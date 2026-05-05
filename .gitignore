@@ -1,0 +1,13 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Local secrets / settings (contains API keys)
+data/settings.json
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/

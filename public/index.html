@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>bidoc.ai JFrog Agent</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="sidebar">
+        <div>
+          <h1>JFrog Agent</h1>
+          <p>ממשק ניהול מקומי לסוכן bidoc.ai</p>
+        </div>
+        <nav>
+          <button class="tab active" data-tab="chat">צ׳אט</button>
+          <button class="tab" data-tab="workflow">זרימת עבודה</button>
+          <button class="tab" data-tab="settings">הגדרות</button>
+          <button class="tab" data-tab="tools">בדיקת כלים</button>
+          <button class="tab" data-tab="history">היסטוריה</button>
+        </nav>
+        <div class="status" id="configStatus">טוען הגדרות...</div>
+      </aside>
+
+      <section class="panel active" id="chat">
+        <header class="panelHeader">
+          <h2>צ׳אט פרויקט</h2>
+          <input id="sessionId" aria-label="session id" />
+        </header>
+        <div class="messages" id="messages"></div>
+        <section class="liveRun" id="liveRun">
+          <header>
+            <strong>לוג ריצה חי</strong>
+            <span id="liveRunStatus">ממתין לבקשה</span>
+          </header>
+          <div class="liveRunList" id="liveRunList"></div>
+        </section>
+        <form class="composer" id="chatForm">
+          <textarea id="messageInput" rows="3" placeholder="כתוב שאלה על הפרויקט..."></textarea>
+          <button type="submit">שלח</button>
+        </form>
+      </section>
+
+      <section class="panel" id="workflow">
+        <header class="panelHeader">
+          <h2>זרימת עבודה</h2>
+          <button id="clearWorkflow">נקה תצוגה</button>
+        </header>
+        <div class="workflowHint" id="workflowHint">שלח הודעה בצ׳אט כדי לראות את רכיבי המערכת, הקווים ביניהם והלוגים של ההרצה האחרונה.</div>
+        <div class="workflowBoard" id="workflowBoard">
+          <svg class="workflowCables" id="workflowCables" aria-hidden="true"></svg>
+          <div class="workflowNodes" id="workflowNodes"></div>
+        </div>
+      </section>
+
+      <section class="panel" id="settings">
+        <header class="panelHeader">
+          <h2>הגדרות</h2>
+          <button id="saveSettings">שמור</button>
+        </header>
+        <h3>חיבורים</h3>
+        <div class="grid">
+          <label class="wide">OpenRouter API key<input id="openRouterApiKey" type="password" autocomplete="off" placeholder="sk-or-..." /></label>
+          <label class="wide">Supabase URL<input id="supabaseUrl" placeholder="https://xxxx.supabase.co" /></label>
+          <label class="wide">Supabase service role key<input id="supabaseServiceRoleKey" type="password" autocomplete="off" placeholder="eyJ..." /></label>
+        </div>
+        <p class="hint">המפתחות נשמרים מקומית במחשב בקובץ ההגדרות של האפליקציה. השאר את השדות כמו שהם אם אינך רוצה להחליף מפתח קיים.</p>
+        <h3>מודלים</h3>
+        <div class="grid">
+          <label>Classifier model<input id="modelClassifier" /></label>
+          <label>Main model<input id="modelMain" /></label>
+          <label>Lite model<input id="modelLite" /></label>
+          <label>Embedding model<input id="modelEmbedding" /></label>
+          <label>Reranker model<input id="modelReranker" /></label>
+          <label class="wide">N8N base URL<input id="n8nBaseUrl" placeholder="https://..." /></label>
+        </div>
+        <h3>Hybrid Search</h3>
+        <div class="grid">
+          <label class="wide">Hybrid RPC name<input id="hybridRpcName" /></label>
+          <label>Candidates<input id="hybridCandidates" type="number" min="1" max="100" /></label>
+          <label>Rerank top K<input id="rerankTopK" type="number" min="1" max="50" /></label>
+          <label>Vector weight<input id="vectorWeight" type="number" min="0" max="1" step="0.05" /></label>
+          <label>Keyword weight<input id="keywordWeight" type="number" min="0" max="1" step="0.05" /></label>
+        </div>
+        <h3>כתובות Webhook לכלים</h3>
+        <div class="toolSettings" id="toolSettings"></div>
+        <p class="hint">מפתחות API וסודות נשארים בקבצי <code>.env</code> או <code>.env.local</code>.</p>
+      </section>
+
+      <section class="panel" id="tools">
+        <header class="panelHeader">
+          <h2>בדיקת כלים</h2>
+          <button id="runTool">הרץ בדיקה</button>
+        </header>
+        <div class="grid">
+          <label>Tool<select id="toolSelect"></select></label>
+          <label class="wide">Query<input id="toolQuery" placeholder="לדוגמה: תראה לי חשבונית 500" /></label>
+          <label>Date filter<input id="toolDateFilter" placeholder="January 2026" /></label>
+          <label>Hashtags<input id="toolHashtags" placeholder="בטיחות, חשמל או #בטיחות #חשמל" /></label>
+        </div>
+        <pre class="result" id="toolResult">אין תוצאה עדיין.</pre>
+      </section>
+
+      <section class="panel" id="history">
+        <header class="panelHeader">
+          <h2>היסטוריה</h2>
+          <button id="refreshHistory">רענן</button>
+        </header>
+        <div class="historyList" id="historyList"></div>
+      </section>
+    </main>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

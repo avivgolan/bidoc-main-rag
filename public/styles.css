@@ -1,0 +1,435 @@
+:root {
+  color-scheme: light;
+  font-family: Arial, "Noto Sans Hebrew", sans-serif;
+  background: #f4f6f8;
+  color: #17212b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+}
+
+.sidebar {
+  background: #18212c;
+  color: white;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+.sidebar p,
+.hint {
+  color: #627386;
+}
+
+.sidebar p {
+  color: #b6c1cc;
+}
+
+nav {
+  display: grid;
+  gap: 8px;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  background: #1677ff;
+  color: white;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.tab {
+  text-align: right;
+  background: transparent;
+  color: #d9e2ea;
+}
+
+.tab.active {
+  background: #253244;
+}
+
+.status {
+  margin-top: auto;
+  padding: 12px;
+  border: 1px solid #344255;
+  border-radius: 8px;
+  color: #d9e2ea;
+  line-height: 1.5;
+}
+
+.panel {
+  display: none;
+  padding: 24px;
+  min-width: 0;
+}
+
+.panel.active {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.panelHeader h2 {
+  margin: 0;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 1px solid #d7dee7;
+  border-radius: 6px;
+  padding: 10px;
+  background: white;
+  color: #17212b;
+}
+
+textarea {
+  resize: vertical;
+}
+
+.messages {
+  flex: 1;
+  min-height: 420px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message {
+  max-width: 820px;
+  padding: 14px;
+  border-radius: 8px;
+  background: white;
+  border: 1px solid #dfe6ee;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.message.user {
+  margin-inline-start: auto;
+  background: #e8f2ff;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr 110px;
+  gap: 12px;
+  align-items: end;
+}
+
+.liveRun {
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.liveRun header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #d7dee7;
+}
+
+.liveRunList {
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.liveRunItem {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fbfdff;
+}
+
+.liveRunItem.error {
+  border-color: #f4b7b7;
+  background: #fff7f7;
+}
+
+.liveRunItem summary {
+  cursor: pointer;
+  color: #344255;
+}
+
+.liveRunItem pre {
+  margin: 8px 0 0;
+  direction: ltr;
+  text-align: left;
+  white-space: pre-wrap;
+  max-height: 110px;
+  overflow: auto;
+  background: #101820;
+  color: #e6edf3;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: #344255;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.toolSettings {
+  display: grid;
+  gap: 10px;
+}
+
+.result {
+  background: #101820;
+  color: #e6edf3;
+  border-radius: 8px;
+  padding: 16px;
+  overflow: auto;
+  min-height: 280px;
+  direction: ltr;
+  text-align: left;
+}
+
+.historyList {
+  display: grid;
+  gap: 10px;
+}
+
+.historyItem {
+  border: 1px solid #dfe6ee;
+  background: white;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.debug {
+  margin-top: 12px;
+  border-top: 1px solid #d7dee7;
+  padding-top: 8px;
+  color: #4b5a69;
+}
+
+.debug pre {
+  direction: ltr;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow: auto;
+  background: #f2f5f8;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.workflowHint {
+  border: 1px dashed #b8c4d2;
+  color: #4b5a69;
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.workflowBoard {
+  position: relative;
+  min-height: 560px;
+  overflow: auto;
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  background:
+    linear-gradient(#eef2f6 1px, transparent 1px),
+    linear-gradient(90deg, #eef2f6 1px, transparent 1px),
+    #f8fafc;
+  background-size: 24px 24px;
+  direction: ltr;
+}
+
+.workflowBoard.hasWorkflow {
+  min-width: 100%;
+}
+
+.workflowNodes {
+  position: relative;
+  min-width: 1480px;
+  min-height: 100%;
+  z-index: 2;
+}
+
+.workflowCables {
+  position: absolute;
+  inset: 0;
+  min-width: 1480px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.workflowCable {
+  fill: none;
+  stroke: #73859a;
+  stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.9));
+}
+
+.workflowNode {
+  position: absolute;
+  width: 310px;
+  min-height: 330px;
+  background: white;
+  border: 1px solid #ccd6e2;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(24, 33, 44, 0.08);
+  direction: rtl;
+  overflow: hidden;
+}
+
+.workflowNodeHeader {
+  display: grid;
+  grid-template-columns: 42px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #d7dee7;
+}
+
+.workflowIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 6px;
+  background: #17212b;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  direction: ltr;
+}
+
+.workflowStatus {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #e7f6ed;
+  color: #126b38;
+}
+
+.workflowNode.error .workflowStatus {
+  background: #fdecec;
+  color: #a32020;
+}
+
+.workflowNode.skipped .workflowStatus {
+  background: #fff5db;
+  color: #8a5a00;
+}
+
+.workflowNode.vector .workflowIcon {
+  background: #2355c4;
+}
+
+.workflowNode.ai .workflowIcon {
+  background: #0f7b6c;
+}
+
+.workflowNode.database .workflowIcon {
+  background: #7a4fb3;
+}
+
+.workflowNode.tool .workflowIcon {
+  background: #995c13;
+}
+
+.workflowNode details {
+  border-top: 1px solid #eef2f6;
+  padding: 10px 12px;
+}
+
+.workflowNode summary {
+  cursor: pointer;
+  color: #344255;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.workflowNode pre {
+  margin: 0;
+  max-height: 105px;
+  overflow: auto;
+  direction: ltr;
+  text-align: left;
+  white-space: pre-wrap;
+  background: #101820;
+  color: #e6edf3;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 800px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    min-height: auto;
+  }
+
+  .grid,
+  .composer {
+    grid-template-columns: 1fr;
+  }
+}
