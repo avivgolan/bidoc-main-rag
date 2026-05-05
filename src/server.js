@@ -14,7 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const config = () => getConfig();
 
-const server = http.createServer(async (req, res) => {
+async function handler(req, res) {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname.startsWith("/api/")) {
@@ -25,11 +25,16 @@ const server = http.createServer(async (req, res) => {
   } catch (error) {
     sendJson(res, 500, { error: error.message });
   }
-});
+}
 
-server.listen(config().port, () => {
-  console.log(`bidoc agent running at http://localhost:${config().port}`);
-});
+export default handler;
+
+if (!process.env.VERCEL) {
+  const server = http.createServer(handler);
+  server.listen(config().port, () => {
+    console.log(`bidoc agent running at http://localhost:${config().port}`);
+  });
+}
 
 async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/events")) {
