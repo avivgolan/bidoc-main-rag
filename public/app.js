@@ -139,6 +139,9 @@ function wireAgents() {
       const result = await api("/api/agents", { method: "PUT", body: { prompts, models } });
       state.agents = result.agents || [];
       renderAgents();
+      showToast("הסוכנים נשמרו בהצלחה");
+    } catch (error) {
+      showToast(`שגיאה בשמירה: ${error.message}`, "error");
     } finally {
       $("saveAgents").disabled = false;
     }
@@ -364,8 +367,9 @@ async function uploadKnowledgeDocument() {
     });
     $("knowledgeFile").value = "";
     await loadKnowledgeDocuments();
+    showToast(`"${file.name}" הועלה בהצלחה`);
   } catch (error) {
-    $("knowledgePreview").textContent = `שגיאה בהעלאה: ${error.message}`;
+    showToast(`שגיאה בהעלאה: ${error.message}`, "error");
   } finally {
     $("uploadKnowledge").disabled = false;
   }
@@ -381,12 +385,19 @@ async function openKnowledgeDocument(filename) {
 
 async function deleteSelectedKnowledgeDocument() {
   if (!state.selectedKnowledgeDocument) return;
-  await api(`/api/knowledge/documents/${encodeURIComponent(state.selectedKnowledgeDocument)}`, { method: "DELETE" });
-  state.selectedKnowledgeDocument = null;
-  $("knowledgePreviewTitle").textContent = "תצוגת מסמך";
-  $("knowledgePreview").textContent = "בחר מסמך מהרשימה.";
+  const filename = state.selectedKnowledgeDocument;
   $("deleteKnowledge").disabled = true;
-  await loadKnowledgeDocuments();
+  try {
+    await api(`/api/knowledge/documents/${encodeURIComponent(filename)}`, { method: "DELETE" });
+    state.selectedKnowledgeDocument = null;
+    $("knowledgePreviewTitle").textContent = "תצוגת מסמך";
+    $("knowledgePreview").textContent = "בחר מסמך מהרשימה.";
+    await loadKnowledgeDocuments();
+    showToast(`"${filename}" נמחק בהצלחה`);
+  } catch (error) {
+    $("deleteKnowledge").disabled = false;
+    showToast(`שגיאה במחיקה: ${error.message}`, "error");
+  }
 }
 
 async function runKnowledgeSearch() {
@@ -586,8 +597,16 @@ function wireSettings() {
       n8nBaseUrl: $("n8nBaseUrl").value,
       tools: Object.fromEntries(n8nTools.map((tool) => [tool, $(`tool_${tool}`).value]))
     };
-    await api("/api/settings", { method: "PUT", body });
-    await loadSettings();
+    $("saveSettings").disabled = true;
+    try {
+      await api("/api/settings", { method: "PUT", body });
+      await loadSettings();
+      showToast("ההגדרות נשמרו בהצלחה");
+    } catch (error) {
+      showToast(`שגיאה בשמירה: ${error.message}`, "error");
+    } finally {
+      $("saveSettings").disabled = false;
+    }
   });
 }
 
@@ -695,6 +714,18 @@ function addMessage(text, role) {
   $("messages").append(node);
   node.scrollIntoView({ block: "end" });
   return node;
+}
+
+function showToast(message, type = "success") {
+  const container = $("toastContainer");
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.append(toast);
+  setTimeout(() => {
+    toast.classList.add("fadeOut");
+    toast.addEventListener("animationend", () => toast.remove());
+  }, 3000);
 }
 
 async function api(path, options = {}) {
