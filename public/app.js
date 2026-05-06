@@ -111,6 +111,15 @@ function wireTabs() {
 
 function wireChat() {
   $("sessionId").addEventListener("change", () => localStorage.setItem("sessionId", $("sessionId").value));
+
+  // Ctrl+Enter (or Cmd+Enter on Mac) submits the form
+  $("messageInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      $("chatForm").requestSubmit($("chatForm").querySelector("button[type=submit]"));
+    }
+  });
+
   $("chatForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     const message = $("messageInput").value.trim();

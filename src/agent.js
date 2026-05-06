@@ -30,10 +30,12 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     emitRunEvent(runId, "classifier", "Classifying message", {});
     classification = await classifyMessage({ message: sanitized, config });
     emitRunEvent(runId, "classifier", "Classification completed", classification);
+    console.log(`[classifier] type=${classification.type} tool="${classification.tool_hint}" msg="${sanitized.slice(0, 70)}"`);
   } catch (error) {
     classification = heuristicClassification(sanitized);
     trace.push({ step: "classifier", ok: false, fallback: true, error: error.message });
     emitRunEvent(runId, "classifier", "Classifier failed, using local fallback", { error: error.message, classification });
+    console.log(`[classifier] FALLBACK (${error.message}) type=${classification.type} msg="${sanitized.slice(0, 70)}"`);
   }
 
   let result;

@@ -60,15 +60,15 @@ test("heuristicClassification marks professional questions", () => {
   assert.ok(output.knowledge_tags.length);
 });
 
-test("knowledge search returns relevant local chunks", () => {
-  saveKnowledgeDocument({
+test("knowledge search returns relevant local chunks", async () => {
+  await saveKnowledgeDocument({
     filename: "test-safety-method.md",
     content: "עצירת עבודה נדרשת כאשר יש סיכון בטיחותי מיידי.\n\nקריטריונים: חומרת הסיכון, הסתברות, ויכולת בקרה."
   });
-  const result = searchKnowledgeBase({ query: "איך מחליטים על עצירת עבודה בגלל בטיחות?", tags: ["בטיחות"], topK: 3 });
+  const result = await searchKnowledgeBase({ query: "איך מחליטים על עצירת עבודה בגלל בטיחות?", tags: ["בטיחות"], topK: 3 });
   assert.ok(result.matches.length >= 1);
   assert.equal(result.matches[0].filename, "test-safety-method.md");
-  deleteKnowledgeDocument("test-safety-method.md");
+  await deleteKnowledgeDocument("test-safety-method.md");
 });
 
 test("knowledge documents reject unsupported file types", () => {
