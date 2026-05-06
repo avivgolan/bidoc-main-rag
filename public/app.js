@@ -23,7 +23,9 @@ const state = {
   openRouterModels: [],
   openRouterModelsFallback: false,
   agentRuntime: {},
-  selectedKnowledgeDocument: null
+  selectedKnowledgeDocument: null,
+  runEvents: [],
+  fullLogVisible: false
 };
 
 const $ = (id) => document.getElementById(id);
@@ -123,6 +125,10 @@ function startLiveRun(runId) {
   if (state.eventSource) state.eventSource.close();
   $("liveRunList").innerHTML = "";
   $("liveRunStatus").textContent = `רץ: ${runId}`;
+  state.runEvents = [];
+  state.fullLogVisible = false;
+  if ($("fullLogView")) { $("fullLogView").hidden = true; $("fullLogView").textContent = ""; }
+  if ($("liveRunList")) $("liveRunList").hidden = false;
   resetAgentRuntime();
   renderAgents();
   appendLiveRunEvent({ step: "client", message: "Opening live log", data: { runId }, time: new Date().toISOString() });
@@ -142,6 +148,7 @@ function startLiveRun(runId) {
 
 function appendLiveRunEvent(item) {
   updateAgentRuntime(item);
+  state.runEvents.push(item);
   const row = document.createElement("details");
   row.className = `liveRunItem ${item.step === "error" ? "error" : ""}`;
   const summary = document.createElement("summary");
@@ -152,6 +159,26 @@ function appendLiveRunEvent(item) {
   row.append(summary, pre);
   $("liveRunList").append(row);
   row.scrollIntoView({ block: "end" });
+  if (state.fullLogVisible) refreshFullLogView();
+}
+
+function buildFullLogText() {
+  return state.runEvents.map((item) => {
+    const time = item.time ? new Date(item.time).toLocaleTimeString("he-IL") : "??:??:??";
+    const step = (item.step || "").padEnd(20);
+    const msg  = (item.message || "").padEnd(40);
+    const data = Object.keys(item.data || {}).length
+      ? JSON.stringify(item.data)
+      : "";
+    return `[${time}] ${step} ${msg} ${data}`.trimEnd();
+  }).join("\n");
+}
+
+function refreshFullLogView() {
+  const el = $("fullLogView");
+  if (!el) return;
+  el.textContent = buildFullLogText();
+  el.scrollTop = el.scrollHeight;
 }
 
 function wireAgents() {
@@ -449,7 +476,41 @@ async function runKnowledgeSearch() {
 function wireWorkflow() {
   $("clearWorkflow").addEventListener("click", () => {
     state.lastWorkflow = null;
+    state.runEvents = [];
+    state.fullLogVisible = false;
+    $("liveRunList").innerHTML = "";
+    $("liveRunStatus").textContent = "ממתין לבקשה";
+    if ($("fullLogView")) { $("fullLogView").hidden = true; $("fullLogView").textContent = ""; }
+    if ($("liveRunList")) $("liveRunList").hidden = false;
     renderWorkflow(null);
+  });
+
+  $("toggleFullLog").addEventListener("click", () => {
+    state.fullLogVisible = !state.fullLogVisible;
+    const listEl = $("liveRunList");
+    const logEl  = $("fullLogView");
+    const btn    = $("toggleFullLog");
+    if (state.fullLogVisible) {
+      refreshFullLogView();
+      listEl.hidden = true;
+      logEl.hidden  = false;
+      btn.textContent = "לוג רגיל";
+    } else {
+      listEl.hidden = false;
+      logEl.hidden  = true;
+      btn.textContent = "לוג מלא";
+    }
+  });
+
+  $("copyLog").addEventListener("click", async () => {
+    const text = buildFullLogText();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("הלוג הועתק ללוח");
+    } catch {
+      showToast("לא ניתן להעתיק", "error");
+    }
   });
 }
 
@@ -624,6 +685,7 @@ function wireSettings() {
         supabaseServiceRoleKey: $("supabaseServiceRoleKey").value
       },
       n8nBaseUrl: $("n8nBaseUrl").value,
+      timezone: $("timezone").value,
       tools: Object.fromEntries(n8nTools.map((tool) => [tool, $(`tool_${tool}`).value]))
     };
     $("saveSettings").disabled = true;
@@ -675,6 +737,7 @@ async function loadSettings() {
   $("vectorWeight").value = state.settings.retrieval.vectorWeight;
   $("keywordWeight").value = state.settings.retrieval.keywordWeight;
   $("n8nBaseUrl").value = state.settings.n8nBaseUrl || "";
+  if ($("timezone")) $("timezone").value = state.settings.timezone || "UTC+3";
   $("openRouterApiKey").value = state.settings.secrets.openRouterApiKey || "";
   $("supabaseUrl").value = state.settings.secrets.supabaseUrl || "";
   $("supabaseServiceRoleKey").value = state.settings.secrets.supabaseServiceRoleKey || "";

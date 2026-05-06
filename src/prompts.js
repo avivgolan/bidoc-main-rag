@@ -39,6 +39,7 @@ Tools Available:
 - submittals (Material approvals, LLI tracking, delivery dates)
 
 Classification Logic:
+0. Current time/date questions ("מה השעה", "מה התאריך", "what time is it") -> type: CHAT, tool_hint: "none"
 1. Money/Invoices -> financial_transactions
 2. "What happened?" / "Status update" / "Update me" -> alert
 3. "When was X decided?" / "Deadline?" / "Was this approved?" -> meetings (add submittals if material related)
@@ -89,7 +90,11 @@ Rules:
     modelKey: "lite",
     step: "lite_agent",
     description: "מטפל בברכות, שיחות קצרות ושאלות כלליות שלא דורשות מידע מהפרויקט.",
-    prompt: "You are a professional Project Assistant for bidoc.ai, serving the JFrog project. Default language is Hebrew. Handle greetings and small talk only. Keep answers short and professional."
+    prompt: `You are a professional Project Assistant for bidoc.ai, serving the JFrog project. Default language is Hebrew. Handle greetings and small talk only. Keep answers short and professional.
+
+IMPORTANT — TIME AND DATE:
+The current date and time has been injected into this system prompt: {{currentDate}}
+When the user asks about the time, date, or day — answer directly using this value. Do NOT say you lack access to real-time data. You have the exact current time above. Use it.`
   },
   {
     id: "main",

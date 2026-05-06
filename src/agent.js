@@ -7,6 +7,7 @@ import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
 import { appendLocalMemory, getLocalMemory } from "./memory.js";
 import { completeRun, emitRunEvent } from "./runLog.js";
 import { renderPrompt } from "./prompts.js";
+import { getProjectDateTime } from "./clock.js";
 import { searchKnowledgeBase } from "./knowledge.js";
 
 export async function runChatPipeline({ message, sessionId, config, runId }) {
@@ -100,7 +101,7 @@ async function runLiteAgent({ message, memory, config, trace, runId }) {
       messages: [
         {
           role: "system",
-          content: config.prompts?.lite || "You are a professional Project Assistant for bidoc.ai, serving the JFrog project. Default language is Hebrew. Handle greetings and small talk only. Keep answers short and professional."
+          content: `SYSTEM TIME: ${getProjectDateTime(config.timezone)} — when the user asks about the time or date, answer using this exact value. Do not say you lack real-time access.\n\n${renderPrompt(config.prompts?.lite, { currentDate: getProjectDateTime(config.timezone) })}`
         },
         ...memory,
         { role: "user", content: message }

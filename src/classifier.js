@@ -1,13 +1,11 @@
 import { chatCompletion, extractJsonObject } from "./openrouter.js";
 import { defaultPrompts, renderPrompt } from "./prompts.js";
+import { getProjectDateTime } from "./clock.js";
 
-export function classifierPrompt(currentDate) {
-  return renderPrompt(defaultPrompts().classifier, { currentDate });
-}
-
-export async function classifyMessage({ message, config, now = new Date() }) {
-  const systemPrompt = renderPrompt(config.prompts?.classifier || classifierPrompt(now.toISOString()), {
-    currentDate: now.toISOString()
+export async function classifyMessage({ message, config }) {
+  const currentDate = getProjectDateTime(config.timezone);
+  const systemPrompt = renderPrompt(config.prompts?.classifier || defaultPrompts().classifier, {
+    currentDate
   });
   const content = await chatCompletion({
     apiKey: config.openRouterApiKey,

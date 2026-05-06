@@ -458,6 +458,12 @@ label {
   background: var(--surface);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
+  margin-bottom: 16px;
+}
+
+#workflow .liveRunList,
+#workflow .fullLogView {
+  max-height: 320px;
 }
 
 .liveRun header {
@@ -474,12 +480,28 @@ label {
 }
 
 .liveRunList {
-  max-height: 200px;
+  max-height: 220px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 8px;
+}
+
+.fullLogView {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 10px 12px;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #d4f0a0;
+  background: #0d1117;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  white-space: pre;
+  direction: ltr;
+  text-align: left;
 }
 
 .liveRunItem {

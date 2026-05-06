@@ -91,13 +91,6 @@
           <input id="sessionId" aria-label="session id" placeholder="Session ID" style="max-width:200px" />
         </header>
         <div class="messages" id="messages"></div>
-        <section class="liveRun" id="liveRun">
-          <header>
-            <strong>לוג ריצה חי</strong>
-            <span id="liveRunStatus">ממתין לבקשה</span>
-          </header>
-          <div class="liveRunList" id="liveRunList"></div>
-        </section>
         <form class="composer" id="chatForm">
           <textarea id="messageInput" rows="2" placeholder="כתוב שאלה על הפרויקט..."></textarea>
           <button type="submit">שלח</button>
@@ -128,8 +121,22 @@
       <section class="panel" id="workflow">
         <header class="panelHeader">
           <h2>זרימת עבודה</h2>
-          <button id="clearWorkflow">נקה תצוגה</button>
+          <div class="headerActions">
+            <button id="toggleFullLog">לוג מלא</button>
+            <button id="copyLog">העתק</button>
+            <button id="clearWorkflow">נקה</button>
+          </div>
         </header>
+
+        <section class="liveRun" id="liveRun">
+          <header>
+            <strong>לוג ריצה חי</strong>
+            <span id="liveRunStatus">ממתין לבקשה</span>
+          </header>
+          <div class="liveRunList" id="liveRunList"></div>
+          <pre class="fullLogView" id="fullLogView" hidden></pre>
+        </section>
+
         <div class="workflowHint" id="workflowHint">
           שלח הודעה בצ׳אט כדי לראות את רכיבי המערכת, הקווים ביניהם והלוגים של ההרצה האחרונה.
         </div>
@@ -235,6 +242,41 @@
             <input id="n8nBaseUrl" placeholder="https://..." />
           </label>
         </div>
+
+        <h3>אזור זמן</h3>
+        <div class="grid">
+          <label>אזור זמן (UTC)
+            <select id="timezone">
+              <option value="UTC-12">UTC-12</option>
+              <option value="UTC-11">UTC-11</option>
+              <option value="UTC-10">UTC-10</option>
+              <option value="UTC-9">UTC-9</option>
+              <option value="UTC-8">UTC-8</option>
+              <option value="UTC-7">UTC-7</option>
+              <option value="UTC-6">UTC-6</option>
+              <option value="UTC-5">UTC-5</option>
+              <option value="UTC-4">UTC-4</option>
+              <option value="UTC-3">UTC-3</option>
+              <option value="UTC-2">UTC-2</option>
+              <option value="UTC-1">UTC-1</option>
+              <option value="UTC+0">UTC+0 (Greenwich)</option>
+              <option value="UTC+1">UTC+1</option>
+              <option value="UTC+2">UTC+2</option>
+              <option value="UTC+3" selected>UTC+3 (ישראל)</option>
+              <option value="UTC+4">UTC+4</option>
+              <option value="UTC+5">UTC+5</option>
+              <option value="UTC+5:30">UTC+5:30 (הודו)</option>
+              <option value="UTC+6">UTC+6</option>
+              <option value="UTC+7">UTC+7</option>
+              <option value="UTC+8">UTC+8</option>
+              <option value="UTC+9">UTC+9</option>
+              <option value="UTC+10">UTC+10</option>
+              <option value="UTC+11">UTC+11</option>
+              <option value="UTC+12">UTC+12</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint">אזור הזמן משפיע על כל שאלות הזמן שנשאלות בסוכן — ודא שהוא תואם למיקום הפרויקט.</p>
 
         <h3>Hybrid Search</h3>
         <div class="grid">

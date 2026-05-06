@@ -1,6 +1,6 @@
 export function heuristicClassification(message) {
   const text = String(message || "").toLowerCase();
-  const isChat = /^(שלום|היי|הי|תודה|hello|hi|thanks|thank you|מי אתה)/i.test(text.trim());
+  const isChat = /^(שלום|היי|הי|תודה|hello|hi|thanks|thank you|מי אתה)|מה ה?שעה|כמה השעה|מה הזמן|מה התאריך|איזה תאריך|what time|what.s the time|what date|what.s the date/i.test(text.trim());
   if (isChat) {
     return baseClassification({ type: "CHAT", tool_hint: "none", hashtags: [] });
   }

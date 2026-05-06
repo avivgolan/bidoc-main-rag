@@ -122,7 +122,8 @@ export function getConfig() {
       tools: Object.fromEntries(
         TOOL_NAMES.map((tool) => [tool, toolSettings[tool] || process.env[`N8N_TOOL_${tool.toUpperCase()}_URL`] || ""])
       )
-    }
+    },
+    timezone: settings.timezone || process.env.TIMEZONE || "UTC+0"
   };
 }
 
@@ -130,6 +131,7 @@ export function publicSettings(config = getConfig()) {
   return {
     models: config.models,
     retrieval: config.retrieval,
+    timezone: config.timezone,
     supabaseConfigured: Boolean(config.supabaseUrl && config.supabaseServiceRoleKey),
     openRouterConfigured: Boolean(config.openRouterApiKey),
     n8nBaseUrl: config.n8n.baseUrl,
@@ -188,7 +190,8 @@ export async function writeLocalSettings(settings) {
     },
     tools: Object.fromEntries(
       TOOL_NAMES.map((tool) => [tool, settings.tools?.[tool] || ""])
-    )
+    ),
+    timezone: settings.timezone || existing.timezone || "UTC+0"
   };
   _settingsCache = safe;
   _settingsCachedAt = Date.now();
