@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, refreshSettingsIfStale, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
@@ -23,6 +23,7 @@ const ready = initSettings().catch(() => {});
 
 async function handler(req, res) {
   await ready;
+  await refreshSettingsIfStale();
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname.startsWith("/api/")) {

@@ -11,6 +11,8 @@ const ENV_FILES = [".env", ".env.local"];
 // ---------------------------------------------------------------------------
 
 let _settingsCache = {};
+let _settingsCachedAt = 0;
+const SETTINGS_TTL_MS = 30_000;
 
 async function sbFetch(path, options = {}) {
   const url = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
@@ -33,9 +35,20 @@ async function sbFetch(path, options = {}) {
   }
 }
 
-export async function initSettings() {
+async function loadSettingsFromDb() {
   const rows = await sbFetch("/rest/v1/agent_settings?id=eq.default&select=data");
   _settingsCache = rows?.[0]?.data || {};
+  _settingsCachedAt = Date.now();
+}
+
+export async function initSettings() {
+  await loadSettingsFromDb();
+}
+
+export async function refreshSettingsIfStale() {
+  if (Date.now() - _settingsCachedAt > SETTINGS_TTL_MS) {
+    await loadSettingsFromDb().catch(() => {});
+  }
 }
 
 export function loadEnv() {
@@ -178,6 +191,7 @@ export async function writeLocalSettings(settings) {
     )
   };
   _settingsCache = safe;
+  _settingsCachedAt = Date.now();
   await sbFetch("/rest/v1/agent_settings", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates" },
