@@ -1,4 +1,4 @@
-export async function chatCompletion({ apiKey, model, messages, temperature = 0.2 }) {
+export async function chatCompletion({ apiKey, model, messages, temperature = 0.2, maxTokens = 4096 }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -11,7 +11,8 @@ export async function chatCompletion({ apiKey, model, messages, temperature = 0.
     body: JSON.stringify({
       model,
       messages,
-      temperature
+      temperature,
+      max_tokens: maxTokens
     })
   });
 
