@@ -48,26 +48,45 @@ async function init() {
 
   // Restore tab from URL hash, then load initial data
   const initialTab = location.hash.slice(1) || "chat";
-  activateTab(initialTab, false);
+  activateTab(initialTab, false, { skipData: true });
   if (!location.hash) history.replaceState({ tab: "chat" }, "", "#chat");
 
-  // Always load settings first (other tabs may depend on it)
+  // Always load settings first (other tabs may depend on it).
   await loadSettings();
-  // Load the data for any tabs that weren't loaded by activateTab above
-  // (settings is always loaded; load the rest unless they were already triggered)
-  if (initialTab !== "agents")    await loadOpenRouterModels();
+  // Model list is needed for the Agents tab selects; previously we skipped this
+  // when initialTab==="agents", and activateTab raced before loadSettings.
+  await loadOpenRouterModels();
   if (initialTab !== "knowledge") await loadKnowledgeDocuments();
   if (initialTab !== "history")   await loadHistory();
 }
 
 const TAB_LOADERS = {
   settings:  () => loadSettings(),
-  agents:    () => loadOpenRouterModels(),
+  agents:    () => loadAgentsTabData(),
   knowledge: () => loadKnowledgeDocuments(),
   history:   () => loadHistory()
 };
 
-function activateTab(tabId, pushHistory = true) {
+async function loadAgentsTabData() {
+  await refreshAgentsFromApi();
+  await loadOpenRouterModels();
+}
+
+async function refreshAgentsFromApi() {
+  try {
+    const { agents } = await api("/api/agents");
+    if (Array.isArray(agents) && agents.length) {
+      state.agents = agents;
+      resetAgentRuntime();
+      renderAgents();
+    }
+  } catch (_) {
+    // keep existing agents from settings
+  }
+}
+
+function activateTab(tabId, pushHistory = true, options = {}) {
+  const { skipData = false } = options;
   const button = document.querySelector(`.tab[data-tab="${tabId}"]`);
   const panel  = $(tabId);
   if (!button || !panel) return;
@@ -77,7 +96,7 @@ function activateTab(tabId, pushHistory = true) {
   if (pushHistory && location.hash !== `#${tabId}`) {
     history.pushState({ tab: tabId }, "", `#${tabId}`);
   }
-  TAB_LOADERS[tabId]?.();
+  if (!skipData) TAB_LOADERS[tabId]?.();
 }
 
 function wireTabs() {
@@ -723,7 +742,15 @@ function wireTools() {
 
 async function loadSettings() {
   state.settings = await api("/api/settings");
-  state.agents = state.settings.agents || [];
+  let agents = state.settings.agents;
+  if (!Array.isArray(agents) || !agents.length) {
+    try {
+      agents = (await api("/api/agents")).agents || [];
+    } catch {
+      agents = [];
+    }
+  }
+  state.agents = agents;
   resetAgentRuntime();
   $("modelClassifier").value = state.settings.models.classifier;
   $("modelKnowledgePlanner").value = state.settings.models.knowledgePlanner;

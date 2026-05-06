@@ -102,29 +102,37 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/knowledge/documents") {
-    return sendJson(res, 200, { documents: listKnowledgeDocuments() });
+    const documents = await listKnowledgeDocuments();
+    return sendJson(res, 200, { documents });
   }
 
   if (req.method === "POST" && url.pathname === "/api/knowledge/documents") {
     const body = await readJson(req);
-    const document = saveKnowledgeDocument({ filename: body.filename, content: body.content });
+    const document = await saveKnowledgeDocument({ filename: body.filename, content: body.content });
     return sendJson(res, 200, { document });
   }
 
   const knowledgeDocumentMatch = url.pathname.match(/^\/api\/knowledge\/documents\/([^/]+)$/);
   if (knowledgeDocumentMatch) {
     const filename = decodeURIComponent(knowledgeDocumentMatch[1]);
-    if (req.method === "GET") return sendJson(res, 200, { document: readKnowledgeDocument(filename) });
-    if (req.method === "DELETE") return sendJson(res, 200, deleteKnowledgeDocument(filename));
+    if (req.method === "GET") {
+      const document = await readKnowledgeDocument(filename);
+      return sendJson(res, 200, { document });
+    }
+    if (req.method === "DELETE") {
+      const deleted = await deleteKnowledgeDocument(filename);
+      return sendJson(res, 200, deleted);
+    }
   }
 
   if (req.method === "POST" && url.pathname === "/api/knowledge/search") {
     const body = await readJson(req);
-    return sendJson(res, 200, searchKnowledgeBase({
+    const payload = await searchKnowledgeBase({
       query: body.query || "",
       tags: parseHashtags(body.tags || body.hashtags || []),
       topK: Number(body.topK || 6)
-    }));
+    });
+    return sendJson(res, 200, payload);
   }
 
   if (req.method === "GET" && url.pathname === "/api/openrouter/models") {
