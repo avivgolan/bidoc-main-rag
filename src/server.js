@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { getConfig, loadEnv, publicSettings, readLocalSettings, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
@@ -18,7 +18,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const config = () => getConfig();
 
+// Load persisted settings from Supabase before handling any requests.
+const ready = initSettings().catch(() => {});
+
 async function handler(req, res) {
+  await ready;
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname.startsWith("/api/")) {
@@ -136,13 +140,13 @@ async function handleApi(req, res, url) {
     const prompts = body.prompts || {};
     const models = body.models || {};
     const current = readLocalSettings();
-    writeLocalSettings({ ...current, prompts, models: { ...(current.models || {}), ...models } });
+    await writeLocalSettings({ ...current, prompts, models: { ...(current.models || {}), ...models } });
     return sendJson(res, 200, { agents: buildAgentList(config()) });
   }
 
   if (req.method === "PUT" && url.pathname === "/api/settings") {
     const body = await readJson(req);
-    const saved = writeLocalSettings(body);
+    const saved = await writeLocalSettings(body);
     return sendJson(res, 200, { saved, settings: publicSettings(config()) });
   }
 

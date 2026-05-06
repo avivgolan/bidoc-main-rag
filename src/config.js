@@ -5,6 +5,39 @@ import { buildAgentList, defaultPrompts } from "./prompts.js";
 const ROOT = process.cwd();
 const ENV_FILES = [".env", ".env.local"];
 
+// ---------------------------------------------------------------------------
+// Supabase persistence for settings
+// Uses env vars directly — never reads from settings to avoid circular deps.
+// ---------------------------------------------------------------------------
+
+let _settingsCache = {};
+
+async function sbFetch(path, options = {}) {
+  const url = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!url || !key) return null;
+  try {
+    const response = await fetch(`${url}${path}`, {
+      ...options,
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      }
+    });
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function initSettings() {
+  const rows = await sbFetch("/rest/v1/agent_settings?id=eq.default&select=data");
+  _settingsCache = rows?.[0]?.data || {};
+}
+
 export function loadEnv() {
   for (const file of ENV_FILES) {
     const fullPath = path.join(ROOT, file);
@@ -113,21 +146,13 @@ function trimSlash(value) {
   return value.replace(/\/+$/, "");
 }
 
-const SETTINGS_PATH = path.join(ROOT, "data", "settings.json");
-
 export function readLocalSettings() {
-  try {
-    if (!fs.existsSync(SETTINGS_PATH)) return {};
-    return JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8"));
-  } catch {
-    return {};
-  }
+  return _settingsCache;
 }
 
-export function writeLocalSettings(settings) {
-  const existing = readLocalSettings();
+export async function writeLocalSettings(settings) {
+  const existing = _settingsCache;
   const incomingSecrets = settings.secrets || {};
-  fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
   const safe = {
     models: settings.models || {},
     prompts: {
@@ -152,7 +177,12 @@ export function writeLocalSettings(settings) {
       TOOL_NAMES.map((tool) => [tool, settings.tools?.[tool] || ""])
     )
   };
-  fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(safe, null, 2)}\n`);
+  _settingsCache = safe;
+  await sbFetch("/rest/v1/agent_settings", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({ id: "default", data: safe, updated_at: new Date().toISOString() })
+  });
   return safe;
 }
 
