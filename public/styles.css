@@ -445,10 +445,30 @@ label {
   border: 0;
 }
 
+.composerActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+}
+
 .composer button {
   padding: 8px 20px;
   border-radius: var(--r);
   flex-shrink: 0;
+}
+
+.shortcutHint {
+  font-size: 10.5px;
+  color: var(--gray-400);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: monospace;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  user-select: none;
 }
 
 /* ---- Live Run Log ---- */
