@@ -43,7 +43,11 @@ let httpServer = null;
 if (!process.env.VERCEL) {
   httpServer = http.createServer(handler);
   httpServer.listen(config().port, () => {
-    console.log(`bidoc agent running at http://localhost:${config().port}`);
+    const cfg = config();
+    console.log(`bidoc agent running at http://localhost:${cfg.port}`);
+    console.log(`[startup] OpenRouter : ${cfg.openRouterApiKey ? "✓ configured" : "✗ MISSING — RAG agent will use fallback"}`);
+    console.log(`[startup] Supabase   : ${cfg.supabaseUrl ? "✓ configured" : "✗ MISSING"}`);
+    console.log(`[startup] Timezone   : ${cfg.timezone}`);
   });
 }
 

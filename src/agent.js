@@ -268,6 +268,7 @@ async function synthesizeAnswer({ message, classification, memory, retrievalResu
   const failed = toolCalls.filter((call) => !call.ok && !call.skipped);
   const skipped = toolCalls.filter((call) => call.skipped);
   if (!config.openRouterApiKey) {
+    console.warn("[main_agent] OPENROUTER_API_KEY is missing — cannot call LLM, returning structured fallback.");
     trace.push({ step: "mainAgent", ok: false, fallback: true, error: "OPENROUTER_API_KEY is missing" });
     emitRunEvent(runId, "main_agent", "Missing OpenRouter key, using fallback answer", {});
     return fallbackRagAnswer({ successful, failed, skipped, sources });
@@ -301,6 +302,7 @@ async function synthesizeAnswer({ message, classification, memory, retrievalResu
       ]
     });
     if (!String(answer || "").trim()) {
+      console.warn("[main_agent] Model returned empty string — using structured fallback.");
       trace.push({ step: "mainAgent", ok: false, fallback: true, error: "Main Agent returned an empty answer" });
       emitRunEvent(runId, "main_agent", "Main Agent returned empty answer, using fallback", {});
       return fallbackRagAnswer({ successful, failed, skipped, sources });
@@ -392,14 +394,25 @@ function normalizeArray(value) {
 function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
   const found = successful.length
     ? successful.map((call) => `- ${call.toolName}: ${summarizeData(call.data)}`).join("\n")
-    : "- לא נמצא מידע רלוונטי במקורות שהוגדרו.";
+    : "- לא הצלחתי לאחזר מידע מהפרויקט כרגע.";
+
+  // Build a human-readable reason for why we're in fallback mode
+  const reasons = [];
+  const supabaseFail = failed.find((c) => c.toolName === "hybrid_search");
+  if (supabaseFail) reasons.push(`חיפוש הוקטורי נכשל (${supabaseFail.error})`);
+  if (!successful.length && !supabaseFail) reasons.push("מפתח OpenRouter חסר — הסוכן הראשי לא הופעל");
+
+  const reasonNote = reasons.length
+    ? `\n> ⚠️ ${reasons.join(" · ")}`
+    : "";
+
   const failedText = failed.map((call) => `- ${call.toolName}: ${call.error}`);
   const skippedText = skipped.map((call) => `- ${call.toolName}: לא מוגדר`);
   const missing = failedText.length || skippedText.length
     ? [...failedText, ...skippedText].join("\n")
     : "- אין.";
   const sourceText = sources.length ? sources.map((source) => `- ${source.url}`).join("\n") : "- לא הוחזרו קישורים.";
-  return `**תשובה:**\n${found}\n\n**פרטים לפי מקור:**\n${found}\n\n**מה לא נמצא:**\n${missing}\n\n**מקורות:**\n${sourceText}`;
+  return `**תשובה:**\n${found}${reasonNote}\n\n**פרטים לפי מקור:**\n${found}\n\n**מה לא נמצא:**\n${missing}\n\n**מקורות:**\n${sourceText}`;
 }
 
 function liteFallback(message) {
