@@ -1,11 +1,13 @@
 import { sanitizeMessage } from "./sanitize.js";
 import { classifyMessage, hintedTools } from "./classifier.js";
 import { heuristicClassification, isHebrew } from "./heuristics.js";
-import { chatCompletion, rerankWithLlm } from "./openrouter.js";
+import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.js";
 import { hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
 import { appendLocalMemory, getLocalMemory } from "./memory.js";
 import { completeRun, emitRunEvent } from "./runLog.js";
+import { renderPrompt } from "./prompts.js";
+import { searchKnowledgeBase } from "./knowledge.js";
 
 export async function runChatPipeline({ message, sessionId, config, runId }) {
   emitRunEvent(runId, "chat_input", "Received user message", { sessionId, preview: message.slice(0, 300) });
@@ -73,6 +75,7 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     answer: result.answer,
     sources: result.sources,
     toolCalls: result.toolCalls,
+    knowledgePlan: result.knowledgePlan || null,
     trace,
     workflowLog
   };
@@ -97,8 +100,7 @@ async function runLiteAgent({ message, memory, config, trace, runId }) {
       messages: [
         {
           role: "system",
-          content:
-            "You are a professional Project Assistant for bidoc.ai, serving the JFrog project. Default language is Hebrew. Handle greetings and small talk only. Keep answers short and professional."
+          content: config.prompts?.lite || "You are a professional Project Assistant for bidoc.ai, serving the JFrog project. Default language is Hebrew. Handle greetings and small talk only. Keep answers short and professional."
         },
         ...memory,
         { role: "user", content: message }
@@ -118,6 +120,11 @@ async function runRagAgent({ message, sessionId, classification, memory, config,
   const sources = [];
   let hybridResults = null;
   let rerankedResults = null;
+  let knowledgePlan = null;
+
+  if (classification.professional) {
+    knowledgePlan = await runKnowledgePlanner({ message, classification, config, trace, runId });
+  }
 
   try {
     emitRunEvent(runId, "hybrid_search", "Running Hybrid Search", {
@@ -153,7 +160,8 @@ async function runRagAgent({ message, sessionId, classification, memory, config,
         model: config.models.reranker,
         query: message,
         results: normalizeRows(hybridResults),
-        topK: config.retrieval.rerankTopK
+        topK: config.retrieval.rerankTopK,
+        systemPrompt: config.prompts?.reranker
       });
       const rerankSources = extractLinks(rerankedResults);
       sources.push(...rerankSources);
@@ -185,11 +193,74 @@ async function runRagAgent({ message, sessionId, classification, memory, config,
   }
 
   const uniqueSources = uniqueByUrl(sources);
-  const answer = await synthesizeAnswer({ message, classification, memory, retrievalResults: rerankedResults || hybridResults, toolCalls, sources: uniqueSources, config, trace, runId });
-  return { answer, sources: uniqueSources, toolCalls };
+  const answer = await synthesizeAnswer({ message, classification, memory, retrievalResults: rerankedResults || hybridResults, toolCalls, sources: uniqueSources, knowledgePlan, config, trace, runId });
+  return { answer, sources: uniqueSources, toolCalls, knowledgePlan };
 }
 
-async function synthesizeAnswer({ message, classification, memory, retrievalResults, toolCalls, sources, config, trace, runId }) {
+async function runKnowledgePlanner({ message, classification, config, trace, runId }) {
+  const tags = [...new Set([...(classification.knowledge_tags || []), ...(classification.hashtags || [])])];
+  emitRunEvent(runId, "knowledge_planner", "Searching local Knowledge Base", { query: message, tags });
+  const search = searchKnowledgeBase({ query: message, tags, topK: 6 });
+  if (!search.matches.length) {
+    const skippedPlan = {
+      skipped: true,
+      reason: search.totalDocuments ? "No relevant Knowledge Base excerpts found" : "Knowledge Base ריק",
+      matches: [],
+      domain_summary: "",
+      relevant_terms: [],
+      decision_criteria: [],
+      rag_queries: [],
+      recommended_tools: [],
+      risks_or_cautions: [search.totalDocuments ? "לא נמצאו מקטעי ידע רלוונטיים." : "Knowledge Base ריק."]
+    };
+    emitRunEvent(runId, "knowledge_planner", "Knowledge Planner skipped", skippedPlan);
+    return skippedPlan;
+  }
+
+  const fallback = fallbackKnowledgePlan({ message, classification, matches: search.matches });
+  if (!config.openRouterApiKey) {
+    trace.push({ step: "knowledgePlanner", ok: false, fallback: true, error: "OPENROUTER_API_KEY is missing" });
+    emitRunEvent(runId, "knowledge_planner", "Missing OpenRouter key, using local knowledge fallback", { matches: search.matches.length });
+    return fallback;
+  }
+
+  try {
+    emitRunEvent(runId, "knowledge_planner", "Calling Professional Knowledge Agent", {
+      model: config.models.knowledgePlanner,
+      matches: search.matches.length
+    });
+    const content = await chatCompletion({
+      apiKey: config.openRouterApiKey,
+      model: config.models.knowledgePlanner,
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: config.prompts?.knowledge_planner || "" },
+        {
+          role: "user",
+          content: JSON.stringify({
+            user_message: message,
+            classification,
+            knowledge_excerpts: search.matches.map((match) => ({
+              filename: match.filename,
+              chunkIndex: match.chunkIndex,
+              score: match.score,
+              text: match.text
+            }))
+          }, null, 2)
+        }
+      ]
+    });
+    const plan = normalizeKnowledgePlan(extractJsonObject(content), search.matches);
+    emitRunEvent(runId, "knowledge_planner", "Knowledge Planner completed", plan);
+    return plan;
+  } catch (error) {
+    trace.push({ step: "knowledgePlanner", ok: false, fallback: true, error: error.message });
+    emitRunEvent(runId, "knowledge_planner", "Knowledge Planner failed, using fallback", { error: error.message });
+    return fallback;
+  }
+}
+
+async function synthesizeAnswer({ message, classification, memory, retrievalResults, toolCalls, sources, knowledgePlan, config, trace, runId }) {
   const successful = toolCalls.filter((call) => call.ok);
   const failed = toolCalls.filter((call) => !call.ok && !call.skipped);
   const skipped = toolCalls.filter((call) => call.skipped);
@@ -201,12 +272,12 @@ async function synthesizeAnswer({ message, classification, memory, retrievalResu
 
   try {
     emitRunEvent(runId, "main_agent", "Calling Main Agent", { model: config.models.main, retrievalRecords: countRows(retrievalResults), toolCalls: toolCalls.length });
-    return await chatCompletion({
+    const answer = await chatCompletion({
       apiKey: config.openRouterApiKey,
       model: config.models.main,
       temperature: 0.2,
       messages: [
-        { role: "system", content: mainSystemPrompt(classification) },
+        { role: "system", content: mainSystemPrompt(classification, config) },
         ...memory,
         {
           role: "user",
@@ -215,6 +286,7 @@ async function synthesizeAnswer({ message, classification, memory, retrievalResu
               user_message: message,
               retrieval_context: formatRetrievalContext(retrievalResults),
               retrieval_results: retrievalResults,
+              knowledge_plan: knowledgePlan,
               tool_results: toolCalls.filter((call) => !call.skipped),
               skipped_tools: skipped.map((call) => call.toolName),
               sources
@@ -225,6 +297,13 @@ async function synthesizeAnswer({ message, classification, memory, retrievalResu
         }
       ]
     });
+    if (!String(answer || "").trim()) {
+      trace.push({ step: "mainAgent", ok: false, fallback: true, error: "Main Agent returned an empty answer" });
+      emitRunEvent(runId, "main_agent", "Main Agent returned empty answer, using fallback", {});
+      return fallbackRagAnswer({ successful, failed, skipped, sources });
+    }
+    emitRunEvent(runId, "main_agent", "Main Agent response received", { length: answer.length });
+    return answer;
   } catch (error) {
     trace.push({ step: "mainAgent", ok: false, fallback: true, error: error.message });
     emitRunEvent(runId, "main_agent", "Main Agent failed, using fallback answer", { error: error.message });
@@ -232,8 +311,8 @@ async function synthesizeAnswer({ message, classification, memory, retrievalResu
   }
 }
 
-function mainSystemPrompt(classification) {
-  return `You are RAG-PM, the Primary Project Intelligence Agent for the JFrog construction project.
+function mainSystemPrompt(classification, config) {
+  const fallback = `You are RAG-PM, the Primary Project Intelligence Agent for the JFrog construction project.
 Default language: Hebrew. If the user writes in English, respond in English.
 
 SYSTEM HINT: ${classification.tool_hint}
@@ -244,6 +323,7 @@ Answer only from supplied vector/tool results. Do not fabricate.
 Use retrieval_context as the primary source when it contains items.
 Do not say "no relevant information found" if retrieval_context or retrieval_results contains records.
 If optional n8n tools are skipped because they are not configured, mention that only under missing info and still answer from vector results.
+If knowledge_plan is supplied, use it only as professional planning guidance. Do not treat it as project evidence.
 Response format:
 **תשובה:**
 - Detailed bullets with names, dates, amounts
@@ -256,6 +336,54 @@ Response format:
 
 **מקורות:**
 - ALL links returned by tools.`;
+  return renderPrompt(config.prompts?.main || fallback, {
+    tool_hint: classification.tool_hint,
+    complexity: classification.complexity,
+    urgency: classification.urgency
+  });
+}
+
+function normalizeKnowledgePlan(value, matches) {
+  return {
+    skipped: false,
+    matches: matches.map((match) => ({
+      filename: match.filename,
+      chunkIndex: match.chunkIndex,
+      score: match.score,
+      text: match.text
+    })),
+    domain_summary: String(value?.domain_summary || ""),
+    relevant_terms: normalizeArray(value?.relevant_terms),
+    decision_criteria: normalizeArray(value?.decision_criteria),
+    rag_queries: normalizeArray(value?.rag_queries),
+    recommended_tools: normalizeArray(value?.recommended_tools),
+    risks_or_cautions: normalizeArray(value?.risks_or_cautions)
+  };
+}
+
+function fallbackKnowledgePlan({ message, classification, matches }) {
+  const terms = [...new Set([...(classification.knowledge_tags || []), ...(classification.hashtags || [])])];
+  return {
+    skipped: false,
+    matches: matches.map((match) => ({
+      filename: match.filename,
+      chunkIndex: match.chunkIndex,
+      score: match.score,
+      text: match.text
+    })),
+    domain_summary: matches.slice(0, 2).map((match) => match.text).join("\n\n").slice(0, 1200),
+    relevant_terms: terms,
+    decision_criteria: [],
+    rag_queries: [message],
+    recommended_tools: hintedTools(classification),
+    risks_or_cautions: ["תכנית הידע נוצרה ללא קריאת מודל, על בסיס התאמות טקסט מקומיות בלבד."]
+  };
+}
+
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
 }
 
 function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
@@ -359,6 +487,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, classification, r
   const rerankerCall = toolCalls.find((call) => call.toolName === "reranker");
   const n8nCalls = toolCalls.filter((call) => !["hybrid_search", "reranker"].includes(call.toolName));
   const isChat = classification.type === "CHAT";
+  const knowledgePlan = result.knowledgePlan || null;
   const nodes = [
     workflowNode("chat_input", "Chat Trigger", "trigger", "done", { message }, { session_id: saved.session_id }),
     workflowNode("sanitize", "Sanitize Message", "code", "done", { message }, { sanitized }),
@@ -392,6 +521,18 @@ function buildWorkflowLog({ message, sanitized, saved, memory, classification, r
       })
     );
   } else {
+    if (classification.professional) {
+      nodes.push(
+        workflowNode("knowledge_planner", "Professional Knowledge Agent", "ai", knowledgePlan?.skipped ? "skipped" : "done", {
+          message: sanitized,
+          knowledge_tags: classification.knowledge_tags || [],
+          professional_reason: classification.professional_reason || ""
+        }, knowledgePlan || {
+          skipped: true,
+          reason: "not returned"
+        })
+      );
+    }
     nodes.push(
       workflowNode("hybrid_search", "Hybrid Search", "vector", hybridCall?.ok ? "done" : "error", {
         raw_query: sanitized,
@@ -469,7 +610,9 @@ function buildWorkflowLog({ message, sanitized, saved, memory, classification, r
         ["save_message", "memory"],
         ["memory", "classifier"],
         ["classifier", "switch"],
-        ["switch", "hybrid_search"],
+        ...(classification.professional
+          ? [["switch", "knowledge_planner"], ["knowledge_planner", "hybrid_search"]]
+          : [["switch", "hybrid_search"]]),
         ["hybrid_search", "reranker"],
         ["reranker", "n8n_tools"],
         ["n8n_tools", "main_agent"],

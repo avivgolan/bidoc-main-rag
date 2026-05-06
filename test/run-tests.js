@@ -3,6 +3,7 @@ import { sanitizeMessage } from "../src/sanitize.js";
 import { normalizeClassification } from "../src/classifier.js";
 import { heuristicClassification } from "../src/heuristics.js";
 import { buildToolOrder } from "../src/tools.js";
+import { deleteKnowledgeDocument, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -28,6 +29,9 @@ test("normalizeClassification fills optional dates as null", () => {
   assert.equal(output.date_from, null);
   assert.equal(output.date_to, null);
   assert.deepEqual(output.hashtags, []);
+  assert.equal(output.professional, false);
+  assert.equal(output.professional_reason, "");
+  assert.deepEqual(output.knowledge_tags, []);
 });
 
 test("normalizeClassification normalizes hashtags", () => {
@@ -47,6 +51,28 @@ test("heuristicClassification marks safety as high urgency", () => {
   assert.equal(output.type, "RAG");
   assert.equal(output.urgency, "HIGH");
   assert.equal(output.tool_hint, "safety_report,alert");
+});
+
+test("heuristicClassification marks professional questions", () => {
+  const output = heuristicClassification("איך מחליטים אם ליקוי בטיחותי דורש עצירת עבודה?");
+  assert.equal(output.type, "RAG");
+  assert.equal(output.professional, true);
+  assert.ok(output.knowledge_tags.length);
+});
+
+test("knowledge search returns relevant local chunks", () => {
+  saveKnowledgeDocument({
+    filename: "test-safety-method.md",
+    content: "עצירת עבודה נדרשת כאשר יש סיכון בטיחותי מיידי.\n\nקריטריונים: חומרת הסיכון, הסתברות, ויכולת בקרה."
+  });
+  const result = searchKnowledgeBase({ query: "איך מחליטים על עצירת עבודה בגלל בטיחות?", tags: ["בטיחות"], topK: 3 });
+  assert.ok(result.matches.length >= 1);
+  assert.equal(result.matches[0].filename, "test-safety-method.md");
+  deleteKnowledgeDocument("test-safety-method.md");
+});
+
+test("knowledge documents reject unsupported file types", () => {
+  assert.throws(() => sanitizeKnowledgeFilename("bad.pdf"), /Only .txt and .md/);
 });
 
 test("high urgency forces safety_report before hinted tools", () => {

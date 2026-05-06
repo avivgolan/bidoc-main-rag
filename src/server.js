@@ -2,11 +2,15 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getConfig, loadEnv, publicSettings, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { spawn } from "node:child_process";
+import { getConfig, loadEnv, publicSettings, readLocalSettings, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { buildAgentList } from "./prompts.js";
+import { listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
 import { hybridSearch, listMessages, listSessions } from "./supabase.js";
 import { callN8nTool } from "./tools.js";
 import { createRun, failRun, subscribeRun } from "./runLog.js";
+import { deleteKnowledgeDocument, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 
 loadEnv();
 
@@ -29,9 +33,11 @@ async function handler(req, res) {
 
 export default handler;
 
+let httpServer = null;
+
 if (!process.env.VERCEL) {
-  const server = http.createServer(handler);
-  server.listen(config().port, () => {
+  httpServer = http.createServer(handler);
+  httpServer.listen(config().port, () => {
     console.log(`bidoc agent running at http://localhost:${config().port}`);
   });
 }
@@ -78,6 +84,60 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/settings") {
     return sendJson(res, 200, publicSettings(config()));
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/system/restart") {
+    sendJson(res, 200, { ok: true, message: "Restarting server" });
+    scheduleServerRestart();
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/agents") {
+    return sendJson(res, 200, { agents: buildAgentList(config()) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/knowledge/documents") {
+    return sendJson(res, 200, { documents: listKnowledgeDocuments() });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/knowledge/documents") {
+    const body = await readJson(req);
+    const document = saveKnowledgeDocument({ filename: body.filename, content: body.content });
+    return sendJson(res, 200, { document });
+  }
+
+  const knowledgeDocumentMatch = url.pathname.match(/^\/api\/knowledge\/documents\/([^/]+)$/);
+  if (knowledgeDocumentMatch) {
+    const filename = decodeURIComponent(knowledgeDocumentMatch[1]);
+    if (req.method === "GET") return sendJson(res, 200, { document: readKnowledgeDocument(filename) });
+    if (req.method === "DELETE") return sendJson(res, 200, deleteKnowledgeDocument(filename));
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/knowledge/search") {
+    const body = await readJson(req);
+    return sendJson(res, 200, searchKnowledgeBase({
+      query: body.query || "",
+      tags: parseHashtags(body.tags || body.hashtags || []),
+      topK: Number(body.topK || 6)
+    }));
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/openrouter/models") {
+    try {
+      const models = await listOpenRouterModels({ apiKey: config().openRouterApiKey });
+      return sendJson(res, 200, { models, fallback: false });
+    } catch (error) {
+      return sendJson(res, 200, { models: fallbackOpenRouterModels(), fallback: true, error: error.message });
+    }
+  }
+
+  if (req.method === "PUT" && url.pathname === "/api/agents") {
+    const body = await readJson(req);
+    const prompts = body.prompts || {};
+    const models = body.models || {};
+    const current = readLocalSettings();
+    writeLocalSettings({ ...current, prompts, models: { ...(current.models || {}), ...models } });
+    return sendJson(res, 200, { agents: buildAgentList(config()) });
   }
 
   if (req.method === "PUT" && url.pathname === "/api/settings") {
@@ -163,4 +223,37 @@ function sendJson(res, status, value) {
 function sendText(res, status, value) {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
   res.end(value);
+}
+
+function scheduleServerRestart() {
+  if (!httpServer) return;
+  setTimeout(() => {
+    httpServer.close(() => {
+      const child = spawn(process.execPath, [process.argv[1]], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: "ignore",
+        env: process.env
+      });
+      child.unref();
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(0), 1500);
+  }, 300);
+}
+
+function fallbackOpenRouterModels() {
+  return [
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "openai/gpt-4.1",
+    "openai/gpt-4.1-mini",
+    "openai/o3-mini",
+    "anthropic/claude-3.5-sonnet",
+    "anthropic/claude-3.7-sonnet",
+    "google/gemini-2.0-flash-001",
+    "google/gemini-2.5-pro",
+    "meta-llama/llama-3.3-70b-instruct",
+    "mistralai/mistral-large"
+  ].map((id) => ({ id, name: id, contextLength: null, pricing: null }));
 }

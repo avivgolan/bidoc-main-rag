@@ -22,6 +22,31 @@ export async function chatCompletion({ apiKey, model, messages, temperature = 0.
   return data.choices?.[0]?.message?.content || "";
 }
 
+export async function listOpenRouterModels({ apiKey = "" } = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    "HTTP-Referer": "http://localhost",
+    "X-Title": "bidoc-agent"
+  };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const response = await fetch("https://openrouter.ai/api/v1/models", { headers });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || `OpenRouter models request failed: ${response.status}`);
+  }
+
+  return (data.data || [])
+    .map((model) => ({
+      id: model.id,
+      name: model.name || model.id,
+      contextLength: model.context_length || null,
+      pricing: model.pricing || null
+    }))
+    .filter((model) => model.id)
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 export async function createEmbedding({ apiKey, model, input }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const normalizedModel = normalizeEmbeddingModel(model);
@@ -43,7 +68,7 @@ export async function createEmbedding({ apiKey, model, input }) {
   return embedding;
 }
 
-export async function rerankWithLlm({ apiKey, model, query, results, topK = 10 }) {
+export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, systemPrompt = "" }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const candidates = results.map((row, index) => ({
     index,
@@ -63,7 +88,7 @@ export async function rerankWithLlm({ apiKey, model, query, results, topK = 10 }
       {
         role: "system",
         content:
-          "You are a strict RAG reranker. Return ONLY valid JSON: {\"ranked\":[{\"index\":number,\"relevance\":number,\"reason\":string}]}. Rank by relevance to the user query. Use scores as hints, but judge semantic relevance. Do not include markdown."
+          systemPrompt || "You are a strict RAG reranker. Return ONLY valid JSON: {\"ranked\":[{\"index\":number,\"relevance\":number,\"reason\":string}]}. Rank by relevance to the user query. Use scores as hints, but judge semantic relevance. Do not include markdown."
       },
       {
         role: "user",

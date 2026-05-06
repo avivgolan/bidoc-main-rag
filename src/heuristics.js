@@ -2,7 +2,7 @@ export function heuristicClassification(message) {
   const text = String(message || "").toLowerCase();
   const isChat = /^(שלום|היי|הי|תודה|hello|hi|thanks|thank you|מי אתה)/i.test(text.trim());
   if (isChat) {
-    return { type: "CHAT", complexity: "GENERAL", tool_hint: "none", urgency: "NORMAL", date_from: null, date_to: null, hashtags: [] };
+    return baseClassification({ type: "CHAT", tool_hint: "none", hashtags: [] });
   }
 
   const rules = [
@@ -17,9 +17,9 @@ export function heuristicClassification(message) {
   ];
 
   for (const [pattern, tool, complexity, urgency = "NORMAL"] of rules) {
-    if (pattern.test(text)) return { type: "RAG", complexity, tool_hint: tool, urgency, date_from: null, date_to: null, hashtags: extractHeuristicHashtags(message) };
+    if (pattern.test(text)) return baseClassification({ type: "RAG", complexity, tool_hint: tool, urgency, hashtags: extractHeuristicHashtags(message), message });
   }
-  return { type: "RAG", complexity: "GENERAL", tool_hint: "alert", urgency: "NORMAL", date_from: null, date_to: null, hashtags: extractHeuristicHashtags(message) };
+  return baseClassification({ type: "RAG", complexity: "GENERAL", tool_hint: "alert", urgency: "NORMAL", hashtags: extractHeuristicHashtags(message), message });
 }
 
 export function isHebrew(text) {
@@ -41,6 +41,37 @@ function extractHeuristicHashtags(message) {
     ["חריגים", /חריג|חריגים|שינוי|change order|exception/],
     ["אישורים", /אישור|אישורים|approved|approval|submittal/],
     ["בקרת_איכות", /בקרת איכות|ליקוי|qc|quality|defect/]
+  ];
+  return tags.filter(([, pattern]) => pattern.test(text)).map(([tag]) => tag);
+}
+
+function baseClassification({ type, complexity = "GENERAL", tool_hint, urgency = "NORMAL", hashtags = [], message = "" }) {
+  const professional = type === "RAG" && isProfessionalQuestion(message);
+  return {
+    type,
+    complexity,
+    tool_hint,
+    urgency,
+    date_from: null,
+    date_to: null,
+    hashtags,
+    professional,
+    professional_reason: professional ? "זוהתה שאלה מקצועית/מתודולוגית שיכולה להיעזר ב-Knowledge Base." : "",
+    knowledge_tags: professional ? [...new Set([...hashtags, ...extractKnowledgeTags(message)])] : []
+  };
+}
+
+function isProfessionalQuestion(message) {
+  return /איך|כיצד|למה|מתי נכון|מה הדרך|שיטה|קריטריון|קריטריונים|מונח|מונחים|תקן|נוהל|החלטה מקצועית|best practice|method|criteria|standard|procedure|glossary/i.test(String(message || ""));
+}
+
+function extractKnowledgeTags(message) {
+  const text = String(message || "").toLowerCase();
+  const tags = [
+    ["שיטות_עבודה", /שיטה|דרך|איך|כיצד|method|best practice/],
+    ["קבלת_החלטות", /החלטה|קריטריון|criteria|decision/],
+    ["תקנים_ונהלים", /תקן|נוהל|standard|procedure/],
+    ["מונחים", /מונח|מונחים|glossary|term/]
   ];
   return tags.filter(([, pattern]) => pattern.test(text)).map(([tag]) => tag);
 }

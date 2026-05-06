@@ -18,7 +18,12 @@ const tools = [
 const state = {
   settings: null,
   lastWorkflow: null,
-  eventSource: null
+  eventSource: null,
+  agents: [],
+  openRouterModels: [],
+  openRouterModelsFallback: false,
+  agentRuntime: {},
+  selectedKnowledgeDocument: null
 };
 
 const $ = (id) => document.getElementById(id);
@@ -34,8 +39,13 @@ async function init() {
   wireSettings();
   wireTools();
   wireWorkflow();
+  wireAgents();
+  wireKnowledge();
+  wireReset();
   $("refreshHistory").addEventListener("click", loadHistory);
   await loadSettings();
+  await loadOpenRouterModels();
+  await loadKnowledgeDocuments();
   await loadHistory();
 }
 
@@ -84,6 +94,8 @@ function startLiveRun(runId) {
   if (state.eventSource) state.eventSource.close();
   $("liveRunList").innerHTML = "";
   $("liveRunStatus").textContent = `רץ: ${runId}`;
+  resetAgentRuntime();
+  renderAgents();
   appendLiveRunEvent({ step: "client", message: "Opening live log", data: { runId }, time: new Date().toISOString() });
   state.eventSource = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events`);
   state.eventSource.addEventListener("log", (event) => {
@@ -100,6 +112,7 @@ function startLiveRun(runId) {
 }
 
 function appendLiveRunEvent(item) {
+  updateAgentRuntime(item);
   const row = document.createElement("details");
   row.className = `liveRunItem ${item.step === "error" ? "error" : ""}`;
   const summary = document.createElement("summary");
@@ -110,6 +123,287 @@ function appendLiveRunEvent(item) {
   row.append(summary, pre);
   $("liveRunList").append(row);
   row.scrollIntoView({ block: "end" });
+}
+
+function wireAgents() {
+  $("refreshModels").addEventListener("click", loadOpenRouterModels);
+  $("saveAgents").addEventListener("click", async () => {
+    const prompts = Object.fromEntries(
+      state.agents.map((agent) => [agent.id, $(`agentPrompt_${agent.id}`)?.value || agent.prompt || ""])
+    );
+    const models = Object.fromEntries(
+      state.agents.map((agent) => [agent.modelKey, $(`agentModel_${agent.id}`)?.value || agent.model || ""])
+    );
+    $("saveAgents").disabled = true;
+    try {
+      const result = await api("/api/agents", { method: "PUT", body: { prompts, models } });
+      state.agents = result.agents || [];
+      renderAgents();
+    } finally {
+      $("saveAgents").disabled = false;
+    }
+  });
+}
+
+function resetAgentRuntime() {
+  state.agentRuntime = Object.fromEntries(
+    state.agents.map((agent) => [agent.id, { status: "idle", lastMessage: "ממתין", input: null, output: null }])
+  );
+}
+
+function updateAgentRuntime(item) {
+  if (item.step === "complete" || item.step === "error") {
+    const finalStatus = item.step === "complete" ? "done" : "error";
+    state.agentRuntime = Object.fromEntries(
+      Object.entries(state.agentRuntime).map(([agentId, runtime]) => [
+        agentId,
+        runtime.status === "thinking"
+          ? { ...runtime, status: finalStatus, lastMessage: item.message || runtime.lastMessage, output: item.data || runtime.output }
+          : runtime
+      ])
+    );
+    renderAgents();
+    return;
+  }
+  const agentId = agentIdForStep(item.step);
+  if (!agentId) return;
+  const current = state.agentRuntime[agentId] || { status: "idle", lastMessage: "ממתין" };
+  const status = statusForRunEvent(item);
+  state.agentRuntime[agentId] = {
+    ...current,
+    status,
+    lastMessage: item.message || current.lastMessage,
+    input: status === "thinking" ? item.data || current.input : current.input,
+    output: status !== "thinking" ? item.data || current.output : current.output
+  };
+  renderAgents();
+}
+
+function agentIdForStep(step) {
+  return {
+    classifier: "classifier",
+    knowledge_planner: "knowledge_planner",
+    lite_agent: "lite",
+    main_agent: "main",
+    reranker: "reranker"
+  }[step] || null;
+}
+
+function statusForRunEvent(item) {
+  if (item.step === "error" || /failed|missing/i.test(item.message || "")) return "error";
+  if (/calling|classifying|running/i.test(item.message || "")) return "thinking";
+  if (/completed|received|fallback/i.test(item.message || "")) return "done";
+  return "thinking";
+}
+
+function renderAgents() {
+  const grid = $("agentGrid");
+  if (!grid) return;
+  const draftPrompts = Object.fromEntries(
+    state.agents.map((agent) => [agent.id, $(`agentPrompt_${agent.id}`)?.value])
+  );
+  const draftModels = Object.fromEntries(
+    state.agents.map((agent) => [agent.id, $(`agentModel_${agent.id}`)?.value])
+  );
+  grid.innerHTML = "";
+  if (!state.agents.length) {
+    grid.textContent = "טוען סוכנים...";
+    return;
+  }
+  for (const agent of state.agents) {
+    const runtime = state.agentRuntime[agent.id] || { status: "idle", lastMessage: "ממתין" };
+    const card = document.createElement("article");
+    card.className = `agentCard ${runtime.status}`;
+    card.innerHTML = `
+      <header>
+        <div>
+          <strong>${escapeHtml(agent.name)}</strong>
+          <span>${escapeHtml(agent.description || "")}</span>
+        </div>
+        <mark>${agentStatusLabel(runtime.status)}</mark>
+      </header>
+      <div class="agentMeta">
+        <span>Step: ${escapeHtml(agent.step || "")}</span>
+      </div>
+      <label>Model
+        <select id="agentModel_${escapeHtml(agent.id)}">
+          ${modelOptions(draftModels[agent.id] || agent.model || "")}
+        </select>
+      </label>
+      <label>Prompt
+        <textarea id="agentPrompt_${escapeHtml(agent.id)}" rows="10" spellcheck="false">${escapeHtml(draftPrompts[agent.id] ?? agent.prompt ?? "")}</textarea>
+      </label>
+      <details>
+        <summary>לוג אחרון של הסוכן</summary>
+        <pre>${escapeHtml(JSON.stringify({
+          status: runtime.status,
+          message: runtime.lastMessage,
+          input: runtime.input,
+          output: runtime.output
+        }, null, 2))}</pre>
+      </details>
+    `;
+    grid.append(card);
+  }
+}
+
+async function loadOpenRouterModels() {
+  if ($("modelListStatus")) $("modelListStatus").textContent = "טוען רשימת מודלים מ-OpenRouter...";
+  try {
+    const result = await api("/api/openrouter/models");
+    state.openRouterModels = result.models || [];
+    state.openRouterModelsFallback = Boolean(result.fallback);
+    if ($("modelListStatus")) {
+      $("modelListStatus").textContent = result.fallback
+        ? `OpenRouter לא החזיר רשימה כרגע, מוצגת רשימת גיבוי. ${result.error || ""}`.trim()
+        : `נטענו ${state.openRouterModels.length} מודלים מ-OpenRouter.`;
+    }
+  } catch (error) {
+    state.openRouterModels = [];
+    if ($("modelListStatus")) $("modelListStatus").textContent = `לא ניתן לטעון מודלים: ${error.message}`;
+  }
+  renderAgents();
+}
+
+function modelOptions(selectedModel) {
+  const models = [...state.openRouterModels];
+  if (selectedModel && !models.some((model) => model.id === selectedModel)) {
+    models.unshift({ id: selectedModel, name: selectedModel, contextLength: null });
+  }
+  if (!models.length) {
+    return `<option value="${escapeHtml(selectedModel)}">${escapeHtml(selectedModel || "אין רשימת מודלים זמינה")}</option>`;
+  }
+  return models.map((model) => {
+    const label = `${model.name || model.id}${model.contextLength ? ` · ${Number(model.contextLength).toLocaleString()} ctx` : ""}`;
+    return `<option value="${escapeHtml(model.id)}" ${model.id === selectedModel ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
+}
+
+function agentStatusLabel(status) {
+  return {
+    idle: "ממתין",
+    thinking: "חושב",
+    done: "סיים",
+    error: "שגיאה"
+  }[status] || status;
+}
+
+function wireKnowledge() {
+  $("refreshKnowledge").addEventListener("click", loadKnowledgeDocuments);
+  $("uploadKnowledge").addEventListener("click", uploadKnowledgeDocument);
+  $("deleteKnowledge").addEventListener("click", deleteSelectedKnowledgeDocument);
+  $("runKnowledgeSearch").addEventListener("click", runKnowledgeSearch);
+}
+
+function wireReset() {
+  $("restartServer").addEventListener("click", restartServer);
+}
+
+async function restartServer() {
+  const button = $("restartServer");
+  const status = $("restartStatus");
+  button.disabled = true;
+  status.textContent = "שולח בקשת restart לשרת...";
+  try {
+    await api("/api/system/restart", { method: "POST", body: {} });
+    status.textContent = "השרת נסגר ועולה מחדש. ממתין לחיבור...";
+    await waitForServer();
+    status.textContent = "השרת חזר. מרענן את האפליקציה...";
+    setTimeout(() => window.location.reload(), 500);
+  } catch (error) {
+    status.textContent = `שגיאה בהפעלת restart: ${error.message}`;
+    button.disabled = false;
+  }
+}
+
+async function waitForServer() {
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    try {
+      const response = await fetch("/api/settings", { cache: "no-store" });
+      if (response.ok) return;
+    } catch {
+      // The server is expected to be unavailable while restarting.
+    }
+    $("restartStatus").textContent = `ממתין לחזרת השרת... ניסיון ${attempt}/30`;
+    await new Promise((resolve) => setTimeout(resolve, 700));
+  }
+  throw new Error("השרת לא חזר בזמן הצפוי. הפעל אותו ידנית דרך CMD.");
+}
+
+async function loadKnowledgeDocuments() {
+  const list = $("knowledgeList");
+  if (!list) return;
+  const result = await api("/api/knowledge/documents");
+  list.innerHTML = "";
+  if (!result.documents?.length) {
+    list.textContent = "אין מסמכים עדיין.";
+    return;
+  }
+  for (const item of result.documents) {
+    const button = document.createElement("button");
+    button.className = "knowledgeItem";
+    button.innerHTML = `
+      <strong>${escapeHtml(item.filename)}</strong>
+      <span>${Number(item.size || 0).toLocaleString()} bytes · ${escapeHtml(new Date(item.updatedAt).toLocaleString("he-IL"))}</span>
+    `;
+    button.addEventListener("click", () => openKnowledgeDocument(item.filename));
+    list.append(button);
+  }
+}
+
+async function uploadKnowledgeDocument() {
+  const file = $("knowledgeFile").files?.[0];
+  if (!file) return;
+  $("uploadKnowledge").disabled = true;
+  try {
+    const content = await file.text();
+    await api("/api/knowledge/documents", {
+      method: "POST",
+      body: { filename: file.name, content }
+    });
+    $("knowledgeFile").value = "";
+    await loadKnowledgeDocuments();
+  } catch (error) {
+    $("knowledgePreview").textContent = `שגיאה בהעלאה: ${error.message}`;
+  } finally {
+    $("uploadKnowledge").disabled = false;
+  }
+}
+
+async function openKnowledgeDocument(filename) {
+  const result = await api(`/api/knowledge/documents/${encodeURIComponent(filename)}`);
+  state.selectedKnowledgeDocument = filename;
+  $("knowledgePreviewTitle").textContent = result.document.filename;
+  $("knowledgePreview").textContent = result.document.content || "";
+  $("deleteKnowledge").disabled = false;
+}
+
+async function deleteSelectedKnowledgeDocument() {
+  if (!state.selectedKnowledgeDocument) return;
+  await api(`/api/knowledge/documents/${encodeURIComponent(state.selectedKnowledgeDocument)}`, { method: "DELETE" });
+  state.selectedKnowledgeDocument = null;
+  $("knowledgePreviewTitle").textContent = "תצוגת מסמך";
+  $("knowledgePreview").textContent = "בחר מסמך מהרשימה.";
+  $("deleteKnowledge").disabled = true;
+  await loadKnowledgeDocuments();
+}
+
+async function runKnowledgeSearch() {
+  $("knowledgeSearchResult").textContent = "מחפש...";
+  try {
+    const result = await api("/api/knowledge/search", {
+      method: "POST",
+      body: {
+        query: $("knowledgeQuery").value,
+        tags: $("knowledgeTags").value,
+        topK: Number($("knowledgeTopK").value || 6)
+      }
+    });
+    $("knowledgeSearchResult").textContent = JSON.stringify(result, null, 2);
+  } catch (error) {
+    $("knowledgeSearchResult").textContent = error.message;
+  }
 }
 
 function wireWorkflow() {
@@ -271,6 +565,7 @@ function wireSettings() {
     const body = {
       models: {
         classifier: $("modelClassifier").value,
+        knowledgePlanner: $("modelKnowledgePlanner").value,
         main: $("modelMain").value,
         lite: $("modelLite").value,
         embedding: $("modelEmbedding").value,
@@ -318,7 +613,10 @@ function wireTools() {
 
 async function loadSettings() {
   state.settings = await api("/api/settings");
+  state.agents = state.settings.agents || [];
+  resetAgentRuntime();
   $("modelClassifier").value = state.settings.models.classifier;
+  $("modelKnowledgePlanner").value = state.settings.models.knowledgePlanner;
   $("modelMain").value = state.settings.models.main;
   $("modelLite").value = state.settings.models.lite;
   $("modelEmbedding").value = state.settings.models.embedding;
@@ -351,6 +649,7 @@ async function loadSettings() {
     `Supabase: ${state.settings.supabaseConfigured ? "מוגדר" : "חסר"}`,
     `Tools: ${configured}/${n8nTools.length}`
   ].join("<br>");
+  renderAgents();
 }
 
 async function loadHistory() {
@@ -363,11 +662,17 @@ async function loadHistory() {
   for (const session of result.sessions) {
     const item = document.createElement("button");
     item.className = "historyItem";
-    item.textContent = `${session.sessionId} - ${session.status || ""}`;
+    const date = session.created_at ? new Date(session.created_at).toLocaleString("he-IL") : "";
+    item.innerHTML = `
+      <strong>${escapeHtml(session.user_message || "שיחה ללא כותרת")}</strong>
+      <span>${escapeHtml(date)} · ${escapeHtml(session.status || "")}</span>
+      <small>${escapeHtml(session.sessionId || session.session_id || "")}</small>
+    `;
     item.addEventListener("click", async () => {
-      $("sessionId").value = session.sessionId;
-      localStorage.setItem("sessionId", session.sessionId);
-      await loadSessionMessages(session.sessionId);
+      const sessionId = session.sessionId || session.session_id;
+      $("sessionId").value = sessionId;
+      localStorage.setItem("sessionId", sessionId);
+      await loadSessionMessages(sessionId);
       document.querySelector('[data-tab="chat"]').click();
     });
     $("historyList").append(item);

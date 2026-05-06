@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { buildAgentList, defaultPrompts } from "./prompts.js";
 
 const ROOT = process.cwd();
 const ENV_FILES = [".env", ".env.local"];
@@ -53,10 +54,15 @@ export function getConfig() {
     postgresUrl: process.env.POSTGRES_URL || "",
     models: {
       classifier: settings.models?.classifier || process.env.CLASSIFIER_MODEL || "openai/gpt-4o-mini",
+      knowledgePlanner: settings.models?.knowledgePlanner || process.env.KNOWLEDGE_PLANNER_MODEL || settings.models?.main || process.env.MAIN_MODEL || "openai/gpt-4o",
       main: settings.models?.main || process.env.MAIN_MODEL || "openai/gpt-4o",
       lite: settings.models?.lite || process.env.LITE_MODEL || "openai/gpt-4o-mini",
       embedding: settings.models?.embedding || process.env.EMBEDDING_MODEL || "openai/text-embedding-3-large",
       reranker: settings.models?.reranker || process.env.RERANKER_MODEL || "openai/gpt-4o-mini"
+    },
+    prompts: {
+      ...defaultPrompts(),
+      ...(settings.prompts || {})
     },
     retrieval: {
       rpcName: settings.retrieval?.rpcName || process.env.HYBRID_RPC_NAME || "hybrid_match_data_index_embeddings_gf_dor_agent",
@@ -91,7 +97,8 @@ export function publicSettings(config = getConfig()) {
         const url = resolveToolUrl(tool, config);
         return [tool, { configured: Boolean(url), url }];
       })
-    )
+    ),
+    agents: buildAgentList(config)
   };
 }
 
@@ -123,6 +130,11 @@ export function writeLocalSettings(settings) {
   fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
   const safe = {
     models: settings.models || {},
+    prompts: {
+      ...defaultPrompts(),
+      ...(existing.prompts || {}),
+      ...(settings.prompts || {})
+    },
     retrieval: {
       rpcName: settings.retrieval?.rpcName || existing.retrieval?.rpcName || "hybrid_match_data_index_embeddings_gf_dor_agent",
       candidates: Number(settings.retrieval?.candidates || existing.retrieval?.candidates || 40),

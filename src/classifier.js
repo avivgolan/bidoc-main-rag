@@ -1,64 +1,20 @@
 import { chatCompletion, extractJsonObject } from "./openrouter.js";
+import { defaultPrompts, renderPrompt } from "./prompts.js";
 
 export function classifierPrompt(currentDate) {
-  return `You are a Senior Project Manager Assistant for the JFrog construction project.
-
-the date now is ${currentDate}
-
-Your Goal: Analyze the user's incoming query and classify it.
-
-Output MUST be a valid JSON object with EXACTLY these keys:
-- "type": "CHAT" (greeting/smalltalk) OR "RAG" (asking for project info)
-- "complexity": "GENERAL" (broad questions: status, what happened, updates) OR "SPECIFIC" (specific document, invoice, report number, or technical detail)
-- "tool_hint": A comma-separated string of the MOST likely tools needed. Use "none" if type is CHAT.
-- "urgency": "HIGH" (safety risk, accident, leak, structural issue) OR "NORMAL"
-- "date_from": ISO timestamp (YYYY-MM-DDTHH:mm:ssZ) of the START of the date range. Use null if no date is mentioned.
-- "date_to": ISO timestamp (YYYY-MM-DDTHH:mm:ssZ) of the END of the date range. Use null if no date is mentioned.
-- "hashtags": An array of the most relevant topic hashtags WITHOUT the # symbol. Use [] if none are clear.
-
-Tools Available:
-[Group A - General/Status]:
-- alert (Critical issues, leaks, breaks, open alerts, project status - ALWAYS first stop)
-- whatsapp_messages (Informal updates, photos, site coordination)
-- emails (Formal correspondence)
-- meetings (Decisions made, deadlines, approvals, "when was it decided?")
-
-[Group B - Specific/Technical]:
-- financial_transactions (Invoices, payments, vendor receipts)
-- consultants_reports (Engineering, supervision, inspection reports)
-- exceptions_report (Change orders, extra costs, scope changes)
-- quality_control (QC findings, defects, open items)
-- safety_report (Safety violations, risk levels, site safety)
-- submittals (Material approvals, LLI tracking, delivery dates)
-
-Classification Logic:
-1. Money/Invoices -> financial_transactions
-2. "What happened?" / "Status update" / "Update me" -> alert
-3. "When was X decided?" / "Deadline?" / "Was this approved?" -> meetings (add submittals if material related)
-4. Safety/Accident/Leak -> safety_report,alert - urgency: HIGH
-5. Defect/QC issue -> quality_control
-6. Material approval/delivery -> submittals
-7. Engineering/technical report -> consultants_reports
-8. WhatsApp/site photos/informal -> whatsapp_messages
-9. Emails/formal letters -> emails
-
-Hashtag Extraction:
-- Extract short topic tags that likely exist in the project index.
-- Prefer exact project/domain topics from the user query.
-- Use Hebrew when the user writes Hebrew.
-- Examples: "מעליות", "בטיחות", "חשמל", "איטום", "אלומיניום", "חשבוניות", "ריצוף", "מיזוג", "אינסטלציה", "חריגים", "אישורים", "בקרת_איכות".
-- Return tags without "#".
-
-Do not include markdown formatting. Output ONLY the JSON object.`;
+  return renderPrompt(defaultPrompts().classifier, { currentDate });
 }
 
 export async function classifyMessage({ message, config, now = new Date() }) {
+  const systemPrompt = renderPrompt(config.prompts?.classifier || classifierPrompt(now.toISOString()), {
+    currentDate: now.toISOString()
+  });
   const content = await chatCompletion({
     apiKey: config.openRouterApiKey,
     model: config.models.classifier,
     temperature: 0,
     messages: [
-      { role: "system", content: classifierPrompt(now.toISOString()) },
+      { role: "system", content: systemPrompt },
       { role: "user", content: message }
     ]
   });
@@ -76,7 +32,10 @@ export function normalizeClassification(value) {
     urgency,
     date_from: value?.date_from || null,
     date_to: value?.date_to || null,
-    hashtags: normalizeHashtags(value?.hashtags)
+    hashtags: normalizeHashtags(value?.hashtags),
+    professional: Boolean(value?.professional),
+    professional_reason: typeof value?.professional_reason === "string" ? value.professional_reason : "",
+    knowledge_tags: normalizeHashtags(value?.knowledge_tags)
   };
 }
 
