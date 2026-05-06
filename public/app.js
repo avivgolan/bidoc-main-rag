@@ -43,19 +43,48 @@ async function init() {
   wireKnowledge();
   wireReset();
   $("refreshHistory").addEventListener("click", loadHistory);
+
+  // Restore tab from URL hash, then load initial data
+  const initialTab = location.hash.slice(1) || "chat";
+  activateTab(initialTab, false);
+  if (!location.hash) history.replaceState({ tab: "chat" }, "", "#chat");
+
+  // Always load settings first (other tabs may depend on it)
   await loadSettings();
-  await loadOpenRouterModels();
-  await loadKnowledgeDocuments();
-  await loadHistory();
+  // Load the data for any tabs that weren't loaded by activateTab above
+  // (settings is always loaded; load the rest unless they were already triggered)
+  if (initialTab !== "agents")    await loadOpenRouterModels();
+  if (initialTab !== "knowledge") await loadKnowledgeDocuments();
+  if (initialTab !== "history")   await loadHistory();
+}
+
+const TAB_LOADERS = {
+  settings:  () => loadSettings(),
+  agents:    () => loadOpenRouterModels(),
+  knowledge: () => loadKnowledgeDocuments(),
+  history:   () => loadHistory()
+};
+
+function activateTab(tabId, pushHistory = true) {
+  const button = document.querySelector(`.tab[data-tab="${tabId}"]`);
+  const panel  = $(tabId);
+  if (!button || !panel) return;
+  document.querySelectorAll(".tab, .panel").forEach((el) => el.classList.remove("active"));
+  button.classList.add("active");
+  panel.classList.add("active");
+  if (pushHistory && location.hash !== `#${tabId}`) {
+    history.pushState({ tab: tabId }, "", `#${tabId}`);
+  }
+  TAB_LOADERS[tabId]?.();
 }
 
 function wireTabs() {
   document.querySelectorAll(".tab").forEach((button) => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll(".tab, .panel").forEach((item) => item.classList.remove("active"));
-      button.classList.add("active");
-      $(button.dataset.tab).classList.add("active");
-    });
+    button.addEventListener("click", () => activateTab(button.dataset.tab));
+  });
+  window.addEventListener("popstate", (event) => {
+    const tabId = event.state?.tab || location.hash.slice(1) || "chat";
+    activateTab(tabId, false);
   });
 }
 
@@ -692,7 +721,7 @@ async function loadHistory() {
       $("sessionId").value = sessionId;
       localStorage.setItem("sessionId", sessionId);
       await loadSessionMessages(sessionId);
-      document.querySelector('[data-tab="chat"]').click();
+      activateTab("chat");
     });
     $("historyList").append(item);
   }
