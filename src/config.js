@@ -41,8 +41,35 @@ async function loadSettingsFromDb() {
   _settingsCachedAt = Date.now();
 }
 
+// ---------------------------------------------------------------------------
+// One-time migration: clear stale default-prompts stored in Supabase.
+// Old code used to persist ALL default prompts to Supabase, which meant that
+// when prompts.js was updated, the old cached prompts kept overriding the new
+// defaults — causing bugs like the classifier always returning "CHAT".
+// After this migration, only user-customised (non-default) prompts are stored.
+// ---------------------------------------------------------------------------
+const PROMPTS_MIGRATION_FLAG = "__prompts_clean_v1";
+
+async function migratePromptsIfNeeded() {
+  if (_settingsCache[PROMPTS_MIGRATION_FLAG]) return; // already migrated
+  console.log("[config] Running one-time prompts migration: clearing stale stored defaults…");
+  _settingsCache = {
+    ..._settingsCache,
+    prompts: {}, // wipe all stored prompts → getConfig() will use fresh defaults
+    [PROMPTS_MIGRATION_FLAG]: true
+  };
+  _settingsCachedAt = Date.now();
+  await sbFetch("/rest/v1/agent_settings", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({ id: "default", data: _settingsCache, updated_at: new Date().toISOString() })
+  });
+  console.log("[config] Prompts migration complete.");
+}
+
 export async function initSettings() {
   await loadSettingsFromDb();
+  await migratePromptsIfNeeded().catch(() => {});
 }
 
 export async function refreshSettingsIfStale() {
@@ -168,13 +195,27 @@ export function readLocalSettings() {
 export async function writeLocalSettings(settings) {
   const existing = _settingsCache;
   const incomingSecrets = settings.secrets || {};
+
+  // Only persist prompts that DIFFER from the current defaults.
+  // This ensures that whenever prompts.js is updated, new defaults always take
+  // effect for any prompt the user hasn't intentionally customised.
+  const currentDefaults = defaultPrompts();
+  let resolvedPrompts;
+  if (settings.prompts != null) {
+    resolvedPrompts = {};
+    for (const [key, value] of Object.entries(settings.prompts)) {
+      if (value !== currentDefaults[key]) {
+        resolvedPrompts[key] = value; // keep only genuine user customisations
+      }
+    }
+  } else {
+    resolvedPrompts = existing.prompts || {}; // settings-only save — preserve existing
+  }
+
   const safe = {
     models: settings.models || {},
-    prompts: {
-      ...defaultPrompts(),
-      ...(existing.prompts || {}),
-      ...(settings.prompts || {})
-    },
+    prompts: resolvedPrompts,
+    [PROMPTS_MIGRATION_FLAG]: true, // mark this record as migrated
     retrieval: {
       rpcName: settings.retrieval?.rpcName || existing.retrieval?.rpcName || "hybrid_match_data_index_embeddings_gf_dor_agent",
       candidates: Number(settings.retrieval?.candidates || existing.retrieval?.candidates || 40),
