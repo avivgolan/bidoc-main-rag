@@ -181,34 +181,40 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
       date_to: classification.date_to,
       hashtags: classification.hashtags || []
     });
-    hybridResults = await hybridSearch({
+    const primarySearch = await hybridSearchWithRelaxedHashtags({
       config,
       query: message,
       dateFrom: classification.date_from,
       dateTo: classification.date_to,
       hashtags: classification.hashtags || [],
-      topK: config.retrieval.candidates
+      topK: config.retrieval.candidates,
+      runId,
+      context: "primary"
     });
+    hybridResults = primarySearch.results;
     const allRows = normalizeRows(hybridResults);
 
     const planQueries = plannedRagQueries(knowledgePlan, message);
     for (const query of planQueries) {
       try {
         emitRunEvent(runId, "hybrid_search", "Running Knowledge Planner RAG query", { query });
-        const plannedResults = await hybridSearch({
+        const plannedSearch = await hybridSearchWithRelaxedHashtags({
           config,
           query,
           dateFrom: classification.date_from,
           dateTo: classification.date_to,
           hashtags: classification.hashtags || [],
-          topK: Math.min(config.retrieval.candidates, 20)
+          topK: Math.min(config.retrieval.candidates, 20),
+          runId,
+          context: "knowledge_plan"
         });
+        const plannedResults = plannedSearch.results;
         const plannedRows = normalizeRows(plannedResults);
         allRows.push(...plannedRows);
         const plannedSources = extractLinks(plannedRows);
         sources.push(...plannedSources);
-        toolCalls.push(annotateToolCall({ toolName: "hybrid_search_plan", ok: true, rawQuery: query, data: plannedRows, sources: plannedSources }));
-        emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query completed", { query, records: plannedRows.length });
+        toolCalls.push(annotateToolCall({ toolName: "hybrid_search_plan", ok: true, rawQuery: query, data: plannedRows, sources: plannedSources, relaxedHashtags: plannedSearch.relaxedHashtags }));
+        emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query completed", { query, records: plannedRows.length, relaxedHashtags: plannedSearch.relaxedHashtags });
       } catch (error) {
         toolCalls.push(annotateToolCall({ toolName: "hybrid_search_plan", ok: false, rawQuery: query, error: error.message, data: null, sources: [] }));
         emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query failed", { query, error: error.message });
@@ -218,7 +224,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     hybridResults = filterRowsByHashtags(uniqueRows(allRows), classification.hashtags || []);
     const hybridSources = extractLinks(hybridResults);
     sources.push(...hybridSources);
-    toolCalls.push(annotateToolCall({ toolName: "hybrid_search", ok: true, rawQuery: message, data: hybridResults, sources: hybridSources }));
+    toolCalls.push(annotateToolCall({ toolName: "hybrid_search", ok: true, rawQuery: message, data: hybridResults, sources: hybridSources, relaxedHashtags: primarySearch.relaxedHashtags }));
     emitRunEvent(runId, "hybrid_search", "Hybrid Search completed", { records: countRows(hybridResults), sources: hybridSources.length, plannedQueries: planQueries.length });
   } catch (error) {
     toolCalls.push(annotateToolCall({ toolName: "hybrid_search", ok: false, rawQuery: message, error: error.message, data: null, sources: [] }));
@@ -270,6 +276,36 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   emitRunEvent(runId, "source_quality", "Source quality scored", sourceQuality);
   const answer = await synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults: rerankedResults || hybridResults, toolCalls, sources: uniqueSources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId });
   return { answer, sources: uniqueSources, toolCalls, knowledgePlan, investigationPlan, sourceQuality, conflicts };
+}
+
+async function hybridSearchWithRelaxedHashtags({ config, query, dateFrom, dateTo, hashtags = [], topK, runId, context }) {
+  const requestedHashtags = normalizeTagList(hashtags);
+  const results = await hybridSearch({
+    config,
+    query,
+    dateFrom,
+    dateTo,
+    hashtags: requestedHashtags,
+    topK
+  });
+  if (countRows(results) || !requestedHashtags.length) {
+    return { results, relaxedHashtags: false };
+  }
+
+  emitRunEvent(runId, "hybrid_search", "No records with hashtag filter, retrying without hashtags", {
+    context,
+    query,
+    hashtags: requestedHashtags
+  });
+  const relaxedResults = await hybridSearch({
+    config,
+    query,
+    dateFrom,
+    dateTo,
+    hashtags: [],
+    topK
+  });
+  return { results: relaxedResults, relaxedHashtags: true };
 }
 
 async function runKnowledgePlanner({ message, classification, config, trace, runId }) {
@@ -368,7 +404,6 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
       messages: [
         { role: "system", content: mainSystemPrompt(classification, config) },
         ...memorySummaryMessages(memorySummary),
-        ...memory,
         {
           role: "user",
           content: JSON.stringify(
@@ -440,7 +475,8 @@ Response format:
 CRITICAL KNOWLEDGE BOUNDARY:
 - knowledge_plan is planning guidance only. It is not project evidence.
 - Use knowledge_plan to decide what to look for and how to reason.
-- Final factual claims must come only from retrieval_context, retrieval_results, tool_results, memory, or explicit user input.
+- Final factual claims must come only from retrieval_context, retrieval_results, tool_results, or explicit user input from the current request.
+- Conversation memory is only for understanding follow-up wording. Never repeat an earlier assistant answer when current retrieval/tool results contradict it or provide newer evidence.
 - Never cite Knowledge Base excerpts as project sources unless they also appear in retrieval/tool results.
 
 SOURCE QUALITY AND CONFLICTS:
@@ -571,6 +607,7 @@ function vocabularyKeywordMatches(normalizedText, textTokens, keyword) {
     for (const textToken of textTokens) {
       const textStem = stemVocabularyToken(textToken);
       if (!keywordStem || !textStem) continue;
+      if (keywordStem.length < 3 || textStem.length < 3) continue;
       if (
         textStem === keywordStem ||
         textStem.includes(keywordStem) ||
@@ -765,7 +802,7 @@ function filterRowsByHashtags(results, requestedHashtags) {
     const rowTags = normalizeTagList(row.hashtags || row.metadata?.hashtags);
     return requested.some((tag) => rowTags.includes(tag));
   });
-  return filtered.length ? filtered : [];
+  return filtered.length ? filtered : rows;
 }
 
 function normalizeTagList(value) {

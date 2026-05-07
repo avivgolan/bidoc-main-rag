@@ -134,6 +134,27 @@ test("professional enforcement matches Hebrew vocabulary inflections", () => {
   assert.ok(output.knowledge_tags.includes("אוצר_מילים"));
 });
 
+test("professional enforcement ignores tiny Hebrew stems", () => {
+  const output = enforceProfessionalKnowledgeMode({
+    type: "RAG",
+    complexity: "GENERAL",
+    tool_hint: "alert",
+    urgency: "NORMAL",
+    date_from: null,
+    date_to: null,
+    hashtags: [],
+    professional: false,
+    professional_reason: "",
+    knowledge_tags: [],
+    investigation: false,
+    investigation_reason: ""
+  }, "מה העיכובים שהיו בפרויקט?", {
+    knowledge: { triggerKeywords: ["חסמים", "עיכוב"] }
+  });
+  assert.equal(output.professional, true);
+  assert.equal(output.knowledge_vocabulary_match, "עיכוב");
+});
+
 test("heuristicClassification marks investigation questions", () => {
   const output = heuristicClassification("למה היה עיכוב ומי אחראי לזה?");
   assert.equal(output.type, "RAG");
