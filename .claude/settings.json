@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent && bedrock refresh-system --project C:/Users/dor thalamus/Documents/bidoc agent"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent"
+          }
+        ]
+      }
+    ]
+  }
+}

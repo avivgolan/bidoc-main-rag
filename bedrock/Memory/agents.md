@@ -23,6 +23,7 @@ Documents all 5 agents in the pipeline: their role, model, prompt location, and 
 - **Model:** `openai/gpt-4o-mini`
 - **File:** `src/classifier.js`, prompt in `src/prompts.js`
 - **Role:** Classifies every incoming message as `CHAT` or `RAG`. Also picks tools, urgency, date range, hashtags, and professional flag.
+- **Output fields:** `type`, `complexity`, `tool_hint`, `urgency`, `date_from`, `date_to`, `hashtags`, `professional`, `professional_reason`, `knowledge_tags`
 - **Fallback:** If OpenRouter fails → `heuristicClassification()` in `src/heuristics.js` (regex-based, no API)
 - **CHAT triggers:** greetings, small talk, time/date questions
 - **RAG triggers:** anything project-related (money, safety, decisions, materials, emails, etc.)
@@ -52,9 +53,11 @@ Documents all 5 agents in the pipeline: their role, model, prompt location, and 
 ### 5. Professional Knowledge Agent (`knowledge_planner`)
 - **Model:** `openai/gpt-4o`
 - **File:** `src/agent.js` → `runKnowledgePlanner()`
-- **Role:** Only runs when classifier sets `professional: true`. Searches local Knowledge Base files (`bedrock/` or `knowledge/` dir), creates a planning brief for the Main RAG Agent.
+- **Storage/search:** `src/knowledge.js` reads `.txt`/`.md` documents from Supabase table `knowledge_documents`, chunks text by paragraphs, then scores by query tokens, phrases, and tags.
+- **Role:** Only runs when classifier sets `professional: true`. Searches the Knowledge Base and creates a planning brief for the Main RAG Agent.
 - **Output:** `domain_summary`, `relevant_terms`, `decision_criteria`, `rag_queries`, `recommended_tools`, `risks_or_cautions`
 - **Fallback:** If no KB matches → skipped. If no API key → local text fallback.
+- **Important boundary:** The knowledge plan is professional guidance only. Main RAG Agent must not treat it as project evidence.
 
 ## Routing Logic
 
@@ -85,3 +88,9 @@ reranker:         "openai/gpt-4o-mini"
 - Customised prompts (those differing from defaults) are stored in Supabase
 - Default prompts are NEVER stored in Supabase (migration `__prompts_clean_v1` ensures this)
 - `renderPrompt(template, values)` fills `{{placeholder}}` tokens at runtime
+
+## Recent Changes
+
+- 2026-05-07 — Added `knowledge_planner` as first-class editable agent with model selection in the Agents tab.
+- 2026-05-07 — Classifier schema expanded with `professional`, `professional_reason`, and `knowledge_tags`.
+- 2026-05-07 — Professional Knowledge Agent connected before Hybrid Search for professional RAG questions.

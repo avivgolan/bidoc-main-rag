@@ -55,3 +55,18 @@ Architectural and process decisions that affect this project.
 - **Date:** 2026-05-07
 - **Decision:** Renamed local branch from `master` to `main`, tracking `origin/main`
 - **Rationale:** Align with GitHub default and remote repo convention
+
+### D-009 — Knowledge Base documents stored in Supabase
+- **Date:** 2026-05-07
+- **Decision:** Store Professional Knowledge Agent documents in Supabase table `knowledge_documents` instead of local disk.
+- **Rationale:** Works across Vercel/serverless deploys and keeps uploaded KB content available beyond one local machine.
+
+### D-010 — Reset page is for local development only
+- **Date:** 2026-05-07
+- **Decision:** Add `POST /api/system/restart` and a Reset UI tab for local `node src/server.js` testing.
+- **Rationale:** Speeds local iteration after code changes. Serverless deployments should be restarted/redeployed through the hosting platform.
+
+### D-011 — Vercel-compatible HTTP handler
+- **Date:** 2026-05-07
+- **Decision:** `src/server.js` exports `handler` as default and only starts `http.createServer()` when `process.env.VERCEL` is absent.
+- **Rationale:** One entrypoint supports both local development and Vercel serverless routing.

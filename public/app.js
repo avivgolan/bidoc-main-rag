@@ -546,8 +546,10 @@ function renderWorkflow(workflow) {
   const board = $("workflowBoard");
   const nodesLayer = $("workflowNodes");
   const cables = $("workflowCables");
+  const inspector = $("workflowInspector");
   nodesLayer.innerHTML = "";
   cables.innerHTML = "";
+  if (inspector) inspector.innerHTML = '<div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>';
 
   if (!workflow?.nodes?.length) {
     $("workflowHint").style.display = "block";
@@ -558,47 +560,75 @@ function renderWorkflow(workflow) {
   $("workflowHint").style.display = "none";
   board.classList.add("hasWorkflow");
 
-  const positions = layoutWorkflow(workflow.nodes);
-  board.style.minHeight = `${Math.max(...Object.values(positions).map((position) => position.y)) + 360}px`;
+  const positions = layoutWorkflow(workflow.nodes, workflow.edges || []);
+  const bounds = workflowBounds(positions);
+  board.style.minHeight = `${Math.max(660, bounds.height + 120)}px`;
+  nodesLayer.style.width = `${Math.max(1180, bounds.width + 420)}px`;
+  nodesLayer.style.height = `${Math.max(620, bounds.height + 120)}px`;
 
-  for (const node of workflow.nodes) {
+  workflow.nodes.forEach((node, index) => {
     const position = positions[node.id] || { x: 40, y: 40 };
-    const element = document.createElement("article");
-    element.className = `workflowNode ${node.kind} ${node.status}`;
+    const element = document.createElement("button");
+    element.type = "button";
+    element.className = `workflowNode ${node.kind} ${node.status} ${index === 0 ? "selected" : ""}`;
     element.id = `workflow_${node.id}`;
     element.style.left = `${position.x}px`;
     element.style.top = `${position.y}px`;
+    element.setAttribute("aria-label", node.label);
     element.innerHTML = `
-      <div class="workflowNodeHeader">
-        <span class="workflowIcon">${iconForNode(node.kind)}</span>
+      <span class="workflowNodeHalo"></span>
+      <span class="workflowIcon">${iconForNode(node.kind)}</span>
+      <span class="workflowNodeText">
         <strong>${escapeHtml(node.label)}</strong>
-        <span class="workflowStatus">${statusLabel(node.status)}</span>
-      </div>
-      <details open>
-        <summary>Input</summary>
-        <pre>${escapeHtml(JSON.stringify(node.input, null, 2))}</pre>
-      </details>
-      <details open>
-        <summary>Output</summary>
-        <pre>${escapeHtml(JSON.stringify(node.output, null, 2))}</pre>
-      </details>
+        <small>${escapeHtml(node.id)}</small>
+      </span>
+      <span class="workflowStatus">${statusLabel(node.status)}</span>
     `;
+    element.addEventListener("click", () => {
+      document.querySelectorAll(".workflowNode").forEach((item) => item.classList.remove("selected"));
+      element.classList.add("selected");
+      renderWorkflowInspector(node);
+    });
     nodesLayer.append(element);
-  }
+  });
+
+  if (workflow.nodes[0]) renderWorkflowInspector(workflow.nodes[0]);
 
   requestAnimationFrame(() => drawCables(workflow.edges || [], positions));
 }
 
-function layoutWorkflow(nodes) {
-  const order = nodes.map((node) => node.id);
+function renderWorkflowInspector(node) {
+  const inspector = $("workflowInspector");
+  if (!inspector) return;
+  inspector.innerHTML = `
+    <header class="workflowInspectorHeader">
+      <span class="workflowIcon ${escapeHtml(node.kind)}">${iconForNode(node.kind)}</span>
+      <div>
+        <strong>${escapeHtml(node.label)}</strong>
+        <small>${escapeHtml(node.id)} · ${statusLabel(node.status)}</small>
+      </div>
+    </header>
+    <details open>
+      <summary>Input</summary>
+      <pre>${escapeHtml(JSON.stringify(node.input, null, 2))}</pre>
+    </details>
+    <details open>
+      <summary>Output</summary>
+      <pre>${escapeHtml(JSON.stringify(node.output, null, 2))}</pre>
+    </details>
+  `;
+}
+
+function layoutWorkflow(nodes, edges = []) {
+  const order = topologicalWorkflowOrder(nodes, edges);
   const positions = {};
-  const colWidth = 360;
-  const rowHeight = 430;
-  const startX = 32;
-  const startY = 28;
+  const colWidth = 210;
+  const rowHeight = 150;
+  const startX = 70;
+  const startY = 86;
   order.forEach((id, index) => {
-    const row = Math.floor(index / 4);
-    const col = index % 4;
+    const row = index % 2;
+    const col = Math.floor(index / 2);
     positions[id] = {
       x: startX + col * colWidth,
       y: startY + row * rowHeight
@@ -607,10 +637,49 @@ function layoutWorkflow(nodes) {
   return positions;
 }
 
+function topologicalWorkflowOrder(nodes, edges) {
+  const ids = nodes.map((node) => node.id);
+  const byId = new Set(ids);
+  const incoming = Object.fromEntries(ids.map((id) => [id, 0]));
+  const outgoing = Object.fromEntries(ids.map((id) => [id, []]));
+  for (const edge of edges) {
+    if (!byId.has(edge.from) || !byId.has(edge.to)) continue;
+    incoming[edge.to] += 1;
+    outgoing[edge.from].push(edge.to);
+  }
+  const queue = ids.filter((id) => incoming[id] === 0);
+  const ordered = [];
+  while (queue.length) {
+    const id = queue.shift();
+    ordered.push(id);
+    for (const next of outgoing[id]) {
+      incoming[next] -= 1;
+      if (incoming[next] === 0) queue.push(next);
+    }
+  }
+  return ordered.length === ids.length ? ordered : ids;
+}
+
+function workflowBounds(positions) {
+  const values = Object.values(positions);
+  if (!values.length) return { width: 0, height: 0 };
+  return {
+    width: Math.max(...values.map((position) => position.x)) + 220,
+    height: Math.max(...values.map((position) => position.y)) + 170
+  };
+}
+
 function drawCables(edges, positions) {
   const cables = $("workflowCables");
   const board = $("workflowBoard");
   const boardRect = board.getBoundingClientRect();
+  cables.innerHTML = `
+    <defs>
+      <marker id="workflowArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z"></path>
+      </marker>
+    </defs>
+  `;
   cables.setAttribute("width", board.scrollWidth);
   cables.setAttribute("height", board.scrollHeight);
   cables.setAttribute("viewBox", `0 0 ${board.scrollWidth} ${board.scrollHeight}`);
@@ -622,17 +691,18 @@ function drawCables(edges, positions) {
     const fromRect = from.getBoundingClientRect();
     const toRect = to.getBoundingClientRect();
     const start = {
-      x: fromRect.left - boardRect.left + board.scrollLeft + fromRect.width,
-      y: fromRect.top - boardRect.top + board.scrollTop + 42
+      x: fromRect.left - boardRect.left + board.scrollLeft + fromRect.width / 2,
+      y: fromRect.top - boardRect.top + board.scrollTop + fromRect.height / 2
     };
     const end = {
-      x: toRect.left - boardRect.left + board.scrollLeft,
-      y: toRect.top - boardRect.top + board.scrollTop + 42
+      x: toRect.left - boardRect.left + board.scrollLeft + toRect.width / 2,
+      y: toRect.top - boardRect.top + board.scrollTop + toRect.height / 2
     };
-    const distance = Math.max(80, Math.abs(end.x - start.x) / 2);
+    const distance = Math.max(90, Math.abs(end.x - start.x) / 2);
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", `M ${start.x} ${start.y} C ${start.x + distance} ${start.y}, ${end.x - distance} ${end.y}, ${end.x} ${end.y}`);
     path.setAttribute("class", "workflowCable");
+    path.setAttribute("marker-end", "url(#workflowArrow)");
     cables.append(path);
   }
 }

@@ -17,11 +17,12 @@ bidoc-agent is a Hebrew-language RAG (Retrieval-Augmented Generation) AI assista
 ## Stack
 
 - **Runtime:** Node.js ≥ 20, ES modules (`"type": "module"`)
-- **Server:** Plain `node:http` on port 4000 — no framework
+- **Server:** Plain `node:http` on port 4000 locally; default-exported handler for Vercel
 - **LLMs:** OpenRouter API — classifier (`gpt-4o-mini`), lite (`gpt-4o-mini`), main (`gpt-4o`), reranker (`gpt-4o-mini`), knowledge-planner (`gpt-4o`)
 - **Vector DB:** Supabase (PostgreSQL + pgvector) via REST; RPC `hybrid_match_data_index_embeddings_gf_dor_agent`
+- **Knowledge Base:** Supabase table `knowledge_documents` with `.txt`/`.md` content, text chunking, tag/keyword scoring
 - **Tool integrations:** n8n webhooks — 10 tools: alert, meetings, emails, whatsapp_messages, financial_transactions, consultants_reports, exceptions_report, quality_control, safety_report, submittals
-- **Frontend:** Vanilla JS + CSS, RTL Hebrew UI, SSE live run log, tab routing via URL hash
+- **Frontend:** Vanilla JS + CSS, RTL Hebrew UI, SSE live run log, workflow graph, agents editor, KB manager, reset page, tab routing via URL hash
 - **Deployment:** Vercel (serverless) + local dev `node src/server.js`
 - **Settings persistence:** Supabase `agent_settings` table (id=`default`, JSON `data` column); 30s TTL cache
 
@@ -35,6 +36,7 @@ User message
   → classify (classifier.js → OpenRouter)
       ├── CHAT  → runLiteAgent  (greetings, time/date, small talk)
       └── RAG   → runRagAgent
+                    → if professional: runKnowledgePlanner (Supabase KB)
                     → hybridSearch (Supabase RPC + OpenRouter embedding)
                     → reranker (OpenRouter)
                     → n8n tool calls (skipped if webhooks not configured)
@@ -53,6 +55,7 @@ User message
 | `src/classifier.js` | LLM classifier + normalisation |
 | `src/heuristics.js` | Fallback classifier (no API needed) |
 | `src/prompts.js` | All 5 agent prompts + `renderPrompt()` |
+| `src/knowledge.js` | Supabase-backed Knowledge Base CRUD + text search |
 | `src/clock.js` | Timezone-aware datetime (`getProjectDateTime()`) |
 | `src/openrouter.js` | `chatCompletion()`, `rerankWithLlm()`, `createEmbedding()` |
 | `src/supabase.js` | `hybridSearch()`, messages CRUD, memory |
@@ -65,10 +68,17 @@ User message
 - All core features working
 - Git branch: `main` (renamed from master 2026-05-07)
 - Remote: `https://github.com/avivgolan/bidoc-main-rag`
+- `/api/system/restart` exists for local Node restart only; it is not meaningful on Vercel serverless
 - Known issue: Supabase "User not found" on hybrid_search — likely wrong service role key stored in settings; workaround: re-enter key in Settings → Save
 
 ## Recent Changes
 
+- 2026-05-07 — Workflow tab redesigned as a Bedrock-like graph canvas with cable arrows and click-to-inspect Input/Output panel
+- 2026-05-07 — Reset tab and `POST /api/system/restart` added for local test restarts
+- 2026-05-07 — Knowledge Base moved to Supabase `knowledge_documents`; UI supports upload/list/view/delete/search
+- 2026-05-07 — Professional Knowledge Agent runs before RAG when classifier sets `professional: true`
+- 2026-05-07 — Vercel-compatible `export default handler` added in `src/server.js`
+- 2026-05-07 — URL hash tab routing added; browser Back/Forward follows UI tabs
 - 2026-05-07 — `src/clock.js` unified timezone module; timezone selector in Settings UI
 - 2026-05-07 — Run log moved to Workflow tab; full-log/copy/clear buttons added
 - 2026-05-07 — Classifier routing fixed (time/date → CHAT; project queries → RAG)

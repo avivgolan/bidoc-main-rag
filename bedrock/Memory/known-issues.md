@@ -41,6 +41,17 @@ tags:
 - **Root cause:** `loadSettings()` threw `TypeError: Cannot set properties of null` on `$("timezone").value` when HTML didn't have the timezone `<select>` element (browser cached old HTML)
 - **Fix applied:** Null-check `if ($("timezone"))` before setting value
 
+### 6. Reset endpoint is local-only
+- **Symptom:** Reset tab works for local `node src/server.js`, but should not be relied on in Vercel.
+- **Cause:** `scheduleServerRestart()` only restarts when `httpServer` exists. In Vercel, `src/server.js` exports a serverless handler and does not own a long-running HTTP server.
+- **Workaround:** For Vercel, redeploy/restart through the platform. For local testing, use the Reset tab or restart `node src/server.js` manually.
+
+### 7. Knowledge Base requires Supabase table
+- **Symptom:** Knowledge Base page/search can fail with "Supabase is not configured" or a table/RLS error.
+- **Cause:** `src/knowledge.js` persists KB documents in Supabase `knowledge_documents`, not local files.
+- **Workaround:** Ensure `.env.local`/Vercel env has valid `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and table `knowledge_documents(filename, content, updated_at)` exists and is accessible by the service role.
+- **Test impact:** `node test/run-tests.js` includes a KB search test that requires Supabase env vars; without them, that test fails even though non-Supabase tests pass.
+
 ## Resolved Issues
 
 | Date | Issue | Fix |
@@ -49,4 +60,6 @@ tags:
 | 2026-05-07 | Time questions answered incorrectly | `SYSTEM TIME:` prefix hardcoded in Lite agent |
 | 2026-05-07 | OpenRouter + Supabase keys lost on restart | `.env.local` file created; keys recovered |
 | 2026-05-07 | Server port conflict (EADDRINUSE 4000) | Kill node processes before restart |
+| 2026-05-07 | Reset requested for local testing | Added Reset tab + `POST /api/system/restart` |
+| 2026-05-07 | Knowledge Base needed persistence beyond local disk | Moved KB documents to Supabase `knowledge_documents` |
 | 2026-05-06 | Unrelated git histories (local vs remote) | `git reset --hard origin/main` |

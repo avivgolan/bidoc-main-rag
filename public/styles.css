@@ -719,21 +719,21 @@ label {
 
 .workflowBoard {
   position: relative;
-  min-height: 560px;
+  min-height: 660px;
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
+  border: 1px solid #263241;
+  border-radius: var(--r-xl);
   background:
-    radial-gradient(circle, var(--gray-300) 1px, transparent 1px),
-    var(--surface-2);
-  background-size: 22px 22px;
+    radial-gradient(circle at 24px 24px, rgba(148, 163, 184, 0.2) 1.4px, transparent 1.8px),
+    linear-gradient(135deg, #0c1118 0%, #111923 52%, #0c1118 100%);
+  background-size: 32px 32px, 100% 100%;
   direction: ltr;
-  box-shadow: var(--shadow-sm);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), var(--shadow-sm);
 }
 
 .workflowNodes {
   position: relative;
-  min-width: 1480px;
+  min-width: 1180px;
   min-height: 100%;
   z-index: 2;
 }
@@ -741,77 +741,125 @@ label {
 .workflowCables {
   position: absolute;
   inset: 0;
-  min-width: 1480px;
+  min-width: 1180px;
   pointer-events: none;
   z-index: 1;
 }
 
 .workflowCable {
   fill: none;
-  stroke: var(--gray-300);
-  stroke-width: 2;
+  stroke: #64748b;
+  stroke-width: 2.4;
   stroke-linecap: round;
+  opacity: 0.9;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+}
+
+.workflowCables marker path {
+  fill: #64748b;
 }
 
 .workflowNode {
   position: absolute;
-  width: 300px;
-  min-height: 310px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-md);
+  width: 152px;
+  min-height: 124px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  place-items: center;
+  gap: 7px;
+  padding: 13px 12px 10px;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid #334155;
+  border-radius: 14px;
+  box-shadow: 0 18px 36px rgba(2, 6, 23, 0.42);
+  color: #e5edf7;
   direction: rtl;
   overflow: hidden;
-  transition: box-shadow var(--t);
+  text-align: center;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color var(--t), box-shadow var(--t), transform var(--t), background var(--t);
 }
 
-.workflowNode:hover { box-shadow: var(--shadow-lg); }
+.workflowNode:hover,
+.workflowNode.selected {
+  border-color: #60a5fa;
+  background: rgba(20, 32, 50, 0.98);
+  box-shadow: 0 20px 42px rgba(2, 6, 23, 0.58), 0 0 0 3px rgba(96, 165, 250, 0.16);
+  transform: translateY(-2px);
+}
 
-.workflowNodeHeader {
-  display: grid;
-  grid-template-columns: 36px 1fr auto;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--surface-3);
-  border-bottom: 1px solid var(--border);
+.workflowNodeHalo {
+  position: absolute;
+  inset: -38px;
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.12), transparent 58%);
+  opacity: 0;
+  transition: opacity var(--t);
+}
+
+.workflowNode:hover .workflowNodeHalo,
+.workflowNode.selected .workflowNodeHalo {
+  opacity: 1;
 }
 
 .workflowIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 30px;
-  min-width: 30px;
-  border-radius: var(--r-sm);
+  position: relative;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 12px;
   background: var(--gray-700);
   color: white;
   font-size: 11px;
   font-weight: 700;
   direction: ltr;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.workflowNodeText {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workflowNodeText strong {
+  color: #f8fafc;
+  font-size: 13px;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.workflowNodeText small {
+  color: #94a3b8;
+  font-size: 11px;
+  direction: ltr;
+  white-space: nowrap;
 }
 
 .workflowStatus {
+  position: relative;
   font-size: 11px;
   font-weight: 600;
   border-radius: var(--r-full);
-  padding: 3px 8px;
-  background: var(--success-bg);
-  color: var(--success-text);
-  border: 1px solid var(--success-border);
+  padding: 3px 9px;
+  background: rgba(34, 197, 94, 0.14);
+  color: #bbf7d0;
+  border: 1px solid rgba(34, 197, 94, 0.34);
 }
 
 .workflowNode.error .workflowStatus {
-  background: var(--error-bg);
-  color: var(--error-text);
-  border-color: var(--error-border);
+  background: rgba(239, 68, 68, 0.14);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.35);
 }
 
 .workflowNode.skipped .workflowStatus {
-  background: var(--warning-bg);
-  color: var(--warning-text);
-  border-color: var(--warning-border);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.35);
 }
 
 .workflowNode.vector  .workflowIcon { background: #2563eb; }
@@ -819,35 +867,89 @@ label {
 .workflowNode.database .workflowIcon { background: #7c3aed; }
 .workflowNode.tool    .workflowIcon { background: #d97706; }
 
-.workflowNode details {
-  border-top: 1px solid var(--border);
-  padding: 10px 12px;
+.workflowInspector {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: min(380px, calc(100% - 40px));
+  max-height: calc(100% - 40px);
+  overflow: auto;
+  z-index: 3;
+  direction: rtl;
+  color: #e5edf7;
+  background: rgba(15, 23, 42, 0.96);
+  border: 1px solid #334155;
+  border-radius: 16px;
+  box-shadow: 0 20px 45px rgba(2, 6, 23, 0.55);
+  padding: 14px;
 }
 
-.workflowNode summary {
-  cursor: pointer;
-  color: var(--text-secondary);
-  font-weight: 600;
+.workflowInspectorEmpty {
+  color: #94a3b8;
   font-size: 13px;
-  margin-bottom: 8px;
+  line-height: 1.6;
+  text-align: center;
+  padding: 24px 8px;
+}
+
+.workflowInspectorHeader {
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 10px;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #263241;
+}
+
+.workflowInspectorHeader strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 15px;
+  margin-bottom: 3px;
+}
+
+.workflowInspectorHeader small {
+  display: block;
+  color: #94a3b8;
+  direction: ltr;
+  text-align: right;
+}
+
+.workflowInspector details {
+  border-top: 1px solid #263241;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
+.workflowInspector summary {
+  cursor: pointer;
+  color: #cbd5e1;
+  font-weight: 700;
+  font-size: 13px;
   list-style: none;
 }
-.workflowNode summary::-webkit-details-marker { display: none; }
+.workflowInspector summary::-webkit-details-marker { display: none; }
 
-.workflowNode pre {
-  margin: 0;
-  max-height: 100px;
+.workflowInspector pre {
+  margin: 8px 0 0;
+  max-height: 190px;
   overflow: auto;
   direction: ltr;
   text-align: left;
   white-space: pre-wrap;
-  background: #0d1117;
-  color: #e6edf3;
-  border-radius: var(--r-sm);
-  padding: 8px 10px;
+  background: #080d14;
+  color: #dbeafe;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 10px;
   font-size: 11.5px;
   line-height: 1.45;
 }
+
+.workflowInspector .workflowIcon.vector  { background: #2563eb; }
+.workflowInspector .workflowIcon.ai      { background: #0891b2; }
+.workflowInspector .workflowIcon.database { background: #7c3aed; }
+.workflowInspector .workflowIcon.tool    { background: #d97706; }
 
 /* ================================================================
    KNOWLEDGE BASE PANEL
