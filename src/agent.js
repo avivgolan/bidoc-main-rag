@@ -4,11 +4,13 @@ import { heuristicClassification, isHebrew } from "./heuristics.js";
 import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.js";
 import { hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
-import { appendLocalMemory, getLocalMemory } from "./memory.js";
+import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
 import { completeRun, emitRunEvent } from "./runLog.js";
 import { renderPrompt } from "./prompts.js";
 import { getProjectDateTime } from "./clock.js";
 import { searchKnowledgeBase } from "./knowledge.js";
+import { TOOL_NAMES } from "./config.js";
+import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./sourceQuality.js";
 
 export async function runChatPipeline({ message, sessionId, config, runId }) {
   emitRunEvent(runId, "chat_input", "Received user message", { sessionId, preview: message.slice(0, 300) });
@@ -23,7 +25,8 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     return [];
   });
   if (!memory.length) memory = getLocalMemory(sessionId);
-  emitRunEvent(runId, "memory", "Memory loaded", { messages: memory.length });
+  const memorySummary = getMemorySummary(sessionId);
+  emitRunEvent(runId, "memory", "Memory loaded", { messages: memory.length, summary: memorySummary });
   let classification;
 
   try {
@@ -37,14 +40,15 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     emitRunEvent(runId, "classifier", "Classifier failed, using local fallback", { error: error.message, classification });
     console.log(`[classifier] FALLBACK (${error.message}) type=${classification.type} msg="${sanitized.slice(0, 70)}"`);
   }
+  classification = enforceInvestigationMode(classification, sanitized);
 
   let result;
   if (classification.type === "CHAT") {
     emitRunEvent(runId, "switch", "Routing to Lite Agent", { type: classification.type });
-    result = await runLiteAgent({ message: sanitized, memory, config, trace, runId });
+    result = await runLiteAgent({ message: sanitized, memory, memorySummary, config, trace, runId });
   } else {
     emitRunEvent(runId, "switch", "Routing to Main RAG Agent", { type: classification.type });
-    result = await runRagAgent({ message: sanitized, sessionId, classification, memory, config, trace, runId });
+    result = await runRagAgent({ message: sanitized, sessionId, classification, memory, memorySummary, config, trace, runId });
   }
 
   await updateMessage({
@@ -65,6 +69,7 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     sanitized,
     saved,
     memory,
+    memorySummary: getMemorySummary(sessionId),
     classification,
     result,
     trace,
@@ -79,6 +84,10 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     sources: result.sources,
     toolCalls: result.toolCalls,
     knowledgePlan: result.knowledgePlan || null,
+    investigationPlan: result.investigationPlan || null,
+    memorySummary: getMemorySummary(sessionId),
+    sourceQuality: result.sourceQuality || null,
+    conflicts: result.conflicts || [],
     trace,
     workflowLog
   };
@@ -86,7 +95,7 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
   return output;
 }
 
-async function runLiteAgent({ message, memory, config, trace, runId }) {
+async function runLiteAgent({ message, memory, memorySummary, config, trace, runId }) {
   const fallback = liteFallback(message);
   if (!config.openRouterApiKey) {
     trace.push({ step: "liteAgent", ok: false, fallback: true, error: "OPENROUTER_API_KEY is missing" });
@@ -105,6 +114,7 @@ async function runLiteAgent({ message, memory, config, trace, runId }) {
           role: "system",
           content: `SYSTEM TIME: ${getProjectDateTime(config.timezone)} — when the user asks about the time or date, answer using this exact value. Do not say you lack real-time access.\n\n${renderPrompt(config.prompts?.lite, { currentDate: getProjectDateTime(config.timezone) })}`
         },
+        ...memorySummaryMessages(memorySummary),
         ...memory,
         { role: "user", content: message }
       ]
@@ -118,12 +128,28 @@ async function runLiteAgent({ message, memory, config, trace, runId }) {
   }
 }
 
-async function runRagAgent({ message, sessionId, classification, memory, config, trace, runId }) {
+async function runRagAgent({ message, sessionId, classification, memory, memorySummary, config, trace, runId }) {
   const toolCalls = [];
   const sources = [];
   let hybridResults = null;
   let rerankedResults = null;
   let knowledgePlan = null;
+  const investigationPlan = buildInvestigationPlan({ message, classification, memorySummary });
+  if (investigationPlan) {
+    emitRunEvent(runId, "investigation", "Investigation Mode enabled", investigationPlan);
+  }
+
+  const safetyPrecheckTools = classification.urgency === "HIGH" ? ["safety_report", "alert"] : [];
+  for (const toolName of safetyPrecheckTools) {
+    const result = await callProjectTool({ toolName, message, classification, sessionId, config });
+    toolCalls.push(annotateToolCall(result));
+    sources.push(...result.sources);
+    emitRunEvent(runId, "safety_precheck", `Safety precheck ${toolName} completed`, {
+      ok: result.ok,
+      skipped: result.skipped || false,
+      error: result.error || null
+    });
+  }
 
   if (classification.professional) {
     knowledgePlan = await runKnowledgePlanner({ message, classification, config, trace, runId });
@@ -145,13 +171,39 @@ async function runRagAgent({ message, sessionId, classification, memory, config,
       hashtags: classification.hashtags || [],
       topK: config.retrieval.candidates
     });
-    hybridResults = filterRowsByHashtags(hybridResults, classification.hashtags || []);
+    const allRows = normalizeRows(hybridResults);
+
+    const planQueries = plannedRagQueries(knowledgePlan, message);
+    for (const query of planQueries) {
+      try {
+        emitRunEvent(runId, "hybrid_search", "Running Knowledge Planner RAG query", { query });
+        const plannedResults = await hybridSearch({
+          config,
+          query,
+          dateFrom: classification.date_from,
+          dateTo: classification.date_to,
+          hashtags: classification.hashtags || [],
+          topK: Math.min(config.retrieval.candidates, 20)
+        });
+        const plannedRows = normalizeRows(plannedResults);
+        allRows.push(...plannedRows);
+        const plannedSources = extractLinks(plannedRows);
+        sources.push(...plannedSources);
+        toolCalls.push(annotateToolCall({ toolName: "hybrid_search_plan", ok: true, rawQuery: query, data: plannedRows, sources: plannedSources }));
+        emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query completed", { query, records: plannedRows.length });
+      } catch (error) {
+        toolCalls.push(annotateToolCall({ toolName: "hybrid_search_plan", ok: false, rawQuery: query, error: error.message, data: null, sources: [] }));
+        emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query failed", { query, error: error.message });
+      }
+    }
+
+    hybridResults = filterRowsByHashtags(uniqueRows(allRows), classification.hashtags || []);
     const hybridSources = extractLinks(hybridResults);
     sources.push(...hybridSources);
-    toolCalls.push({ toolName: "hybrid_search", ok: true, rawQuery: message, data: hybridResults, sources: hybridSources });
-    emitRunEvent(runId, "hybrid_search", "Hybrid Search completed", { records: countRows(hybridResults), sources: hybridSources.length });
+    toolCalls.push(annotateToolCall({ toolName: "hybrid_search", ok: true, rawQuery: message, data: hybridResults, sources: hybridSources }));
+    emitRunEvent(runId, "hybrid_search", "Hybrid Search completed", { records: countRows(hybridResults), sources: hybridSources.length, plannedQueries: planQueries.length });
   } catch (error) {
-    toolCalls.push({ toolName: "hybrid_search", ok: false, rawQuery: message, error: error.message, data: null, sources: [] });
+    toolCalls.push(annotateToolCall({ toolName: "hybrid_search", ok: false, rawQuery: message, error: error.message, data: null, sources: [] }));
     emitRunEvent(runId, "hybrid_search", "Hybrid Search failed", { error: error.message });
   }
 
@@ -168,54 +220,57 @@ async function runRagAgent({ message, sessionId, classification, memory, config,
       });
       const rerankSources = extractLinks(rerankedResults);
       sources.push(...rerankSources);
-      toolCalls.push({ toolName: "reranker", ok: true, rawQuery: message, data: rerankedResults, sources: rerankSources });
+      toolCalls.push(annotateToolCall({ toolName: "reranker", ok: true, rawQuery: message, data: rerankedResults, sources: rerankSources }));
       emitRunEvent(runId, "reranker", "Reranker completed", { records: countRows(rerankedResults) });
     } catch (error) {
       const fallbackRows = normalizeRows(hybridResults).slice(0, config.retrieval.rerankTopK);
       rerankedResults = fallbackRows;
-      toolCalls.push({ toolName: "reranker", ok: false, fallback: true, rawQuery: message, error: error.message, data: fallbackRows, sources: [] });
+      toolCalls.push(annotateToolCall({ toolName: "reranker", ok: false, fallback: true, rawQuery: message, error: error.message, data: fallbackRows, sources: [] }));
       emitRunEvent(runId, "reranker", "Reranker failed, using hybrid order", { error: error.message, fallbackRecords: fallbackRows.length });
     }
   }
 
-  const tools = buildToolOrder(classification, hintedTools(classification));
+  const plannerTools = recommendedProjectTools(knowledgePlan);
+  const tools = buildToolOrder(classification, [...hintedTools(classification), ...plannerTools])
+    .filter((toolName) => !safetyPrecheckTools.includes(toolName));
   emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools", { tools });
   for (const toolName of tools) {
-    const result = await callN8nTool({
-      toolName,
-      query: message,
-      dateFilter: buildDateFilter(classification),
-      dateFrom: classification.date_from,
-      dateTo: classification.date_to,
-      sessionId,
-      config
-    });
-    toolCalls.push(result);
+    const result = await callProjectTool({ toolName, message, classification, sessionId, config });
+    toolCalls.push(annotateToolCall(result));
     sources.push(...result.sources);
     emitRunEvent(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, skipped: result.skipped || false, error: result.error || null });
   }
 
   const uniqueSources = uniqueByUrl(sources);
-  const answer = await synthesizeAnswer({ message, classification, memory, retrievalResults: rerankedResults || hybridResults, toolCalls, sources: uniqueSources, knowledgePlan, config, trace, runId });
-  return { answer, sources: uniqueSources, toolCalls, knowledgePlan };
+  const sourceQuality = buildSourceQualitySummary(toolCalls);
+  const conflicts = detectConflicts(toolCalls);
+  if (conflicts.length) {
+    emitRunEvent(runId, "conflict_detection", "Potential source conflicts detected", { conflicts });
+  } else {
+    emitRunEvent(runId, "conflict_detection", "No obvious source conflicts detected", {});
+  }
+  emitRunEvent(runId, "source_quality", "Source quality scored", sourceQuality);
+  const answer = await synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults: rerankedResults || hybridResults, toolCalls, sources: uniqueSources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId });
+  return { answer, sources: uniqueSources, toolCalls, knowledgePlan, investigationPlan, sourceQuality, conflicts };
 }
 
 async function runKnowledgePlanner({ message, classification, config, trace, runId }) {
   const tags = [...new Set([...(classification.knowledge_tags || []), ...(classification.hashtags || [])])];
   emitRunEvent(runId, "knowledge_planner", "Searching local Knowledge Base", { query: message, tags });
-  const search = searchKnowledgeBase({ query: message, tags, topK: 6 });
+  let search;
+  try {
+    search = await searchKnowledgeBase({ query: message, tags, topK: 6 });
+  } catch (error) {
+    const skippedPlan = skippedKnowledgePlan(`Knowledge Base unavailable: ${error.message}`);
+    trace.push({ step: "knowledgePlanner", ok: false, skipped: true, error: error.message });
+    emitRunEvent(runId, "knowledge_planner", "Knowledge Planner skipped", skippedPlan);
+    return skippedPlan;
+  }
   if (!search.matches.length) {
-    const skippedPlan = {
-      skipped: true,
-      reason: search.totalDocuments ? "No relevant Knowledge Base excerpts found" : "Knowledge Base ריק",
-      matches: [],
-      domain_summary: "",
-      relevant_terms: [],
-      decision_criteria: [],
-      rag_queries: [],
-      recommended_tools: [],
-      risks_or_cautions: [search.totalDocuments ? "לא נמצאו מקטעי ידע רלוונטיים." : "Knowledge Base ריק."]
-    };
+    const skippedPlan = skippedKnowledgePlan(
+      search.totalDocuments ? "No relevant Knowledge Base excerpts found" : "Knowledge Base ריק",
+      search.totalDocuments ? "לא נמצאו מקטעי ידע רלוונטיים." : "Knowledge Base ריק."
+    );
     emitRunEvent(runId, "knowledge_planner", "Knowledge Planner skipped", skippedPlan);
     return skippedPlan;
   }
@@ -263,7 +318,19 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
   }
 }
 
-async function synthesizeAnswer({ message, classification, memory, retrievalResults, toolCalls, sources, knowledgePlan, config, trace, runId }) {
+async function callProjectTool({ toolName, message, classification, sessionId, config }) {
+  return callN8nTool({
+    toolName,
+    query: message,
+    dateFilter: buildDateFilter(classification),
+    dateFrom: classification.date_from,
+    dateTo: classification.date_to,
+    sessionId,
+    config
+  });
+}
+
+async function synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults, toolCalls, sources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId }) {
   const successful = toolCalls.filter((call) => call.ok);
   const failed = toolCalls.filter((call) => !call.ok && !call.skipped);
   const skipped = toolCalls.filter((call) => call.skipped);
@@ -282,6 +349,7 @@ async function synthesizeAnswer({ message, classification, memory, retrievalResu
       temperature: 0.2,
       messages: [
         { role: "system", content: mainSystemPrompt(classification, config) },
+        ...memorySummaryMessages(memorySummary),
         ...memory,
         {
           role: "user",
@@ -291,6 +359,9 @@ async function synthesizeAnswer({ message, classification, memory, retrievalResu
               retrieval_context: formatRetrievalContext(retrievalResults),
               retrieval_results: retrievalResults,
               knowledge_plan: knowledgePlan,
+              investigation_plan: investigationPlan,
+              source_quality: sourceQuality,
+              potential_conflicts: conflicts,
               tool_results: toolCalls.filter((call) => !call.skipped),
               skipped_tools: skipped.map((call) => call.toolName),
               sources
@@ -341,11 +412,82 @@ Response format:
 
 **מקורות:**
 - ALL links returned by tools.`;
-  return renderPrompt(config.prompts?.main || fallback, {
+  const rendered = renderPrompt(config.prompts?.main || fallback, {
     tool_hint: classification.tool_hint,
     complexity: classification.complexity,
     urgency: classification.urgency
   });
+  return `${rendered}
+
+CRITICAL KNOWLEDGE BOUNDARY:
+- knowledge_plan is planning guidance only. It is not project evidence.
+- Use knowledge_plan to decide what to look for and how to reason.
+- Final factual claims must come only from retrieval_context, retrieval_results, tool_results, memory, or explicit user input.
+- Never cite Knowledge Base excerpts as project sources unless they also appear in retrieval/tool results.
+
+SOURCE QUALITY AND CONFLICTS:
+- If source_quality.overall is LOW or NO_SOURCES, clearly qualify the answer.
+- If potential_conflicts is not empty, add a short "סתירות אפשריות" note and do not hide the conflict.
+- Prefer higher sourceQuality.score sources when sources disagree.
+
+INVESTIGATION MODE:
+- If investigation_plan is supplied, include "**מה בדקתי:**" with the checks performed/suggested.
+- Then answer with findings, uncertainty, and missing evidence.
+- Do not invent root causes or responsibility without project evidence.`;
+}
+
+function skippedKnowledgePlan(reason, caution = reason) {
+  return {
+    skipped: true,
+    reason,
+    matches: [],
+    domain_summary: "",
+    relevant_terms: [],
+    decision_criteria: [],
+    rag_queries: [],
+    recommended_tools: [],
+    risks_or_cautions: [caution]
+  };
+}
+
+function buildInvestigationPlan({ message, classification, memorySummary }) {
+  if (!classification.investigation) return null;
+  const tools = buildToolOrder(classification, hintedTools(classification));
+  const checks = [
+    "בדיקת האינדקס עם נוסח השאלה המקורי",
+    "בדיקת מקורות רשמיים מול מקורות שטח",
+    "בדיקת סתירות אפשריות בין תוצאות",
+    "הפרדה בין ממצא מבוסס לבין השערה"
+  ];
+  if (classification.urgency === "HIGH") checks.unshift("בדיקת בטיחות מוקדמת לפני שאר החיפושים");
+  if (memorySummary?.active_topics?.length) checks.push(`שימוש בהקשר השיחה: ${memorySummary.active_topics.join(", ")}`);
+  return {
+    enabled: true,
+    reason: classification.investigation_reason || "שאלה מורכבת הדורשת חקירה.",
+    question: message,
+    expected_checks: checks,
+    recommended_tools: tools,
+    answer_contract: [
+      "להציג מה נבדק",
+      "לציין ממצאים לפי מקור",
+      "לציין סתירות או מידע חסר",
+      "לא לקבוע סיבה או אחריות ללא מקור פרויקט"
+    ]
+  };
+}
+
+function enforceInvestigationMode(classification, message) {
+  if (!classification || classification.type === "CHAT" || classification.investigation) return classification;
+  if (!isInvestigationQuestion(message)) return classification;
+  return {
+    ...classification,
+    investigation: true,
+    investigation_reason: "זוהתה שאלה מורכבת לפי חוקי התזמור המקומיים."
+  };
+}
+
+function isInvestigationQuestion(message) {
+  return /למה|מדוע|מה גרם|גורם|עיכוב|אחריות|אחראי|מי אחראי|השווא|פער|סתירה|בעיה חוזרת|שורש|root cause|why|cause|delay|responsible|compare|conflict/i.test(String(message || ""));
 }
 
 function normalizeKnowledgePlan(value, matches) {
@@ -389,6 +531,45 @@ function normalizeArray(value) {
   if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
   if (typeof value === "string" && value.trim()) return [value.trim()];
   return [];
+}
+
+function plannedRagQueries(knowledgePlan, originalMessage) {
+  if (!knowledgePlan || knowledgePlan.skipped) return [];
+  const original = String(originalMessage || "").trim();
+  return normalizeArray(knowledgePlan.rag_queries)
+    .map((query) => query.trim())
+    .filter((query) => query && query !== original)
+    .slice(0, 2);
+}
+
+function recommendedProjectTools(knowledgePlan) {
+  if (!knowledgePlan || knowledgePlan.skipped) return [];
+  return normalizeArray(knowledgePlan.recommended_tools)
+    .map((tool) => tool.trim())
+    .filter((tool) => TOOL_NAMES.includes(tool));
+}
+
+function uniqueRows(rows) {
+  const seen = new Set();
+  return normalizeRows(rows).filter((row) => {
+    const key = rowKey(row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function rowKey(row) {
+  return String(
+    row?.id ||
+    row?.attachment_id ||
+    row?.metadata?.attachment_id ||
+    row?.metadata?.source ||
+    row?.url ||
+    row?.content ||
+    row?.text ||
+    JSON.stringify(row)
+  ).slice(0, 500);
 }
 
 function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
@@ -497,11 +678,16 @@ function uniqueByUrl(sources) {
   });
 }
 
-function buildWorkflowLog({ message, sanitized, saved, memory, classification, result, trace, config }) {
+function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, classification, result, trace, config }) {
   const toolCalls = result.toolCalls || [];
   const hybridCall = toolCalls.find((call) => call.toolName === "hybrid_search");
   const rerankerCall = toolCalls.find((call) => call.toolName === "reranker");
-  const n8nCalls = toolCalls.filter((call) => !["hybrid_search", "reranker"].includes(call.toolName));
+  const retrievalToolNames = ["hybrid_search", "hybrid_search_plan", "reranker"];
+  const safetyPrecheckCalls = classification.urgency === "HIGH"
+    ? toolCalls.filter((call) => ["safety_report", "alert"].includes(call.toolName))
+    : [];
+  const safetyPrecheckNames = new Set(safetyPrecheckCalls.map((call) => call.toolName));
+  const n8nCalls = toolCalls.filter((call) => !retrievalToolNames.includes(call.toolName) && !safetyPrecheckNames.has(call.toolName));
   const isChat = classification.type === "CHAT";
   const knowledgePlan = result.knowledgePlan || null;
   const nodes = [
@@ -519,6 +705,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, classification, r
       session_id: saved.session_id
     }, {
       messages_loaded: memory.length,
+      summary: memorySummary,
       preview: memory.slice(-4)
     }),
     workflowNode("classifier", "Smart Classifier", "ai", "done", { sanitized }, classification),
@@ -537,6 +724,30 @@ function buildWorkflowLog({ message, sanitized, saved, memory, classification, r
       })
     );
   } else {
+    if (classification.urgency === "HIGH") {
+      nodes.push(
+        workflowNode("safety_precheck", "Safety Precheck", "tool", safetyPrecheckCalls.some((call) => call.ok) ? "done" : "skipped", {
+          urgency: classification.urgency,
+          tools: ["safety_report", "alert"]
+        }, {
+          results: safetyPrecheckCalls.map((call) => ({
+            toolName: call.toolName,
+            ok: call.ok,
+            skipped: call.skipped,
+            error: call.error || null,
+            sources: call.sources || []
+          }))
+        })
+      );
+    }
+    if (result.investigationPlan) {
+      nodes.push(
+        workflowNode("investigation", "Investigation Mode", "router", "done", {
+          reason: classification.investigation_reason,
+          message: sanitized
+        }, result.investigationPlan)
+      );
+    }
     if (classification.professional) {
       nodes.push(
         workflowNode("knowledge_planner", "Professional Knowledge Agent", "ai", knowledgePlan?.skipped ? "skipped" : "done", {
@@ -595,7 +806,9 @@ function buildWorkflowLog({ message, sanitized, saved, memory, classification, r
         tool_calls: n8nCalls.length
       }, {
         answer: result.answer,
-        sources: result.sources
+        sources: result.sources,
+        source_quality: result.sourceQuality,
+        conflicts: result.conflicts
       })
     );
   }
@@ -626,9 +839,16 @@ function buildWorkflowLog({ message, sanitized, saved, memory, classification, r
         ["save_message", "memory"],
         ["memory", "classifier"],
         ["classifier", "switch"],
+        ...(classification.urgency === "HIGH" ? [["switch", "safety_precheck"]] : []),
+        ...(result.investigationPlan
+          ? [[classification.urgency === "HIGH" ? "safety_precheck" : "switch", "investigation"]]
+          : []),
         ...(classification.professional
-          ? [["switch", "knowledge_planner"], ["knowledge_planner", "hybrid_search"]]
-          : [["switch", "hybrid_search"]]),
+          ? [
+              [result.investigationPlan ? "investigation" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "knowledge_planner"],
+              ["knowledge_planner", "hybrid_search"]
+            ]
+          : [[result.investigationPlan ? "investigation" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "hybrid_search"]]),
         ["hybrid_search", "reranker"],
         ["reranker", "n8n_tools"],
         ["n8n_tools", "main_agent"],

@@ -85,6 +85,40 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { sessions });
   }
 
+  if (req.method === "POST" && url.pathname === "/api/evaluations/run") {
+    const body = await readJson(req);
+    const cases = Array.isArray(body.cases) ? body.cases.slice(0, 25) : [];
+    if (!cases.length) return sendJson(res, 400, { error: "cases array is required" });
+    const results = [];
+    for (const [index, testCase] of cases.entries()) {
+      const message = String(testCase.message || "").trim();
+      if (!message) {
+        results.push({ index, ok: false, error: "message is required" });
+        continue;
+      }
+      const runId = `eval_${Date.now()}_${index}_${Math.random().toString(16).slice(2)}`;
+      createRun(runId);
+      try {
+        const output = await runChatPipeline({
+          message,
+          sessionId: body.sessionId || `eval_${Date.now()}`,
+          config: config(),
+          runId
+        });
+        results.push(summarizeEvaluationCase({ index, testCase, output, runId }));
+      } catch (error) {
+        failRun(runId, error);
+        results.push({ index, message, runId, ok: false, error: error.message });
+      }
+    }
+    return sendJson(res, 200, {
+      total: results.length,
+      passed: results.filter((item) => item.ok).length,
+      failed: results.filter((item) => !item.ok).length,
+      results
+    });
+  }
+
   const messagesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/);
   if (req.method === "GET" && messagesMatch) {
     const messages = await listMessages({ config: config(), sessionId: decodeURIComponent(messagesMatch[1]) }).catch(() => []);
@@ -240,6 +274,46 @@ function sendJson(res, status, value) {
 function sendText(res, status, value) {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
   res.end(value);
+}
+
+function summarizeEvaluationCase({ index, testCase, output, runId }) {
+  const expectedTools = parseArray(testCase.expectedTools || []);
+  const actualTools = [...new Set((output.toolCalls || []).map((call) => call.toolName))];
+  const checks = {
+    type: !testCase.expectedType || output.type === testCase.expectedType,
+    professional: testCase.expectedProfessional == null || Boolean(output.classification?.professional) === Boolean(testCase.expectedProfessional),
+    tools: !expectedTools.length || expectedTools.every((tool) => actualTools.includes(tool)),
+    answer: Boolean(String(output.answer || "").trim()),
+    sources: testCase.requireSources ? Boolean(output.sources?.length) : true,
+    noConflicts: testCase.allowConflicts === false ? !output.conflicts?.length : true
+  };
+  return {
+    index,
+    runId,
+    message: testCase.message,
+    ok: Object.values(checks).every(Boolean),
+    checks,
+    expected: {
+      type: testCase.expectedType || null,
+      professional: testCase.expectedProfessional ?? null,
+      tools: expectedTools,
+      requireSources: Boolean(testCase.requireSources)
+    },
+    actual: {
+      type: output.type,
+      professional: Boolean(output.classification?.professional),
+      tools: actualTools,
+      answerLength: String(output.answer || "").length,
+      sourceQuality: output.sourceQuality,
+      conflicts: output.conflicts || []
+    }
+  };
+}
+
+function parseArray(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  if (typeof value !== "string") return [];
+  return value.split(/[,\n]+/).map((item) => item.trim()).filter(Boolean);
 }
 
 function scheduleServerRestart() {

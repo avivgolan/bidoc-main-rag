@@ -70,3 +70,18 @@ Architectural and process decisions that affect this project.
 - **Date:** 2026-05-07
 - **Decision:** `src/server.js` exports `handler` as default and only starts `http.createServer()` when `process.env.VERCEL` is absent.
 - **Rationale:** One entrypoint supports both local development and Vercel serverless routing.
+
+### D-012 — Agent boundary enforcement in orchestrator
+- **Date:** 2026-05-07
+- **Decision:** Keep agent-to-agent information transfer controlled by `src/agent.js`: Knowledge Planner may add search/tool guidance, but final facts must come from project retrieval/tool results; HIGH urgency runs safety precheck before retrieval.
+- **Rationale:** Prevents professional KB guidance from becoming uncited project evidence and makes safety routing deterministic in code, not only in prompts.
+
+### D-013 — Lightweight evaluation and evidence quality layer
+- **Date:** 2026-05-07
+- **Decision:** Add deterministic source quality scoring and regex-based conflict detection before final synthesis, plus `POST /api/evaluations/run` and an Evaluation section inside the Tools screen for repeatable checks.
+- **Rationale:** Improves trustworthiness without adding another LLM dependency, and gives local/manual regression testing for routing, tools, sources, and conflicts.
+
+### D-014 — Local Memory Summary and Investigation Mode
+- **Date:** 2026-05-07
+- **Decision:** Keep a local conversation summary in `src/memory.js` and pass it as non-evidence context; mark complex causal/accountability/comparison questions as Investigation Mode and pass an `investigation_plan` to Main RAG.
+- **Rationale:** Improves conversational continuity and forces complex answers to show what was checked without treating memory as project evidence.

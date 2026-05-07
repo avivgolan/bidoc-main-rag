@@ -61,5 +61,6 @@ tags:
 | 2026-05-07 | OpenRouter + Supabase keys lost on restart | `.env.local` file created; keys recovered |
 | 2026-05-07 | Server port conflict (EADDRINUSE 4000) | Kill node processes before restart |
 | 2026-05-07 | Reset requested for local testing | Added Reset tab + `POST /api/system/restart` |
+| 2026-05-07 | Knowledge Planner async search could break professional questions | `runKnowledgePlanner()` now awaits/catches KB search and skips safely when unavailable |
 | 2026-05-07 | Knowledge Base needed persistence beyond local disk | Moved KB documents to Supabase `knowledge_documents` |
 | 2026-05-06 | Unrelated git histories (local vs remote) | `git reset --hard origin/main` |

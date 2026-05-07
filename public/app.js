@@ -28,6 +28,9 @@ const state = {
   fullLogVisible: false
 };
 
+const WORKFLOW_NODE_WIDTH = 152;
+const WORKFLOW_NODE_HEIGHT = 124;
+
 const $ = (id) => document.getElementById(id);
 
 init();
@@ -43,6 +46,7 @@ async function init() {
   wireWorkflow();
   wireAgents();
   wireKnowledge();
+  wireEvaluation();
   wireReset();
   $("refreshHistory").addEventListener("click", loadHistory);
 
@@ -97,6 +101,9 @@ function activateTab(tabId, pushHistory = true, options = {}) {
     history.pushState({ tab: tabId }, "", `#${tabId}`);
   }
   if (!skipData) TAB_LOADERS[tabId]?.();
+  if (tabId === "workflow" && state.lastWorkflow) {
+    requestAnimationFrame(() => renderWorkflow(state.lastWorkflow));
+  }
 }
 
 function wireTabs() {
@@ -386,6 +393,71 @@ function wireReset() {
   $("restartServer").addEventListener("click", restartServer);
 }
 
+function wireEvaluation() {
+  const input = $("evaluationCases");
+  if (!input) return;
+  input.value = JSON.stringify(defaultEvaluationCases(), null, 2);
+  $("runEvaluation").addEventListener("click", runEvaluation);
+}
+
+function defaultEvaluationCases() {
+  return [
+    {
+      message: "שלום, מי אתה?",
+      expectedType: "CHAT"
+    },
+    {
+      message: "תראה לי חשבונית 500",
+      expectedType: "RAG",
+      expectedTools: ["financial_transactions"]
+    },
+    {
+      message: "יש בעיית בטיחות באתר?",
+      expectedType: "RAG",
+      expectedTools: ["safety_report", "alert"]
+    },
+    {
+      message: "איך מחליטים אם ליקוי בטיחותי דורש עצירת עבודה?",
+      expectedType: "RAG",
+      expectedProfessional: true
+    }
+  ];
+}
+
+async function runEvaluation() {
+  const button = $("runEvaluation");
+  const summary = $("evaluationSummary");
+  const results = $("evaluationResults");
+  button.disabled = true;
+  summary.textContent = "מריץ בדיקות...";
+  results.innerHTML = "";
+  try {
+    const cases = JSON.parse($("evaluationCases").value || "[]");
+    const output = await api("/api/evaluations/run", {
+      method: "POST",
+      body: { cases, sessionId: `eval_${Date.now()}` }
+    });
+    summary.textContent = `${output.passed}/${output.total} עברו · ${output.failed} נכשלו`;
+    results.innerHTML = "";
+    for (const item of output.results || []) {
+      const card = document.createElement("article");
+      card.className = `evaluationCard ${item.ok ? "passed" : "failed"}`;
+      card.innerHTML = `
+        <header>
+          <strong>${escapeHtml(item.ok ? "עבר" : "נכשל")} · ${escapeHtml(item.message || "")}</strong>
+          <span>${escapeHtml(item.runId || "")}</span>
+        </header>
+        <pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre>
+      `;
+      results.append(card);
+    }
+  } catch (error) {
+    summary.textContent = `שגיאה בהרצת בדיקות: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function restartServer() {
   const button = $("restartServer");
   const status = $("restartStatus");
@@ -664,15 +736,14 @@ function workflowBounds(positions) {
   const values = Object.values(positions);
   if (!values.length) return { width: 0, height: 0 };
   return {
-    width: Math.max(...values.map((position) => position.x)) + 220,
-    height: Math.max(...values.map((position) => position.y)) + 170
+    width: Math.max(...values.map((position) => position.x)) + WORKFLOW_NODE_WIDTH + 70,
+    height: Math.max(...values.map((position) => position.y)) + WORKFLOW_NODE_HEIGHT + 70
   };
 }
 
 function drawCables(edges, positions) {
   const cables = $("workflowCables");
   const board = $("workflowBoard");
-  const boardRect = board.getBoundingClientRect();
   cables.innerHTML = `
     <defs>
       <marker id="workflowArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -685,25 +756,28 @@ function drawCables(edges, positions) {
   cables.setAttribute("viewBox", `0 0 ${board.scrollWidth} ${board.scrollHeight}`);
 
   for (const edge of edges) {
-    const from = $(`workflow_${edge.from}`);
-    const to = $(`workflow_${edge.to}`);
+    const from = positions[edge.from];
+    const to = positions[edge.to];
     if (!from || !to) continue;
-    const fromRect = from.getBoundingClientRect();
-    const toRect = to.getBoundingClientRect();
     const start = {
-      x: fromRect.left - boardRect.left + board.scrollLeft + fromRect.width / 2,
-      y: fromRect.top - boardRect.top + board.scrollTop + fromRect.height / 2
+      x: from.x + WORKFLOW_NODE_WIDTH,
+      y: from.y + WORKFLOW_NODE_HEIGHT / 2
     };
     const end = {
-      x: toRect.left - boardRect.left + board.scrollLeft + toRect.width / 2,
-      y: toRect.top - boardRect.top + board.scrollTop + toRect.height / 2
+      x: to.x,
+      y: to.y + WORKFLOW_NODE_HEIGHT / 2
     };
-    const distance = Math.max(90, Math.abs(end.x - start.x) / 2);
+    const distance = Math.max(70, Math.abs(end.x - start.x) / 2);
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", `M ${start.x} ${start.y} C ${start.x + distance} ${start.y}, ${end.x - distance} ${end.y}, ${end.x} ${end.y}`);
     path.setAttribute("class", "workflowCable");
     path.setAttribute("marker-end", "url(#workflowArrow)");
     cables.append(path);
+
+    const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    hitPath.setAttribute("d", path.getAttribute("d"));
+    hitPath.setAttribute("class", "workflowCable workflowCableGlow");
+    cables.insertBefore(hitPath, path);
   }
 }
 

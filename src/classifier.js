@@ -33,7 +33,9 @@ export function normalizeClassification(value) {
     hashtags: normalizeHashtags(value?.hashtags),
     professional: Boolean(value?.professional),
     professional_reason: typeof value?.professional_reason === "string" ? value.professional_reason : "",
-    knowledge_tags: normalizeHashtags(value?.knowledge_tags)
+    knowledge_tags: normalizeHashtags(value?.knowledge_tags),
+    investigation: Boolean(value?.investigation),
+    investigation_reason: typeof value?.investigation_reason === "string" ? value.investigation_reason : ""
   };
 }
 

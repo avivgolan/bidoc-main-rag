@@ -4,6 +4,8 @@ import { normalizeClassification } from "../src/classifier.js";
 import { heuristicClassification } from "../src/heuristics.js";
 import { buildToolOrder } from "../src/tools.js";
 import { deleteKnowledgeDocument, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
+import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality.js";
+import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -32,6 +34,8 @@ test("normalizeClassification fills optional dates as null", () => {
   assert.equal(output.professional, false);
   assert.equal(output.professional_reason, "");
   assert.deepEqual(output.knowledge_tags, []);
+  assert.equal(output.investigation, false);
+  assert.equal(output.investigation_reason, "");
 });
 
 test("normalizeClassification normalizes hashtags", () => {
@@ -58,6 +62,20 @@ test("heuristicClassification marks professional questions", () => {
   assert.equal(output.type, "RAG");
   assert.equal(output.professional, true);
   assert.ok(output.knowledge_tags.length);
+});
+
+test("heuristicClassification marks investigation questions", () => {
+  const output = heuristicClassification("למה היה עיכוב ומי אחראי לזה?");
+  assert.equal(output.type, "RAG");
+  assert.equal(output.investigation, true);
+  assert.ok(output.investigation_reason);
+});
+
+test("local memory summary tracks active topics", () => {
+  appendLocalMemory("summary_test", "מה היה עם מעליות בחודש האחרון?", "נמצאו עדכונים על מעליות.");
+  const summary = getMemorySummary("summary_test");
+  assert.ok(summary.active_topics.includes("מעליות"));
+  assert.ok(memorySummaryMessages(summary).length);
 });
 
 test("knowledge search returns relevant local chunks", async () => {
@@ -89,6 +107,24 @@ test("general fallback uses alert and whatsapp_messages", () => {
     buildToolOrder({ urgency: "NORMAL", complexity: "GENERAL" }, []),
     ["alert", "whatsapp_messages"]
   );
+});
+
+test("source quality prefers official reports over whatsapp", () => {
+  const summary = buildSourceQualitySummary([
+    { toolName: "whatsapp_messages", ok: true, data: "site update" },
+    { toolName: "safety_report", ok: true, data: "official report" }
+  ]);
+  assert.equal(summary.overall, "HIGH");
+  assert.equal(summary.primarySources[0].toolName, "safety_report");
+});
+
+test("conflict detection flags approval disagreements", () => {
+  const conflicts = detectConflicts([
+    { toolName: "meetings", ok: true, data: "האישור אושר בישיבה" },
+    { toolName: "emails", ok: true, data: "הבקשה לא אושרה במייל" }
+  ]);
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].type, "approval");
 });
 
 let failed = 0;

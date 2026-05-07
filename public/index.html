@@ -331,6 +331,23 @@
           </label>
         </div>
         <pre class="result" id="toolResult">אין תוצאה עדיין.</pre>
+
+        <section class="embeddedPanel">
+          <header class="panelHeader compact">
+            <div>
+              <h2>Evaluation Mode</h2>
+              <p class="hint">הרצת סט שאלות קבוע כדי לבדוק ניתוב, כלים, מקורות וסתירות.</p>
+            </div>
+            <button id="runEvaluation" type="button">הרץ בדיקות</button>
+          </header>
+          <div class="grid">
+            <label class="wide">Test cases JSON
+              <textarea id="evaluationCases" rows="12" spellcheck="false"></textarea>
+            </label>
+          </div>
+          <div class="evaluationSummary" id="evaluationSummary">ממתין להרצה.</div>
+          <div class="evaluationResults" id="evaluationResults"></div>
+        </section>
       </section>
 
       <!-- ======================================================

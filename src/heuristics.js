@@ -47,6 +47,7 @@ function extractHeuristicHashtags(message) {
 
 function baseClassification({ type, complexity = "GENERAL", tool_hint, urgency = "NORMAL", hashtags = [], message = "" }) {
   const professional = type === "RAG" && isProfessionalQuestion(message);
+  const investigation = type === "RAG" && isInvestigationQuestion(message);
   return {
     type,
     complexity,
@@ -57,12 +58,18 @@ function baseClassification({ type, complexity = "GENERAL", tool_hint, urgency =
     hashtags,
     professional,
     professional_reason: professional ? "זוהתה שאלה מקצועית/מתודולוגית שיכולה להיעזר ב-Knowledge Base." : "",
-    knowledge_tags: professional ? [...new Set([...hashtags, ...extractKnowledgeTags(message)])] : []
+    knowledge_tags: professional ? [...new Set([...hashtags, ...extractKnowledgeTags(message)])] : [],
+    investigation,
+    investigation_reason: investigation ? "זוהתה שאלה מורכבת שדורשת בדיקת מקורות והצגת מה נבדק." : ""
   };
 }
 
 function isProfessionalQuestion(message) {
   return /איך|כיצד|למה|מתי נכון|מה הדרך|שיטה|קריטריון|קריטריונים|מונח|מונחים|תקן|נוהל|החלטה מקצועית|best practice|method|criteria|standard|procedure|glossary/i.test(String(message || ""));
+}
+
+function isInvestigationQuestion(message) {
+  return /למה|מדוע|מה גרם|גורם|עיכוב|אחריות|אחראי|מי אחראי|השווא|פער|סתירה|בעיה חוזרת|שורש|root cause|why|cause|delay|responsible|compare|conflict/i.test(String(message || ""));
 }
 
 function extractKnowledgeTags(message) {

@@ -15,7 +15,7 @@ tags:
 
 ## Purpose
 
-Documents all 5 agents in the pipeline: their role, model, prompt location, and routing logic.
+Documents all 5 agents in the pipeline: their role, model, prompt location, routing logic, and information-transfer boundaries.
 
 ## The 5 Agents
 
@@ -23,7 +23,7 @@ Documents all 5 agents in the pipeline: their role, model, prompt location, and 
 - **Model:** `openai/gpt-4o-mini`
 - **File:** `src/classifier.js`, prompt in `src/prompts.js`
 - **Role:** Classifies every incoming message as `CHAT` or `RAG`. Also picks tools, urgency, date range, hashtags, and professional flag.
-- **Output fields:** `type`, `complexity`, `tool_hint`, `urgency`, `date_from`, `date_to`, `hashtags`, `professional`, `professional_reason`, `knowledge_tags`
+- **Output fields:** `type`, `complexity`, `tool_hint`, `urgency`, `date_from`, `date_to`, `hashtags`, `professional`, `professional_reason`, `knowledge_tags`, `investigation`, `investigation_reason`
 - **Fallback:** If OpenRouter fails → `heuristicClassification()` in `src/heuristics.js` (regex-based, no API)
 - **CHAT triggers:** greetings, small talk, time/date questions
 - **RAG triggers:** anything project-related (money, safety, decisions, materials, emails, etc.)
@@ -41,6 +41,9 @@ Documents all 5 agents in the pipeline: their role, model, prompt location, and 
 - **File:** `src/agent.js` → `runRagAgent()` → `synthesizeAnswer()`
 - **Role:** Synthesises final answer from vector search results + n8n tool results + memory.
 - **Input:** `retrieval_context`, `retrieval_results`, `tool_results`, `knowledge_plan`, `sources`
+- **Boundary:** `knowledge_plan` is planning guidance only. Final factual claims must come from project retrieval/tool results, memory, or explicit user input.
+- **Source review:** Receives `source_quality` and `potential_conflicts`; prompt instructs it to qualify low-quality evidence and mention possible conflicts.
+- **Investigation:** Receives `investigation_plan` for complex causal/accountability questions and must include a concise "מה בדקתי" section.
 - **No-data handling:** When hybrid_search fails and no tools return data, a `noDataNote` is appended to the system prompt instructing the model to still return a formatted response explaining the failure.
 - **Fallback (no API key or empty response):** `fallbackRagAnswer()` — structured Hebrew fallback with ⚠️ reason note.
 
@@ -56,7 +59,8 @@ Documents all 5 agents in the pipeline: their role, model, prompt location, and 
 - **Storage/search:** `src/knowledge.js` reads `.txt`/`.md` documents from Supabase table `knowledge_documents`, chunks text by paragraphs, then scores by query tokens, phrases, and tags.
 - **Role:** Only runs when classifier sets `professional: true`. Searches the Knowledge Base and creates a planning brief for the Main RAG Agent.
 - **Output:** `domain_summary`, `relevant_terms`, `decision_criteria`, `rag_queries`, `recommended_tools`, `risks_or_cautions`
-- **Fallback:** If no KB matches → skipped. If no API key → local text fallback.
+- **Planner effect:** `rag_queries` can trigger up to two extra Hybrid Search queries after the raw user query. `recommended_tools` are merged into the n8n tool order when they are valid project tools.
+- **Fallback:** If KB search fails or no KB matches → skipped. If no API key → local text fallback.
 - **Important boundary:** The knowledge plan is professional guidance only. Main RAG Agent must not treat it as project evidence.
 
 ## Routing Logic
@@ -64,7 +68,12 @@ Documents all 5 agents in the pipeline: their role, model, prompt location, and 
 ```
 classification.type === "CHAT"  →  runLiteAgent()
 classification.type === "RAG"   →  runRagAgent()
-  classification.professional === true  →  runKnowledgePlanner() first
+  classification.urgency === "HIGH"     →  safety_report + alert precheck before retrieval
+  classification.investigation === true →  build investigation plan before synthesis
+  classification.professional === true  →  runKnowledgePlanner() before Hybrid Search
+  raw user query                         →  always first Hybrid Search query
+  knowledge_plan.rag_queries             →  optional extra Hybrid Search queries after raw query
+  all tool/retrieval calls                →  source quality score + conflict scan before answer
 ```
 
 ## Model Configuration
@@ -91,6 +100,9 @@ reranker:         "openai/gpt-4o-mini"
 
 ## Recent Changes
 
+- 2026-05-07 — Added Memory Summary and Investigation Mode; complex questions now pass an investigation plan to Main RAG and conversation context is summarized outside the raw message window.
+- 2026-05-07 — Added source quality scoring, possible conflict detection, and Evaluation Mode for repeatable routing/source checks.
+- 2026-05-07 — Hardened agent information boundaries: Knowledge Plan is guidance only, safety precheck runs before retrieval for HIGH urgency, and planner queries/tools now influence RAG/tools without replacing the raw user query.
 - 2026-05-07 — Added `knowledge_planner` as first-class editable agent with model selection in the Agents tab.
 - 2026-05-07 — Classifier schema expanded with `professional`, `professional_reason`, and `knowledge_tags`.
 - 2026-05-07 — Professional Knowledge Agent connected before Hybrid Search for professional RAG questions.
