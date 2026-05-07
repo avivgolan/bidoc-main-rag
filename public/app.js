@@ -24,6 +24,8 @@ const state = {
   openRouterModelsFallback: false,
   agentRuntime: {},
   selectedKnowledgeDocument: null,
+  selectedKnowledgeAgent: "schedule",
+  knowledgeAgents: [],
   runEvents: [],
   fullLogVisible: false
 };
@@ -91,8 +93,7 @@ const $ = (id) => document.getElementById(id);
 init();
 
 async function init() {
-  $("sessionId").value = localStorage.getItem("sessionId") || `local_${Date.now()}`;
-  localStorage.setItem("sessionId", $("sessionId").value);
+  startNewSession({ showToast: false });
   tools.forEach((tool) => $("toolSelect").append(new Option(tool, tool)));
   wireTabs();
   wireChat();
@@ -115,9 +116,42 @@ async function init() {
   // Model list is needed for the Agents tab selects; previously we skipped this
   // when initialTab==="agents", and activateTab raced before loadSettings.
   await loadOpenRouterModels();
-  if (initialTab !== "knowledge") await loadKnowledgeDocuments();
-  if (initialTab !== "history")   await loadHistory();
+  await loadKnowledgeDocuments();
+  await loadHistory();
   requestAnimationFrame(() => renderWorkflow(state.lastWorkflow));
+}
+
+function createSessionId() {
+  const random = Math.random().toString(16).slice(2, 10);
+  return `local_${Date.now()}_${random}`;
+}
+
+function setCurrentSession(sessionId) {
+  $("sessionId").value = sessionId;
+  localStorage.setItem("sessionId", sessionId);
+}
+
+function startNewSession(options = {}) {
+  const { showToast: shouldShowToast = true } = options;
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+  setCurrentSession(createSessionId());
+  $("messages").innerHTML = "";
+  state.lastWorkflow = null;
+  state.runEvents = [];
+  state.fullLogVisible = false;
+  if ($("liveRunList")) $("liveRunList").innerHTML = "";
+  if ($("liveRunStatus")) $("liveRunStatus").textContent = "ממתין לבקשה";
+  if ($("fullLogView")) {
+    $("fullLogView").hidden = true;
+    $("fullLogView").textContent = "";
+  }
+  resetAgentRuntime();
+  renderAgents();
+  requestAnimationFrame(() => renderWorkflow(null));
+  if (shouldShowToast) showToast("נפתחה שיחה חדשה");
 }
 
 const TAB_LOADERS = {
@@ -173,7 +207,11 @@ function wireTabs() {
 }
 
 function wireChat() {
-  $("sessionId").addEventListener("change", () => localStorage.setItem("sessionId", $("sessionId").value));
+  $("newSession")?.addEventListener("click", () => {
+    startNewSession();
+    activateTab("chat");
+    $("messageInput").focus();
+  });
 
   // Ctrl+Enter (or Cmd+Enter on Mac) submits the form
   $("messageInput").addEventListener("keydown", (event) => {
@@ -187,6 +225,7 @@ function wireChat() {
     event.preventDefault();
     const message = $("messageInput").value.trim();
     if (!message) return;
+    if (!$("sessionId").value) setCurrentSession(createSessionId());
     const runId = `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     $("messageInput").value = "";
     addMessage(message, "user");
@@ -549,7 +588,9 @@ async function waitForServer() {
 async function loadKnowledgeDocuments() {
   const list = $("knowledgeList");
   if (!list) return;
-  const result = await api("/api/knowledge/documents");
+  await loadKnowledgeAgents();
+  const agentId = state.selectedKnowledgeAgent || "schedule";
+  const result = await api(`/api/knowledge/documents?agentId=${encodeURIComponent(agentId)}`);
   list.innerHTML = "";
   if (!result.documents?.length) {
     list.textContent = "אין מסמכים עדיין.";
@@ -562,8 +603,62 @@ async function loadKnowledgeDocuments() {
       <strong>${escapeHtml(item.filename)}</strong>
       <span>${Number(item.size || 0).toLocaleString()} bytes · ${escapeHtml(new Date(item.updatedAt).toLocaleString("he-IL"))}</span>
     `;
-    button.addEventListener("click", () => openKnowledgeDocument(item.filename));
+    button.addEventListener("click", () => openKnowledgeDocument(item.filename, item.agentId));
     list.append(button);
+  }
+}
+
+async function loadKnowledgeAgents() {
+  if (state.knowledgeAgents.length) {
+    renderKnowledgeAgents();
+    return;
+  }
+  const result = await api("/api/knowledge/agents");
+  state.knowledgeAgents = result.agents || [];
+  if (!state.knowledgeAgents.some((agent) => agent.id === state.selectedKnowledgeAgent)) {
+    state.selectedKnowledgeAgent = state.knowledgeAgents[0]?.id || "schedule";
+  }
+  renderKnowledgeAgents();
+}
+
+function renderKnowledgeAgents() {
+  const wrap = $("knowledgeAgents");
+  const select = $("knowledgeAgentSelect");
+  if (select) {
+    select.innerHTML = "";
+    for (const agent of state.knowledgeAgents) {
+      select.append(new Option(agent.name, agent.id, agent.id === state.selectedKnowledgeAgent, agent.id === state.selectedKnowledgeAgent));
+    }
+    select.onchange = () => {
+      state.selectedKnowledgeAgent = select.value || "schedule";
+      state.selectedKnowledgeDocument = null;
+      $("knowledgePreviewTitle").textContent = "תצוגת מסמך";
+      $("knowledgePreview").textContent = "בחר מסמך מהרשימה.";
+      $("deleteKnowledge").disabled = true;
+      loadKnowledgeDocuments();
+    };
+  }
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  for (const agent of state.knowledgeAgents) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `knowledgeAgentCard ${agent.id === state.selectedKnowledgeAgent ? "active" : ""}`;
+    button.innerHTML = `
+      <strong>${escapeHtml(agent.name)}</strong>
+      <span>${escapeHtml(agent.description || "")}</span>
+      <small>${escapeHtml((agent.tags || []).slice(0, 6).join(", "))}</small>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedKnowledgeAgent = agent.id;
+      state.selectedKnowledgeDocument = null;
+      $("knowledgePreviewTitle").textContent = "תצוגת מסמך";
+      $("knowledgePreview").textContent = "בחר מסמך מהרשימה.";
+      $("deleteKnowledge").disabled = true;
+      renderKnowledgeAgents();
+      loadKnowledgeDocuments();
+    });
+    wrap.append(button);
   }
 }
 
@@ -575,7 +670,7 @@ async function uploadKnowledgeDocument() {
     const content = await file.text();
     await api("/api/knowledge/documents", {
       method: "POST",
-      body: { filename: file.name, content }
+      body: { filename: file.name, content, agentId: state.selectedKnowledgeAgent || "schedule" }
     });
     $("knowledgeFile").value = "";
     await loadKnowledgeDocuments();
@@ -587,9 +682,10 @@ async function uploadKnowledgeDocument() {
   }
 }
 
-async function openKnowledgeDocument(filename) {
-  const result = await api(`/api/knowledge/documents/${encodeURIComponent(filename)}`);
+async function openKnowledgeDocument(filename, agentId = state.selectedKnowledgeAgent) {
+  const result = await api(`/api/knowledge/documents/${encodeURIComponent(filename)}?agentId=${encodeURIComponent(agentId || "schedule")}`);
   state.selectedKnowledgeDocument = filename;
+  state.selectedKnowledgeAgent = result.document.agentId || agentId || "schedule";
   $("knowledgePreviewTitle").textContent = result.document.filename;
   $("knowledgePreview").textContent = result.document.content || "";
   $("deleteKnowledge").disabled = false;
@@ -600,7 +696,7 @@ async function deleteSelectedKnowledgeDocument() {
   const filename = state.selectedKnowledgeDocument;
   $("deleteKnowledge").disabled = true;
   try {
-    await api(`/api/knowledge/documents/${encodeURIComponent(filename)}`, { method: "DELETE" });
+    await api(`/api/knowledge/documents/${encodeURIComponent(filename)}?agentId=${encodeURIComponent(state.selectedKnowledgeAgent || "schedule")}`, { method: "DELETE" });
     state.selectedKnowledgeDocument = null;
     $("knowledgePreviewTitle").textContent = "תצוגת מסמך";
     $("knowledgePreview").textContent = "בחר מסמך מהרשימה.";
@@ -620,6 +716,7 @@ async function runKnowledgeSearch() {
       body: {
         query: $("knowledgeQuery").value,
         tags: $("knowledgeTags").value,
+        agentId: $("knowledgeAgentSelect")?.value || state.selectedKnowledgeAgent || "schedule",
         topK: Number($("knowledgeTopK").value || 6)
       }
     });
@@ -1201,8 +1298,7 @@ async function loadHistory() {
     `;
     item.addEventListener("click", async () => {
       const sessionId = session.sessionId || session.session_id;
-      $("sessionId").value = sessionId;
-      localStorage.setItem("sessionId", sessionId);
+      setCurrentSession(sessionId);
       await loadSessionMessages(sessionId);
       activateTab("chat");
     });

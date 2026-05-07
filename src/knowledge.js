@@ -1,76 +1,126 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
+const ROOT = process.cwd();
+const KNOWLEDGE_ROOT = path.join(ROOT, "data", "knowledge-base");
 const ALLOWED_EXTENSIONS = new Set([".md", ".txt"]);
+
+export const KNOWLEDGE_AGENTS = [
+  {
+    id: "schedule",
+    name: "Schedule Knowledge Agent",
+    description: "חסמים, עיכובים, לו״ז, נתיב קריטי וניהול זמן.",
+    tags: ["עיכובים", "חסמים", "לו״ז", "לוחות_זמנים", "תלויות", "גורמי_עיכוב", "נתיב_קריטי"],
+    keywords: ["עיכוב", "עיכובים", "חסם", "חסמים", "לו״ז", "לוח זמנים", "תלות", "תלויות", "נתיב קריטי", "delay", "schedule", "blocker"]
+  },
+  {
+    id: "safety_quality",
+    name: "Safety & Quality Knowledge Agent",
+    description: "בטיחות, ליקויים, QC, איכות, עצירת עבודה וסיכונים באתר.",
+    tags: ["בטיחות", "בקרת_איכות", "ליקויים", "QC", "סיכונים", "עצירת_עבודה"],
+    keywords: ["בטיחות", "ליקוי", "ליקויים", "qc", "איכות", "סיכון", "סיכונים", "עצירת עבודה", "defect", "safety", "quality"]
+  },
+  {
+    id: "commercial",
+    name: "Commercial Knowledge Agent",
+    description: "חריגים, תביעות, עלויות, אחריות, חוזים ואישורים מסחריים.",
+    tags: ["חריגים", "תביעות", "עלויות", "כספים", "אחריות", "חוזים", "אישורים"],
+    keywords: ["חריג", "חריגים", "תביעה", "תביעות", "עלות", "עלויות", "כסף", "חוזה", "אחריות", "אישור", "change order", "claim", "commercial"]
+  }
+];
+
 const STOP_WORDS = new Set([
   "של", "על", "עם", "את", "זה", "זו", "הוא", "היא", "הם", "הן", "או", "אם", "כי", "לא", "כן", "מה", "מי",
   "the", "and", "or", "of", "to", "in", "on", "for", "is", "are", "a", "an", "with", "by", "from"
 ]);
 
-async function sbFetch(path, options = {}) {
-  const url = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  if (!url || !key) throw new Error("Supabase is not configured");
-  const response = await fetch(`${url}${path}`, {
-    ...options,
-    headers: {
-      apikey: key,
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {})
+export function listKnowledgeAgents() {
+  return KNOWLEDGE_AGENTS;
+}
+
+export function routeKnowledgeAgents({ message = "", tags = [], limit = 2 } = {}) {
+  const text = `${message} ${normalizeTags(tags).join(" ")}`.toLowerCase();
+  const scored = KNOWLEDGE_AGENTS
+    .map((agent) => {
+      let score = 0;
+      for (const keyword of agent.keywords) {
+        if (text.includes(String(keyword).toLowerCase())) score += 3;
+      }
+      for (const tag of agent.tags) {
+        if (text.includes(String(tag).toLowerCase())) score += 2;
+      }
+      return { ...agent, score };
+    })
+    .filter((agent) => agent.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Number(limit || 2));
+  return scored.length ? scored : [KNOWLEDGE_AGENTS[0]];
+}
+
+export async function listKnowledgeDocuments({ agentId } = {}) {
+  const agents = agentId ? [normalizeAgentId(agentId)] : KNOWLEDGE_AGENTS.map((agent) => agent.id);
+  const documents = [];
+  for (const id of agents) {
+    await ensureAgentDir(id);
+    const entries = await fs.readdir(agentDir(id), { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !ALLOWED_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+      const filePath = path.join(agentDir(id), entry.name);
+      const stat = await fs.stat(filePath);
+      documents.push({
+        agentId: id,
+        agentName: knowledgeAgentName(id),
+        filename: entry.name,
+        storedFilename: `${id}/${entry.name}`,
+        size: stat.size,
+        updatedAt: stat.mtime.toISOString()
+      });
     }
-  });
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error(data?.message || `Supabase request failed: ${response.status}`);
-  return data;
+  }
+  return documents.sort((a, b) => a.filename.localeCompare(b.filename, "he"));
 }
 
-export async function listKnowledgeDocuments() {
-  const rows = await sbFetch("/rest/v1/knowledge_documents?select=filename,content,updated_at&order=filename.asc");
-  return (rows || []).map((row) => ({
-    filename: row.filename,
-    size: Buffer.byteLength(row.content || "", "utf8"),
-    updatedAt: row.updated_at
-  }));
-}
-
-export async function saveKnowledgeDocument({ filename, content }) {
+export async function saveKnowledgeDocument({ filename, content, agentId = "schedule" }) {
+  const id = normalizeAgentId(agentId);
   const safeName = sanitizeKnowledgeFilename(filename);
-  const now = new Date().toISOString();
-  await sbFetch("/rest/v1/knowledge_documents", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates" },
-    body: JSON.stringify({ filename: safeName, content: String(content || ""), updated_at: now })
-  });
-  return { filename: safeName, content: String(content || ""), size: Buffer.byteLength(content || "", "utf8"), updatedAt: now };
-}
-
-export async function readKnowledgeDocument(filename) {
-  const safeName = sanitizeKnowledgeFilename(filename);
-  const rows = await sbFetch(`/rest/v1/knowledge_documents?filename=eq.${encodeURIComponent(safeName)}&select=filename,content,updated_at`);
-  if (!rows?.length) throw new Error("Knowledge document not found");
-  const row = rows[0];
+  await ensureAgentDir(id);
+  const filePath = safeKnowledgePath(id, safeName);
+  await fs.writeFile(filePath, String(content || ""), "utf8");
+  const stat = await fs.stat(filePath);
   return {
-    filename: row.filename,
-    content: row.content || "",
-    size: Buffer.byteLength(row.content || "", "utf8"),
-    updatedAt: row.updated_at
+    agentId: id,
+    agentName: knowledgeAgentName(id),
+    filename: safeName,
+    storedFilename: `${id}/${safeName}`,
+    content: String(content || ""),
+    size: stat.size,
+    updatedAt: stat.mtime.toISOString()
   };
 }
 
-export async function deleteKnowledgeDocument(filename) {
-  const safeName = sanitizeKnowledgeFilename(filename);
-  await sbFetch(`/rest/v1/knowledge_documents?filename=eq.${encodeURIComponent(safeName)}`, { method: "DELETE" });
-  return { filename: safeName, deleted: true };
+export async function readKnowledgeDocument(filename, { agentId } = {}) {
+  const resolved = resolveKnowledgeTarget(filename, agentId);
+  const content = await fs.readFile(safeKnowledgePath(resolved.agentId, resolved.filename), "utf8");
+  const stat = await fs.stat(safeKnowledgePath(resolved.agentId, resolved.filename));
+  return {
+    agentId: resolved.agentId,
+    agentName: knowledgeAgentName(resolved.agentId),
+    filename: resolved.filename,
+    storedFilename: `${resolved.agentId}/${resolved.filename}`,
+    content,
+    size: stat.size,
+    updatedAt: stat.mtime.toISOString()
+  };
 }
 
-export async function searchKnowledgeBase({ query, tags = [], topK = 6 }) {
-  const rows = await sbFetch("/rest/v1/knowledge_documents?select=filename,content,updated_at&order=filename.asc");
-  const documents = (rows || []).map((row) => ({
-    filename: row.filename,
-    content: row.content || "",
-    size: Buffer.byteLength(row.content || "", "utf8"),
-    updatedAt: row.updated_at
-  }));
+export async function deleteKnowledgeDocument(filename, { agentId } = {}) {
+  const resolved = resolveKnowledgeTarget(filename, agentId);
+  await fs.unlink(safeKnowledgePath(resolved.agentId, resolved.filename));
+  return { agentId: resolved.agentId, filename: resolved.filename, deleted: true };
+}
 
+export async function searchKnowledgeBase({ query, tags = [], topK = 6, agentId } = {}) {
+  const documents = await loadKnowledgeDocuments(agentId);
   const queryText = String(query || "");
   const queryTokens = tokenize(queryText);
   const normalizedTags = normalizeTags(tags);
@@ -82,21 +132,32 @@ export async function searchKnowledgeBase({ query, tags = [], topK = 6 }) {
     .sort((a, b) => b.score - a.score)
     .slice(0, Number(topK || 6));
 
-  return { matches, totalDocuments: documents.length, totalChunks: chunks.length };
+  return { agentId: agentId ? normalizeAgentId(agentId) : null, matches, totalDocuments: documents.length, totalChunks: chunks.length };
 }
 
 export function sanitizeKnowledgeFilename(filename) {
   const raw = String(filename || "").trim().split(/[\\/]/).pop();
   if (!raw) throw new Error("filename is required");
-  const ext = raw.slice(raw.lastIndexOf(".")).toLowerCase();
+  const ext = path.extname(raw).toLowerCase();
   if (!ALLOWED_EXTENSIONS.has(ext)) throw new Error("Only .txt and .md knowledge documents are supported");
   return raw.replace(/[^\w.\-\u0590-\u05FF ]+/g, "_");
+}
+
+async function loadKnowledgeDocuments(agentId) {
+  const summaries = await listKnowledgeDocuments({ agentId });
+  return Promise.all(summaries.map(async (summary) => ({
+    ...summary,
+    content: await fs.readFile(safeKnowledgePath(summary.agentId, summary.filename), "utf8")
+  })));
 }
 
 function chunkDocument(document) {
   const blocks = document.content.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
   return blocks.map((text, index) => ({
+    agentId: document.agentId,
+    agentName: document.agentName,
     filename: document.filename,
+    storedFilename: document.storedFilename,
     chunkIndex: index,
     text: text.length > 1800 ? text.slice(0, 1800) : text,
     tokens: tokenize(text)
@@ -139,4 +200,38 @@ function tokenize(text) {
 function normalizeTags(tags) {
   const raw = Array.isArray(tags) ? tags : typeof tags === "string" ? tags.split(/[,\s]+/) : [];
   return [...new Set(raw.map((tag) => String(tag || "").trim().replace(/^#+/, "")).filter(Boolean))];
+}
+
+function normalizeAgentId(agentId) {
+  const id = String(agentId || "schedule").trim();
+  return KNOWLEDGE_AGENTS.some((agent) => agent.id === id) ? id : "schedule";
+}
+
+function knowledgeAgentName(agentId) {
+  return KNOWLEDGE_AGENTS.find((agent) => agent.id === normalizeAgentId(agentId))?.name || "Schedule Knowledge Agent";
+}
+
+function agentDir(agentId) {
+  return path.join(KNOWLEDGE_ROOT, normalizeAgentId(agentId));
+}
+
+async function ensureAgentDir(agentId) {
+  await fs.mkdir(agentDir(agentId), { recursive: true });
+}
+
+function safeKnowledgePath(agentId, filename) {
+  const safeName = sanitizeKnowledgeFilename(filename);
+  const fullPath = path.resolve(agentDir(agentId), safeName);
+  const basePath = path.resolve(agentDir(agentId));
+  if (!fullPath.startsWith(`${basePath}${path.sep}`)) throw new Error("Invalid knowledge path");
+  return fullPath;
+}
+
+function resolveKnowledgeTarget(filename, agentId) {
+  const raw = String(filename || "").trim().replace(/\\/g, "/");
+  const [maybeAgent, ...rest] = raw.split("/");
+  if (rest.length && KNOWLEDGE_AGENTS.some((agent) => agent.id === maybeAgent)) {
+    return { agentId: maybeAgent, filename: sanitizeKnowledgeFilename(rest.join("/")) };
+  }
+  return { agentId: normalizeAgentId(agentId), filename: sanitizeKnowledgeFilename(raw) };
 }

@@ -8,7 +8,7 @@ import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessa
 import { completeRun, emitRunEvent } from "./runLog.js";
 import { renderPrompt } from "./prompts.js";
 import { getProjectDateTime } from "./clock.js";
-import { searchKnowledgeBase } from "./knowledge.js";
+import { routeKnowledgeAgents, searchKnowledgeBase } from "./knowledge.js";
 import { TOOL_NAMES } from "./config.js";
 import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./sourceQuality.js";
 
@@ -310,10 +310,26 @@ async function hybridSearchWithRelaxedHashtags({ config, query, dateFrom, dateTo
 
 async function runKnowledgePlanner({ message, classification, config, trace, runId }) {
   const tags = [...new Set([...(classification.knowledge_tags || []), ...(classification.hashtags || [])])];
-  emitRunEvent(runId, "knowledge_planner", "Searching local Knowledge Base", { query: message, tags });
+  const routedAgents = routeKnowledgeAgents({ message, tags, limit: 2 });
+  emitRunEvent(runId, "knowledge_planner", "Searching local Knowledge Base", {
+    query: message,
+    tags,
+    agents: routedAgents.map((agent) => ({ id: agent.id, name: agent.name, score: agent.score }))
+  });
   let search;
   try {
-    search = await searchKnowledgeBase({ query: message, tags, topK: 6 });
+    const searches = await Promise.all(
+      routedAgents.map((agent) => searchKnowledgeBase({ query: message, tags: [...tags, ...agent.tags], topK: 4, agentId: agent.id }))
+    );
+    search = {
+      agentIds: routedAgents.map((agent) => agent.id),
+      agents: routedAgents.map((agent) => ({ id: agent.id, name: agent.name, description: agent.description })),
+      matches: searches.flatMap((item) => item.matches || [])
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8),
+      totalDocuments: searches.reduce((sum, item) => sum + Number(item.totalDocuments || 0), 0),
+      totalChunks: searches.reduce((sum, item) => sum + Number(item.totalChunks || 0), 0)
+    };
   } catch (error) {
     const skippedPlan = skippedKnowledgePlan(`Knowledge Base unavailable: ${error.message}`);
     trace.push({ step: "knowledgePlanner", ok: false, skipped: true, error: error.message });
@@ -329,7 +345,7 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
     return skippedPlan;
   }
 
-  const fallback = fallbackKnowledgePlan({ message, classification, matches: search.matches });
+  const fallback = fallbackKnowledgePlan({ message, classification, matches: search.matches, agents: search.agents });
   if (!config.openRouterApiKey) {
     trace.push({ step: "knowledgePlanner", ok: false, fallback: true, error: "OPENROUTER_API_KEY is missing" });
     emitRunEvent(runId, "knowledge_planner", "Missing OpenRouter key, using local knowledge fallback", { matches: search.matches.length });
@@ -339,7 +355,8 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
   try {
     emitRunEvent(runId, "knowledge_planner", "Calling Professional Knowledge Agent", {
       model: config.models.knowledgePlanner,
-      matches: search.matches.length
+      matches: search.matches.length,
+      agents: search.agents
     });
     const content = await chatCompletion({
       apiKey: config.openRouterApiKey,
@@ -352,7 +369,10 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
           content: JSON.stringify({
             user_message: message,
             classification,
+            selected_knowledge_agents: search.agents,
             knowledge_excerpts: search.matches.map((match) => ({
+              agentId: match.agentId,
+              agentName: match.agentName,
               filename: match.filename,
               chunkIndex: match.chunkIndex,
               score: match.score,
@@ -362,7 +382,7 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
         }
       ]
     });
-    const plan = normalizeKnowledgePlan(extractJsonObject(content), search.matches);
+    const plan = normalizeKnowledgePlan(extractJsonObject(content), search.matches, search.agents);
     emitRunEvent(runId, "knowledge_planner", "Knowledge Planner completed", plan);
     return plan;
   } catch (error) {
@@ -494,6 +514,7 @@ function skippedKnowledgePlan(reason, caution = reason) {
   return {
     skipped: true,
     reason,
+    agents: [],
     matches: [],
     domain_summary: "",
     relevant_terms: [],
@@ -644,10 +665,13 @@ function stemVocabularyToken(token) {
   return value;
 }
 
-function normalizeKnowledgePlan(value, matches) {
+function normalizeKnowledgePlan(value, matches, agents = []) {
   return {
     skipped: false,
+    agents,
     matches: matches.map((match) => ({
+      agentId: match.agentId,
+      agentName: match.agentName,
       filename: match.filename,
       chunkIndex: match.chunkIndex,
       score: match.score,
@@ -662,11 +686,14 @@ function normalizeKnowledgePlan(value, matches) {
   };
 }
 
-function fallbackKnowledgePlan({ message, classification, matches }) {
+function fallbackKnowledgePlan({ message, classification, matches, agents = [] }) {
   const terms = [...new Set([...(classification.knowledge_tags || []), ...(classification.hashtags || [])])];
   return {
     skipped: false,
+    agents,
     matches: matches.map((match) => ({
+      agentId: match.agentId,
+      agentName: match.agentName,
       filename: match.filename,
       chunkIndex: match.chunkIndex,
       score: match.score,

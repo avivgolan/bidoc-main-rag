@@ -88,7 +88,10 @@
       <section class="panel active" id="chat">
         <header class="panelHeader">
           <h2>צ׳אט</h2>
-          <input id="sessionId" aria-label="session id" placeholder="Session ID" style="max-width:200px" />
+          <div class="chatSessionBar">
+            <input id="sessionId" aria-label="session id" placeholder="Session ID" readonly />
+            <button id="newSession" type="button">שיחה חדשה</button>
+          </div>
         </header>
         <div class="messages" id="messages"></div>
         <form class="composer" id="chatForm">
@@ -164,6 +167,8 @@
           <button id="refreshKnowledge" type="button">רענן</button>
         </header>
 
+        <section class="knowledgeAgents" id="knowledgeAgents"></section>
+
         <div class="grid">
           <label class="wide">העלאת מסמך
             <input id="knowledgeFile" type="file" accept=".txt,.md,text/plain,text/markdown" />
@@ -189,6 +194,9 @@
         <div class="grid">
           <label class="wide">שאילתה
             <input id="knowledgeQuery" placeholder="לדוגמה: איך מחליטים אם ליקוי בטיחותי דורש עצירת עבודה?" />
+          </label>
+          <label>Knowledge Agent
+            <select id="knowledgeAgentSelect"></select>
           </label>
           <label>תגיות
             <input id="knowledgeTags" placeholder="בטיחות, קבלת_החלטות" />

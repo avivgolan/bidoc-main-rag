@@ -10,7 +10,7 @@ import { runChatPipeline } from "./agent.js";
 import { hybridSearch, listMessages, listSessions } from "./supabase.js";
 import { callN8nTool } from "./tools.js";
 import { createRun, failRun, subscribeRun } from "./runLog.js";
-import { deleteKnowledgeDocument, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
+import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 
 loadEnv();
 
@@ -152,26 +152,31 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { agents: buildAgentList(config()) });
   }
 
+  if (req.method === "GET" && url.pathname === "/api/knowledge/agents") {
+    return sendJson(res, 200, { agents: listKnowledgeAgents() });
+  }
+
   if (req.method === "GET" && url.pathname === "/api/knowledge/documents") {
-    const documents = await listKnowledgeDocuments();
+    const documents = await listKnowledgeDocuments({ agentId: url.searchParams.get("agentId") || undefined });
     return sendJson(res, 200, { documents });
   }
 
   if (req.method === "POST" && url.pathname === "/api/knowledge/documents") {
     const body = await readJson(req);
-    const document = await saveKnowledgeDocument({ filename: body.filename, content: body.content });
+    const document = await saveKnowledgeDocument({ filename: body.filename, content: body.content, agentId: body.agentId });
     return sendJson(res, 200, { document });
   }
 
   const knowledgeDocumentMatch = url.pathname.match(/^\/api\/knowledge\/documents\/([^/]+)$/);
   if (knowledgeDocumentMatch) {
     const filename = decodeURIComponent(knowledgeDocumentMatch[1]);
+    const agentId = url.searchParams.get("agentId") || undefined;
     if (req.method === "GET") {
-      const document = await readKnowledgeDocument(filename);
+      const document = await readKnowledgeDocument(filename, { agentId });
       return sendJson(res, 200, { document });
     }
     if (req.method === "DELETE") {
-      const deleted = await deleteKnowledgeDocument(filename);
+      const deleted = await deleteKnowledgeDocument(filename, { agentId });
       return sendJson(res, 200, deleted);
     }
   }
@@ -181,7 +186,8 @@ async function handleApi(req, res, url) {
     const payload = await searchKnowledgeBase({
       query: body.query || "",
       tags: parseHashtags(body.tags || body.hashtags || []),
-      topK: Number(body.topK || 6)
+      topK: Number(body.topK || 6),
+      agentId: body.agentId
     });
     return sendJson(res, 200, payload);
   }
