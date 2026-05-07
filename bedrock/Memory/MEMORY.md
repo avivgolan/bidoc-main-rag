@@ -22,7 +22,7 @@ bidoc-agent is a Hebrew-language RAG (Retrieval-Augmented Generation) AI assista
 - **Vector DB:** Supabase (PostgreSQL + pgvector) via REST; RPC `hybrid_match_data_index_embeddings_gf_dor_agent`
 - **Knowledge Base:** Supabase table `knowledge_documents` with `.txt`/`.md` content, text chunking, tag/keyword scoring
 - **Tool integrations:** n8n webhooks — 10 tools: alert, meetings, emails, whatsapp_messages, financial_transactions, consultants_reports, exceptions_report, quality_control, safety_report, submittals
-- **Frontend:** Vanilla JS + CSS, RTL Hebrew UI, SSE live run log, workflow graph, agents editor, KB manager, tools/evaluation screen, reset page, tab routing via URL hash
+- **Frontend:** Vanilla JS + CSS, RTL Hebrew UI, SSE live run log, workflow graph, agents editor, KB manager, tools/evaluation/connection diagnostics screen, reset page, tab routing via URL hash
 - **Deployment:** Vercel (serverless) + local dev `node src/server.js`
 - **Settings persistence:** Supabase `agent_settings` table (id=`default`, JSON `data` column); 30s TTL cache
 
@@ -74,11 +74,15 @@ User message
 - Git branch: `main` (renamed from master 2026-05-07)
 - Remote: `https://github.com/avivgolan/bidoc-main-rag`
 - `/api/system/restart` exists for local Node restart only; it is not meaningful on Vercel serverless
-- Known issue: Supabase "User not found" on hybrid_search — likely wrong service role key stored in settings; workaround: re-enter key in Settings → Save
+- Known issue: `User not found` during classifier/hybrid/main usually indicates an OpenRouter auth/key/account problem; Tools → Connection Diagnostics tests OpenRouter Chat, OpenRouter Embeddings, Supabase REST, and Supabase Hybrid RPC separately.
 
 ## Recent Changes
 
-- 2026-05-07 — Workflow tab redesigned as a Bedrock-like graph canvas with visible cable arrows and click-to-inspect Input/Output panel
+- 2026-05-07 — Workflow tab now renders a static full-system map at all times, then lights up only the nodes and cable edges used by the latest run; disconnected management components are shown as isolated dashed nodes
+- 2026-05-07 — Added connection diagnostics under Tools: OpenRouter Chat, OpenRouter Embeddings, Supabase REST, and Supabase Hybrid RPC are tested independently
+- 2026-05-07 — Settings now show whether secrets were loaded from Supabase `agent_settings` or env, verify Supabase writes, and include a manual "reload from Supabase" action
+- 2026-05-07 — `חסמים` / blockers / constraints now trigger Professional Knowledge Agent before RAG so glossary/methodology can guide retrieval
+- 2026-05-07 — Added local post-classifier enforcement for professional concepts so Knowledge Planner runs even when the LLM classifier misses the flag
 - 2026-05-07 — Added local Memory Summary and Investigation Mode for complex causal/accountability questions
 - 2026-05-07 — Added source quality scoring, conflict detection, and Evaluation Mode under the Tools screen (`POST /api/evaluations/run`)
 - 2026-05-07 — Agent boundary enforcement added: safety precheck before retrieval, Knowledge Planner safe skip, planner RAG queries/tools, and explicit Knowledge Plan evidence boundary

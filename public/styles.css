@@ -711,7 +711,8 @@ label {
   color: var(--text-muted);
   background: var(--surface);
   border-radius: var(--r-lg);
-  padding: 28px 20px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
   text-align: center;
   font-size: 14px;
   line-height: 1.6;
@@ -756,14 +757,35 @@ label {
   filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.42));
 }
 
+.workflowCable.dormant {
+  stroke: rgba(148, 163, 184, 0.46);
+  stroke-width: 1.8;
+  stroke-dasharray: 8 9;
+  opacity: 0.42;
+  filter: none;
+}
+
+.workflowCable.active {
+  stroke: #60a5fa;
+  opacity: 1;
+}
+
 .workflowCableGlow {
   stroke: rgba(59, 130, 246, 0.18);
   stroke-width: 10;
   filter: none;
 }
 
-.workflowCables marker path {
+.workflowCableGlow.dormant {
+  display: none;
+}
+
+#workflowArrowActive path {
   fill: #93c5fd;
+}
+
+#workflowArrowDormant path {
+  fill: rgba(148, 163, 184, 0.58);
 }
 
 .workflowNode {
@@ -788,6 +810,22 @@ label {
   transition: border-color var(--t), box-shadow var(--t), transform var(--t), background var(--t);
 }
 
+.workflowNode.unused {
+  opacity: 0.62;
+  box-shadow: none;
+}
+
+.workflowNode.used {
+  border-color: rgba(96, 165, 250, 0.78);
+  box-shadow: 0 20px 42px rgba(2, 6, 23, 0.58), 0 0 0 2px rgba(96, 165, 250, 0.2);
+}
+
+.workflowNode.disconnected {
+  border-style: dashed;
+  border-color: rgba(251, 191, 36, 0.62);
+  background: rgba(24, 28, 37, 0.92);
+}
+
 .workflowNode:hover,
 .workflowNode.selected {
   border-color: #60a5fa;
@@ -805,7 +843,8 @@ label {
 }
 
 .workflowNode:hover .workflowNodeHalo,
-.workflowNode.selected .workflowNodeHalo {
+.workflowNode.selected .workflowNodeHalo,
+.workflowNode.used .workflowNodeHalo {
   opacity: 1;
 }
 
@@ -857,6 +896,12 @@ label {
   border: 1px solid rgba(34, 197, 94, 0.34);
 }
 
+.workflowNode.idle .workflowStatus {
+  background: rgba(148, 163, 184, 0.12);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
 .workflowNode.error .workflowStatus {
   background: rgba(239, 68, 68, 0.14);
   color: #fecaca;
@@ -869,25 +914,27 @@ label {
   border-color: rgba(251, 191, 36, 0.35);
 }
 
+.workflowNode.disconnected .workflowStatus {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.32);
+}
+
 .workflowNode.vector  .workflowIcon { background: #2563eb; }
 .workflowNode.ai      .workflowIcon { background: #0891b2; }
 .workflowNode.database .workflowIcon { background: #7c3aed; }
 .workflowNode.tool    .workflowIcon { background: #d97706; }
 
 .workflowInspector {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  width: min(380px, calc(100% - 40px));
-  max-height: calc(100% - 40px);
+  margin-top: 14px;
+  max-height: 420px;
   overflow: auto;
-  z-index: 5;
   direction: rtl;
   color: #e5edf7;
   background: rgba(15, 23, 42, 0.96);
   border: 1px solid #334155;
   border-radius: 16px;
-  box-shadow: 0 20px 45px rgba(2, 6, 23, 0.55);
+  box-shadow: var(--shadow-sm);
   padding: 14px;
 }
 
@@ -1048,6 +1095,145 @@ label {
   margin-top: 26px;
   border-top: 1px solid var(--border);
   padding-top: 22px;
+}
+
+.settingsSourceStatus {
+  margin: 14px 0 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: 13px 15px;
+  display: grid;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.settingsSourceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settingsSourceRow strong {
+  color: var(--text-primary);
+}
+
+.settingsSourceRow span {
+  border-radius: var(--r-full);
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settingsSourceRow span.ok {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.settingsSourceRow span.error {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.settingsSourceGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 8px 14px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.settingsSourceGrid b {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.settingsSourceStatus small {
+  color: var(--danger-text);
+  direction: ltr;
+  text-align: left;
+}
+
+.diagnosticsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.diagnosticCard {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+  box-shadow: var(--shadow-sm);
+}
+
+.diagnosticCard.ok {
+  border-color: var(--success-border);
+}
+
+.diagnosticCard.error {
+  border-color: var(--danger-border);
+}
+
+.diagnosticCard.idle {
+  color: var(--text-muted);
+}
+
+.diagnosticTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.diagnosticTop strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.diagnosticTop span {
+  border-radius: var(--r-full);
+  padding: 3px 9px;
+  background: var(--gray-100);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.diagnosticCard.ok .diagnosticTop span {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.diagnosticCard.error .diagnosticTop span {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.diagnosticCard small {
+  color: var(--text-muted);
+  direction: ltr;
+  text-align: right;
+}
+
+.diagnosticCard pre {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  direction: ltr;
+  text-align: left;
+  white-space: pre-wrap;
+  background: var(--gray-900);
+  color: #dbeafe;
+  border-radius: var(--r);
+  padding: 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 /* ================================================================

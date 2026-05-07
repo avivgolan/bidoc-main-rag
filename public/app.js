@@ -31,6 +31,58 @@ const state = {
 const WORKFLOW_NODE_WIDTH = 152;
 const WORKFLOW_NODE_HEIGHT = 124;
 
+const WORKFLOW_TEMPLATE_NODES = [
+  { id: "chat_input", label: "Chat Trigger", kind: "trigger", x: 70, y: 92, description: "Receives the user message and session id." },
+  { id: "sanitize", label: "Sanitize Message", kind: "code", x: 286, y: 92, description: "Redacts prompt-injection patterns before any AI call." },
+  { id: "save_message", label: "Save Message", kind: "database", x: 502, y: 92, description: "Creates the processing row in chat_messages_gf." },
+  { id: "classifier", label: "Smart Classifier", kind: "ai", x: 718, y: 92, description: "Classifies CHAT/RAG, urgency, tools, dates, professional and investigation flags." },
+  { id: "memory", label: "Chat Memory", kind: "memory", x: 934, y: 92, description: "Loads recent session history and local conversation summary after routing classification." },
+  { id: "switch", label: "Traffic Switch", kind: "router", x: 1150, y: 92, description: "Routes the request to Lite Agent or the RAG path." },
+
+  { id: "lite_agent", label: "Lite Agent", kind: "ai", x: 1370, y: 10, description: "Handles greetings, small talk, and general non-project answers." },
+  { id: "safety_precheck", label: "Safety Precheck", kind: "tool", x: 1370, y: 176, description: "Runs safety_report and alert before retrieval when urgency is high." },
+  { id: "investigation", label: "Investigation Mode", kind: "router", x: 1586, y: 176, description: "Builds a deeper inspection plan for root-cause and responsibility questions." },
+  { id: "knowledge_planner", label: "Professional Knowledge Agent", kind: "ai", x: 1802, y: 176, description: "Uses the Knowledge Base as planning guidance for professional questions." },
+  { id: "hybrid_search", label: "Hybrid Search", kind: "vector", x: 2018, y: 176, description: "Runs vector + keyword retrieval against Supabase with date and hashtag filters." },
+  { id: "reranker", label: "OpenRouter Reranker", kind: "ai", x: 2234, y: 176, description: "Reorders retrieved records by relevance to the user question." },
+  { id: "n8n_tools", label: "n8n Tool Adapters", kind: "tool", x: 2450, y: 176, description: "Calls configured external n8n tool webhooks." },
+  { id: "source_quality", label: "Source Quality", kind: "router", x: 2666, y: 176, description: "Scores the reliability and freshness of retrieved/tool sources." },
+  { id: "conflict_detection", label: "Conflict Detection", kind: "router", x: 2882, y: 176, description: "Highlights possible contradictions across sources before synthesis." },
+  { id: "main_agent", label: "Main RAG Agent", kind: "ai", x: 3098, y: 176, description: "Synthesizes the final grounded answer from retrieval, tools and plans." },
+  { id: "update_message", label: "Update DB", kind: "database", x: 3314, y: 92, description: "Updates chat_messages_gf with the final answer and status." },
+
+  { id: "settings", label: "Settings", kind: "database", x: 70, y: 438, disconnected: true, description: "Configuration screen. Not part of a chat run." },
+  { id: "knowledge_manager", label: "Knowledge Manager", kind: "database", x: 286, y: 438, disconnected: true, description: "Uploads and manages KB documents. Not part of a chat run unless the planner reads KB data." },
+  { id: "tool_tester", label: "Tool Tester", kind: "tool", x: 502, y: 438, disconnected: true, description: "Manual test panel for tools and evaluations. Not part of automatic chat routing." },
+  { id: "reset_server", label: "Reset Server", kind: "tool", x: 718, y: 438, disconnected: true, description: "Local restart helper for testing. Isolated from the agent pipeline." }
+];
+
+const WORKFLOW_TEMPLATE_EDGES = [
+  ["chat_input", "sanitize"],
+  ["sanitize", "save_message"],
+  ["save_message", "classifier"],
+  ["classifier", "memory"],
+  ["memory", "switch"],
+  ["switch", "lite_agent"],
+  ["lite_agent", "update_message"],
+  ["switch", "safety_precheck"],
+  ["switch", "investigation"],
+  ["safety_precheck", "investigation"],
+  ["switch", "knowledge_planner"],
+  ["safety_precheck", "knowledge_planner"],
+  ["investigation", "knowledge_planner"],
+  ["switch", "hybrid_search"],
+  ["safety_precheck", "hybrid_search"],
+  ["investigation", "hybrid_search"],
+  ["knowledge_planner", "hybrid_search"],
+  ["hybrid_search", "reranker"],
+  ["reranker", "n8n_tools"],
+  ["n8n_tools", "source_quality"],
+  ["source_quality", "conflict_detection"],
+  ["conflict_detection", "main_agent"],
+  ["main_agent", "update_message"]
+].map(([from, to]) => ({ from, to }));
+
 const $ = (id) => document.getElementById(id);
 
 init();
@@ -62,6 +114,7 @@ async function init() {
   await loadOpenRouterModels();
   if (initialTab !== "knowledge") await loadKnowledgeDocuments();
   if (initialTab !== "history")   await loadHistory();
+  requestAnimationFrame(() => renderWorkflow(state.lastWorkflow));
 }
 
 const TAB_LOADERS = {
@@ -101,7 +154,7 @@ function activateTab(tabId, pushHistory = true, options = {}) {
     history.pushState({ tab: tabId }, "", `#${tabId}`);
   }
   if (!skipData) TAB_LOADERS[tabId]?.();
-  if (tabId === "workflow" && state.lastWorkflow) {
+  if (tabId === "workflow") {
     requestAnimationFrame(() => renderWorkflow(state.lastWorkflow));
   }
 }
@@ -623,26 +676,29 @@ function renderWorkflow(workflow) {
   cables.innerHTML = "";
   if (inspector) inspector.innerHTML = '<div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>';
 
-  if (!workflow?.nodes?.length) {
-    $("workflowHint").style.display = "block";
-    board.classList.remove("hasWorkflow");
-    return;
-  }
+  const view = buildWorkflowView(workflow);
+  const hasRun = Boolean(workflow?.nodes?.length);
+  $("workflowHint").style.display = hasRun ? "none" : "block";
+  board.classList.toggle("hasWorkflow", hasRun);
 
-  $("workflowHint").style.display = "none";
-  board.classList.add("hasWorkflow");
-
-  const positions = layoutWorkflow(workflow.nodes, workflow.edges || []);
+  const positions = layoutWorkflow(view.nodes, view.edges);
   const bounds = workflowBounds(positions);
   board.style.minHeight = `${Math.max(660, bounds.height + 120)}px`;
   nodesLayer.style.width = `${Math.max(1180, bounds.width + 420)}px`;
   nodesLayer.style.height = `${Math.max(620, bounds.height + 120)}px`;
 
-  workflow.nodes.forEach((node, index) => {
+  view.nodes.forEach((node, index) => {
     const position = positions[node.id] || { x: 40, y: 40 };
     const element = document.createElement("button");
     element.type = "button";
-    element.className = `workflowNode ${node.kind} ${node.status} ${index === 0 ? "selected" : ""}`;
+    element.className = [
+      "workflowNode",
+      node.kind,
+      node.status,
+      node.used ? "used" : "unused",
+      node.disconnected ? "disconnected" : "",
+      index === 0 ? "selected" : ""
+    ].filter(Boolean).join(" ");
     element.id = `workflow_${node.id}`;
     element.style.left = `${position.x}px`;
     element.style.top = `${position.y}px`;
@@ -664,9 +720,52 @@ function renderWorkflow(workflow) {
     nodesLayer.append(element);
   });
 
-  if (workflow.nodes[0]) renderWorkflowInspector(workflow.nodes[0]);
+  if (view.nodes[0]) renderWorkflowInspector(view.nodes[0]);
 
-  requestAnimationFrame(() => drawCables(workflow.edges || [], positions));
+  requestAnimationFrame(() => drawCables(view.edges, positions, view.activeEdgeKeys));
+}
+
+function buildWorkflowView(workflow) {
+  const runtimeNodes = new Map((workflow?.nodes || []).map((node) => [node.id, node]));
+  const runtimeIds = new Set(runtimeNodes.keys());
+  const activeEdgeKeys = new Set((workflow?.edges || []).map(edgeKey));
+  const templateIds = new Set(WORKFLOW_TEMPLATE_NODES.map((node) => node.id));
+  const nodes = WORKFLOW_TEMPLATE_NODES.map((node) => {
+    const runtime = runtimeNodes.get(node.id);
+    const input = runtime?.input ?? { description: node.description || "", configured_component: true };
+    const output = runtime?.output ?? (node.disconnected
+      ? { isolated: true, reason: "This management component is not connected to automatic chat runs." }
+      : { status: "not used in the last run" });
+    return {
+      ...node,
+      ...(runtime || {}),
+      label: runtime?.label || node.label,
+      kind: runtime?.kind || node.kind,
+      status: runtime?.status || (node.disconnected ? "disconnected" : "idle"),
+      used: runtimeIds.has(node.id),
+      disconnected: Boolean(node.disconnected),
+      input,
+      output
+    };
+  });
+
+  for (const runtime of runtimeNodes.values()) {
+    if (!templateIds.has(runtime.id)) nodes.push({ ...runtime, used: true });
+  }
+
+  const edgeKeys = new Set();
+  const edges = [];
+  for (const edge of WORKFLOW_TEMPLATE_EDGES) {
+    const key = edgeKey(edge);
+    edgeKeys.add(key);
+    edges.push({ ...edge, active: activeEdgeKeys.has(key) });
+  }
+  for (const edge of workflow?.edges || []) {
+    const key = edgeKey(edge);
+    if (!edgeKeys.has(key)) edges.push({ ...edge, active: true });
+  }
+
+  return { nodes, edges, activeEdgeKeys };
 }
 
 function renderWorkflowInspector(node) {
@@ -692,6 +791,14 @@ function renderWorkflowInspector(node) {
 }
 
 function layoutWorkflow(nodes, edges = []) {
+  if (nodes.some((node) => Number.isFinite(node.x) && Number.isFinite(node.y))) {
+    return Object.fromEntries(nodes.map((node) => [
+      node.id,
+      Number.isFinite(node.x) && Number.isFinite(node.y)
+        ? { x: node.x, y: node.y }
+        : { x: 40, y: 40 }
+    ]));
+  }
   const order = topologicalWorkflowOrder(nodes, edges);
   const positions = {};
   const colWidth = 210;
@@ -741,12 +848,19 @@ function workflowBounds(positions) {
   };
 }
 
-function drawCables(edges, positions) {
+function edgeKey(edge) {
+  return `${edge.from}->${edge.to}`;
+}
+
+function drawCables(edges, positions, activeEdgeKeys = new Set()) {
   const cables = $("workflowCables");
   const board = $("workflowBoard");
   cables.innerHTML = `
     <defs>
-      <marker id="workflowArrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <marker id="workflowArrowActive" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z"></path>
+      </marker>
+      <marker id="workflowArrowDormant" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
         <path d="M 0 0 L 10 5 L 0 10 z"></path>
       </marker>
     </defs>
@@ -768,15 +882,17 @@ function drawCables(edges, positions) {
       y: to.y + WORKFLOW_NODE_HEIGHT / 2
     };
     const distance = Math.max(70, Math.abs(end.x - start.x) / 2);
+    const active = Boolean(edge.active || activeEdgeKeys.has(edgeKey(edge)));
+    const cableClass = active ? "active" : "dormant";
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", `M ${start.x} ${start.y} C ${start.x + distance} ${start.y}, ${end.x - distance} ${end.y}, ${end.x} ${end.y}`);
-    path.setAttribute("class", "workflowCable");
-    path.setAttribute("marker-end", "url(#workflowArrow)");
+    path.setAttribute("class", `workflowCable ${cableClass}`);
+    path.setAttribute("marker-end", active ? "url(#workflowArrowActive)" : "url(#workflowArrowDormant)");
     cables.append(path);
 
     const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
     hitPath.setAttribute("d", path.getAttribute("d"));
-    hitPath.setAttribute("class", "workflowCable workflowCableGlow");
+    hitPath.setAttribute("class", `workflowCable workflowCableGlow ${cableClass}`);
     cables.insertBefore(hitPath, path);
   }
 }
@@ -796,9 +912,11 @@ function iconForNode(kind) {
 
 function statusLabel(status) {
   return {
+    idle: "ממתין",
     done: "בוצע",
     error: "שגיאה",
-    skipped: "דולג"
+    skipped: "דולג",
+    disconnected: "לא מחובר"
   }[status] || status;
 }
 
@@ -851,6 +969,9 @@ function wireSettings() {
         vectorWeight: Number($("vectorWeight").value || 0.65),
         keywordWeight: Number($("keywordWeight").value || 0.35)
       },
+      knowledge: {
+        triggerKeywords: parseMultilineList($("knowledgeTriggerKeywords")?.value || "")
+      },
       secrets: {
         openRouterApiKey: $("openRouterApiKey").value,
         supabaseUrl: $("supabaseUrl").value,
@@ -869,6 +990,20 @@ function wireSettings() {
       showToast(`שגיאה בשמירה: ${error.message}`, "error");
     } finally {
       $("saveSettings").disabled = false;
+    }
+  });
+
+  $("reloadSettings")?.addEventListener("click", async () => {
+    $("reloadSettings").disabled = true;
+    try {
+      const result = await api("/api/settings/reload", { method: "POST", body: {} });
+      state.settings = result.settings;
+      applySettingsToForm();
+      showToast("ההגדרות נטענו מחדש מ-Supabase");
+    } catch (error) {
+      showToast(`שגיאה ברענון: ${error.message}`, "error");
+    } finally {
+      $("reloadSettings").disabled = false;
     }
   });
 }
@@ -891,6 +1026,56 @@ function wireTools() {
       $("toolResult").textContent = error.message;
     }
   });
+
+  $("runConnectionDiagnostics")?.addEventListener("click", runConnectionDiagnostics);
+}
+
+async function runConnectionDiagnostics() {
+  const button = $("runConnectionDiagnostics");
+  const container = $("connectionDiagnostics");
+  button.disabled = true;
+  container.innerHTML = '<div class="diagnosticCard idle">מריץ בדיקות חיבור...</div>';
+  try {
+    const result = await api("/api/diagnostics/connections", { method: "POST", body: {} });
+    renderConnectionDiagnostics(result.results || []);
+  } catch (error) {
+    container.innerHTML = `<div class="diagnosticCard error"><strong>בדיקת החיבורים נכשלה</strong><small>${escapeHtml(error.message)}</small></div>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderConnectionDiagnostics(results) {
+  const container = $("connectionDiagnostics");
+  if (!results.length) {
+    container.innerHTML = '<div class="diagnosticCard error">לא התקבלו תוצאות בדיקה.</div>';
+    return;
+  }
+  container.innerHTML = "";
+  for (const item of results) {
+    const card = document.createElement("article");
+    card.className = `diagnosticCard ${item.ok ? "ok" : "error"}`;
+    card.innerHTML = `
+      <div class="diagnosticTop">
+        <strong>${escapeHtml(item.label)}</strong>
+        <span>${item.ok ? "תקין" : diagnosticStatusLabel(item.status)}</span>
+      </div>
+      <small>${item.ms ?? 0}ms</small>
+      <pre>${escapeHtml(JSON.stringify(item.ok ? item.details : { status: item.status, error: item.error }, null, 2))}</pre>
+    `;
+    container.append(card);
+  }
+}
+
+function diagnosticStatusLabel(status) {
+  return {
+    auth_error: "בעיית מפתח / הרשאה",
+    billing_or_quota: "קרדיטים / מגבלה",
+    missing_rpc_or_schema: "RPC או סכימה חסרים",
+    missing_table_or_column: "טבלה או עמודה חסרה",
+    missing_config: "חסר קונפיגורציה",
+    error: "שגיאה"
+  }[status] || "שגיאה";
 }
 
 async function loadSettings() {
@@ -905,6 +1090,12 @@ async function loadSettings() {
   }
   state.agents = agents;
   resetAgentRuntime();
+  applySettingsToForm();
+  renderAgents();
+}
+
+function applySettingsToForm() {
+  if (!state.settings) return;
   $("modelClassifier").value = state.settings.models.classifier;
   $("modelKnowledgePlanner").value = state.settings.models.knowledgePlanner;
   $("modelMain").value = state.settings.models.main;
@@ -916,6 +1107,9 @@ async function loadSettings() {
   $("rerankTopK").value = state.settings.retrieval.rerankTopK;
   $("vectorWeight").value = state.settings.retrieval.vectorWeight;
   $("keywordWeight").value = state.settings.retrieval.keywordWeight;
+  if ($("knowledgeTriggerKeywords")) {
+    $("knowledgeTriggerKeywords").value = (state.settings.knowledge?.triggerKeywords || []).join("\n");
+  }
   $("n8nBaseUrl").value = state.settings.n8nBaseUrl || "";
   if ($("timezone")) $("timezone").value = state.settings.timezone || "UTC+3";
   $("openRouterApiKey").value = state.settings.secrets.openRouterApiKey || "";
@@ -940,7 +1134,50 @@ async function loadSettings() {
     `Supabase: ${state.settings.supabaseConfigured ? "מוגדר" : "חסר"}`,
     `Tools: ${configured}/${n8nTools.length}`
   ].join("<br>");
+  renderSettingsSourceStatus();
   renderAgents();
+}
+
+function renderSettingsSourceStatus() {
+  const target = $("settingsSourceStatus");
+  if (!target || !state.settings?.settingsStore) return;
+  const store = state.settings.settingsStore;
+  const source = store.secretSources || {};
+  target.innerHTML = `
+    <div class="settingsSourceRow">
+      <strong>שמירת הגדרות</strong>
+      <span class="${store.write?.ok || store.loadedFromSupabase ? "ok" : "error"}">${settingsStoreLabel(store)}</span>
+    </div>
+    <div class="settingsSourceGrid">
+      <span>OpenRouter Key: <b>${secretSourceLabel(source.openRouterApiKey)}</b></span>
+      <span>Supabase URL: <b>${secretSourceLabel(source.supabaseUrl)}</b></span>
+      <span>Supabase Service Role: <b>${secretSourceLabel(source.supabaseServiceRoleKey)}</b></span>
+      <span>קריאה אחרונה: <b>${store.read?.ok ? "תקינה" : "נכשלה"}</b></span>
+    </div>
+    ${store.write?.error ? `<small>${escapeHtml(store.write.error)}</small>` : ""}
+  `;
+}
+
+function settingsStoreLabel(store) {
+  if (store.write?.ok) return "נשמר ב-Supabase";
+  if (store.loadedFromSupabase) return "נטען מ-Supabase";
+  return "לא אומת שנשמר";
+}
+
+function secretSourceLabel(source) {
+  return {
+    supabase_settings: "Supabase agent_settings",
+    runtime_settings: "Runtime cache",
+    env: ".env / environment",
+    missing: "חסר"
+  }[source] || source || "לא ידוע";
+}
+
+function parseMultilineList(value) {
+  return String(value || "")
+    .split(/[,\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 async function loadHistory() {

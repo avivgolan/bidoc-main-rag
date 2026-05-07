@@ -3,9 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, refreshSettingsIfStale, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
-import { listOpenRouterModels } from "./openrouter.js";
+import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
 import { hybridSearch, listMessages, listSessions } from "./supabase.js";
 import { callN8nTool } from "./tools.js";
@@ -119,6 +119,14 @@ async function handleApi(req, res, url) {
     });
   }
 
+  if (req.method === "POST" && url.pathname === "/api/diagnostics/connections") {
+    const results = await runConnectionDiagnostics(config());
+    return sendJson(res, 200, {
+      ok: results.every((item) => item.ok),
+      results
+    });
+  }
+
   const messagesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/);
   if (req.method === "GET" && messagesMatch) {
     const messages = await listMessages({ config: config(), sessionId: decodeURIComponent(messagesMatch[1]) }).catch(() => []);
@@ -127,6 +135,11 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/settings") {
     return sendJson(res, 200, publicSettings(config()));
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/settings/reload") {
+    await reloadSettingsFromDb();
+    return sendJson(res, 200, { settings: publicSettings(config()) });
   }
 
   if (req.method === "POST" && url.pathname === "/api/system/restart") {
@@ -274,6 +287,109 @@ function sendJson(res, status, value) {
 function sendText(res, status, value) {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
   res.end(value);
+}
+
+async function runConnectionDiagnostics(cfg) {
+  const results = [];
+  results.push(await diagnosticCheck("openrouter_chat", "OpenRouter Chat", async () => {
+    if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+    const answer = await chatCompletion({
+      apiKey: cfg.openRouterApiKey,
+      model: cfg.models.classifier || "openai/gpt-4o-mini",
+      temperature: 0,
+      maxTokens: 16,
+      messages: [
+        { role: "system", content: "Return only OK." },
+        { role: "user", content: "ping" }
+      ]
+    });
+    return { model: cfg.models.classifier, preview: String(answer || "").slice(0, 80) };
+  }));
+
+  results.push(await diagnosticCheck("openrouter_embeddings", "OpenRouter Embeddings", async () => {
+    if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+    const embedding = await createEmbedding({
+      apiKey: cfg.openRouterApiKey,
+      model: cfg.models.embedding,
+      input: "connection test"
+    });
+    return { model: cfg.models.embedding, dimensions: embedding.length };
+  }));
+
+  results.push(await diagnosticCheck("supabase_rest", "Supabase REST", async () => {
+    if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
+    const rows = await rawSupabaseFetch(cfg, "/rest/v1/chat_messages_gf?select=id&limit=1");
+    return { table: "chat_messages_gf", rows: Array.isArray(rows) ? rows.length : 0 };
+  }));
+
+  results.push(await diagnosticCheck("supabase_hybrid_rpc", "Supabase Hybrid RPC", async () => {
+    if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
+    if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing because RPC test needs a query embedding");
+    const embedding = await createEmbedding({
+      apiKey: cfg.openRouterApiKey,
+      model: cfg.models.embedding,
+      input: "connection test"
+    });
+    const rows = await rawSupabaseFetch(cfg, `/rest/v1/rpc/${cfg.retrieval.rpcName}`, {
+      method: "POST",
+      body: JSON.stringify({
+        query_text: "connection test",
+        query_embedding: embedding,
+        match_count: 1,
+        date_from: null,
+        date_to: null,
+        hashtags: [],
+        vector_weight: cfg.retrieval.vectorWeight,
+        keyword_weight: cfg.retrieval.keywordWeight
+      })
+    });
+    return { rpc: cfg.retrieval.rpcName, rows: Array.isArray(rows) ? rows.length : 0 };
+  }));
+
+  return results;
+}
+
+async function diagnosticCheck(id, label, fn) {
+  const startedAt = Date.now();
+  try {
+    const details = await fn();
+    return { id, label, ok: true, status: "ok", ms: Date.now() - startedAt, details };
+  } catch (error) {
+    return {
+      id,
+      label,
+      ok: false,
+      status: classifyDiagnosticError(error.message),
+      ms: Date.now() - startedAt,
+      error: error.message
+    };
+  }
+}
+
+async function rawSupabaseFetch(cfg, path, options = {}) {
+  const response = await fetch(`${cfg.supabaseUrl}${path}`, {
+    ...options,
+    headers: {
+      apikey: cfg.supabaseServiceRoleKey,
+      Authorization: `Bearer ${cfg.supabaseServiceRoleKey}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new Error(data?.message || `Supabase request failed: ${response.status}`);
+  return data;
+}
+
+function classifyDiagnosticError(message) {
+  const value = String(message || "");
+  if (/OPENROUTER_API_KEY|User not found|No auth credentials|unauthorized|forbidden|401|403/i.test(value)) return "auth_error";
+  if (/credit|quota|insufficient/i.test(value)) return "billing_or_quota";
+  if (/could not find|PGRST202|function|rpc|schema cache/i.test(value)) return "missing_rpc_or_schema";
+  if (/relation|table|column/i.test(value)) return "missing_table_or_column";
+  if (/Supabase URL|Service Role/i.test(value)) return "missing_config";
+  return "error";
 }
 
 function summarizeEvaluationCase({ index, testCase, output, runId }) {

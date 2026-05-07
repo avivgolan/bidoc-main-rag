@@ -12,12 +12,45 @@ const ENV_FILES = [".env", ".env.local"];
 
 let _settingsCache = {};
 let _settingsCachedAt = 0;
+let _settingsLoadedFromDb = false;
+let _settingsDbStatus = {
+  read: { ok: false, at: null, error: "not loaded yet" },
+  write: { ok: false, at: null, error: "not written yet" }
+};
 const SETTINGS_TTL_MS = 30_000;
+const DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS = [
+  "חסם",
+  "חסמים",
+  "מעכב",
+  "מעכבים",
+  "עיכוב",
+  "סיכון",
+  "סיכונים",
+  "תלות",
+  "תלויות",
+  "קריטריון",
+  "קריטריונים",
+  "נוהל",
+  "תקן",
+  "blocker",
+  "blockers",
+  "barrier",
+  "barriers",
+  "constraint",
+  "constraints",
+  "risk",
+  "risks",
+  "dependency",
+  "dependencies"
+];
 
-async function sbFetch(path, options = {}) {
+async function sbFetch(path, options = {}, operation = "read") {
   const url = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-  if (!url || !key) return null;
+  if (!url || !key) {
+    markSettingsDbStatus(operation, false, "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing in env");
+    return null;
+  }
   try {
     const response = await fetch(`${url}${path}`, {
       ...options,
@@ -29,15 +62,27 @@ async function sbFetch(path, options = {}) {
       }
     });
     const text = await response.text();
-    return text ? JSON.parse(text) : null;
-  } catch {
+    const data = text ? JSON.parse(text) : null;
+    if (!response.ok) {
+      markSettingsDbStatus(operation, false, data?.message || `Supabase settings request failed: ${response.status}`);
+      return null;
+    }
+    markSettingsDbStatus(operation, true, "");
+    return data;
+  } catch (error) {
+    markSettingsDbStatus(operation, false, error.message);
     return null;
   }
 }
 
 async function loadSettingsFromDb() {
-  const rows = await sbFetch("/rest/v1/agent_settings?id=eq.default&select=data");
-  _settingsCache = rows?.[0]?.data || {};
+  const rows = await sbFetch("/rest/v1/agent_settings?id=eq.default&select=data", {}, "read");
+  if (Array.isArray(rows)) {
+    _settingsCache = rows?.[0]?.data || {};
+    _settingsLoadedFromDb = Boolean(rows?.[0]?.data);
+  } else {
+    _settingsLoadedFromDb = false;
+  }
   _settingsCachedAt = Date.now();
 }
 
@@ -63,7 +108,7 @@ async function migratePromptsIfNeeded() {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({ id: "default", data: _settingsCache, updated_at: new Date().toISOString() })
-  });
+  }, "write");
   console.log("[config] Prompts migration complete.");
 }
 
@@ -76,6 +121,11 @@ export async function refreshSettingsIfStale() {
   if (Date.now() - _settingsCachedAt > SETTINGS_TTL_MS) {
     await loadSettingsFromDb().catch(() => {});
   }
+}
+
+export async function reloadSettingsFromDb() {
+  await loadSettingsFromDb();
+  return _settingsCache;
 }
 
 export function loadEnv() {
@@ -144,6 +194,9 @@ export function getConfig() {
       vectorWeight: Number(settings.retrieval?.vectorWeight || process.env.HYBRID_VECTOR_WEIGHT || 0.65),
       keywordWeight: Number(settings.retrieval?.keywordWeight || process.env.HYBRID_KEYWORD_WEIGHT || 0.35)
     },
+    knowledge: {
+      triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS)
+    },
     n8n: {
       baseUrl: trimSlash(settings.n8nBaseUrl || process.env.N8N_BASE_URL || ""),
       tools: Object.fromEntries(
@@ -155,9 +208,11 @@ export function getConfig() {
 }
 
 export function publicSettings(config = getConfig()) {
+  const settings = readLocalSettings();
   return {
     models: config.models,
     retrieval: config.retrieval,
+    knowledge: config.knowledge,
     timezone: config.timezone,
     supabaseConfigured: Boolean(config.supabaseUrl && config.supabaseServiceRoleKey),
     openRouterConfigured: Boolean(config.openRouterApiKey),
@@ -166,6 +221,17 @@ export function publicSettings(config = getConfig()) {
       openRouterApiKey: maskSecret(config.openRouterApiKey),
       supabaseUrl: config.supabaseUrl,
       supabaseServiceRoleKey: maskSecret(config.supabaseServiceRoleKey)
+    },
+    settingsStore: {
+      loadedFromSupabase: _settingsLoadedFromDb,
+      cacheAgeMs: _settingsCachedAt ? Date.now() - _settingsCachedAt : null,
+      read: _settingsDbStatus.read,
+      write: _settingsDbStatus.write,
+      secretSources: {
+        openRouterApiKey: secretSource(settings.secrets?.openRouterApiKey, process.env.OPENROUTER_API_KEY),
+        supabaseUrl: secretSource(settings.secrets?.supabaseUrl, process.env.SUPABASE_URL),
+        supabaseServiceRoleKey: secretSource(settings.secrets?.supabaseServiceRoleKey, process.env.SUPABASE_SERVICE_ROLE_KEY)
+      }
     },
     tools: Object.fromEntries(
       TOOL_NAMES.map((tool) => {
@@ -186,6 +252,15 @@ export function resolveToolUrl(toolName, config = getConfig()) {
 
 function trimSlash(value) {
   return value.replace(/\/+$/, "");
+}
+
+function normalizeStringList(value, fallback = []) {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[,\n]+/)
+      : fallback;
+  return [...new Set(raw.map((item) => String(item || "").trim()).filter(Boolean))];
 }
 
 export function readLocalSettings() {
@@ -223,6 +298,9 @@ export async function writeLocalSettings(settings) {
       vectorWeight: Number(settings.retrieval?.vectorWeight || existing.retrieval?.vectorWeight || 0.65),
       keywordWeight: Number(settings.retrieval?.keywordWeight || existing.retrieval?.keywordWeight || 0.35)
     },
+    knowledge: {
+      triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, existing.knowledge?.triggerKeywords || DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS)
+    },
     n8nBaseUrl: settings.n8nBaseUrl || "",
     secrets: {
       openRouterApiKey: mergeSecret(existing.secrets?.openRouterApiKey, incomingSecrets.openRouterApiKey),
@@ -240,8 +318,23 @@ export async function writeLocalSettings(settings) {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({ id: "default", data: safe, updated_at: new Date().toISOString() })
-  });
+  }, "write");
+  _settingsLoadedFromDb = _settingsDbStatus.write.ok || _settingsLoadedFromDb;
   return safe;
+}
+
+function markSettingsDbStatus(operation, ok, error = "") {
+  if (!["read", "write"].includes(operation)) return;
+  _settingsDbStatus = {
+    ..._settingsDbStatus,
+    [operation]: { ok, at: new Date().toISOString(), error }
+  };
+}
+
+function secretSource(settingsValue, envValue) {
+  if (settingsValue) return _settingsLoadedFromDb ? "supabase_settings" : "runtime_settings";
+  if (envValue) return "env";
+  return "missing";
 }
 
 function maskSecret(value) {

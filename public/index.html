@@ -146,10 +146,10 @@
         <div class="workflowBoard" id="workflowBoard">
           <svg class="workflowCables" id="workflowCables" aria-hidden="true"></svg>
           <div class="workflowNodes" id="workflowNodes"></div>
-          <aside class="workflowInspector" id="workflowInspector">
-            <div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>
-          </aside>
         </div>
+        <aside class="workflowInspector" id="workflowInspector">
+          <div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>
+        </aside>
       </section>
 
       <!-- ======================================================
@@ -207,7 +207,10 @@
       <section class="panel" id="settings">
         <header class="panelHeader">
           <h2>הגדרות</h2>
-          <button id="saveSettings">שמור</button>
+          <div class="headerActions">
+            <button id="reloadSettings" type="button">רענן מ-Supabase</button>
+            <button id="saveSettings">שמור</button>
+          </div>
         </header>
 
         <h3>חיבורים</h3>
@@ -222,7 +225,8 @@
             <input id="supabaseServiceRoleKey" type="password" autocomplete="off" placeholder="eyJ..." />
           </label>
         </div>
-        <p class="hint">המפתחות נשמרים מקומית בקובץ ההגדרות. השאר שדות ריקים כדי לשמור את הערכים הקיימים.</p>
+        <p class="hint">המפתחות נשמרים בטבלת Supabase <code style="background:var(--surface-3);padding:1px 5px;border-radius:4px;font-size:12.5px;">agent_settings</code>. השאר שדות ריקים כדי לשמור את הערכים הקיימים.</p>
+        <div class="settingsSourceStatus" id="settingsSourceStatus">טוען סטטוס הגדרות...</div>
 
         <h3>מודלים</h3>
         <div class="grid">
@@ -284,6 +288,14 @@
         </div>
         <p class="hint">אזור הזמן משפיע על כל שאלות הזמן שנשאלות בסוכן — ודא שהוא תואם למיקום הפרויקט.</p>
 
+        <h3>Knowledge Base Vocabulary</h3>
+        <div class="grid">
+          <label class="wide">מילות מפתח שמפעילות את סוכן ה-Knowledge Base
+            <textarea id="knowledgeTriggerKeywords" rows="6" spellcheck="false" placeholder="חסמים&#10;סיכונים&#10;תלויות"></textarea>
+          </label>
+        </div>
+        <p class="hint">כאשר אחת מהמילים מופיעה בשאלת המשתמש, המערכת תפעיל את Professional Knowledge Agent כדי לפרש את המונח ולכוון מה לחפש בפרויקט.</p>
+
         <h3>Hybrid Search</h3>
         <div class="grid">
           <label class="wide">Hybrid RPC Name
@@ -331,6 +343,19 @@
           </label>
         </div>
         <pre class="result" id="toolResult">אין תוצאה עדיין.</pre>
+
+        <section class="embeddedPanel">
+          <header class="panelHeader compact">
+            <div>
+              <h2>בדיקת חיבורים</h2>
+              <p class="hint">בודק בנפרד OpenRouter Chat, OpenRouter Embeddings, Supabase REST ו-Supabase Hybrid RPC.</p>
+            </div>
+            <button id="runConnectionDiagnostics" type="button">בדוק חיבורים</button>
+          </header>
+          <div class="diagnosticsGrid" id="connectionDiagnostics">
+            <div class="diagnosticCard idle">ממתין לבדיקה.</div>
+          </div>
+        </section>
 
         <section class="embeddedPanel">
           <header class="panelHeader compact">

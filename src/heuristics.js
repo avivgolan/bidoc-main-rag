@@ -65,7 +65,7 @@ function baseClassification({ type, complexity = "GENERAL", tool_hint, urgency =
 }
 
 function isProfessionalQuestion(message) {
-  return /איך|כיצד|למה|מתי נכון|מה הדרך|שיטה|קריטריון|קריטריונים|מונח|מונחים|תקן|נוהל|החלטה מקצועית|best practice|method|criteria|standard|procedure|glossary/i.test(String(message || ""));
+  return /איך|כיצד|למה|מתי נכון|מה הדרך|שיטה|קריטריון|קריטריונים|מונח|מונחים|תקן|נוהל|החלטה מקצועית|חסם|חסמים|מעכב|מעכבים|עיכוב|סיכון|סיכונים|תלות|תלויות|best practice|method|criteria|standard|procedure|glossary|barrier|barriers|constraint|constraints|blocker|blockers|bottleneck|risk|dependency/i.test(String(message || ""));
 }
 
 function isInvestigationQuestion(message) {
@@ -78,7 +78,8 @@ function extractKnowledgeTags(message) {
     ["שיטות_עבודה", /שיטה|דרך|איך|כיצד|method|best practice/],
     ["קבלת_החלטות", /החלטה|קריטריון|criteria|decision/],
     ["תקנים_ונהלים", /תקן|נוהל|standard|procedure/],
-    ["מונחים", /מונח|מונחים|glossary|term/]
+    ["מונחים", /מונח|מונחים|glossary|term/],
+    ["חסמים_וסיכונים", /חסם|חסמים|מעכב|מעכבים|עיכוב|סיכון|סיכונים|תלות|תלויות|barrier|constraint|blocker|bottleneck|risk|dependency/]
   ];
   return tags.filter(([, pattern]) => pattern.test(text)).map(([tag]) => tag);
 }

@@ -19,7 +19,7 @@ Output MUST be a valid JSON object with EXACTLY these keys:
 - "date_from": ISO timestamp (YYYY-MM-DDTHH:mm:ssZ) of the START of the date range. Use null if no date is mentioned.
 - "date_to": ISO timestamp (YYYY-MM-DDTHH:mm:ssZ) of the END of the date range. Use null if no date is mentioned.
 - "hashtags": An array of the most relevant topic hashtags WITHOUT the # symbol. Use [] if none are clear.
-- "professional": true if the user asks a professional/domain-methodology question that benefits from a glossary, decision rules, best practices, technical interpretation, or how-to reasoning. Otherwise false.
+- "professional": true if the user asks a professional/domain-methodology question that benefits from a glossary, decision rules, best practices, technical interpretation, or how-to reasoning. Mark true for construction/project-management concepts such as blockers/barriers/constraints ("חסמים"), risks, dependencies, delay causes, decision criteria, or methodology. Otherwise false.
 - "professional_reason": Short reason for the professional flag. Use "" if false.
 - "knowledge_tags": Array of domain tags for the professional knowledge base. Use [] if none.
 - "investigation": true if the user asks a complex causal/accountability/comparison question that should show what was checked before answering. Otherwise false.
@@ -51,6 +51,7 @@ Classification Logic:
 7. Engineering/technical report -> consultants_reports
 8. WhatsApp/site photos/informal -> whatsapp_messages
 9. Emails/formal letters -> emails
+10. Professional terms or management concepts such as "חסמים", "גורמי עיכוב", "סיכונים", "תלויות", "decision criteria", "blockers", "constraints" -> professional: true, knowledge_tags should include relevant glossary/methodology tags. Keep the project data route as RAG.
 
 Hashtag Extraction:
 - Extract short topic tags that likely exist in the project index.

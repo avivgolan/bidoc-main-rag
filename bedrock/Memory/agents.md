@@ -27,6 +27,8 @@ Documents all 5 agents in the pipeline: their role, model, prompt location, rout
 - **Fallback:** If OpenRouter fails → `heuristicClassification()` in `src/heuristics.js` (regex-based, no API)
 - **CHAT triggers:** greetings, small talk, time/date questions
 - **RAG triggers:** anything project-related (money, safety, decisions, materials, emails, etc.)
+- **Professional triggers:** Domain/project-management concepts such as `חסמים`, blockers, constraints, risks, dependencies, decision criteria, methodology, standards, and glossary terms set `professional: true` so the Knowledge Planner runs before RAG.
+- **Local enforcement:** After the LLM classifier returns, `runChatPipeline()` applies `enforceProfessionalKnowledgeMode()`. This corrects model misses for professional concepts (notably `חסמים`) and emits `Professional Knowledge mode enforced locally`.
 - **Key fix (2026-05-07):** Supabase was caching old classifier prompt → always returned CHAT. Fixed by migration that clears stored defaults.
 
 ### 2. Lite Agent (`lite`)
@@ -76,6 +78,20 @@ classification.type === "RAG"   →  runRagAgent()
   all tool/retrieval calls                →  source quality score + conflict scan before answer
 ```
 
+## Workflow Visualization
+
+- The Workflow tab keeps a static template of the full system graph in `public/app.js`.
+- Latest run logs are merged into that template: used nodes become active, unused nodes remain idle, and only runtime edges are highlighted.
+- Management-only surfaces such as Settings, Knowledge Manager, Tool Tester, and Reset Server are shown as disconnected dashed nodes because they are not automatic chat-pipeline components.
+- RAG runtime edges now include `n8n_tools → source_quality → conflict_detection → main_agent`, matching the source review steps before final synthesis.
+
+## Diagnostics
+
+- Tools tab includes Connection Diagnostics via `POST /api/diagnostics/connections`.
+- It tests OpenRouter Chat, OpenRouter Embeddings, Supabase REST (`chat_messages_gf`), and Supabase Hybrid RPC separately.
+- This is used to distinguish OpenRouter auth/account errors such as `User not found` from Supabase REST/RPC/schema problems.
+- Settings tab displays secret sources (`Supabase agent_settings`, `.env / environment`, runtime cache, or missing), reports Supabase settings write status, and exposes `POST /api/settings/reload` for manual refresh from Supabase.
+
 ## Model Configuration
 
 Models are stored in Supabase `agent_settings.data.models`. Defaults in `src/config.js`:
@@ -100,6 +116,11 @@ reranker:         "openai/gpt-4o-mini"
 
 ## Recent Changes
 
+- 2026-05-07 — Added Tools connection diagnostics for OpenRouter Chat, OpenRouter Embeddings, Supabase REST, and Supabase Hybrid RPC.
+- 2026-05-07 — Added Settings source/status UI and manual reload from Supabase for `agent_settings`.
+- 2026-05-07 — Classifier professional detection now treats `חסמים` / blockers / constraints as Knowledge Planner questions.
+- 2026-05-07 — Added local post-classifier enforcement so Knowledge Planner still runs when the LLM classifier misses `professional=true`.
+- 2026-05-07 — Workflow visualization changed from run-only graph to persistent system map with active/idle/disconnected states and real runtime cable highlighting.
 - 2026-05-07 — Added Memory Summary and Investigation Mode; complex questions now pass an investigation plan to Main RAG and conversation context is summarized outside the raw message window.
 - 2026-05-07 — Added source quality scoring, possible conflict detection, and Evaluation Mode for repeatable routing/source checks.
 - 2026-05-07 — Hardened agent information boundaries: Knowledge Plan is guidance only, safety precheck runs before retrieval for HIGH urgency, and planner queries/tools now influence RAG/tools without replacing the raw user query.

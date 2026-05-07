@@ -13,7 +13,7 @@ last_validation: 2026-05-07
 last_validation_result: ok
 last_doctor: 2026-05-07
 last_doctor_result: ok
-last_project_sync: 2026-05-07T01:05:04Z
+last_project_sync: 2026-05-07T14:43:39Z
 ---
 
 # Knowledge Status: bidoc agent
@@ -30,7 +30,7 @@ last_project_sync: 2026-05-07T01:05:04Z
 
 - Last bootstrap: `2026-05-06T23:40:24Z`
 - Last backfill/import: `2026-05-07`
-- Last project sync: `2026-05-07T01:05:04Z`
+- Last project sync: `2026-05-07T14:43:39Z`
 - Last memory refresh by Codex: `2026-05-07`
 - Last compaction: `2026-05-07`
 - Last validation: `2026-05-07` (`ok`)

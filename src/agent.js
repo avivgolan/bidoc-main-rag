@@ -19,14 +19,6 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
   const saved = await saveMessage({ config, userMessage: message, sanitizedMessage: sanitized, sessionId });
   emitRunEvent(runId, "save_message", "Message saved", { id: saved.id, status: saved.status });
   const trace = [];
-  let memory = await recentMemory({ config, sessionId }).catch((error) => {
-    trace.push({ step: "memory", ok: false, error: error.message });
-    emitRunEvent(runId, "memory", "Memory load failed", { error: error.message });
-    return [];
-  });
-  if (!memory.length) memory = getLocalMemory(sessionId);
-  const memorySummary = getMemorySummary(sessionId);
-  emitRunEvent(runId, "memory", "Memory loaded", { messages: memory.length, summary: memorySummary });
   let classification;
 
   try {
@@ -40,7 +32,24 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     emitRunEvent(runId, "classifier", "Classifier failed, using local fallback", { error: error.message, classification });
     console.log(`[classifier] FALLBACK (${error.message}) type=${classification.type} msg="${sanitized.slice(0, 70)}"`);
   }
+  const beforeProfessional = Boolean(classification?.professional);
+  classification = enforceProfessionalKnowledgeMode(classification, sanitized, config);
+  if (!beforeProfessional && classification?.professional) {
+    emitRunEvent(runId, "classifier", "Professional Knowledge mode enforced locally", {
+      professional_reason: classification.professional_reason,
+      knowledge_tags: classification.knowledge_tags || []
+    });
+  }
   classification = enforceInvestigationMode(classification, sanitized);
+
+  let memory = await recentMemory({ config, sessionId }).catch((error) => {
+    trace.push({ step: "memory", ok: false, error: error.message });
+    emitRunEvent(runId, "memory", "Memory load failed", { error: error.message });
+    return [];
+  });
+  if (!memory.length) memory = getLocalMemory(sessionId);
+  const memorySummary = getMemorySummary(sessionId);
+  emitRunEvent(runId, "memory", "Memory loaded", { messages: memory.length, summary: memorySummary });
 
   let result;
   if (classification.type === "CHAT") {
@@ -486,8 +495,45 @@ function enforceInvestigationMode(classification, message) {
   };
 }
 
+export function enforceProfessionalKnowledgeMode(classification, message, config = {}) {
+  if (!classification) return classification;
+  const local = heuristicClassification(message);
+  const vocabularyMatch = findKnowledgeVocabularyMatch(message, config.knowledge?.triggerKeywords || []);
+  if (local.type !== "RAG" || (!local.professional && !vocabularyMatch)) return classification;
+  if (classification.professional && classification.type === "RAG") return classification;
+  return {
+    ...classification,
+    type: "RAG",
+    professional: true,
+    professional_reason:
+      classification.professional_reason ||
+      local.professional_reason ||
+      (vocabularyMatch ? `זוהתה מילת מפתח מאוצר המילים: ${vocabularyMatch}` : "") ||
+      "זוהתה שאלה מקצועית לפי חוקי התזמור המקומיים.",
+    knowledge_tags: uniqueStrings([
+      ...(classification.knowledge_tags || []),
+      ...(classification.hashtags || []),
+      ...(local.knowledge_tags || []),
+      ...(local.hashtags || []),
+      ...(vocabularyMatch ? ["אוצר_מילים"] : [])
+    ])
+  };
+}
+
 function isInvestigationQuestion(message) {
   return /למה|מדוע|מה גרם|גורם|עיכוב|אחריות|אחראי|מי אחראי|השווא|פער|סתירה|בעיה חוזרת|שורש|root cause|why|cause|delay|responsible|compare|conflict/i.test(String(message || ""));
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function findKnowledgeVocabularyMatch(message, keywords) {
+  const text = String(message || "").toLowerCase();
+  return (keywords || [])
+    .map((keyword) => String(keyword || "").trim())
+    .filter(Boolean)
+    .find((keyword) => text.includes(keyword.toLowerCase())) || "";
 }
 
 function normalizeKnowledgePlan(value, matches) {
@@ -701,6 +747,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
       id: saved.id,
       status: saved.status
     }),
+    workflowNode("classifier", "Smart Classifier", "ai", "done", { sanitized }, classification),
     workflowNode("memory", "Chat Memory", "memory", "done", {
       session_id: saved.session_id
     }, {
@@ -708,7 +755,6 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
       summary: memorySummary,
       preview: memory.slice(-4)
     }),
-    workflowNode("classifier", "Smart Classifier", "ai", "done", { sanitized }, classification),
     workflowNode("switch", "Traffic Switch", "router", "done", classification, {
       route: isChat ? "Lite Agent" : "Main RAG Agent"
     })
@@ -799,6 +845,18 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
           sources: call.sources || []
         }))
       }),
+      workflowNode("source_quality", "Source Quality", "router", "done", {
+        retrieval_records: countRows(rerankerCall?.data || hybridCall?.data),
+        tool_calls: n8nCalls.length
+      }, result.sourceQuality || {
+        summary: "not returned"
+      }),
+      workflowNode("conflict_detection", "Conflict Detection", "router", (result.conflicts || []).length ? "error" : "done", {
+        source_quality: Boolean(result.sourceQuality),
+        sources: result.sources?.length || 0
+      }, {
+        conflicts: result.conflicts || []
+      }),
       workflowNode("main_agent", "Main RAG Agent", "ai", "done", {
         message: sanitized,
         memory_messages: memory.length,
@@ -827,18 +885,18 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
     ? [
         ["chat_input", "sanitize"],
         ["sanitize", "save_message"],
-        ["save_message", "memory"],
-        ["memory", "classifier"],
-        ["classifier", "switch"],
+        ["save_message", "classifier"],
+        ["classifier", "memory"],
+        ["memory", "switch"],
         ["switch", "lite_agent"],
         ["lite_agent", "update_message"]
       ]
     : [
         ["chat_input", "sanitize"],
         ["sanitize", "save_message"],
-        ["save_message", "memory"],
-        ["memory", "classifier"],
-        ["classifier", "switch"],
+        ["save_message", "classifier"],
+        ["classifier", "memory"],
+        ["memory", "switch"],
         ...(classification.urgency === "HIGH" ? [["switch", "safety_precheck"]] : []),
         ...(result.investigationPlan
           ? [[classification.urgency === "HIGH" ? "safety_precheck" : "switch", "investigation"]]
@@ -851,7 +909,9 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
           : [[result.investigationPlan ? "investigation" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "hybrid_search"]]),
         ["hybrid_search", "reranker"],
         ["reranker", "n8n_tools"],
-        ["n8n_tools", "main_agent"],
+        ["n8n_tools", "source_quality"],
+        ["source_quality", "conflict_detection"],
+        ["conflict_detection", "main_agent"],
         ["main_agent", "update_message"]
       ];
 

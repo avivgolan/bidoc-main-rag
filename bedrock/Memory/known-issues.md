@@ -15,7 +15,15 @@ tags:
 
 ## Active Issues
 
+### 0. "User not found" during classifier/hybrid/main
+- **Symptom:** Run log shows `classifier failed: User not found`, `hybrid_search: User not found`, or `Main Agent failed: User not found`.
+- **Likely cause:** OpenRouter auth/account problem. `hybrid_search` creates an embedding through OpenRouter before calling Supabase RPC, so this error can appear under hybrid search even when Supabase REST works.
+- **Workaround:** Go to Settings → re-enter a valid OpenRouter key (`sk-or-...`) → Save → Reset server. Check OpenRouter credits/account status.
+- **Diagnostic:** Tools → Connection Diagnostics tests OpenRouter Chat, OpenRouter Embeddings, Supabase REST, and Supabase Hybrid RPC independently.
+- **Supabase note:** If Supabase REST fails, re-enter the correct Supabase Service Role Key. The service role key must be a project JWT (`eyJ...`), not a management token.
+
 ### 1. Supabase "User not found" on hybrid_search
+- **Status:** Superseded by issue 0 for cases where classifier/main also fail. If `save_message` works but classifier/main/hybrid all show `User not found`, diagnose OpenRouter first.
 - **Symptom:** RAG response shows `hybrid_search: User not found` in "מה לא נמצא" section
 - **Cause:** Supabase service role key stored in settings is wrong, expired, or masked
 - **Workaround:** Go to Settings → re-enter the correct Supabase Service Role Key → Save

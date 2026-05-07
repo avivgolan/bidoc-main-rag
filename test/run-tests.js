@@ -6,6 +6,7 @@ import { buildToolOrder } from "../src/tools.js";
 import { deleteKnowledgeDocument, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
 import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality.js";
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
+import { enforceProfessionalKnowledgeMode } from "../src/agent.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -62,6 +63,53 @@ test("heuristicClassification marks professional questions", () => {
   assert.equal(output.type, "RAG");
   assert.equal(output.professional, true);
   assert.ok(output.knowledge_tags.length);
+});
+
+test("heuristicClassification treats project blockers as professional concept questions", () => {
+  const output = heuristicClassification("מה היו החסמים בפרויקט?");
+  assert.equal(output.type, "RAG");
+  assert.equal(output.professional, true);
+  assert.ok(output.knowledge_tags.includes("חסמים_וסיכונים"));
+});
+
+test("professional enforcement fixes model misses for project blockers", () => {
+  const output = enforceProfessionalKnowledgeMode({
+    type: "RAG",
+    complexity: "GENERAL",
+    tool_hint: "alert",
+    urgency: "NORMAL",
+    date_from: null,
+    date_to: null,
+    hashtags: [],
+    professional: false,
+    professional_reason: "",
+    knowledge_tags: [],
+    investigation: false,
+    investigation_reason: ""
+  }, "מה היו החסמים בפרויקט?");
+  assert.equal(output.professional, true);
+  assert.ok(output.knowledge_tags.includes("חסמים_וסיכונים"));
+});
+
+test("professional enforcement uses configured knowledge vocabulary", () => {
+  const output = enforceProfessionalKnowledgeMode({
+    type: "RAG",
+    complexity: "GENERAL",
+    tool_hint: "alert",
+    urgency: "NORMAL",
+    date_from: null,
+    date_to: null,
+    hashtags: [],
+    professional: false,
+    professional_reason: "",
+    knowledge_tags: [],
+    investigation: false,
+    investigation_reason: ""
+  }, "מה מצב טופס 4?", {
+    knowledge: { triggerKeywords: ["טופס 4"] }
+  });
+  assert.equal(output.professional, true);
+  assert.ok(output.knowledge_tags.includes("אוצר_מילים"));
 });
 
 test("heuristicClassification marks investigation questions", () => {
