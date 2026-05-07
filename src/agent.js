@@ -34,10 +34,19 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
   }
   const beforeProfessional = Boolean(classification?.professional);
   classification = enforceProfessionalKnowledgeMode(classification, sanitized, config);
+  emitRunEvent(runId, "knowledge_vocabulary", classification?.knowledge_vocabulary_match
+    ? "Knowledge vocabulary matched"
+    : "Knowledge vocabulary checked", {
+    matched: classification?.knowledge_vocabulary_match || null,
+    professional: Boolean(classification?.professional),
+    trigger_keywords: config.knowledge?.triggerKeywords || [],
+    knowledge_tags: classification?.knowledge_tags || []
+  });
   if (!beforeProfessional && classification?.professional) {
-    emitRunEvent(runId, "classifier", "Professional Knowledge mode enforced locally", {
+    emitRunEvent(runId, "knowledge_vocabulary", "Professional Knowledge mode enforced locally", {
       professional_reason: classification.professional_reason,
-      knowledge_tags: classification.knowledge_tags || []
+      knowledge_tags: classification.knowledge_tags || [],
+      matched: classification.knowledge_vocabulary_match || null
     });
   }
   classification = enforceInvestigationMode(classification, sanitized);
@@ -499,10 +508,23 @@ export function enforceProfessionalKnowledgeMode(classification, message, config
   if (!classification) return classification;
   const local = heuristicClassification(message);
   const vocabularyMatch = findKnowledgeVocabularyMatch(message, config.knowledge?.triggerKeywords || []);
-  if (local.type !== "RAG" || (!local.professional && !vocabularyMatch)) return classification;
-  if (classification.professional && classification.type === "RAG") return classification;
-  return {
+  const checkedClassification = {
     ...classification,
+    knowledge_vocabulary_checked: true,
+    knowledge_vocabulary_match: vocabularyMatch || classification.knowledge_vocabulary_match || null
+  };
+  if (local.type !== "RAG" || (!local.professional && !vocabularyMatch)) return checkedClassification;
+  if (classification.professional && classification.type === "RAG") {
+    return {
+      ...checkedClassification,
+      knowledge_tags: uniqueStrings([
+        ...(classification.knowledge_tags || []),
+        ...(vocabularyMatch ? ["אוצר_מילים"] : [])
+      ])
+    };
+  }
+  return {
+    ...checkedClassification,
     type: "RAG",
     professional: true,
     professional_reason:
@@ -529,11 +551,60 @@ function uniqueStrings(values) {
 }
 
 function findKnowledgeVocabularyMatch(message, keywords) {
-  const text = String(message || "").toLowerCase();
+  const originalText = String(message || "");
+  const text = normalizeVocabularyText(originalText);
+  const textTokens = vocabularyTokens(text);
   return (keywords || [])
     .map((keyword) => String(keyword || "").trim())
     .filter(Boolean)
-    .find((keyword) => text.includes(keyword.toLowerCase())) || "";
+    .find((keyword) => vocabularyKeywordMatches(text, textTokens, keyword)) || "";
+}
+
+function vocabularyKeywordMatches(normalizedText, textTokens, keyword) {
+  const normalizedKeyword = normalizeVocabularyText(keyword);
+  if (!normalizedKeyword) return false;
+  if (normalizedText.includes(normalizedKeyword)) return true;
+
+  const keywordTokens = vocabularyTokens(normalizedKeyword);
+  for (const keywordToken of keywordTokens) {
+    const keywordStem = stemVocabularyToken(keywordToken);
+    for (const textToken of textTokens) {
+      const textStem = stemVocabularyToken(textToken);
+      if (!keywordStem || !textStem) continue;
+      if (
+        textStem === keywordStem ||
+        textStem.includes(keywordStem) ||
+        keywordStem.includes(textStem)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function normalizeVocabularyText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/[\u0591-\u05C7]/g, "")
+    .replace(/[^\p{L}\p{N}\s_-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function vocabularyTokens(value) {
+  return normalizeVocabularyText(value).split(/[\s_-]+/).filter(Boolean);
+}
+
+function stemVocabularyToken(token) {
+  let value = String(token || "").trim();
+  if (!value) return "";
+  value = value.replace(/^(ו|ה|ב|כ|ל|מ|ש)(?=.{3,})/u, "");
+  value = value
+    .replace(/(יים|יהם|יהן|ות|ים|י|ה|ן|ם)$/u, "")
+    .replace(/(ed|ing|ers|er|ies|s)$/iu, "");
+  return value;
 }
 
 function normalizeKnowledgePlan(value, matches) {
@@ -748,6 +819,15 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
       status: saved.status
     }),
     workflowNode("classifier", "Smart Classifier", "ai", "done", { sanitized }, classification),
+    workflowNode("knowledge_vocabulary", "Knowledge Vocabulary", "router", classification.knowledge_vocabulary_match ? "done" : "skipped", {
+      message: sanitized,
+      trigger_keywords: config.knowledge?.triggerKeywords || []
+    }, {
+      checked: Boolean(classification.knowledge_vocabulary_checked),
+      matched: classification.knowledge_vocabulary_match || null,
+      professional: Boolean(classification.professional),
+      knowledge_tags: classification.knowledge_tags || []
+    }),
     workflowNode("memory", "Chat Memory", "memory", "done", {
       session_id: saved.session_id
     }, {
@@ -886,7 +966,8 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         ["chat_input", "sanitize"],
         ["sanitize", "save_message"],
         ["save_message", "classifier"],
-        ["classifier", "memory"],
+        ["classifier", "knowledge_vocabulary"],
+        ["knowledge_vocabulary", "memory"],
         ["memory", "switch"],
         ["switch", "lite_agent"],
         ["lite_agent", "update_message"]
@@ -895,7 +976,8 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         ["chat_input", "sanitize"],
         ["sanitize", "save_message"],
         ["save_message", "classifier"],
-        ["classifier", "memory"],
+        ["classifier", "knowledge_vocabulary"],
+        ["knowledge_vocabulary", "memory"],
         ["memory", "switch"],
         ...(classification.urgency === "HIGH" ? [["switch", "safety_precheck"]] : []),
         ...(result.investigationPlan
@@ -903,7 +985,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
           : []),
         ...(classification.professional
           ? [
-              [result.investigationPlan ? "investigation" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "knowledge_planner"],
+              [classification.knowledge_vocabulary_match ? "knowledge_vocabulary" : result.investigationPlan ? "investigation" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "knowledge_planner"],
               ["knowledge_planner", "hybrid_search"]
             ]
           : [[result.investigationPlan ? "investigation" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "hybrid_search"]]),

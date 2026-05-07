@@ -112,6 +112,28 @@ test("professional enforcement uses configured knowledge vocabulary", () => {
   assert.ok(output.knowledge_tags.includes("אוצר_מילים"));
 });
 
+test("professional enforcement matches Hebrew vocabulary inflections", () => {
+  const output = enforceProfessionalKnowledgeMode({
+    type: "RAG",
+    complexity: "GENERAL",
+    tool_hint: "alert",
+    urgency: "NORMAL",
+    date_from: null,
+    date_to: null,
+    hashtags: [],
+    professional: false,
+    professional_reason: "",
+    knowledge_tags: [],
+    investigation: false,
+    investigation_reason: ""
+  }, "מה העיכובים שהיו בפרויקט?", {
+    knowledge: { triggerKeywords: ["עיכוב"] }
+  });
+  assert.equal(output.professional, true);
+  assert.equal(output.knowledge_vocabulary_match, "עיכוב");
+  assert.ok(output.knowledge_tags.includes("אוצר_מילים"));
+});
+
 test("heuristicClassification marks investigation questions", () => {
   const output = heuristicClassification("למה היה עיכוב ומי אחראי לזה?");
   assert.equal(output.type, "RAG");
