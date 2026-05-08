@@ -131,7 +131,8 @@ export async function fetchTimelineEvents({ config, limit = 1000 }) {
     id: row.id,
     date: row.date,
     tags: parseHashtags(row.hashtags),
-    content: row.content || (typeof row.metadata === "object" && row.metadata ? row.metadata.summary || row.metadata.text || row.metadata.content || "" : "") || ""
+    content: row.content || (typeof row.metadata === "object" && row.metadata ? row.metadata.summary || row.metadata.text || row.metadata.content || "" : "") || "",
+    metadata: row.metadata ?? null
   }));
 }
 

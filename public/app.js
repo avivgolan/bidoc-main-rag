@@ -1344,7 +1344,8 @@ const timelineState = {
   calYear: null, calMonth: null, calSelectedDate: null,
   selectedEventId: null,
   searchQuery: "",
-  viewportStart: null
+  viewportStart: null,
+  visibleListFields: new Set()
 };
 
 function timelineDebug(message, data = {}) {
@@ -1775,6 +1776,44 @@ function buildPanelsLayer(events) {
 }
 
 function buildListPanel(events) {
+  const wrap = document.createElement("div"); wrap.className = "tlListWrap";
+
+  // --- field picker toolbar ---
+  const toolbar = document.createElement("div"); toolbar.className = "tlListToolbar";
+  const fieldsBtn = document.createElement("button"); fieldsBtn.className = "tlFieldsBtn"; fieldsBtn.textContent = "שדות ▾";
+  toolbar.appendChild(fieldsBtn);
+  wrap.appendChild(toolbar);
+
+  const picker = document.createElement("div"); picker.className = "tlFieldsPicker"; picker.hidden = true;
+  const allFields = collectAllMetaFields(events);
+  if (allFields.length) {
+    const sections = [{ id: "orig", title: "original_data" }, { id: "meta", title: "metadata" }];
+    for (const sec of sections) {
+      const secFields = allFields.filter(f => f.section === sec.id);
+      if (!secFields.length) continue;
+      const secHdr = document.createElement("div"); secHdr.className = "tlFieldsSecHdr"; secHdr.textContent = sec.title; picker.appendChild(secHdr);
+      for (const f of secFields) {
+        const row = document.createElement("label"); row.className = "tlFieldRow";
+        const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = timelineState.visibleListFields.has(f.key);
+        cb.addEventListener("change", () => {
+          if (cb.checked) timelineState.visibleListFields.add(f.key);
+          else timelineState.visibleListFields.delete(f.key);
+          renderTimeline();
+        });
+        row.appendChild(cb);
+        const lbl = document.createElement("span"); lbl.textContent = f.label; row.appendChild(lbl);
+        picker.appendChild(row);
+      }
+    }
+  } else {
+    picker.textContent = "אין שדות זמינים";
+  }
+  wrap.appendChild(picker);
+
+  fieldsBtn.addEventListener("click", (e) => { e.stopPropagation(); picker.hidden = !picker.hidden; });
+  document.addEventListener("click", () => { picker.hidden = true; }, { capture: false });
+
+  // --- list ---
   const list = document.createElement("div"); list.className = "tlList"; list.id = "tlListPanel";
   const grouped = new Map();
   for (const ev of events) {
@@ -1790,19 +1829,28 @@ function buildListPanel(events) {
       const d = new Date(ev.date); const type = classifyEvent(ev);
       const item = document.createElement("div"); item.className = "tlListItem"; item.dataset.eventId = ev.id;
       const dot = document.createElement("div"); dot.className = "tlListDot"; dot.style.background = getTypeColor(type);
-      const wrap = document.createElement("div"); wrap.style.cssText = "flex:1;min-width:0;";
-      const meta = document.createElement("div"); meta.className = "tlListMeta"; meta.textContent = d.toLocaleDateString("he-IL",{day:"numeric",month:"short"});
-      const txt = document.createElement("div"); txt.className = "tlListText"; txt.textContent = ev.content || ev.tags.join(", ") || "—";
-      wrap.appendChild(meta); wrap.appendChild(txt); item.appendChild(dot); item.appendChild(wrap);
-      item.setAttribute("role", "button");
-      item.setAttribute("tabindex", "0");
+      const inner = document.createElement("div"); inner.style.cssText = "flex:1;min-width:0;";
+      const metaEl = document.createElement("div"); metaEl.className = "tlListMeta"; metaEl.textContent = d.toLocaleDateString("he-IL",{day:"numeric",month:"short"});
+      const txt = document.createElement("div"); txt.className = "tlListText"; txt.textContent = ev.content || getMailSummarize(ev) || ev.tags.join(", ") || "—";
+      inner.appendChild(metaEl); inner.appendChild(txt);
+      for (const fk of timelineState.visibleListFields) {
+        const val = formatFieldValue(getFieldValue(ev, fk));
+        if (!val) continue;
+        const row = document.createElement("div"); row.className = "tlListFieldRow";
+        const keyEl = document.createElement("span"); keyEl.className = "tlListFieldKey"; keyEl.textContent = fk.replace("orig.", "");
+        const valEl = document.createElement("span"); valEl.className = "tlListFieldVal"; valEl.textContent = val;
+        row.appendChild(keyEl); row.appendChild(valEl); inner.appendChild(row);
+      }
+      item.appendChild(dot); item.appendChild(inner);
+      item.setAttribute("role", "button"); item.setAttribute("tabindex", "0");
       item.setAttribute("aria-label", (ev.content || ev.tags.join(", ") || "אירוע").slice(0, 80));
       item.addEventListener("click", () => selectTlEvent(ev));
       item.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTlEvent(ev); } });
       list.appendChild(item);
     }
   }
-  return list;
+  wrap.appendChild(list);
+  return wrap;
 }
 
 function buildAiPanel(events) {
@@ -1857,8 +1905,25 @@ function selectTlEvent(ev, scroll = true) {
       </div>
     </div>
     <div class="tlDetailBody">${escapeHtml(ev.content || "אין תוכן זמין.")}</div>
+    ${getMailCategory(ev) ? `<div class="tlMailSumLabel">mail_category</div><div class="tlMailCatBadge">${escapeHtml(getMailCategory(ev))}</div>` : ""}
+    ${getMailSummarize(ev) ? `<div class="tlMailSumLabel">mail_summarize</div><div class="tlMailSumBody">${escapeHtml(getMailSummarize(ev))}</div>` : ""}
     ${ev.tags.length ? `<div class="tlDetailTags">${ev.tags.map(t => `<span class="tlDetailTag" style="background:${hexA(color,.13)};color:${color};border:1px solid ${hexA(color,.28)};">#${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+    <div class="tlMetaSection" id="tlMetaSection"></div>
   `;
+  const metaSection = panel.querySelector("#tlMetaSection");
+  const metaBtn = document.createElement("button");
+  metaBtn.className = "tlMetaBtn";
+  metaBtn.textContent = "הצג metadata";
+  metaBtn.addEventListener("click", () => {
+    const existing = metaSection.querySelector(".tlMetaBox");
+    if (existing) { existing.remove(); metaBtn.textContent = "הצג metadata"; return; }
+    const box = document.createElement("pre");
+    box.className = "tlMetaBox";
+    box.textContent = ev.metadata != null ? JSON.stringify(ev.metadata, null, 2) : "(אין metadata לרשומה זו)";
+    metaSection.appendChild(box);
+    metaBtn.textContent = "הסתר metadata";
+  });
+  metaSection.appendChild(metaBtn);
   if (scroll) { const listItem = document.querySelector(`.tlListItem[data-event-id="${ev.id}"]`); listItem?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
 }
 
@@ -1883,6 +1948,52 @@ function mkGrad(NS, id, stops) {
 
 // ---- Event classification ----
 const TYPE_COLORS = { meeting:"#a855f7", document:"#10b981", alert:"#f97316", email:"#3b82f6", decision:"#f59e0b", critical:"#ef4444", default:"#00c9a7" };
+
+function _parseOriginalData(ev) {
+  if (!ev.metadata) return null;
+  try {
+    const orig = ev.metadata.original_data;
+    return typeof orig === "string" ? JSON.parse(orig) : (orig || null);
+  } catch { return null; }
+}
+function getMailSummarize(ev) {
+  return ev.metadata?.mail_summarize || _parseOriginalData(ev)?.mail_summarize || null;
+}
+function getMailCategory(ev) {
+  return ev.metadata?.mail_category || _parseOriginalData(ev)?.mail_category || null;
+}
+
+function collectAllMetaFields(events) {
+  const fields = new Map();
+  for (const ev of events) {
+    if (!ev.metadata) continue;
+    for (const k of Object.keys(ev.metadata)) {
+      if (k !== "original_data" && !fields.has(k)) fields.set(k, { key: k, label: k, section: "meta" });
+    }
+    const orig = _parseOriginalData(ev);
+    if (orig) {
+      for (const k of Object.keys(orig)) {
+        const fk = `orig.${k}`;
+        if (!fields.has(fk)) fields.set(fk, { key: fk, label: k, section: "orig" });
+      }
+    }
+  }
+  return [...fields.values()].sort((a, b) => a.label.localeCompare(b.label, "he"));
+}
+
+function getFieldValue(ev, key) {
+  if (key.startsWith("orig.")) return _parseOriginalData(ev)?.[key.slice(5)] ?? null;
+  return ev.metadata?.[key] ?? null;
+}
+
+function formatFieldValue(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === "boolean") return val ? "כן" : "לא";
+  if (Array.isArray(val)) return val.join(", ");
+  if (typeof val === "object") return JSON.stringify(val);
+  const s = String(val).trim();
+  return s || null;
+}
 
 function classifyEvent(ev) {
   const tags = ev.tags.map(t => t.toLowerCase());
