@@ -67,6 +67,12 @@
             </span>
             <span class="tabLabel">היסטוריה</span>
           </button>
+          <button class="tab" data-tab="timeline">
+            <span class="tabIcon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/><circle cx="8" cy="6" r="2" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="2" fill="currentColor" stroke="none"/><circle cx="10" cy="18" r="2" fill="currentColor" stroke="none"/></svg>
+            </span>
+            <span class="tabLabel">ציר זמן</span>
+          </button>
           <button class="tab" data-tab="reset">
             <span class="tabIcon">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.4"/></svg>
@@ -392,6 +398,39 @@
           <button id="refreshHistory">רענן</button>
         </header>
         <div class="historyList" id="historyList"></div>
+      </section>
+
+      <!-- ======================================================
+           TIMELINE
+           ====================================================== -->
+      <section class="panel" id="timeline" aria-label="ציר זמן אירועים">
+        <header class="panelHeader">
+          <div class="timelineTitleGroup">
+            <h2>ציר זמן אירועים</h2>
+            <p class="hint" id="timelineCount"></p>
+          </div>
+          <label class="timelineSearch" aria-label="חיפוש בציר הזמן">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input id="timelineSearch" type="search" placeholder="חיפוש אירועים, מסמכים, שיחות..." />
+          </label>
+          <div class="headerActions">
+            <button id="refreshTimeline" type="button">רענן</button>
+          </div>
+        </header>
+        <div class="timelineToolbar">
+          <div class="timelineFiltersPanel">
+            <div class="timelineFilters" id="timelineFilters"></div>
+          </div>
+          <div class="timelineViewControls">
+            <div class="timelineResolution" id="timelineResolution">
+              <button class="resBtn active" data-res="month">חודש</button>
+              <button class="resBtn" data-res="week">שבוע</button>
+              <button class="resBtn" data-res="day">יום</button>
+              <button class="resBtn" data-res="cal">לוח</button>
+            </div>
+          </div>
+        </div>
+        <div class="timelineContainer" id="timelineContainer">טוען...</div>
       </section>
 
       <!-- ======================================================

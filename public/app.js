@@ -104,6 +104,7 @@ async function init() {
   wireKnowledge();
   wireEvaluation();
   wireReset();
+  wireTimeline();
   $("refreshHistory").addEventListener("click", loadHistory);
 
   // Restore tab from URL hash, then load initial data
@@ -158,7 +159,8 @@ const TAB_LOADERS = {
   settings:  () => loadSettings(),
   agents:    () => loadAgentsTabData(),
   knowledge: () => loadKnowledgeDocuments(),
-  history:   () => loadHistory()
+  history:   () => loadHistory(),
+  timeline:  () => loadTimeline()
 };
 
 async function loadAgentsTabData() {
@@ -1334,6 +1336,721 @@ function showToast(message, type = "success") {
     toast.classList.add("fadeOut");
     toast.addEventListener("animationend", () => toast.remove());
   }, 3000);
+}
+
+// ---- TIMELINE ----
+const timelineState = {
+  events: [], resolution: "month", activeTags: new Set(),
+  calYear: null, calMonth: null, calSelectedDate: null,
+  selectedEventId: null,
+  searchQuery: "",
+  viewportStart: null
+};
+
+function timelineDebug(message, data = {}) {
+  console.debug("[timeline]", message, data);
+}
+
+async function loadTimeline() {
+  const container = $("timelineContainer");
+  container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#2e4050;font-size:13px;">טוען...</div>';
+  try {
+    const { events } = await api("/api/timeline");
+    timelineState.events = events || [];
+    if (timelineState.events.length && timelineState.calYear === null) {
+      const last = new Date(timelineState.events[timelineState.events.length - 1].date);
+      timelineState.calYear = last.getFullYear();
+      timelineState.calMonth = last.getMonth();
+    }
+    renderTimelineFilters();
+    renderTimeline();
+    $("timelineCount").textContent = `${timelineState.events.length} אירועים`;
+  } catch (e) {
+    console.error("Timeline error:", e);
+    container.innerHTML = `<p style="padding:24px;color:#fb923c;">שגיאה בטעינת ציר הזמן. נסה לרענן.</p>`;
+  }
+}
+
+function renderTimelineFilters() {
+  const allTags = [...new Set(timelineState.events.flatMap((e) => e.tags))].sort();
+  const bar = $("timelineFilters");
+  if (!bar) return;
+  bar.innerHTML = "";
+  if (!allTags.length) return;
+  const clearBtn = Object.assign(document.createElement("button"), {
+    className: "tagChip" + (timelineState.activeTags.size === 0 ? " active" : ""),
+    textContent: "הכל"
+  });
+  clearBtn.addEventListener("click", () => { timelineState.activeTags.clear(); renderTimelineFilters(); renderTimeline(); });
+  bar.appendChild(clearBtn);
+  for (const tag of allTags) {
+    const btn = Object.assign(document.createElement("button"), {
+      className: "tagChip" + (timelineState.activeTags.has(tag) ? " active" : ""),
+      textContent: "#" + tag
+    });
+    btn.addEventListener("click", () => {
+      if (timelineState.activeTags.has(tag)) timelineState.activeTags.delete(tag);
+      else timelineState.activeTags.add(tag);
+      renderTimelineFilters(); renderTimeline();
+    });
+    bar.appendChild(btn);
+  }
+}
+
+function renderTimeline() {
+  if (timelineState.resolution === "cal") renderCalendar();
+  else renderFuturisticTimeline();
+  updateTimelineCount();
+}
+
+function getFilteredTimelineEvents() {
+  const query = timelineState.searchQuery.trim().toLowerCase();
+  return timelineState.events.filter((event) => {
+    const matchesTags = !timelineState.activeTags.size || event.tags.some((tag) => timelineState.activeTags.has(tag));
+    if (!matchesTags) return false;
+    if (!query) return true;
+    const haystack = [
+      event.content || "",
+      ...(event.tags || []),
+      event.date || ""
+    ].join(" ").toLowerCase();
+    return haystack.includes(query);
+  });
+}
+
+function updateTimelineCount() {
+  const total = timelineState.events.length;
+  const filtered = getFilteredTimelineEvents().length;
+  $("timelineCount").textContent = filtered === total ? `${total} אירועים` : `${filtered} / ${total} אירועים`;
+}
+
+function renderFuturisticTimeline() {
+  const container = $("timelineContainer");
+  const filtered = getFilteredTimelineEvents();
+
+  container.innerHTML = "";
+  if (!filtered.length) {
+    container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#2e4050;font-size:13px;">אין אירועים להצגה</div>';
+    return;
+  }
+
+  const dates = filtered.map(e => new Date(e.date)).filter(d => !isNaN(d));
+  if (!dates.length) return;
+  const viewport = getTimelineViewport(dates);
+  const visibleEvents = filterEventsByDateRange(filtered, viewport.start, viewport.end);
+  const buckets = buildTimelineBuckets(viewport.start, viewport.end, timelineState.resolution);
+  timelineDebug("render", {
+    resolution: timelineState.resolution,
+    totalEvents: filtered.length,
+    visibleEvents: visibleEvents.length,
+    viewportStart: viewport.start.toISOString(),
+    viewportEnd: viewport.end.toISOString()
+  });
+
+  const dark = document.createElement("div");
+  dark.className = "tlDark";
+  dark.appendChild(buildWaveLayer(visibleEvents, buckets, viewport.start, viewport.end));
+  dark.appendChild(buildStripLayer(filtered, viewport));
+  dark.appendChild(buildPanelsLayer(visibleEvents));
+  container.appendChild(dark);
+
+  const selected = timelineState.selectedEventId
+    ? visibleEvents.find(e => e.id === timelineState.selectedEventId)
+    : visibleEvents[Math.min(visibleEvents.length - 1, Math.floor(visibleEvents.length * 0.58))];
+  if (selected) selectTlEvent(selected, false);
+}
+
+function getTimelineViewport(dates) {
+  const minMs = Math.min(...dates.map(d => d.getTime()));
+  const maxMs = Math.max(...dates.map(d => d.getTime()));
+  const fullStart = startOfDay(new Date(minMs));
+  const fullEnd = endOfDay(new Date(maxMs));
+  const totalMs = Math.max(1, fullEnd - fullStart);
+  const windowMs = Math.min(totalMs, getTimelineWindowMs(timelineState.resolution));
+  const maxOffsetMs = Math.max(0, totalMs - windowMs);
+  if (timelineState.viewportStart === null || !Number.isFinite(timelineState.viewportStart)) {
+    timelineState.viewportStart = 1;
+  }
+  timelineState.viewportStart = clamp(timelineState.viewportStart, 0, 1);
+  const offsetMs = maxOffsetMs * timelineState.viewportStart;
+  const start = new Date(fullStart.getTime() + offsetMs);
+  const end = new Date(start.getTime() + windowMs);
+  return {
+    fullStart,
+    fullEnd,
+    start,
+    end,
+    totalMs,
+    windowMs,
+    windowLeftPct: maxOffsetMs ? (offsetMs / totalMs) * 100 : 0,
+    windowWidthPct: Math.min(100, (windowMs / totalMs) * 100)
+  };
+}
+
+function getTimelineWindowMs(resolution) {
+  const DAY = 86400000;
+  if (resolution === "day") return 14 * DAY;
+  if (resolution === "week") return 12 * 7 * DAY;
+  return 12 * 31 * DAY;
+}
+
+function filterEventsByDateRange(events, start, end) {
+  return events.filter((event) => {
+    const date = new Date(event.date);
+    return !isNaN(date) && date >= start && date <= end;
+  });
+}
+
+function buildTimelineBuckets(start, end, resolution) {
+  const buckets = [];
+  const cursor = startOfBucket(start, resolution);
+  while (cursor <= end) {
+    const bucketStart = new Date(cursor);
+    const bucketEnd = addBucket(bucketStart, resolution);
+    buckets.push({ start: bucketStart, end: bucketEnd, label: formatTimelineBucketLabel(bucketStart, resolution) });
+    cursor.setTime(bucketEnd.getTime());
+  }
+  if (!buckets.length) buckets.push({ start: new Date(start), end: new Date(end), label: formatTimelineBucketLabel(start, resolution) });
+  return buckets;
+}
+
+function startOfBucket(date, resolution) {
+  const d = startOfDay(date);
+  if (resolution === "month") return new Date(d.getFullYear(), d.getMonth(), 1);
+  if (resolution === "week") {
+    d.setDate(d.getDate() - d.getDay());
+    return d;
+  }
+  return d;
+}
+
+function addBucket(date, resolution) {
+  const next = new Date(date);
+  if (resolution === "month") next.setMonth(next.getMonth() + 1);
+  else if (resolution === "week") next.setDate(next.getDate() + 7);
+  else next.setDate(next.getDate() + 1);
+  return next;
+}
+
+function formatTimelineBucketLabel(date, resolution) {
+  if (resolution === "month") return date.toLocaleDateString("he-IL", { month: "short" });
+  if (resolution === "week") return date.toLocaleDateString("he-IL", { day: "numeric", month: "short" });
+  return date.toLocaleDateString("he-IL", { day: "numeric", month: "numeric" });
+}
+
+function findTimelineBucketIndex(buckets, date) {
+  return buckets.findIndex(bucket => date >= bucket.start && date < bucket.end);
+}
+
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function endOfDay(date) {
+  const d = new Date(date);
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function buildWaveLayer(events, buckets, minDate, maxDate) {
+  const wrap = document.createElement("div");
+  wrap.className = "tlWave";
+  const NS = "http://www.w3.org/2000/svg";
+  const VW = 1000, VH = 220;
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${VW} ${VH}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("class", "tlWaveSvg");
+
+  // Defs
+  const defs = document.createElementNS(NS, "defs");
+  const grad = mkGrad(NS, "tlWG", [{o:"0%",c:"#00c9a7",a:.32},{o:"60%",c:"#0d4a3a",a:.14},{o:"100%",c:"#080b14",a:0}]);
+  const grad2 = mkGrad(NS, "tlWG2", [{o:"0%",c:"#3b82f6",a:.14},{o:"100%",c:"#080b14",a:0}]);
+  const filt = document.createElementNS(NS, "filter");
+  filt.setAttribute("id","tlGlow"); filt.setAttribute("x","-20%"); filt.setAttribute("y","-20%");
+  filt.setAttribute("width","140%"); filt.setAttribute("height","140%");
+  const blur = document.createElementNS(NS, "feGaussianBlur");
+  blur.setAttribute("stdDeviation","3"); blur.setAttribute("result","b");
+  const merge = document.createElementNS(NS, "feMerge");
+  ["b","SourceGraphic"].forEach(v => { const n = document.createElementNS(NS,"feMergeNode"); n.setAttribute("in",v); merge.appendChild(n); });
+  filt.appendChild(blur); filt.appendChild(merge);
+  [grad, grad2, filt].forEach(n => defs.appendChild(n));
+  svg.appendChild(defs);
+
+  // Background + grid
+  const bg = document.createElementNS(NS,"rect"); bg.setAttribute("width",VW); bg.setAttribute("height",VH); bg.setAttribute("fill","#080b14"); svg.appendChild(bg);
+  for (let i = 0; i <= buckets.length; i++) {
+    const x = (i / buckets.length) * VW;
+    const g = document.createElementNS(NS,"line"); g.setAttribute("x1",x); g.setAttribute("y1",25); g.setAttribute("x2",x); g.setAttribute("y2",VH-20); g.setAttribute("stroke","rgba(255,255,255,.04)"); g.setAttribute("stroke-width","0.5"); svg.appendChild(g);
+  }
+
+  // Density wave
+  const dens = buckets.map(() => 0);
+  for (const ev of events) {
+    const d = new Date(ev.date); if (isNaN(d)) continue;
+    const i = findTimelineBucketIndex(buckets, d);
+    if (i >= 0) dens[i]++;
+  }
+  const maxD = Math.max(...dens, 1);
+  const norm = dens.map(d => d / maxD);
+  const BASE = VH - 32, AMP = VH * 0.56;
+
+  const wpts = norm.map((v, i) => ({ x: ((i + 0.5) / buckets.length) * VW, y: BASE - v * AMP }));
+  const allPts = [{ x: 0, y: BASE }, ...wpts, { x: VW, y: BASE }];
+  const pd = catmullRom(allPts);
+
+  const fill = document.createElementNS(NS,"path"); fill.setAttribute("d", pd + ` L${VW},${VH} L0,${VH} Z`); fill.setAttribute("fill","url(#tlWG)"); svg.appendChild(fill);
+  const fill2pts = allPts.map((p,i) => ({ x: p.x, y: Math.min(BASE, p.y + (norm[Math.max(0,i-1)] || 0) * 14 + 10) }));
+  const f2 = document.createElementNS(NS,"path"); f2.setAttribute("d", catmullRom(fill2pts) + ` L${VW},${VH} L0,${VH} Z`); f2.setAttribute("fill","url(#tlWG2)"); f2.setAttribute("opacity","0.65"); svg.appendChild(f2);
+  const stroke = document.createElementNS(NS,"path"); stroke.setAttribute("d",pd); stroke.setAttribute("fill","none"); stroke.setAttribute("stroke","#00c9a7"); stroke.setAttribute("stroke-width","1.2"); stroke.setAttribute("opacity","0.65"); stroke.setAttribute("filter","url(#tlGlow)"); svg.appendChild(stroke);
+  const hl = document.createElementNS(NS,"line"); hl.setAttribute("x1",0); hl.setAttribute("y1",BASE); hl.setAttribute("x2",VW); hl.setAttribute("y2",BASE); hl.setAttribute("stroke","rgba(255,255,255,.05)"); hl.setAttribute("stroke-width","0.5"); hl.setAttribute("stroke-dasharray","4 4"); svg.appendChild(hl);
+  wrap.appendChild(svg);
+
+  // Year badge
+  const yr = document.createElement("div"); yr.className = "tlYearBadge";
+  yr.textContent = minDate.getFullYear() === maxDate.getFullYear() ? String(minDate.getFullYear()) : `${minDate.getFullYear()} – ${maxDate.getFullYear()}`;
+  wrap.appendChild(yr);
+
+  // Month labels
+  const bar = document.createElement("div"); bar.className = "tlMonthBar";
+  buckets.forEach(bucket => { const l = document.createElement("div"); l.className = "tlMonthTick"; l.textContent = bucket.label; bar.appendChild(l); });
+  wrap.appendChild(bar);
+
+  // Event nodes — cluster by active resolution bucket
+  const nodesWrap = document.createElement("div"); nodesWrap.className = "tlNodes";
+  const byBucket = new Map();
+  for (const ev of events) {
+    const d = new Date(ev.date); if (isNaN(d)) continue;
+    const i = findTimelineBucketIndex(buckets, d);
+    if (i < 0) continue;
+    if (!byBucket.has(i)) byBucket.set(i, []); byBucket.get(i).push(ev);
+  }
+  for (const [bucketIndex, evs] of byBucket) {
+    const bucket = buckets[bucketIndex];
+    if (!bucket) continue;
+    const density = norm[bucketIndex] ?? 0;
+    const waveYpct = ((BASE - density * AMP) / VH) * 100;
+    const xBase = ((bucketIndex + 0.5) / buckets.length) * 100;
+    const show = evs.length > 6 ? evs.slice(0, 1) : evs.slice(0, 4);
+    const isCluster = evs.length > 6;
+    for (let k2 = 0; k2 < show.length; k2++) {
+      const ev = show[k2];
+      const type = classifyEvent(ev);
+      const spread = show.length > 1 ? ((k2 / (show.length - 1)) - 0.5) * (0.75 / buckets.length) * 100 : 0;
+      const xPct = xBase + spread;
+      const yPct = waveYpct - 9 - (k2 % 2) * 4;
+      const node = document.createElement("div");
+      node.className = `tlNode tl-${type}` + (isCluster ? " tlCluster" : "");
+      node.style.left = `${xPct}%`; node.style.top = `${yPct}%`;
+      node.textContent = isCluster ? String(evs.length) : getEventIcon(type);
+      node.dataset.eventId = isCluster ? "" : ev.id;
+      node.setAttribute("role", "button");
+      node.setAttribute("tabindex", "0");
+      const nodeLabel = isCluster ? `${evs.length} אירועים ב${bucket.label}` : ((ev.content || "").slice(0, 60) || ev.tags.join(", ") || "אירוע");
+      node.setAttribute("aria-label", nodeLabel);
+      const handler = () => isCluster ? selectTlEvent(evs[0]) : selectTlEvent(ev);
+      node.addEventListener("click", handler);
+      node.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handler(); } });
+      nodesWrap.appendChild(node);
+      // connector line
+      const line = document.createElement("div"); line.className = "tlNodeLine";
+      line.style.left = `${xPct}%`; line.style.top = `${waveYpct}%`;
+      line.style.height = `${Math.max(0, yPct - waveYpct) + 9}%`;
+      line.style.color = getTypeColor(type);
+      nodesWrap.appendChild(line);
+    }
+  }
+  wrap.appendChild(nodesWrap);
+  return wrap;
+}
+
+function buildStripLayer(events, viewport) {
+  const strip = document.createElement("div"); strip.className = "tlStrip";
+  const inner = document.createElement("div"); inner.className = "tlStripInner";
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS,"svg"); svg.setAttribute("class","tlStripSvg"); svg.setAttribute("viewBox","0 0 1000 48"); svg.setAttribute("preserveAspectRatio","none");
+  const bg = document.createElementNS(NS,"rect"); bg.setAttribute("width","1000"); bg.setAttribute("height","48"); bg.setAttribute("fill","#050709"); svg.appendChild(bg);
+  const buckets = buildTimelineBuckets(viewport.fullStart, viewport.fullEnd, timelineState.resolution);
+  const dens = buckets.map(() => 0);
+  for (const ev of events) { const d = new Date(ev.date); if (isNaN(d)) continue; const i = findTimelineBucketIndex(buckets, d); if (i >= 0) dens[i]++; }
+  const maxD = Math.max(...dens, 1); const bw = 1000 / buckets.length;
+  dens.forEach((v, i) => {
+    if (!v) return;
+    const h = (v / maxD) * 38;
+    const r = document.createElementNS(NS,"rect"); r.setAttribute("x", i*bw+1); r.setAttribute("y", 48-h); r.setAttribute("width", bw-2); r.setAttribute("height", h); r.setAttribute("fill","#00c9a7"); r.setAttribute("opacity","0.22"); r.setAttribute("rx","1"); svg.appendChild(r);
+  });
+  const bl = document.createElementNS(NS,"line"); bl.setAttribute("x1","0"); bl.setAttribute("y1","47"); bl.setAttribute("x2","1000"); bl.setAttribute("y2","47"); bl.setAttribute("stroke","rgba(255,255,255,.06)"); bl.setAttribute("stroke-width","0.5"); svg.appendChild(bl);
+  inner.appendChild(svg);
+  const today = new Date();
+  if (today >= viewport.fullStart && today <= viewport.fullEnd) {
+    const pct = ((today - viewport.fullStart) / viewport.totalMs) * 100;
+    const nl = document.createElement("div"); nl.className = "tlNowLine"; nl.style.left = `${pct}%`; inner.appendChild(nl);
+    const lbl = document.createElement("div"); lbl.className = "tlNowLabel"; lbl.textContent = "היום"; lbl.style.left = `${pct + 0.5}%`; inner.appendChild(lbl);
+  }
+  const winPct = viewport.windowWidthPct;
+  const win = document.createElement("div"); win.className = "tlStripWindow"; win.style.left = `${viewport.windowLeftPct}%`; win.style.width = `${winPct}%`;
+  win.setAttribute("role", "slider");
+  win.setAttribute("aria-label", "גלילת ציר הזמן");
+  win.setAttribute("aria-valuemin", "0");
+  win.setAttribute("aria-valuemax", "100");
+  win.setAttribute("aria-valuenow", String(Math.round(viewport.windowLeftPct)));
+  wireTimelineStripDrag(inner, win, winPct);
+  inner.appendChild(win);
+  strip.appendChild(inner);
+  return strip;
+}
+
+function wireTimelineStripDrag(track, windowEl, windowWidthPct) {
+  const maxLeftPct = Math.max(0, 100 - windowWidthPct);
+  let dragOffsetPx = 0;
+  let dragTrackRect = null;
+
+  const setViewportFromLeftPct = (leftPct) => {
+    const clampedLeft = clamp(leftPct, 0, maxLeftPct);
+    timelineState.viewportStart = maxLeftPct ? clampedLeft / maxLeftPct : 0;
+    timelineDebug("viewport", { resolution: timelineState.resolution, viewportStart: timelineState.viewportStart });
+    renderTimeline();
+  };
+
+  const leftPctFromClient = (clientX) => {
+    const rect = dragTrackRect || track.getBoundingClientRect();
+    if (!rect.width) return 0;
+    return ((clientX - rect.left - dragOffsetPx) / rect.width) * 100;
+  };
+
+  const onMove = (event) => setViewportFromLeftPct(leftPctFromClient(event.clientX));
+  const stopDrag = () => {
+    document.removeEventListener("pointermove", onMove);
+    document.removeEventListener("pointerup", stopDrag);
+    document.removeEventListener("pointercancel", stopDrag);
+    dragTrackRect = null;
+    windowEl.classList.remove("dragging");
+  };
+
+  windowEl.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    const rect = windowEl.getBoundingClientRect();
+    dragTrackRect = track.getBoundingClientRect();
+    dragOffsetPx = event.clientX - rect.left;
+    windowEl.classList.add("dragging");
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", stopDrag, { once: true });
+    document.addEventListener("pointercancel", stopDrag, { once: true });
+  });
+
+  track.addEventListener("pointerdown", (event) => {
+    if (event.target === windowEl) return;
+    dragTrackRect = track.getBoundingClientRect();
+    dragOffsetPx = (windowWidthPct / 100) * dragTrackRect.width / 2;
+    setViewportFromLeftPct(leftPctFromClient(event.clientX));
+    dragTrackRect = null;
+  });
+
+  windowEl.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const currentLeft = maxLeftPct * (timelineState.viewportStart ?? 0);
+    const step = event.shiftKey ? 10 : 3;
+    if (event.key === "Home") setViewportFromLeftPct(0);
+    else if (event.key === "End") setViewportFromLeftPct(maxLeftPct);
+    else setViewportFromLeftPct(currentLeft + (event.key === "ArrowRight" ? step : -step));
+  });
+}
+
+function buildPanelsLayer(events) {
+  const panels = document.createElement("div"); panels.className = "tlPanels";
+  panels.appendChild(buildListPanel(events));
+
+  const detail = document.createElement("div"); detail.className = "tlDetail"; detail.id = "tlDetailPanel";
+  detail.innerHTML = `<div class="tlDetailEmpty"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg><span>לחץ על אירוע לפרטים</span></div>`;
+  panels.appendChild(detail);
+  panels.appendChild(buildAiPanel(events));
+  return panels;
+}
+
+function buildListPanel(events) {
+  const list = document.createElement("div"); list.className = "tlList"; list.id = "tlListPanel";
+  const grouped = new Map();
+  for (const ev of events) {
+    const d = new Date(ev.date); if (isNaN(d)) continue;
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+    if (!grouped.has(k)) grouped.set(k,[]); grouped.get(k).push(ev);
+  }
+  const HEM = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
+  for (const [k, evs] of grouped) {
+    const [yr, mo] = k.split("-").map(Number);
+    const hdr = document.createElement("div"); hdr.className = "tlListGroup"; hdr.textContent = `${HEM[mo-1]} ${yr} · ${evs.length}`; list.appendChild(hdr);
+    for (const ev of evs) {
+      const d = new Date(ev.date); const type = classifyEvent(ev);
+      const item = document.createElement("div"); item.className = "tlListItem"; item.dataset.eventId = ev.id;
+      const dot = document.createElement("div"); dot.className = "tlListDot"; dot.style.background = getTypeColor(type);
+      const wrap = document.createElement("div"); wrap.style.cssText = "flex:1;min-width:0;";
+      const meta = document.createElement("div"); meta.className = "tlListMeta"; meta.textContent = d.toLocaleDateString("he-IL",{day:"numeric",month:"short"});
+      const txt = document.createElement("div"); txt.className = "tlListText"; txt.textContent = ev.content || ev.tags.join(", ") || "—";
+      wrap.appendChild(meta); wrap.appendChild(txt); item.appendChild(dot); item.appendChild(wrap);
+      item.setAttribute("role", "button");
+      item.setAttribute("tabindex", "0");
+      item.setAttribute("aria-label", (ev.content || ev.tags.join(", ") || "אירוע").slice(0, 80));
+      item.addEventListener("click", () => selectTlEvent(ev));
+      item.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTlEvent(ev); } });
+      list.appendChild(item);
+    }
+  }
+  return list;
+}
+
+function buildAiPanel(events) {
+  const panel = document.createElement("div"); panel.className = "tlAi";
+  const total = events.length;
+  const types = {};
+  for (const ev of events) { const t = classifyEvent(ev); types[t] = (types[t]||0)+1; }
+  const allTags = [...new Set(events.flatMap(e => e.tags))];
+  const topType = Object.entries(types).sort((a,b) => b[1]-a[1])[0];
+  const dates = events.map(e => new Date(e.date)).filter(d => !isNaN(d));
+  const dayRange = dates.length ? Math.round((Math.max(...dates.map(d=>d.getTime())) - Math.min(...dates.map(d=>d.getTime()))) / 86400000) : 0;
+  const typeLabels = { meeting:"פגישות", document:"מסמכים", alert:"התראות", email:"אימייל", decision:"החלטות", default:"כללי", critical:"קריטי" };
+
+  panel.appendChild(mkAiCard("סה״כ אירועים", String(total), `${allTags.length} תגיות ייחודיות`));
+  if (topType) panel.appendChild(mkAiCard("קטגוריה מובילה", String(topType[1]), typeLabels[topType[0]] || topType[0]));
+  if (dayRange) panel.appendChild(mkAiCard("טווח זמן", `${dayRange}`, "ימים של פעילות"));
+
+  const div = document.createElement("div"); div.className = "tlAiDivider"; panel.appendChild(div);
+
+  for (const [type, count] of Object.entries(types).sort((a,b)=>b[1]-a[1]).slice(0,5)) {
+    const pct = Math.round(count/total*100);
+    const c = document.createElement("div"); c.className = "tlAiCard";
+    c.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;"><span style="font-size:10.5px;color:#5a7080;">${typeLabels[type]||type}</span><span style="font-size:11px;color:#c8d8e8;font-weight:700;">${count}</span></div><div style="height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${getTypeColor(type)};border-radius:2px;opacity:.7;"></div></div>`;
+    panel.appendChild(c);
+  }
+  return panel;
+}
+
+function mkAiCard(label, val, sub) {
+  const c = document.createElement("div"); c.className = "tlAiCard";
+  c.innerHTML = `<div class="tlAiLabel">${escapeHtml(label)}</div><div class="tlAiVal">${escapeHtml(val)}</div><div class="tlAiSub">${escapeHtml(sub)}</div>`;
+  return c;
+}
+
+function selectTlEvent(ev, scroll = true) {
+  timelineState.selectedEventId = ev.id;
+  document.querySelectorAll(".tlListItem").forEach(el => el.classList.toggle("tlListActive", el.dataset.eventId === ev.id));
+  document.querySelectorAll(".tlNode[data-event-id]").forEach(el => el.classList.toggle("tlSel", el.dataset.eventId === ev.id));
+  const panel = $("tlDetailPanel"); if (!panel) return;
+  const type = classifyEvent(ev);
+  const color = getTypeColor(type);
+  const d = new Date(ev.date);
+  const dateStr = isNaN(d) ? "" : d.toLocaleDateString("he-IL",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  const title = (ev.content || "").slice(0, 90) || ev.tags.slice(0,3).join(", ") || "ללא כותרת";
+  const typeLabels = { meeting:"פגישה", document:"מסמך", alert:"התראה", email:"אימייל", decision:"החלטה", default:"אירוע", critical:"קריטי" };
+  panel.innerHTML = `
+    <div class="tlDetailHdr">
+      <div class="tlDetailIcon" style="background:${hexA(color,.14)};color:${color};">${getEventIcon(type)}</div>
+      <div style="flex:1;min-width:0;">
+        <div class="tlDetailDate">${escapeHtml(dateStr)} · ${typeLabels[type]||type}</div>
+        <div class="tlDetailTitle">${escapeHtml(title)}</div>
+      </div>
+    </div>
+    <div class="tlDetailBody">${escapeHtml(ev.content || "אין תוכן זמין.")}</div>
+    ${ev.tags.length ? `<div class="tlDetailTags">${ev.tags.map(t => `<span class="tlDetailTag" style="background:${hexA(color,.13)};color:${color};border:1px solid ${hexA(color,.28)};">#${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+  `;
+  if (scroll) { const listItem = document.querySelector(`.tlListItem[data-event-id="${ev.id}"]`); listItem?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+}
+
+// ---- Wave helper: Catmull-Rom ----
+function catmullRom(pts) {
+  if (pts.length < 2) return `M ${pts[0]?.x||0} ${pts[0]?.y||0}`;
+  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[Math.max(0,i-1)], p1 = pts[i], p2 = pts[i+1], p3 = pts[Math.min(pts.length-1,i+2)];
+    const cp1x = p1.x + (p2.x - p0.x) / 6, cp1y = p1.y + (p2.y - p0.y) / 6;
+    const cp2x = p2.x - (p3.x - p1.x) / 6, cp2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)} ${cp2x.toFixed(1)} ${cp2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
+function mkGrad(NS, id, stops) {
+  const g = document.createElementNS(NS,"linearGradient"); g.setAttribute("id",id); g.setAttribute("x1","0"); g.setAttribute("y1","0"); g.setAttribute("x2","0"); g.setAttribute("y2","1");
+  for (const s of stops) { const el = document.createElementNS(NS,"stop"); el.setAttribute("offset",s.o); el.setAttribute("stop-color",s.c); el.setAttribute("stop-opacity",String(s.a)); g.appendChild(el); }
+  return g;
+}
+
+// ---- Event classification ----
+const TYPE_COLORS = { meeting:"#a855f7", document:"#10b981", alert:"#f97316", email:"#3b82f6", decision:"#f59e0b", critical:"#ef4444", default:"#00c9a7" };
+
+function classifyEvent(ev) {
+  const tags = ev.tags.map(t => t.toLowerCase());
+  if (tags.some(t => /פגישה|ישיבה|meeting|zoom|call/.test(t)))    return "meeting";
+  if (tags.some(t => /מסמך|דוח|תכנ|document|report|plan/.test(t))) return "document";
+  if (tags.some(t => /התראה|alert|warning|risk|סיכון|חריג/.test(t))) return "alert";
+  if (tags.some(t => /אימייל|email|mail|הודעה/.test(t)))            return "email";
+  if (tags.some(t => /החלטה|decision|approval|אישור/.test(t)))      return "decision";
+  if (tags.some(t => /קריטי|critical|urgent|דחוף/.test(t)))         return "critical";
+  return "default";
+}
+
+function getEventIcon(type) {
+  return { meeting:"M", document:"D", alert:"!", email:"@", decision:"OK", critical:"!", default:"•" }[type] || "•";
+}
+
+function getTypeColor(type) { return TYPE_COLORS[type] || TYPE_COLORS.default; }
+
+function hexA(hex, alpha) {
+  const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!r) return hex;
+  return `rgba(${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)},${alpha})`;
+}
+
+// ---- Calendar ----
+function renderCalendar() {
+  const container = $("timelineContainer");
+  const filtered = getFilteredTimelineEvents();
+
+  const year  = timelineState.calYear  ?? new Date().getFullYear();
+  const month = timelineState.calMonth ?? new Date().getMonth();
+
+  const byDay = new Map();
+  for (const ev of filtered) {
+    const d = new Date(ev.date);
+    if (isNaN(d)) continue;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(ev);
+  }
+
+  container.innerHTML = "";
+
+  const nav = document.createElement("div");
+  nav.className = "calNav";
+  const monthName = new Date(year, month, 1).toLocaleDateString("he-IL", { month: "long", year: "numeric" });
+  nav.innerHTML = `
+    <button class="calNavBtn" id="calPrev">&#8250;</button>
+    <span class="calNavTitle">${escapeHtml(monthName)}</span>
+    <button class="calNavBtn" id="calNext">&#8249;</button>
+  `;
+  nav.querySelector("#calPrev").addEventListener("click", () => {
+    if (timelineState.calMonth === 0) { timelineState.calMonth = 11; timelineState.calYear--; }
+    else timelineState.calMonth--;
+    timelineState.calSelectedDate = null;
+    renderCalendar();
+  });
+  nav.querySelector("#calNext").addEventListener("click", () => {
+    if (timelineState.calMonth === 11) { timelineState.calMonth = 0; timelineState.calYear++; }
+    else timelineState.calMonth++;
+    timelineState.calSelectedDate = null;
+    renderCalendar();
+  });
+  container.appendChild(nav);
+
+  const grid = document.createElement("div");
+  grid.className = "calGrid";
+  for (const lbl of ["א", "ב", "ג", "ד", "ה", "ו", "ש"]) {
+    const el = document.createElement("div");
+    el.className = "calDayLabel";
+    el.textContent = lbl;
+    grid.appendChild(el);
+  }
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  for (let i = 0; i < firstDay; i++) {
+    const empty = document.createElement("div");
+    empty.className = "calCell empty";
+    grid.appendChild(empty);
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const dayEvents = byDay.get(key) || [];
+    const isSelected = timelineState.calSelectedDate === key;
+    const cell = document.createElement("div");
+    cell.className = "calCell" + (dayEvents.length ? " has-events" : "") + (isSelected ? " selected" : "");
+
+    const numEl = document.createElement("div");
+    numEl.className = "calCellNum";
+    numEl.textContent = d;
+    cell.appendChild(numEl);
+
+    if (dayEvents.length) {
+      const dots = document.createElement("div");
+      dots.className = "calDots";
+      const maxDots = Math.min(dayEvents.length, 5);
+      for (let i = 0; i < maxDots; i++) {
+        const dot = document.createElement("div");
+        dot.className = "calDot";
+        dots.appendChild(dot);
+      }
+      if (dayEvents.length > 5) {
+        const more = document.createElement("span");
+        more.style.cssText = "font-size:10px;color:var(--text-muted);line-height:6px;";
+        more.textContent = `+${dayEvents.length - 5}`;
+        dots.appendChild(more);
+      }
+      cell.appendChild(dots);
+      cell.addEventListener("click", () => {
+        timelineState.calSelectedDate = isSelected ? null : key;
+        renderCalendar();
+      });
+    }
+    grid.appendChild(cell);
+  }
+  container.appendChild(grid);
+
+  if (timelineState.calSelectedDate && byDay.has(timelineState.calSelectedDate)) {
+    const panel = document.createElement("div");
+    panel.className = "calDayPanel";
+    const selDate = new Date(timelineState.calSelectedDate);
+    const titleEl = document.createElement("div");
+    titleEl.className = "calDayPanelTitle";
+    titleEl.textContent = selDate.toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    panel.appendChild(titleEl);
+    for (const ev of byDay.get(timelineState.calSelectedDate)) panel.appendChild(buildEventCard(ev));
+    container.appendChild(panel);
+  }
+}
+
+function buildEventCard(ev) {
+  const card = document.createElement("div"); card.className = "tlCard";
+  const d = new Date(ev.date);
+  const dateStr = isNaN(d) ? "" : d.toLocaleDateString("he-IL",{day:"numeric",month:"short",year:"numeric"});
+  const excerpt = (ev.content || "").slice(0, 140).replace(/\n/g," ");
+  card.innerHTML = `<div class="tlCardDate">${escapeHtml(dateStr)}</div><div class="tlCardContent">${escapeHtml(excerpt)}${ev.content && ev.content.length > 140 ? "..." : ""}</div>${ev.tags.length ? `<div class="tlCardTags"></div>` : ""}`;
+  if (ev.tags.length) {
+    const tagsEl = card.querySelector(".tlCardTags");
+    for (const t of ev.tags) {
+      const chip = document.createElement("span"); chip.className = "tagBadge"; chip.textContent = "#"+t;
+      tagsEl.appendChild(chip);
+    }
+  }
+  return card;
+}
+
+function wireTimeline() {
+  $("timelineResolution")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".resBtn"); if (!btn) return;
+    document.querySelectorAll(".resBtn").forEach(b => { b.classList.remove("active"); b.setAttribute("aria-pressed", "false"); });
+    btn.classList.add("active"); btn.setAttribute("aria-pressed", "true");
+    timelineState.resolution = btn.dataset.res;
+    timelineState.viewportStart = null;
+    timelineState.selectedEventId = null;
+    timelineDebug("resolution", { resolution: timelineState.resolution });
+    renderTimeline();
+  });
+  document.querySelectorAll(".resBtn").forEach(b => b.setAttribute("aria-pressed", b.classList.contains("active") ? "true" : "false"));
+  $("refreshTimeline")?.setAttribute("aria-label", "רענן ציר זמן");
+  $("refreshTimeline")?.addEventListener("click", loadTimeline);
+  $("timelineSearch")?.addEventListener("input", (event) => {
+    timelineState.searchQuery = event.target.value || "";
+    timelineState.selectedEventId = null;
+    renderTimeline();
+  });
 }
 
 async function api(path, options = {}) {

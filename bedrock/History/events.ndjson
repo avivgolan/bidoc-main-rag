@@ -1,0 +1,4 @@
+{"ts":"2026-05-07T22:58:20Z","type":"project_start","tool":"git","slug":"bidoc agent","summary":"Project started (first commit: 2026-05-05, 23 total commits)"}
+{"ts":"2026-05-07T22:58:20Z","type":"integration_cursor","tool":"cli","slug":"bidoc agent","summary":"cursor integration detected"}
+{"ts":"2026-05-07T22:58:20Z","type":"integration_claude","tool":"cli","slug":"bidoc agent","summary":"claude integration detected"}
+{"ts":"2026-05-07T22:58:20Z","type":"backfill","tool":"cli","slug":"bidoc agent","summary":"History backfill: 23 commits, 0 releases, 2 integrations"}

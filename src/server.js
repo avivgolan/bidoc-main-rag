@@ -7,7 +7,7 @@ import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, re
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { hybridSearch, listMessages, listSessions } from "./supabase.js";
+import { fetchTimelineEvents, hybridSearch, listMessages, listSessions } from "./supabase.js";
 import { callN8nTool } from "./tools.js";
 import { createRun, failRun, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
@@ -247,6 +247,12 @@ async function handleApi(req, res, url) {
     });
     return sendJson(res, 200, result);
   }
+
+  if (req.method === "GET" && url.pathname === "/api/timeline") {
+    const events = await fetchTimelineEvents({ config: config() }).catch(() => []);
+    return sendJson(res, 200, { events });
+  }
+
 
   sendJson(res, 404, { error: "Not found" });
 }

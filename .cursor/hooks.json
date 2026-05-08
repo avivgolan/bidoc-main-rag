@@ -1,26 +1,26 @@
 {
   "version": 1,
-  "description": "Repo-local hooks for project-bedrock. Hooks stay thin: detect meaningful changes and trigger lightweight capture/update, never rebuild the full ontology.",
+  "description": "Repo-local hooks for bedrock. Hooks stay thin: detect meaningful changes and trigger lightweight capture/update, never rebuild the full ontology.",
   "hooks": [
     {
       "name": "project-knowledge-sync",
       "event": "post-write",
-      "command": "bedrock update --summary-file /c/Users/dor thalamus/Documents/bidoc agent/.cursor/knowledge-sync.last.json --project /c/Users/dor thalamus/Documents/bidoc agent"
+      "command": "bedrock update --summary-file C:/Users/dor thalamus/Documents/bidoc agent/.cursor/knowledge-sync.last.json --project C:/Users/dor thalamus/Documents/bidoc agent"
     },
     {
       "name": "project-knowledge-session-start",
       "event": "session-start",
-      "command": "bedrock sync --project /c/Users/dor thalamus/Documents/bidoc agent && bedrock refresh-system --project /c/Users/dor thalamus/Documents/bidoc agent"
+      "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent && bedrock refresh-system --project C:/Users/dor thalamus/Documents/bidoc agent"
     },
     {
       "name": "project-knowledge-stop",
       "event": "stop",
-      "command": "bedrock sync --project /c/Users/dor thalamus/Documents/bidoc agent"
+      "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent"
     },
     {
       "name": "project-knowledge-pre-compact",
       "event": "preCompact",
-      "command": "bedrock sync --project /c/Users/dor thalamus/Documents/bidoc agent"
+      "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent"
     }
   ]
 }

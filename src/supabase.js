@@ -122,6 +122,25 @@ function looksLikeRpcSignatureError(message) {
   return /function|parameter|argument|schema cache|could not find|PGRST202/i.test(String(message || ""));
 }
 
+export async function fetchTimelineEvents({ config, limit = 1000 }) {
+  if (!isConfigured(config)) return [];
+  const TABLE = "data_index_embeddings_gf_dor_agent";
+  const query = `/rest/v1/${TABLE}?select=id,date,hashtags,content,metadata&order=date.asc&limit=${limit}&date=not.is.null`;
+  const rows = await supabaseFetch(config, query);
+  return (rows || []).map((row) => ({
+    id: row.id,
+    date: row.date,
+    tags: parseHashtags(row.hashtags),
+    content: row.content || (typeof row.metadata === "object" && row.metadata ? row.metadata.summary || row.metadata.text || row.metadata.content || "" : "") || ""
+  }));
+}
+
+function parseHashtags(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map((t) => String(t).replace(/^#+/, "")).filter(Boolean);
+  return String(raw).match(/#[֐-׿\w]+/gu)?.map((t) => t.replace(/^#+/, "")) || [];
+}
+
 function localMessage({ userMessage, sanitizedMessage, sessionId }) {
   return {
     id: `local_${Date.now()}`,

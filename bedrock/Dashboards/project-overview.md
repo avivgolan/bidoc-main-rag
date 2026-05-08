@@ -1,0 +1,24 @@
+---
+note_type: dashboard
+dashboard: project-overview
+project: bidoc agent
+last_updated: 2026-05-08
+tags:
+  - bedrock
+  - dashboard
+---
+
+# Project Overview
+
+## Current State
+
+- Memory root: [../Memory/MEMORY.md](../Memory/MEMORY.md)
+- Evidence roots: [../Evidence/raw/README.md](../Evidence/raw/README.md), [../Evidence/imports/README.md](../Evidence/imports/README.md)
+
+## Durable Changes
+
+- No durable rollup recorded yet.
+
+## Open Questions
+
+- Which branch should be backfilled first?
