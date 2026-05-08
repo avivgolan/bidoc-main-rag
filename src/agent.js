@@ -4,6 +4,7 @@ import { heuristicClassification, isHebrew } from "./heuristics.js";
 import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.js";
 import { hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
+import { runAlertAgent } from "./subagents/alert.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
 import { completeRun, emitRunEvent } from "./runLog.js";
 import { renderPrompt } from "./prompts.js";
@@ -393,6 +394,22 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
 }
 
 async function callProjectTool({ toolName, message, classification, sessionId, config }) {
+  if (toolName === "alert") {
+    try {
+      const result = await runAlertAgent({
+        query: message,
+        dateFilter: buildDateFilter(classification)
+      });
+      return {
+        toolName,
+        ok: result.ok,
+        data: result.answer,
+        sources: extractLinks(result.answer)
+      };
+    } catch (error) {
+      return { toolName, ok: false, error: error.message, data: null, sources: [] };
+    }
+  }
   return callN8nTool({
     toolName,
     query: message,

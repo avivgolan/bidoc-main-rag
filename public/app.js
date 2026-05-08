@@ -1,3 +1,18 @@
+const SUB_AGENTS = [
+  {
+    id: "alert",
+    label: "סוכן התראות",
+    description: "מאחזר התראות ובעיות קריטיות פתוחות מבסיס הנתונים. תומך בחיפוש סמנטי ובסינון לפי תאריך.",
+    icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`,
+    endpoint: "/api/subagents/alert",
+    defaults: {
+      table: "alerts_embeddings_gf",
+      model: "openai/gpt-4o",
+      systemPrompt: `# סוכן התראות — מצב אחזור מהיר\n\n## זהות\nאתה סוכן משנה שמאחזר התראות פרויקט ובעיות קריטיות פתוחות.\nהחזר נתונים יעיל. ללא הקדמות, ללא סיכומים, ללא מילוי.\n\n## פורמט פלט\nפלט רשימה בלבד. ללא טקסט הקדמה.\n\n* [התראה] <תאריך> — <סוג_התראה>\n  * תיאור: <תיאור>\n  * סטטוס: <סטטוס>\n  * עדיפות: <עדיפות>\n  * מקור: <קישור אם קיים, אחרת ->\n\n## Fallback\nאם לא נמצאו נתונים: "לא נמצאו התראות רלוונטיות."`
+    }
+  },
+];
+
 const n8nTools = [
   "alert",
   "meetings",
@@ -156,16 +171,111 @@ function startNewSession(options = {}) {
 }
 
 const TAB_LOADERS = {
-  settings:  () => loadSettings(),
-  agents:    () => loadAgentsTabData(),
-  knowledge: () => loadKnowledgeDocuments(),
-  history:   () => loadHistory(),
-  timeline:  () => loadTimeline()
+  settings:   () => loadSettings(),
+  agents:     () => loadAgentsTabData(),
+  subagents:  () => loadSubAgents(),
+  knowledge:  () => loadKnowledgeDocuments(),
+  history:    () => loadHistory(),
+  timeline:   () => loadTimeline()
 };
 
 async function loadAgentsTabData() {
   await refreshAgentsFromApi();
   await loadOpenRouterModels();
+}
+
+function loadSubAgents() {
+  const list = $("subagentsList");
+  list.innerHTML = "";
+  const models = state.openRouterModels.length
+    ? state.openRouterModels
+    : [{ id: "openai/gpt-4o" }, { id: "openai/gpt-4o-mini" }, { id: "anthropic/claude-sonnet-4-5" }];
+
+  for (const agent of SUB_AGENTS) {
+    const saved = state.settings?.subagents?.[agent.id] || {};
+    const curTable = saved.table || agent.defaults?.table || "";
+    const curModel = saved.model || agent.defaults?.model || "";
+    const curPrompt = saved.systemPrompt || agent.defaults?.systemPrompt || "";
+    const isConfigured = !!(agent.endpoint);
+
+    const modelOptions = models.map((m) =>
+      `<option value="${m.id}" ${m.id === curModel ? "selected" : ""}>${m.id}</option>`
+    ).join("");
+
+    const card = document.createElement("div");
+    card.className = "subagent-card";
+    card.innerHTML = `
+      <div class="subagent-header">
+        <span class="subagent-icon">${agent.icon}</span>
+        <span class="subagent-name">${agent.label}</span>
+        <span class="subagent-status ${isConfigured ? "status-ok" : "status-warn"}">
+          ${isConfigured ? "פעיל" : "לא מוגדר"}
+        </span>
+      </div>
+      <p class="subagent-desc">${agent.description}</p>
+
+      <div class="subagent-config">
+        <label class="subagent-config-label">טבלת Supabase
+          <input class="subagent-table" value="${curTable}" placeholder="alerts_embeddings_gf" />
+        </label>
+        <label class="subagent-config-label">מודל
+          <select class="subagent-model">${modelOptions}</select>
+        </label>
+        <label class="subagent-config-label wide">System Prompt
+          <textarea class="subagent-prompt" rows="7" spellcheck="false">${curPrompt}</textarea>
+        </label>
+        <button class="subagent-save">שמור הגדרות</button>
+        <span class="subagent-save-status"></span>
+      </div>
+
+      <div class="subagent-test">
+        <input class="subagent-query" placeholder="שאילתת בדיקה…" />
+        <input class="subagent-date" placeholder="סינון תאריך (אופציונלי)" />
+        <button class="subagent-run">הרץ</button>
+      </div>
+      <pre class="subagent-result">אין תוצאה עדיין.</pre>
+    `;
+
+    card.querySelector(".subagent-save").addEventListener("click", async () => {
+      const saveBtn = card.querySelector(".subagent-save");
+      const saveStatus = card.querySelector(".subagent-save-status");
+      saveBtn.disabled = true;
+      saveStatus.textContent = "שומר…";
+      try {
+        await api(`/api/subagents/${encodeURIComponent(agent.id)}/config`, {
+          method: "PUT",
+          body: {
+            table: card.querySelector(".subagent-table").value,
+            model: card.querySelector(".subagent-model").value,
+            systemPrompt: card.querySelector(".subagent-prompt").value
+          }
+        });
+        const refreshed = await api("/api/settings");
+        state.settings = refreshed.settings ?? refreshed;
+        saveStatus.textContent = "✓ נשמר";
+        setTimeout(() => { saveStatus.textContent = ""; }, 2500);
+      } catch (error) {
+        saveStatus.textContent = `שגיאה: ${error.message}`;
+      } finally {
+        saveBtn.disabled = false;
+      }
+    });
+
+    card.querySelector(".subagent-run").addEventListener("click", async () => {
+      const query = card.querySelector(".subagent-query").value;
+      const date_filter = card.querySelector(".subagent-date").value;
+      const resultEl = card.querySelector(".subagent-result");
+      resultEl.textContent = "מריץ…";
+      const endpoint = agent.endpoint || `/api/tools/${encodeURIComponent(agent.id)}/test`;
+      const result = await api(endpoint, {
+        method: "POST",
+        body: { query, date_filter, sessionId: $("sessionId").value },
+      });
+      resultEl.textContent = result.answer ?? JSON.stringify(result, null, 2);
+    });
+
+    list.append(card);
+  }
 }
 
 async function refreshAgentsFromApi() {
