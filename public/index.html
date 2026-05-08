@@ -35,7 +35,13 @@
             <span class="tabIcon">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             </span>
-            <span class="tabLabel">סוכנים</span>
+            <span class="tabLabel">סוכן ראשי</span>
+          </button>
+          <button class="tab" data-tab="subagents">
+            <span class="tabIcon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><circle cx="5" cy="12" r="2.5"/><path d="M1 20c0-2.5 1.8-4 4-4"/><circle cx="19" cy="12" r="2.5"/><path d="M23 20c0-2.5-1.8-4-4-4"/></svg>
+            </span>
+            <span class="tabLabel">סוכני משנה</span>
           </button>
           <button class="tab" data-tab="knowledge">
             <span class="tabIcon">
@@ -125,6 +131,19 @@
         </header>
         <p class="hint" id="modelListStatus">טוען רשימת מודלים מ-OpenRouter...</p>
         <div class="agentGrid" id="agentGrid"></div>
+      </section>
+
+      <!-- ======================================================
+           SUB-AGENTS
+           ====================================================== -->
+      <section class="panel" id="subagents">
+        <header class="panelHeader">
+          <div>
+            <h2>סוכני משנה</h2>
+            <p class="hint">סוכני n8n המחוברים למערכת — כל סוכן מטפל בתחום ספציפי ומוזמן על-ידי ה-Main Agent.</p>
+          </div>
+        </header>
+        <div id="subagentsList" class="subagents-grid"></div>
       </section>
 
       <!-- ======================================================

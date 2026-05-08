@@ -2355,3 +2355,137 @@ body:has(#timeline.active) .sidebar {
     padding: 14px;
   }
 }
+
+/* ================================================================
+   Sub-Agents
+   ================================================================ */
+
+.subagents-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  padding: 1rem 0;
+}
+
+.subagent-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.2rem 1.4rem;
+}
+
+.subagent-header {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-bottom: .5rem;
+}
+
+.subagent-icon {
+  display: flex;
+  align-items: center;
+  color: var(--brand-500);
+}
+
+.subagent-name {
+  font-weight: 600;
+  font-size: 1rem;
+  flex: 1;
+}
+
+.subagent-status {
+  font-size: .72rem;
+  font-weight: 500;
+  padding: .2rem .65rem;
+  border-radius: 99px;
+}
+
+.status-ok {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.status-warn {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.subagent-desc {
+  font-size: .85rem;
+  color: var(--text-muted);
+  margin: 0 0 .9rem;
+  line-height: 1.5;
+}
+
+.subagent-test {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-bottom: .7rem;
+}
+
+.subagent-test input {
+  flex: 1;
+  min-width: 140px;
+}
+
+.subagent-result {
+  font-size: .8rem;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .6rem .8rem;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.subagent-config {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .7rem;
+  margin-bottom: 1rem;
+  padding: .9rem 1rem;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.subagent-config-label {
+  display: flex;
+  flex-direction: column;
+  gap: .3rem;
+  font-size: .8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.subagent-config-label.wide {
+  grid-column: 1 / -1;
+}
+
+.subagent-config-label input,
+.subagent-config-label select,
+.subagent-config-label textarea {
+  font-size: .85rem;
+}
+
+.subagent-config-label textarea {
+  resize: vertical;
+  min-height: 120px;
+  font-family: monospace;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.subagent-save {
+  align-self: end;
+}
+
+.subagent-save-status {
+  align-self: end;
+  font-size: .8rem;
+  color: var(--brand-500);
+}

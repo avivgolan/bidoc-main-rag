@@ -9,6 +9,7 @@ import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrou
 import { runChatPipeline } from "./agent.js";
 import { fetchTimelineEvents, hybridSearch, listMessages, listSessions } from "./supabase.js";
 import { callN8nTool } from "./tools.js";
+import { runAlertAgent } from "./subagents/alert.js";
 import { createRun, failRun, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 
@@ -246,6 +247,39 @@ async function handleApi(req, res, url) {
       config: config()
     });
     return sendJson(res, 200, result);
+  }
+
+  const subagentConfigMatch = url.pathname.match(/^\/api\/subagents\/([^/]+)\/config$/);
+  if (req.method === "PUT" && subagentConfigMatch) {
+    const agentId = decodeURIComponent(subagentConfigMatch[1]);
+    const body = await readJson(req);
+    const current = readLocalSettings();
+    const updated = {
+      ...current,
+      subagents: {
+        ...(current.subagents || {}),
+        [agentId]: {
+          table: body.table || "",
+          model: body.model || "",
+          systemPrompt: body.systemPrompt || ""
+        }
+      }
+    };
+    const saved = await writeLocalSettings(updated);
+    return sendJson(res, 200, { ok: true, config: saved.subagents?.[agentId] });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/subagents/alert") {
+    const body = await readJson(req);
+    try {
+      const result = await runAlertAgent({
+        query: body.query || "",
+        dateFilter: body.date_filter || ""
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      return sendJson(res, 200, { ok: false, error: error.message, answer: null });
+    }
   }
 
   if (req.method === "GET" && url.pathname === "/api/timeline") {

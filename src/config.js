@@ -243,7 +243,8 @@ export function publicSettings(config = getConfig()) {
         return [tool, { configured: Boolean(url), url }];
       })
     ),
-    agents: buildAgentList(config)
+    agents: buildAgentList(config),
+    subagents: settings.subagents || {}
   };
 }
 
@@ -314,7 +315,8 @@ export async function writeLocalSettings(settings) {
     tools: Object.fromEntries(
       TOOL_NAMES.map((tool) => [tool, settings.tools?.[tool] || ""])
     ),
-    timezone: settings.timezone || existing.timezone || "UTC+0"
+    timezone: settings.timezone || existing.timezone || "UTC+0",
+    subagents: settings.subagents || existing.subagents || {}
   };
   _settingsCache = safe;
   _settingsCachedAt = Date.now();
