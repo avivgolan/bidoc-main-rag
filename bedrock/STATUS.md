@@ -5,10 +5,10 @@ profile_hint: hybrid
 ontology_model: 2
 real_knowledge_path: /c/Users/dor thalamus/Documents/bidoc agent/bedrock
 local_pointer_path: ./bedrock
-onboarding: pending
+onboarding: complete
 last_bootstrap: 2026-05-07T23:00:05Z
 last_backfill_import: 
-2026-05-08
+2026-05-09
 last_compaction: 
 last_validation: 
 last_validation_result: unknown
@@ -27,13 +27,13 @@ last_system_refresh: 2026-05-07T23:38:45Z
 - Ontology model: `2`
 - Real knowledge path: `/c/Users/dor thalamus/Documents/bidoc agent/bedrock`
 - Local pointer path: `./bedrock`
-- Onboarding: `pending`
+- Onboarding: `complete`
 
 ## Activity
 
 - Last bootstrap: `2026-05-07T23:00:05Z`
 - Last backfill/import: `not-yet`
-- Last project sync: `2026-05-08T14:21:07Z`
+- Last project sync: `2026-05-09T12:38:20Z`
 - Last compaction: `not-yet`
 - Last validation: `not-yet` (`unknown`)
 - Last doctor: `not-yet` (`unknown`)

@@ -436,9 +436,16 @@
             <button id="refreshTimeline" type="button">רענן</button>
           </div>
         </header>
+        <div class="timelineSourceToggle">
+          <button class="tlSrcBtn active" data-src="index">הכל</button>
+          <button class="tlSrcBtn" data-src="alerts">אירועים</button>
+        </div>
         <div class="timelineToolbar">
-          <div class="timelineFiltersPanel">
-            <div class="timelineFilters" id="timelineFilters"></div>
+          <div class="tlTagsDropdownWrap">
+            <button class="tlTagsBtn" id="tlTagsBtn">תגיות ▾</button>
+            <div class="tlTagsDropdown" id="tlTagsDropdown" hidden>
+              <div class="timelineFilters" id="timelineFilters"></div>
+            </div>
           </div>
           <div class="timelineViewControls">
             <div class="timelineResolution" id="timelineResolution">

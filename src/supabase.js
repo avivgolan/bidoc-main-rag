@@ -26,6 +26,15 @@ export async function updateMessage({ config, messageId, aiResponse, status = "d
   });
 }
 
+export async function annotateMessage({ config, messageId, annotation }) {
+  if (!isConfigured(config) || String(messageId).startsWith("local_")) return null;
+  return supabaseFetch(config, `/rest/v1/${MESSAGES_TABLE}?id=eq.${encodeURIComponent(messageId)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ annotation })
+  });
+}
+
 export async function listSessions({ config, limit = 30 }) {
   if (!isConfigured(config)) return [];
   const query = `/rest/v1/${MESSAGES_TABLE}?select=session_id,status,created_at,user_message,ai_response&order=created_at.desc&limit=${limit}`;
@@ -120,6 +129,32 @@ function normalizeHashtags(hashtags) {
 
 function looksLikeRpcSignatureError(message) {
   return /function|parameter|argument|schema cache|could not find|PGRST202/i.test(String(message || ""));
+}
+
+export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {
+  if (!isConfigured(config)) return [];
+  const TABLE = "alerts_embeddings_gf";
+  const query = `/rest/v1/${TABLE}?select=id,date,content,metadata&order=date.asc&limit=${limit}&date=not.is.null`;
+  const rows = await supabaseFetch(config, query);
+  return (rows || []).map((row) => {
+    const parsed = parseAlertContent(row.content || "");
+    return {
+      id: `alert_${row.id}`,
+      date: row.date,
+      tags: parsed.type ? [parsed.type] : ["התראה"],
+      content: parsed.summary || (row.content || "").slice(0, 120),
+      metadata: row.metadata ?? null,
+      source: "alert",
+      severity: parsed.severity
+    };
+  });
+}
+
+function parseAlertContent(text) {
+  const summary = text.match(/Summary:\s*(.+)/)?.[1]?.trim() || "";
+  const type = text.match(/Type:\s*(.+)/)?.[1]?.trim() || "";
+  const severity = parseInt(text.match(/Severity:\s*(\d)/)?.[1] || "1", 10);
+  return { summary, type, severity };
 }
 
 export async function fetchTimelineEvents({ config, limit = 1000 }) {

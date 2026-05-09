@@ -7,7 +7,7 @@ import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, re
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { fetchTimelineEvents, hybridSearch, listMessages, listSessions } from "./supabase.js";
+import { annotateMessage, fetchAlertsTimelineEvents, fetchTimelineEvents, hybridSearch, listMessages, listSessions } from "./supabase.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { createRun, failRun, subscribeRun } from "./runLog.js";
@@ -274,7 +274,9 @@ async function handleApi(req, res, url) {
     try {
       const result = await runAlertAgent({
         query: body.query || "",
-        dateFilter: body.date_filter || ""
+        dateFilter: body.date_filter || "",
+        dateFrom: body.date_from || null,
+        dateTo: body.date_to || null
       });
       return sendJson(res, 200, result);
     } catch (error) {
@@ -282,8 +284,25 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === "POST" && /^\/api\/messages\/[^/]+\/annotate$/.test(url.pathname)) {
+    const messageId = decodeURIComponent(url.pathname.split("/")[3]);
+    const body = await readJson(req);
+    const annotation = body.annotation === "V" || body.annotation === "X" ? body.annotation : null;
+    try {
+      await annotateMessage({ config: config(), messageId, annotation });
+      return sendJson(res, 200, { ok: true });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/api/timeline") {
     const events = await fetchTimelineEvents({ config: config() }).catch(() => []);
+    return sendJson(res, 200, { events });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/timeline/alerts") {
+    const events = await fetchAlertsTimelineEvents({ config: config() }).catch(() => []);
     return sendJson(res, 200, { events });
   }
 

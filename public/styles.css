@@ -1414,6 +1414,24 @@ label {
 .tagChip:hover { background: var(--surface-2, #f0f1ed); }
 .tagChip.active { background: var(--cobalt); color: #fff; border-color: var(--cobalt); }
 
+.tagChipColored {
+  border-color: var(--chip-color);
+  color: var(--chip-color);
+  padding-right: 8px;
+}
+.tagChipColored::before {
+  content: '';
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--chip-color);
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.tagChipColored:hover {
+  background: color-mix(in srgb, var(--chip-color) 12%, transparent);
+}
+
 .timelineContainer { padding: 8px 0; }
 
 .tlGroup { margin-bottom: 28px; }
@@ -1569,6 +1587,7 @@ label {
   display: flex; flex-direction: column;
   flex: 1; min-height: 0;
   background: #080b14; overflow: hidden;
+  direction: ltr;
 }
 
 /* ---- Layer 1 · Wave ---- */
@@ -1631,7 +1650,7 @@ label {
 .tlNode:focus-visible { transform: translate(-50%,-50%) scale(1.45); z-index: 20; outline: 2px solid currentColor; outline-offset: 3px; }
 .tlNode:focus:not(:focus-visible) { outline: none; }
 .tlNode.tlSel   { transform: translate(-50%,-50%) scale(1.55); z-index: 25; }
-.tlNode.tlCluster { width: 32px; height: 32px; font-size: 10px; }
+.tlNode.tlCluster { width: 32px; height: 32px; font-size: 10px; overflow: visible; isolation: isolate; }
 
 .tlNodeLine {
   position: absolute; width: 1px;
@@ -1772,11 +1791,25 @@ label {
   color: #3b82f6; padding: 6px 12px 3px; opacity: .8;
 }
 .tlFieldRow {
-  display: flex; align-items: center; gap: 8px;
-  padding: 4px 12px; cursor: pointer; font-size: 12px; color: #8fa0b8;
+  display: flex; align-items: center; gap: 9px;
+  padding: 5px 12px; cursor: pointer; font-size: 12px; color: #8fa0b8;
 }
 .tlFieldRow:hover { background: rgba(255,255,255,.04); color: #c8d8e8; }
-.tlFieldRow input[type="checkbox"] { accent-color: #00c9a7; cursor: pointer; }
+.tlFieldRow input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 15px; height: 15px; border-radius: 3px; flex-shrink: 0;
+  border: 1.5px solid rgba(0,201,167,.4); background: rgba(0,0,0,.3);
+  cursor: pointer; position: relative; transition: background .12s, border-color .12s;
+}
+.tlFieldRow input[type="checkbox"]:checked {
+  background: #00c9a7; border-color: #00c9a7;
+}
+.tlFieldRow input[type="checkbox"]:checked::after {
+  content: ""; position: absolute;
+  left: 4px; top: 1.5px; width: 5px; height: 8px;
+  border: 2px solid #080b14; border-top: none; border-left: none;
+  transform: rotate(45deg);
+}
 .tlListFieldRow {
   display: flex; gap: 5px; align-items: baseline;
   margin-top: 3px; flex-wrap: wrap;
@@ -1961,6 +1994,35 @@ body:has(#timeline.active) .sidebar {
   background: rgba(20, 184, 166, 0.2);
 }
 
+.timelineSourceToggle {
+  display: flex;
+  gap: 6px;
+  padding: 10px 20px 0;
+}
+
+.tlSrcBtn {
+  padding: 5px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+
+.tlSrcBtn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.tlSrcBtn.active {
+  background: var(--brand-500, #14b8a6);
+  border-color: var(--brand-500, #14b8a6);
+  color: #fff;
+}
+
 .timelineToolbar {
   min-height: 58px;
   display: grid;
@@ -1972,25 +2034,29 @@ body:has(#timeline.active) .sidebar {
   background: rgba(7, 18, 34, 0.72);
 }
 
-#timeline.active .timelineFiltersPanel {
-  display: block;
-  max-height: none;
-  overflow: hidden;
-  margin: 0;
+#timeline.active .timelineFiltersPanel { display: none; }
+
+.tlTagsDropdownWrap { position: relative; }
+.tlTagsBtn {
+  font-size: 11.5px; padding: 4px 12px; border-radius: 5px;
+  border: 1px solid rgba(148,163,184,.2); background: rgba(15,27,46,.8);
+  color: #9eb3c8; cursor: pointer; white-space: nowrap;
+  transition: background .13s, color .13s, border-color .13s;
+}
+.tlTagsBtn:hover { background: rgba(37,99,235,.18); color: #dbeafe; border-color: rgba(96,165,250,.36); }
+.tlTagsBtn.open { background: rgba(20,184,166,.15); color: #ccfbf1; border-color: rgba(45,212,191,.4); }
+
+.tlTagsDropdown {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  background: #0d1520; border: 1px solid rgba(255,255,255,.12);
+  border-radius: 8px; padding: 10px 12px;
+  min-width: 260px; max-width: 380px;
+  max-height: 320px; overflow-y: auto;
+  box-shadow: 0 10px 28px rgba(0,0,0,.55);
+}
+.tlTagsDropdown .timelineFilters {
+  display: flex; flex-wrap: wrap; gap: 6px;
   padding: 0;
-  border: 0;
-  background: transparent;
-}
-
-#timeline.active .timelineFilters {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  gap: 8px;
-  padding: 1px;
-}
-
-#timeline.active .timelineFilters::-webkit-scrollbar {
-  height: 0;
 }
 
 #timeline.active .tagChip,
@@ -2488,4 +2554,40 @@ body:has(#timeline.active) .sidebar {
   align-self: end;
   font-size: .8rem;
   color: var(--brand-500);
+}
+
+/* Annotation (like / dislike) */
+.annotation-bar {
+  display: flex;
+  gap: .3rem;
+  margin-top: .5rem;
+  justify-content: flex-start;
+}
+.annotation-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.annotation-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.annotation-btn.active-like {
+  background: #d1fae5;
+  border-color: #6ee7b7;
+  color: #065f46;
+}
+.annotation-btn.active-dislike {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #991b1b;
 }

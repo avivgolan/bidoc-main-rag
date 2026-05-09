@@ -46,7 +46,7 @@ async function searchAlertsEmbeddings(config, query, table, topK = 20) {
   return Array.isArray(data) ? data : [];
 }
 
-export async function runAlertAgent({ query, dateFilter = "" }) {
+export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, dateTo = null }) {
   const config = getConfig();
   const saved = readLocalSettings().subagents?.alert || {};
 
@@ -57,15 +57,21 @@ export async function runAlertAgent({ query, dateFilter = "" }) {
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY לא מוגדר");
   if (!config.supabaseUrl || !config.supabaseServiceRoleKey) throw new Error("Supabase לא מוגדר");
 
-  const searchQuery = dateFilter ? `${query} ${dateFilter}` : query;
-  const results = await searchAlertsEmbeddings(config, searchQuery, table);
+  const normalizedDateFrom = normalizeDateBoundary(dateFrom);
+  const normalizedDateTo = normalizeDateBoundary(dateTo);
+  const effectiveDateFilter = dateFilter || buildAlertDateFilter(normalizedDateFrom, normalizedDateTo);
+  const searchQuery = effectiveDateFilter ? `${query} ${effectiveDateFilter}` : query;
+  const rawResults = await searchAlertsEmbeddings(config, searchQuery, table);
+  const results = filterAlertsByDateRange(rawResults, normalizedDateFrom, normalizedDateTo);
 
   const today = new Date().toISOString().slice(0, 10);
 
   const userContent = [
     `תאריך היום: ${today}`,
     `שאילתה: ${query}`,
-    dateFilter ? `פילטר תאריך: ${dateFilter}` : "",
+    effectiveDateFilter ? `פילטר תאריך: ${effectiveDateFilter}` : "",
+    normalizedDateFrom ? `date_from: ${normalizedDateFrom}` : "",
+    normalizedDateTo ? `date_to: ${normalizedDateTo}` : "",
     "",
     `תוצאות חיפוש (${results.length} רשומות):`,
     JSON.stringify(results, null, 2)
@@ -82,4 +88,29 @@ export async function runAlertAgent({ query, dateFilter = "" }) {
   });
 
   return { ok: true, answer, resultsCount: results.length };
+}
+
+export function buildAlertDateFilter(dateFrom = null, dateTo = null) {
+  if (!dateFrom && !dateTo) return "";
+  return [dateFrom, dateTo].filter(Boolean).join(" - ");
+}
+
+export function filterAlertsByDateRange(results, dateFrom = null, dateTo = null) {
+  if (!dateFrom && !dateTo) return results;
+  const fromTime = dateFrom ? Date.parse(dateFrom) : Number.NEGATIVE_INFINITY;
+  const toTime = dateTo ? Date.parse(dateTo) : Number.POSITIVE_INFINITY;
+  if (Number.isNaN(fromTime) && Number.isNaN(toTime)) return results;
+
+  return results.filter((row) => {
+    const rowDate = row?.date || row?.metadata?.date || row?.created_at || row?.metadata?.created_at;
+    const rowTime = Date.parse(rowDate);
+    if (Number.isNaN(rowTime)) return false;
+    if (!Number.isNaN(fromTime) && rowTime < fromTime) return false;
+    if (!Number.isNaN(toTime) && rowTime > toTime) return false;
+    return true;
+  });
+}
+
+function normalizeDateBoundary(value) {
+  return value ? String(value).trim() : null;
 }

@@ -6,7 +6,8 @@ import { buildToolOrder } from "../src/tools.js";
 import { deleteKnowledgeDocument, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
 import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality.js";
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
-import { enforceProfessionalKnowledgeMode } from "../src/agent.js";
+import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
+import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -198,6 +199,40 @@ test("general fallback uses alert and whatsapp_messages", () => {
     buildToolOrder({ urgency: "NORMAL", complexity: "GENERAL" }, []),
     ["alert", "whatsapp_messages"]
   );
+});
+
+test("alert agent request carries structured date range", () => {
+  const request = buildAlertAgentRequest({
+    message: "show alerts",
+    classification: {
+      date_from: "2026-05-01T00:00:00Z",
+      date_to: "2026-05-09T23:59:59Z"
+    }
+  });
+  assert.equal(request.query, "show alerts");
+  assert.equal(request.dateFilter, "2026-05-01T00:00:00Z - 2026-05-09T23:59:59Z");
+  assert.equal(request.dateFrom, "2026-05-01T00:00:00Z");
+  assert.equal(request.dateTo, "2026-05-09T23:59:59Z");
+});
+
+test("alert agent request leaves date filter empty without range", () => {
+  const request = buildAlertAgentRequest({
+    message: "show alerts",
+    classification: { date_from: null, date_to: null }
+  });
+  assert.equal(request.dateFilter, "");
+  assert.equal(request.dateFrom, null);
+  assert.equal(request.dateTo, null);
+});
+
+test("alert date filter and row filtering use explicit range", () => {
+  assert.equal(buildAlertDateFilter("2026-05-01T00:00:00Z", "2026-05-09T23:59:59Z"), "2026-05-01T00:00:00Z - 2026-05-09T23:59:59Z");
+  const rows = filterAlertsByDateRange([
+    { id: 1, date: "2026-04-30T12:00:00Z" },
+    { id: 2, date: "2026-05-04T12:00:00Z" },
+    { id: 3, metadata: { date: "2026-05-10T12:00:00Z" } }
+  ], "2026-05-01T00:00:00Z", "2026-05-09T23:59:59Z");
+  assert.deepEqual(rows.map((row) => row.id), [2]);
 });
 
 test("source quality prefers official reports over whatsapp", () => {

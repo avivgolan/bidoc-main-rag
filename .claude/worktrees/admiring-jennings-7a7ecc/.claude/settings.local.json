@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(cd \"C:\\\\Users\\\\dor thalamus\\\\Documents\\\\bidoc agent\" && pwd && ls -la)",
+      "mcp__e5ac254d-c55a-4af9-902a-b94c0f9ce4b3__list_projects",
+      "mcp__e5ac254d-c55a-4af9-902a-b94c0f9ce4b3__apply_migration",
+      "mcp__e5ac254d-c55a-4af9-902a-b94c0f9ce4b3__execute_sql"
+    ]
+  }
+}

@@ -396,10 +396,7 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
 async function callProjectTool({ toolName, message, classification, sessionId, config }) {
   if (toolName === "alert") {
     try {
-      const result = await runAlertAgent({
-        query: message,
-        dateFilter: buildDateFilter(classification)
-      });
+      const result = await runAlertAgent(buildAlertAgentRequest({ message, classification }));
       return {
         toolName,
         ok: result.ok,
@@ -419,6 +416,15 @@ async function callProjectTool({ toolName, message, classification, sessionId, c
     sessionId,
     config
   });
+}
+
+export function buildAlertAgentRequest({ message, classification }) {
+  return {
+    query: message,
+    dateFilter: buildDateFilter(classification),
+    dateFrom: classification?.date_from || null,
+    dateTo: classification?.date_to || null
+  };
 }
 
 async function synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults, toolCalls, sources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId }) {

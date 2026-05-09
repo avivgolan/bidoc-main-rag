@@ -351,6 +351,7 @@ function wireChat() {
         body: { message, sessionId: $("sessionId").value, runId }
       });
       pending.textContent = result.answer || "לא התקבלה תשובה.";
+      if (result.messageId) attachAnnotation(pending, result.messageId);
       appendDebug(pending, result);
       state.lastWorkflow = result.workflowLog || null;
       renderWorkflow(state.lastWorkflow);
@@ -1423,7 +1424,10 @@ async function loadSessionMessages(sessionId) {
   $("messages").innerHTML = "";
   for (const row of result.messages) {
     if (row.user_message) addMessage(row.user_message, "user");
-    if (row.ai_response) addMessage(row.ai_response, "assistant");
+    if (row.ai_response) {
+      const node = addMessage(row.ai_response, "assistant");
+      if (row.id) attachAnnotation(node, row.id, row.annotation || null);
+    }
   }
 }
 
@@ -1434,6 +1438,33 @@ function addMessage(text, role) {
   $("messages").append(node);
   node.scrollIntoView({ block: "end" });
   return node;
+}
+
+function attachAnnotation(node, messageId, current = null) {
+  const bar = document.createElement("div");
+  bar.className = "annotation-bar";
+  const like = document.createElement("button");
+  like.className = "annotation-btn" + (current === "V" ? " active-like" : "");
+  like.title = "לייק";
+  like.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14z"/><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>`;
+  const dislike = document.createElement("button");
+  dislike.className = "annotation-btn" + (current === "X" ? " active-dislike" : "");
+  dislike.title = "דיסלייק";
+  dislike.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/></svg>`;
+  async function vote(annotation) {
+    const next = like.classList.contains("active-like") && annotation === "V" ? null
+                : dislike.classList.contains("active-dislike") && annotation === "X" ? null
+                : annotation;
+    like.classList.toggle("active-like", next === "V");
+    dislike.classList.toggle("active-dislike", next === "X");
+    await api(`/api/messages/${encodeURIComponent(messageId)}/annotate`, {
+      method: "POST", body: { annotation: next }
+    }).catch(() => {});
+  }
+  like.addEventListener("click", () => vote("V"));
+  dislike.addEventListener("click", () => vote("X"));
+  bar.append(like, dislike);
+  node.append(bar);
 }
 
 function showToast(message, type = "success") {
@@ -1452,6 +1483,7 @@ function showToast(message, type = "success") {
 const timelineState = {
   events: [], resolution: "month", activeTags: new Set(),
   calYear: null, calMonth: null, calSelectedDate: null,
+  source: "index",
   selectedEventId: null,
   searchQuery: "",
   viewportStart: null,
@@ -1465,10 +1497,14 @@ function timelineDebug(message, data = {}) {
 async function loadTimeline() {
   const container = $("timelineContainer");
   container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#2e4050;font-size:13px;">טוען...</div>';
+  const endpoint = timelineState.source === "alerts" ? "/api/timeline/alerts" : "/api/timeline";
   try {
-    const { events } = await api("/api/timeline");
+    const { events } = await api(endpoint);
     timelineState.events = events || [];
-    if (timelineState.events.length && timelineState.calYear === null) {
+    timelineState.calYear = null;
+    timelineState.calMonth = null;
+    timelineState.calSelectedDate = null;
+    if (timelineState.events.length) {
       const last = new Date(timelineState.events[timelineState.events.length - 1].date);
       timelineState.calYear = last.getFullYear();
       timelineState.calMonth = last.getMonth();
@@ -1486,6 +1522,8 @@ function renderTimelineFilters() {
   const allTags = [...new Set(timelineState.events.flatMap((e) => e.tags))].sort();
   const bar = $("timelineFilters");
   if (!bar) return;
+  const dropdown = $("tlTagsDropdown");
+  const wasOpen = dropdown && !dropdown.hidden;
   bar.innerHTML = "";
   if (!allTags.length) return;
   const clearBtn = Object.assign(document.createElement("button"), {
@@ -1495,10 +1533,20 @@ function renderTimelineFilters() {
   clearBtn.addEventListener("click", () => { timelineState.activeTags.clear(); renderTimelineFilters(); renderTimeline(); });
   bar.appendChild(clearBtn);
   for (const tag of allTags) {
+    const isAlerts = timelineState.source === "alerts";
+    const color = isAlerts ? getTagColor(tag) : null;
     const btn = Object.assign(document.createElement("button"), {
-      className: "tagChip" + (timelineState.activeTags.has(tag) ? " active" : ""),
-      textContent: "#" + tag
+      className: "tagChip" + (timelineState.activeTags.has(tag) ? " active" : "") + (isAlerts ? " tagChipColored" : ""),
+      textContent: tag
     });
+    if (color) {
+      btn.style.setProperty("--chip-color", color);
+      if (timelineState.activeTags.has(tag)) {
+        btn.style.background = color;
+        btn.style.borderColor = color;
+        btn.style.color = "#fff";
+      }
+    }
     btn.addEventListener("click", () => {
       if (timelineState.activeTags.has(tag)) timelineState.activeTags.delete(tag);
       else timelineState.activeTags.add(tag);
@@ -1506,6 +1554,7 @@ function renderTimelineFilters() {
     });
     bar.appendChild(btn);
   }
+  if (wasOpen && dropdown) { dropdown.hidden = false; $("tlTagsBtn")?.classList.add("open"); }
 }
 
 function renderTimeline() {
@@ -1679,10 +1728,43 @@ function buildWaveLayer(events, buckets, minDate, maxDate) {
   svg.setAttribute("preserveAspectRatio", "none");
   svg.setAttribute("class", "tlWaveSvg");
 
+  // Per-bucket color computation (for spectrum gradient)
+  const _bcMap = new Map();
+  for (const ev of events) {
+    const d = new Date(ev.date); if (isNaN(d)) continue;
+    const i = findTimelineBucketIndex(buckets, d);
+    if (i >= 0) { if (!_bcMap.has(i)) _bcMap.set(i,[]); _bcMap.get(i).push(ev); }
+  }
+  const bucketColors = buckets.map((_,i) => mixEventColors(_bcMap.get(i) || []));
+
   // Defs
   const defs = document.createElementNS(NS, "defs");
-  const grad = mkGrad(NS, "tlWG", [{o:"0%",c:"#00c9a7",a:.32},{o:"60%",c:"#0d4a3a",a:.14},{o:"100%",c:"#080b14",a:0}]);
-  const grad2 = mkGrad(NS, "tlWG2", [{o:"0%",c:"#3b82f6",a:.14},{o:"100%",c:"#080b14",a:0}]);
+
+  // Horizontal spectrum gradient
+  const specGrad = document.createElementNS(NS,"linearGradient");
+  specGrad.setAttribute("id","tlSpec"); specGrad.setAttribute("gradientUnits","userSpaceOnUse");
+  specGrad.setAttribute("x1","0"); specGrad.setAttribute("y1","0");
+  specGrad.setAttribute("x2",VW); specGrad.setAttribute("y2","0");
+  bucketColors.forEach((color,i) => {
+    const s = document.createElementNS(NS,"stop");
+    s.setAttribute("offset",`${((i+0.5)/buckets.length*100).toFixed(1)}%`);
+    s.setAttribute("stop-color",color);
+    specGrad.appendChild(s);
+  });
+
+  // Vertical fade mask (preserves the wave silhouette)
+  const fadeMG = document.createElementNS(NS,"linearGradient");
+  fadeMG.setAttribute("id","tlFadeM"); fadeMG.setAttribute("x1","0"); fadeMG.setAttribute("y1","0");
+  fadeMG.setAttribute("x2","0"); fadeMG.setAttribute("y2","1");
+  [{o:"0%",a:.38},{o:"55%",a:.16},{o:"100%",a:0}].forEach(({o,a}) => {
+    const s = document.createElementNS(NS,"stop");
+    s.setAttribute("offset",o); s.setAttribute("stop-color","white"); s.setAttribute("stop-opacity",a);
+    fadeMG.appendChild(s);
+  });
+  const fadeMask = document.createElementNS(NS,"mask"); fadeMask.setAttribute("id","tlVM");
+  const fadeR = document.createElementNS(NS,"rect"); fadeR.setAttribute("width",VW); fadeR.setAttribute("height",VH);
+  fadeR.setAttribute("fill","url(#tlFadeM)"); fadeMask.appendChild(fadeR);
+
   const filt = document.createElementNS(NS, "filter");
   filt.setAttribute("id","tlGlow"); filt.setAttribute("x","-20%"); filt.setAttribute("y","-20%");
   filt.setAttribute("width","140%"); filt.setAttribute("height","140%");
@@ -1691,7 +1773,7 @@ function buildWaveLayer(events, buckets, minDate, maxDate) {
   const merge = document.createElementNS(NS, "feMerge");
   ["b","SourceGraphic"].forEach(v => { const n = document.createElementNS(NS,"feMergeNode"); n.setAttribute("in",v); merge.appendChild(n); });
   filt.appendChild(blur); filt.appendChild(merge);
-  [grad, grad2, filt].forEach(n => defs.appendChild(n));
+  [specGrad, fadeMG, fadeMask, filt].forEach(n => defs.appendChild(n));
   svg.appendChild(defs);
 
   // Background + grid
@@ -1716,10 +1798,41 @@ function buildWaveLayer(events, buckets, minDate, maxDate) {
   const allPts = [{ x: 0, y: BASE }, ...wpts, { x: VW, y: BASE }];
   const pd = catmullRom(allPts);
 
-  const fill = document.createElementNS(NS,"path"); fill.setAttribute("d", pd + ` L${VW},${VH} L0,${VH} Z`); fill.setAttribute("fill","url(#tlWG)"); svg.appendChild(fill);
-  const fill2pts = allPts.map((p,i) => ({ x: p.x, y: Math.min(BASE, p.y + (norm[Math.max(0,i-1)] || 0) * 14 + 10) }));
-  const f2 = document.createElementNS(NS,"path"); f2.setAttribute("d", catmullRom(fill2pts) + ` L${VW},${VH} L0,${VH} Z`); f2.setAttribute("fill","url(#tlWG2)"); f2.setAttribute("opacity","0.65"); svg.appendChild(f2);
-  const stroke = document.createElementNS(NS,"path"); stroke.setAttribute("d",pd); stroke.setAttribute("fill","none"); stroke.setAttribute("stroke","#00c9a7"); stroke.setAttribute("stroke-width","1.2"); stroke.setAttribute("opacity","0.65"); stroke.setAttribute("filter","url(#tlGlow)"); svg.appendChild(stroke);
+  // Spectrum analyzer bars — one per bucket, colored + fading downward
+  const barW = VW / buckets.length;
+  for (let i = 0; i < buckets.length; i++) {
+    const density = norm[i] || 0;
+    if (density < 0.015) continue;
+    const color = bucketColors[i];
+    const barH = density * AMP;
+    const barX = i * barW;
+    const barY = BASE - barH;
+    const gid = `tlBG_${i}`;
+    const bg = document.createElementNS(NS,"linearGradient");
+    bg.setAttribute("id",gid); bg.setAttribute("gradientUnits","userSpaceOnUse");
+    bg.setAttribute("x1","0"); bg.setAttribute("y1",barY);
+    bg.setAttribute("x2","0"); bg.setAttribute("y2",BASE);
+    [{o:"0%",a:.75},{o:"60%",a:.28},{o:"100%",a:.03}].forEach(({o,a}) => {
+      const s = document.createElementNS(NS,"stop");
+      s.setAttribute("offset",o); s.setAttribute("stop-color",color); s.setAttribute("stop-opacity",a);
+      bg.appendChild(s);
+    });
+    defs.appendChild(bg);
+    const bar = document.createElementNS(NS,"rect");
+    bar.setAttribute("x", barX + 1.5);
+    bar.setAttribute("y", barY);
+    bar.setAttribute("width", Math.max(1, barW - 3));
+    bar.setAttribute("height", barH);
+    bar.setAttribute("fill", `url(#${gid})`);
+    bar.setAttribute("rx","2");
+    svg.appendChild(bar);
+  }
+
+  // Smooth wave silhouette (low opacity, ties everything together)
+  const fill = document.createElementNS(NS,"path"); fill.setAttribute("d", pd + ` L${VW},${VH} L0,${VH} Z`); fill.setAttribute("fill","url(#tlSpec)"); fill.setAttribute("opacity","0.08"); svg.appendChild(fill);
+
+  // Glowing stroke
+  const stroke = document.createElementNS(NS,"path"); stroke.setAttribute("d",pd); stroke.setAttribute("fill","none"); stroke.setAttribute("stroke","url(#tlSpec)"); stroke.setAttribute("stroke-width","1.8"); stroke.setAttribute("opacity","0.9"); stroke.setAttribute("filter","url(#tlGlow)"); svg.appendChild(stroke);
   const hl = document.createElementNS(NS,"line"); hl.setAttribute("x1",0); hl.setAttribute("y1",BASE); hl.setAttribute("x2",VW); hl.setAttribute("y2",BASE); hl.setAttribute("stroke","rgba(255,255,255,.05)"); hl.setAttribute("stroke-width","0.5"); hl.setAttribute("stroke-dasharray","4 4"); svg.appendChild(hl);
   wrap.appendChild(svg);
 
@@ -1759,7 +1872,12 @@ function buildWaveLayer(events, buckets, minDate, maxDate) {
       const node = document.createElement("div");
       node.className = `tlNode tl-${type}` + (isCluster ? " tlCluster" : "");
       node.style.left = `${xPct}%`; node.style.top = `${yPct}%`;
-      node.textContent = isCluster ? String(evs.length) : getEventIcon(type);
+      if (isCluster) {
+        buildClusterPieNode(node, evs);
+      } else {
+        applyNodeColor(node, type);
+        node.textContent = getEventIcon(type);
+      }
       node.dataset.eventId = isCluster ? "" : ev.id;
       node.setAttribute("role", "button");
       node.setAttribute("tabindex", "0");
@@ -2059,6 +2177,21 @@ function mkGrad(NS, id, stops) {
 // ---- Event classification ----
 const TYPE_COLORS = { meeting:"#a855f7", document:"#10b981", alert:"#f97316", email:"#3b82f6", decision:"#f59e0b", critical:"#ef4444", default:"#00c9a7" };
 
+const ALERT_TAG_COLORS = {
+  "עדכון":        "#06b6d4",
+  "איכות":        "#a855f7",
+  "עיכוב":        "#f59e0b",
+  "אירוע בטיחות": "#ef4444",
+};
+const TAG_PALETTE = ["#06b6d4","#a855f7","#f59e0b","#ef4444","#10b981","#3b82f6","#f97316","#ec4899","#84cc16","#8b5cf6","#14b8a6","#f43f5e"];
+
+function getTagColor(tag) {
+  if (ALERT_TAG_COLORS[tag]) return ALERT_TAG_COLORS[tag];
+  let hash = 0;
+  for (let i = 0; i < tag.length; i++) hash = (hash * 31 + tag.charCodeAt(i)) | 0;
+  return TAG_PALETTE[Math.abs(hash) % TAG_PALETTE.length];
+}
+
 function _parseOriginalData(ev) {
   if (!ev.metadata) return null;
   try {
@@ -2106,6 +2239,7 @@ function formatFieldValue(val) {
 }
 
 function classifyEvent(ev) {
+  if (ev.source === "alert") return ev.tags[0] || "התראה";
   const tags = ev.tags.map(t => t.toLowerCase());
   if (tags.some(t => /פגישה|ישיבה|meeting|zoom|call/.test(t)))    return "meeting";
   if (tags.some(t => /מסמך|דוח|תכנ|document|report|plan/.test(t))) return "document";
@@ -2117,10 +2251,102 @@ function classifyEvent(ev) {
 }
 
 function getEventIcon(type) {
-  return { meeting:"M", document:"D", alert:"!", email:"@", decision:"OK", critical:"!", default:"•" }[type] || "•";
+  return { meeting:"M", document:"D", alert:"!", email:"@", decision:"OK", critical:"!", default:"•" }[type] || "⚑";
 }
 
-function getTypeColor(type) { return TYPE_COLORS[type] || TYPE_COLORS.default; }
+function getTypeColor(type) { return TYPE_COLORS[type] || getTagColor(type); }
+
+function mixEventColors(evs) {
+  if (!evs.length) return "#00c9a7";
+  const counts = {};
+  for (const ev of evs) { const t = classifyEvent(ev); counts[t] = (counts[t] || 0) + 1; }
+  const total = evs.length;
+  let r = 0, g = 0, b = 0;
+  for (const [type, count] of Object.entries(counts)) {
+    const hex = getTypeColor(type).replace("#","");
+    r += parseInt(hex.slice(0,2),16) * count / total;
+    g += parseInt(hex.slice(2,4),16) * count / total;
+    b += parseInt(hex.slice(4,6),16) * count / total;
+  }
+  return `#${Math.round(r).toString(16).padStart(2,"0")}${Math.round(g).toString(16).padStart(2,"0")}${Math.round(b).toString(16).padStart(2,"0")}`;
+}
+
+function applyNodeColor(node, type) {
+  if (TYPE_COLORS[type]) return; // handled by CSS class
+  const c = getTagColor(type);
+  node.style.background = hexA(c, 0.22);
+  node.style.borderColor = hexA(c, 0.55);
+  node.style.color = c;
+}
+
+function buildClusterPieNode(node, evs) {
+  const counts = {};
+  for (const ev of evs) {
+    const t = classifyEvent(ev);
+    counts[t] = (counts[t] || 0) + 1;
+  }
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const total = evs.length;
+  const size = 32;
+  const cx = size / 2, cy = size / 2;
+  const outerR = size / 2 - 0.75;
+  const innerR = outerR * 0.50;
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", size); svg.setAttribute("height", size);
+  svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  svg.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;";
+
+  if (entries.length === 1) {
+    const color = getTypeColor(entries[0][0]);
+    const circ = document.createElementNS(SVG_NS, "circle");
+    circ.setAttribute("cx", cx); circ.setAttribute("cy", cy); circ.setAttribute("r", outerR);
+    circ.setAttribute("fill", hexA(color, 0.22));
+    circ.setAttribute("stroke", hexA(color, 0.55));
+    circ.setAttribute("stroke-width", "1.5");
+    svg.appendChild(circ);
+    node.style.color = color;
+  } else {
+    let angle0 = -Math.PI / 2;
+    for (const [type, count] of entries) {
+      const sweep = (count / total) * Math.PI * 2;
+      const angle1 = angle0 + sweep;
+      const color = getTypeColor(type);
+      const cos0 = Math.cos(angle0), sin0 = Math.sin(angle0);
+      const cos1 = Math.cos(angle1), sin1 = Math.sin(angle1);
+      const large = sweep > Math.PI ? 1 : 0;
+      const path = document.createElementNS(SVG_NS, "path");
+      path.setAttribute("d", [
+        `M${cx + outerR * cos0} ${cy + outerR * sin0}`,
+        `A${outerR} ${outerR} 0 ${large} 1 ${cx + outerR * cos1} ${cy + outerR * sin1}`,
+        `L${cx + innerR * cos1} ${cy + innerR * sin1}`,
+        `A${innerR} ${innerR} 0 ${large} 0 ${cx + innerR * cos0} ${cy + innerR * sin0}`,
+        "Z"
+      ].join(" "));
+      path.setAttribute("fill", color);
+      path.setAttribute("opacity", "0.82");
+      svg.appendChild(path);
+      angle0 = angle1;
+    }
+    const ring = document.createElementNS(SVG_NS, "circle");
+    ring.setAttribute("cx", cx); ring.setAttribute("cy", cy); ring.setAttribute("r", outerR);
+    ring.setAttribute("fill", "none");
+    ring.setAttribute("stroke", "rgba(255,255,255,0.1)");
+    ring.setAttribute("stroke-width", "1");
+    svg.appendChild(ring);
+    node.style.color = getTypeColor(entries[0][0]);
+  }
+
+  node.style.background = "rgba(5,15,25,0.72)";
+  node.style.border = "none";
+  node.appendChild(svg);
+
+  const label = document.createElement("span");
+  label.style.cssText = "position:relative;z-index:1;font-size:10px;font-weight:700;color:inherit;";
+  label.textContent = String(total);
+  node.appendChild(label);
+}
 
 function hexA(hex, alpha) {
   const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -2254,6 +2480,19 @@ function buildEventCard(ev) {
 }
 
 function wireTimeline() {
+  document.querySelectorAll(".tlSrcBtn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.dataset.src === timelineState.source) return;
+      document.querySelectorAll(".tlSrcBtn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      timelineState.source = btn.dataset.src;
+      timelineState.activeTags.clear();
+      timelineState.viewportStart = null;
+      timelineState.selectedEventId = null;
+      loadTimeline();
+    });
+  });
+
   $("timelineResolution")?.addEventListener("click", (e) => {
     const btn = e.target.closest(".resBtn"); if (!btn) return;
     document.querySelectorAll(".resBtn").forEach(b => { b.classList.remove("active"); b.setAttribute("aria-pressed", "false"); });
@@ -2272,6 +2511,21 @@ function wireTimeline() {
     timelineState.selectedEventId = null;
     renderTimeline();
   });
+
+  const tagsBtn = $("tlTagsBtn");
+  const tagsDropdown = $("tlTagsDropdown");
+  if (tagsBtn && tagsDropdown) {
+    tagsBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = !tagsDropdown.hidden;
+      tagsDropdown.hidden = open;
+      tagsBtn.classList.toggle("open", !open);
+    });
+    document.addEventListener("click", () => {
+      tagsDropdown.hidden = true;
+      tagsBtn.classList.remove("open");
+    });
+  }
 }
 
 async function api(path, options = {}) {

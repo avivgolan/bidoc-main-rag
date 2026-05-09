@@ -2,7 +2,7 @@
 note_type: durable-memory-root
 project: bidoc agent
 status: active
-last_updated: 2026-05-08
+last_updated: 2026-05-09
 tags:
   - bedrock
   - memory
@@ -17,14 +17,15 @@ the right branch notes.
 
 ## Current State
 
-- Profile hint: `hybrid`. The agent should inspect the repo to infer the real ontology.
-- Memory has been initialized but branches have not been created yet.
+- Node.js HTTP server and plain SPA for a construction-project RAG assistant.
+- Main chat, subagents, timeline, and stack notes are tracked as separate branches.
 - Timeline UI behavior is tracked in [timeline.md](timeline.md).
 
 ## Recent Changes
 
 - 2026-05-08 - Bootstrapped minimal memory root.
 - 2026-05-08 - Added timeline branch note after fixing timeline viewport controls.
+- 2026-05-09 - Completed initial branch onboarding for stack, chat, and subagents.
 
 ## Decisions
 
@@ -32,9 +33,11 @@ the right branch notes.
 
 ## Open Questions
 
-- Which areas of the project should become the first memory branches?
 - Which decisions should be recorded explicitly from existing docs and code?
 
 ## Branches
 
+- [stack.md](stack.md) - Runtime, deployment, persistence, and test command notes.
+- [chat.md](chat.md) - Main chat pipeline, classifier output, RAG routing, and tool-call flow.
+- [subagents.md](subagents.md) - Alert subagent configuration, endpoint, and date-filter behavior.
 - [timeline.md](timeline.md) - Timeline page frontend behavior and interaction notes.
