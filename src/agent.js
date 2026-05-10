@@ -70,17 +70,6 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     result = await runRagAgent({ message: sanitized, sessionId, classification, memory, memorySummary, config, trace, runId });
   }
 
-  await updateMessage({
-    config,
-    messageId: saved.id,
-    aiResponse: result.answer,
-    status: "done"
-  }).then(() => {
-    emitRunEvent(runId, "update_message", "Message updated with AI response", { id: saved.id, status: "done" });
-  }).catch((error) => {
-    trace.push({ step: "updateMessage", ok: false, error: error.message });
-    emitRunEvent(runId, "update_message", "DB update failed", { error: error.message });
-  });
   appendLocalMemory(sessionId, message, result.answer);
   emitRunEvent(runId, "local_memory", "Local memory updated", {});
   const workflowLog = buildWorkflowLog({
@@ -93,6 +82,19 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     result,
     trace,
     config
+  });
+
+  await updateMessage({
+    config,
+    messageId: saved.id,
+    aiResponse: result.answer,
+    status: "done",
+    workflowLog
+  }).then(() => {
+    emitRunEvent(runId, "update_message", "Message updated with AI response", { id: saved.id, status: "done" });
+  }).catch((error) => {
+    trace.push({ step: "updateMessage", ok: false, error: error.message });
+    emitRunEvent(runId, "update_message", "DB update failed", { error: error.message });
   });
 
   const output = {

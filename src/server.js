@@ -7,7 +7,8 @@ import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, re
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, fetchAlertsTimelineEvents, fetchTimelineEvents, hybridSearch, listMessages, listSessions } from "./supabase.js";
+import { annotateMessage, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listSessions, saveQaReport } from "./supabase.js";
+import { runQaAgent } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { createRun, failRun, subscribeRun } from "./runLog.js";
@@ -306,6 +307,42 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { events });
   }
 
+
+  if (req.method === "GET" && url.pathname === "/api/qa/dislikes") {
+    const messages = await listDislikedMessages({ config: config() }).catch(() => []);
+    return sendJson(res, 200, { messages });
+  }
+
+  const qaRunMatch = url.pathname.match(/^\/api\/qa\/([^/]+)\/run$/);
+  if (req.method === "POST" && qaRunMatch) {
+    const messageId = decodeURIComponent(qaRunMatch[1]);
+    const row = await getMessage({ config: config(), messageId }).catch(() => null);
+    if (!row) return sendJson(res, 404, { error: "Message not found" });
+    if (!row.workflow_log) return sendJson(res, 422, { error: "חסר workflow_log — הרץ את ה-migration בסופאבייס ושלח הודעה חדשה עם דיסלייק" });
+    const qaBody = await readJson(req).catch(() => ({}));
+    try {
+      const report = await runQaAgent({
+        config: config(),
+        userMessage: row.user_message,
+        aiResponse: row.ai_response,
+        workflowLog: row.workflow_log,
+        userFeedback: qaBody.userFeedback || null
+      });
+      await saveQaReport({ config: config(), messageId, status: "done", report });
+      return sendJson(res, 200, { ok: true, report });
+    } catch (err) {
+      await saveQaReport({ config: config(), messageId, status: "error", error: err.message });
+      return sendJson(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  const qaReportMatch = url.pathname.match(/^\/api\/qa\/([^/]+)\/report$/);
+  if (req.method === "GET" && qaReportMatch) {
+    const messageId = decodeURIComponent(qaReportMatch[1]);
+    const report = await getLatestQaReport({ config: config(), messageId }).catch(() => null);
+    if (!report) return sendJson(res, 404, { error: "No report found" });
+    return sendJson(res, 200, { report });
+  }
 
   sendJson(res, 404, { error: "Not found" });
 }

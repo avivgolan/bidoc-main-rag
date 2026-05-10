@@ -17,13 +17,49 @@ export async function saveMessage({ config, userMessage, sanitizedMessage, sessi
   return response?.[0] || localMessage({ userMessage, sanitizedMessage, sessionId });
 }
 
-export async function updateMessage({ config, messageId, aiResponse, status = "done" }) {
+export async function updateMessage({ config, messageId, aiResponse, status = "done", workflowLog = null }) {
   if (!isConfigured(config) || String(messageId).startsWith("local_")) return null;
+  const patch = { ai_response: aiResponse, status };
+  if (workflowLog !== null) patch.workflow_log = workflowLog;
   return supabaseFetch(config, `/rest/v1/${MESSAGES_TABLE}?id=eq.${encodeURIComponent(messageId)}`, {
     method: "PATCH",
     headers: { Prefer: "return=representation" },
-    body: JSON.stringify({ ai_response: aiResponse, status })
+    body: JSON.stringify(patch)
   });
+}
+
+export async function getMessage({ config, messageId }) {
+  if (!isConfigured(config)) return null;
+  const rows = await supabaseFetch(config,
+    `/rest/v1/${MESSAGES_TABLE}?id=eq.${encodeURIComponent(messageId)}&select=*&limit=1`
+  );
+  return rows?.[0] || null;
+}
+
+export async function listDislikedMessages({ config, limit = 50 }) {
+  if (!isConfigured(config)) return [];
+  return supabaseFetch(config,
+    `/rest/v1/${MESSAGES_TABLE}?select=id,user_message,ai_response,created_at,session_id&annotation=eq.X&status=eq.done&order=created_at.desc&limit=${limit}`
+  );
+}
+
+const QA_TABLE = "qa_reports";
+
+export async function saveQaReport({ config, messageId, status, report = null, error = null }) {
+  if (!isConfigured(config)) return null;
+  return supabaseFetch(config, `/rest/v1/${QA_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ message_id: messageId, status, report, error })
+  });
+}
+
+export async function getLatestQaReport({ config, messageId }) {
+  if (!isConfigured(config)) return null;
+  const rows = await supabaseFetch(config,
+    `/rest/v1/${QA_TABLE}?message_id=eq.${encodeURIComponent(messageId)}&order=created_at.desc&limit=1`
+  );
+  return rows?.[0] || null;
 }
 
 export async function annotateMessage({ config, messageId, annotation }) {

@@ -128,6 +128,7 @@ async function init() {
   wireEvaluation();
   wireReset();
   wireTimeline();
+  wireQa();
   $("refreshHistory").addEventListener("click", loadHistory);
 
   // Restore tab from URL hash, then load initial data
@@ -184,7 +185,8 @@ const TAB_LOADERS = {
   subagents:  () => loadSubAgents(),
   knowledge:  () => loadKnowledgeDocuments(),
   history:    () => loadHistory(),
-  timeline:   () => loadTimeline()
+  timeline:   () => loadTimeline(),
+  qa:         () => loadQaList()
 };
 
 async function loadAgentsTabData() {
@@ -2534,6 +2536,126 @@ function wireTimeline() {
       tagsBtn.classList.remove("open");
     });
   }
+}
+
+// ── QA ────────────────────────────────────────────────────────────────────────
+
+function wireQa() {
+  $("refreshQa")?.addEventListener("click", loadQaList);
+}
+
+async function loadQaList() {
+  const list = $("qaList");
+  list.textContent = "טוען...";
+  let messages;
+  try {
+    const result = await api("/api/qa/dislikes");
+    messages = result.messages || [];
+  } catch (err) {
+    list.textContent = `שגיאה: ${escapeHtml(err.message)}`;
+    return;
+  }
+
+  list.innerHTML = "";
+
+  if (!messages.length) {
+    list.innerHTML = '<p class="hint" style="padding:20px">אין הודעות שנדחו עדיין.</p>';
+    return;
+  }
+
+  for (const msg of messages) {
+    const card = document.createElement("div");
+    card.className = "qaCard";
+
+    const date = msg.created_at ? new Date(msg.created_at).toLocaleString("he-IL") : "";
+    const safeId = escapeHtml(msg.id);
+
+    card.innerHTML = `
+      <div class="qaCardHeader">
+        <div class="qaCardMeta">
+          <span class="qaCardDate">${escapeHtml(date)}</span>
+        </div>
+        <button class="qaRunBtn" data-id="${safeId}">הרץ QA</button>
+      </div>
+      <div class="qaQuestion"><strong>שאלה:</strong> ${escapeHtml((msg.user_message || "").slice(0, 250))}</div>
+      <div class="qaAnswer"><strong>תשובה:</strong> ${escapeHtml((msg.ai_response || "").slice(0, 350))}</div>
+      <textarea class="qaFeedbackInput" placeholder="תאר מה הייתה הבעיה (אופציונלי)..."></textarea>
+      <div class="qaReport" id="qaReport_${safeId}"></div>
+    `;
+
+    card.querySelector(".qaRunBtn").addEventListener("click", () => runQa(msg.id, card));
+    list.append(card);
+
+    loadExistingQaReport(msg.id, card);
+  }
+}
+
+async function loadExistingQaReport(messageId, card) {
+  try {
+    const result = await api(`/api/qa/${encodeURIComponent(messageId)}/report`);
+    if (result.report) renderQaReport(result.report, messageId, card);
+  } catch (_) {
+    // 404 = no report yet
+  }
+}
+
+async function runQa(messageId, card) {
+  const btn = card.querySelector(".qaRunBtn");
+  const reportEl = card.querySelector(`#qaReport_${messageId}`);
+  const feedbackText = card.querySelector(".qaFeedbackInput")?.value?.trim() || "";
+  btn.disabled = true;
+  btn.textContent = "מנתח...";
+  reportEl.innerHTML = '<div class="qaRunning">מריץ ניתוח QA...</div>';
+
+  try {
+    const result = await api(`/api/qa/${encodeURIComponent(messageId)}/run`, {
+      method: "POST",
+      body: feedbackText ? { userFeedback: feedbackText } : {}
+    });
+    renderQaReport(result.report, messageId, card);
+    showToast("ניתוח QA הסתיים");
+  } catch (err) {
+    reportEl.innerHTML = `<div class="qaError">שגיאה: ${escapeHtml(err.message)}</div>`;
+    showToast("ניתוח QA נכשל", "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "הרץ QA מחדש";
+  }
+}
+
+function renderQaReport(report, messageId, card) {
+  const reportEl = card.querySelector(`#qaReport_${messageId}`);
+  if (!report || !reportEl) return;
+
+  const sevClass = { high: "qaHigh", medium: "qaMedium", low: "qaLow" };
+  const sevLabel = { high: "גבוה", medium: "בינוני", low: "נמוך" };
+
+  const stepRows = (report.step_issues || []).map((issue) => `
+    <div class="qaStepIssue ${sevClass[issue.severity] || ""}">
+      <div class="qaStepIssueHeader">
+        <strong>${escapeHtml(issue.label || issue.step)}</strong>
+        <span class="qaStepSeverity">${escapeHtml(sevLabel[issue.severity] || issue.severity)}</span>
+      </div>
+      <p>${escapeHtml(issue.issue)}</p>
+    </div>
+  `).join("");
+
+  const recs = (report.recommendations || []).map((rec) => `<li>${escapeHtml(rec)}</li>`).join("");
+  const rootCauses = (report.root_cause_steps || []).map((s) => `<code>${escapeHtml(s)}</code>`).join(", ");
+
+  reportEl.innerHTML = `
+    <div class="qaReportBox">
+      <div class="qaReportHeader">
+        <span class="qaOverallSeverity ${sevClass[report.overall_severity] || ""}">חומרה: ${escapeHtml(sevLabel[report.overall_severity] || report.overall_severity || "")}</span>
+        <span class="qaAnswerQuality">איכות: ${escapeHtml(report.answer_quality || "")}</span>
+        <span class="qaConfidence">ביטחון: ${escapeHtml(report.confidence || "")}</span>
+      </div>
+      <p class="qaSummary">${escapeHtml(report.summary || "")}</p>
+      ${rootCauses ? `<div class="qaSection"><strong>שלבים שנכשלו:</strong> ${rootCauses}</div>` : ""}
+      ${stepRows ? `<div class="qaSection"><strong>ממצאים לפי שלב:</strong><div class="qaStepList">${stepRows}</div></div>` : ""}
+      ${recs ? `<div class="qaSection"><strong>המלצות:</strong><ul class="qaRecs">${recs}</ul></div>` : ""}
+    </div>
+  `;
 }
 
 async function api(path, options = {}) {
