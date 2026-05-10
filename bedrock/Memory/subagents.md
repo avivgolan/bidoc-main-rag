@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: subagents
-last_updated: 2026-05-09
+last_updated: 2026-05-10
 tags:
   - subagents
   - alert
@@ -18,11 +18,13 @@ tags:
 - The test endpoint `POST /api/subagents/alert` is handled in `src/server.js`.
 - Alert requests can include `dateFilter`, `dateFrom`, and `dateTo`.
 - When `dateFrom`/`dateTo` are present, Alert filters returned rows by `date`, `metadata.date`, `created_at`, or `metadata.created_at`.
+- The workflow UI has a first-class `alert_agent` node for Alert runs.
 
 ## Recent Changes
 
 - 2026-05-09 -- Alert agent calls from chat now pass structured date bounds separately from the human-readable date filter.
 - 2026-05-09 -- Alert endpoint accepts `date_from` and `date_to` for direct subagent calls.
+- 2026-05-10 -- Added dedicated Alert Agent visibility to the workflow graph and inspector.
 
 ## Gotchas
 

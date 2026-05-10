@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: chat
-last_updated: 2026-05-09
+last_updated: 2026-05-10
 tags:
   - chat
   - rag
@@ -18,10 +18,12 @@ tags:
 - Main RAG uses `hybridSearch` with `classification.date_from` and `classification.date_to`.
 - Tool ordering comes from `buildToolOrder` in `src/tools.js`; high urgency forces `safety_report` then `alert`.
 - Main RAG calls project tools through `callProjectTool` in `src/agent.js`.
+- Workflow logs include a dedicated `alert_agent` node when the Alert subagent is called.
 
 ## Recent Changes
 
 - 2026-05-09 -- Main chat now builds a structured alert-agent request with `dateFilter`, `dateFrom`, and `dateTo`.
+- 2026-05-10 -- Workflow logs now show Alert as its own `Alert Agent` node instead of hiding it inside safety/tool steps.
 
 ## Related
 

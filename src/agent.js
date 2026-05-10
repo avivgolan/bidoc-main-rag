@@ -159,15 +159,19 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   }
 
   const safetyPrecheckTools = classification.urgency === "HIGH" ? ["safety_report", "alert"] : [];
-  for (const toolName of safetyPrecheckTools) {
-    const result = await callProjectTool({ toolName, message, classification, sessionId, config });
+  const safetyResults = await Promise.all(
+    safetyPrecheckTools.map((toolName) =>
+      callProjectTool({ toolName, message, classification, sessionId, config }).then((result) => {
+        emitRunEvent(runId, "safety_precheck", `Safety precheck ${toolName} completed`, {
+          ok: result.ok, skipped: result.skipped || false, error: result.error || null
+        });
+        return result;
+      })
+    )
+  );
+  for (const result of safetyResults) {
     toolCalls.push(annotateToolCall(result));
     sources.push(...result.sources);
-    emitRunEvent(runId, "safety_precheck", `Safety precheck ${toolName} completed`, {
-      ok: result.ok,
-      skipped: result.skipped || false,
-      error: result.error || null
-    });
   }
 
   if (classification.professional) {
@@ -196,30 +200,35 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     const allRows = normalizeRows(hybridResults);
 
     const planQueries = plannedRagQueries(knowledgePlan, message);
-    for (const query of planQueries) {
-      try {
-        emitRunEvent(runId, "hybrid_search", "Running Knowledge Planner RAG query", { query });
-        const plannedSearch = await hybridSearchWithRelaxedHashtags({
-          config,
-          query,
-          dateFrom: classification.date_from,
-          dateTo: classification.date_to,
-          hashtags: classification.hashtags || [],
-          topK: Math.min(config.retrieval.candidates, 20),
-          runId,
-          context: "knowledge_plan"
-        });
-        const plannedResults = plannedSearch.results;
-        const plannedRows = normalizeRows(plannedResults);
-        allRows.push(...plannedRows);
-        const plannedSources = extractLinks(plannedRows);
-        sources.push(...plannedSources);
-        toolCalls.push(annotateToolCall({ toolName: "hybrid_search_plan", ok: true, rawQuery: query, data: plannedRows, sources: plannedSources, relaxedHashtags: plannedSearch.relaxedHashtags }));
-        emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query completed", { query, records: plannedRows.length, relaxedHashtags: plannedSearch.relaxedHashtags });
-      } catch (error) {
-        toolCalls.push(annotateToolCall({ toolName: "hybrid_search_plan", ok: false, rawQuery: query, error: error.message, data: null, sources: [] }));
-        emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query failed", { query, error: error.message });
-      }
+    const planResults = await Promise.all(
+      planQueries.map(async (query) => {
+        try {
+          emitRunEvent(runId, "hybrid_search", "Running Knowledge Planner RAG query", { query });
+          const plannedSearch = await hybridSearchWithRelaxedHashtags({
+            config, query,
+            dateFrom: classification.date_from,
+            dateTo: classification.date_to,
+            hashtags: classification.hashtags || [],
+            topK: Math.min(config.retrieval.candidates, 20),
+            runId, context: "knowledge_plan"
+          });
+          const plannedRows = normalizeRows(plannedSearch.results);
+          const plannedSources = extractLinks(plannedRows);
+          emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query completed", { query, records: plannedRows.length, relaxedHashtags: plannedSearch.relaxedHashtags });
+          return { ok: true, query, rows: plannedRows, sources: plannedSources, relaxedHashtags: plannedSearch.relaxedHashtags };
+        } catch (error) {
+          emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query failed", { query, error: error.message });
+          return { ok: false, query, rows: [], sources: [], error: error.message };
+        }
+      })
+    );
+    for (const pr of planResults) {
+      allRows.push(...pr.rows);
+      sources.push(...pr.sources);
+      toolCalls.push(annotateToolCall(pr.ok
+        ? { toolName: "hybrid_search_plan", ok: true, rawQuery: pr.query, data: pr.rows, sources: pr.sources, relaxedHashtags: pr.relaxedHashtags }
+        : { toolName: "hybrid_search_plan", ok: false, rawQuery: pr.query, error: pr.error, data: null, sources: [] }
+      ));
     }
 
     hybridResults = filterRowsByHashtags(uniqueRows(allRows), classification.hashtags || []);
@@ -258,12 +267,18 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   const plannerTools = recommendedProjectTools(knowledgePlan);
   const tools = buildToolOrder(classification, [...hintedTools(classification), ...plannerTools])
     .filter((toolName) => !safetyPrecheckTools.includes(toolName));
-  emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools", { tools });
-  for (const toolName of tools) {
-    const result = await callProjectTool({ toolName, message, classification, sessionId, config });
+  emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools in parallel", { tools });
+  const toolResults = await Promise.all(
+    tools.map((toolName) =>
+      callProjectTool({ toolName, message, classification, sessionId, config }).then((result) => {
+        emitRunEvent(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, skipped: result.skipped || false, error: result.error || null });
+        return result;
+      })
+    )
+  );
+  for (const result of toolResults) {
     toolCalls.push(annotateToolCall(result));
     sources.push(...result.sources);
-    emitRunEvent(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, skipped: result.skipped || false, error: result.error || null });
   }
 
   const uniqueSources = uniqueByUrl(sources);
@@ -886,12 +901,15 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
   const toolCalls = result.toolCalls || [];
   const hybridCall = toolCalls.find((call) => call.toolName === "hybrid_search");
   const rerankerCall = toolCalls.find((call) => call.toolName === "reranker");
+  const alertCall = toolCalls.find((call) => call.toolName === "alert");
   const retrievalToolNames = ["hybrid_search", "hybrid_search_plan", "reranker"];
   const safetyPrecheckCalls = classification.urgency === "HIGH"
     ? toolCalls.filter((call) => ["safety_report", "alert"].includes(call.toolName))
     : [];
+  const safetyReportPrecheckCalls = safetyPrecheckCalls.filter((call) => call.toolName !== "alert");
+  const alertRanInSafetyPrecheck = Boolean(alertCall && safetyPrecheckCalls.includes(alertCall));
   const safetyPrecheckNames = new Set(safetyPrecheckCalls.map((call) => call.toolName));
-  const n8nCalls = toolCalls.filter((call) => !retrievalToolNames.includes(call.toolName) && !safetyPrecheckNames.has(call.toolName));
+  const n8nCalls = toolCalls.filter((call) => call.toolName !== "alert" && !retrievalToolNames.includes(call.toolName) && !safetyPrecheckNames.has(call.toolName));
   const isChat = classification.type === "CHAT";
   const knowledgePlan = result.knowledgePlan || null;
   const nodes = [
@@ -939,17 +957,31 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
   } else {
     if (classification.urgency === "HIGH") {
       nodes.push(
-        workflowNode("safety_precheck", "Safety Precheck", "tool", safetyPrecheckCalls.some((call) => call.ok) ? "done" : "skipped", {
+        workflowNode("safety_precheck", "Safety Precheck", "tool", safetyReportPrecheckCalls.some((call) => call.ok) ? "done" : "skipped", {
           urgency: classification.urgency,
-          tools: ["safety_report", "alert"]
+          tools: ["safety_report"]
         }, {
-          results: safetyPrecheckCalls.map((call) => ({
+          results: safetyReportPrecheckCalls.map((call) => ({
             toolName: call.toolName,
             ok: call.ok,
             skipped: call.skipped,
             error: call.error || null,
             sources: call.sources || []
           }))
+        })
+      );
+    }
+    if (alertCall) {
+      nodes.push(
+        workflowNode("alert_agent", "Alert Agent", "ai", alertCall.ok ? "done" : alertCall.skipped ? "skipped" : "error", {
+          ...buildAlertAgentRequest({ message: sanitized, classification }),
+          phase: alertRanInSafetyPrecheck ? "safety_precheck" : "tool_call"
+        }, {
+          ok: alertCall.ok,
+          skipped: alertCall.skipped || false,
+          error: alertCall.error || null,
+          answer: summarizeData(alertCall.data),
+          sources: alertCall.sources || []
         })
       );
     }
@@ -1067,18 +1099,22 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         ["knowledge_vocabulary", "memory"],
         ["memory", "switch"],
         ...(classification.urgency === "HIGH" ? [["switch", "safety_precheck"]] : []),
+        ...(alertRanInSafetyPrecheck ? [["safety_precheck", "alert_agent"]] : []),
         ...(result.investigationPlan
-          ? [[classification.urgency === "HIGH" ? "safety_precheck" : "switch", "investigation"]]
+          ? [[alertRanInSafetyPrecheck ? "alert_agent" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "investigation"]]
           : []),
         ...(classification.professional
           ? [
-              [classification.knowledge_vocabulary_match ? "knowledge_vocabulary" : result.investigationPlan ? "investigation" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "knowledge_planner"],
+              [classification.knowledge_vocabulary_match ? "knowledge_vocabulary" : result.investigationPlan ? "investigation" : alertRanInSafetyPrecheck ? "alert_agent" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "knowledge_planner"],
               ["knowledge_planner", "hybrid_search"]
             ]
-          : [[result.investigationPlan ? "investigation" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "hybrid_search"]]),
+          : [[result.investigationPlan ? "investigation" : alertRanInSafetyPrecheck ? "alert_agent" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "hybrid_search"]]),
         ["hybrid_search", "reranker"],
-        ["reranker", "n8n_tools"],
-        ["n8n_tools", "source_quality"],
+        ...(alertCall && !alertRanInSafetyPrecheck
+          ? n8nCalls.length
+            ? [["reranker", "alert_agent"], ["alert_agent", "n8n_tools"], ["n8n_tools", "source_quality"]]
+            : [["reranker", "alert_agent"], ["alert_agent", "source_quality"]]
+          : [["reranker", "n8n_tools"], ["n8n_tools", "source_quality"]]),
         ["source_quality", "conflict_detection"],
         ["conflict_detection", "main_agent"],
         ["main_agent", "update_message"]
