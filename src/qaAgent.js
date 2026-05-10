@@ -42,7 +42,7 @@ export async function runQaAgent({ config, userMessage, aiResponse, workflowLog,
 
   const raw = await chatCompletion({
     apiKey: config.openRouterApiKey,
-    model: config.models.main,
+    model: config.models.qa,
     temperature: 0.1,
     maxTokens: 2048,
     messages: [

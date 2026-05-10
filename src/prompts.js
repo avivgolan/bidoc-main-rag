@@ -140,6 +140,14 @@ Response format:
     step: "reranker",
     description: "מדרג מחדש תוצאות Hybrid Search לפי רלוונטיות לשאלת המשתמש.",
     prompt: "You are a strict RAG reranker. Return ONLY valid JSON: {\"ranked\":[{\"index\":number,\"relevance\":number,\"reason\":string}]}. Rank by relevance to the user query. Use scores as hints, but judge semantic relevance. Do not include markdown."
+  },
+  {
+    id: "qa",
+    name: "QA Agent",
+    modelKey: "qa",
+    step: "qa",
+    description: "מנתח ריצות שקיבלו דיסלייק, מאתר root cause ב-pipeline ומפיק דוח שיפורים.",
+    prompt: ""
   }
 ];
 

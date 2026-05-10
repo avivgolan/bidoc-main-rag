@@ -185,7 +185,8 @@ export function getConfig() {
       main: settings.models?.main || process.env.MAIN_MODEL || "openai/gpt-4o",
       lite: settings.models?.lite || process.env.LITE_MODEL || "openai/gpt-4o-mini",
       embedding: settings.models?.embedding || process.env.EMBEDDING_MODEL || "openai/text-embedding-3-large",
-      reranker: settings.models?.reranker || process.env.RERANKER_MODEL || "openai/gpt-4o-mini"
+      reranker: settings.models?.reranker || process.env.RERANKER_MODEL || "openai/gpt-4o-mini",
+      qa: settings.models?.qa || process.env.QA_MODEL || settings.models?.main || process.env.MAIN_MODEL || "openai/gpt-4o"
     },
     prompts: {
       ...defaultPrompts(),
