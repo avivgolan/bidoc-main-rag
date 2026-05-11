@@ -19,11 +19,13 @@ tags:
 - Tool ordering comes from `buildToolOrder` in `src/tools.js`; high urgency forces `safety_report` then `alert`.
 - Main RAG calls project tools through `callProjectTool` in `src/agent.js`.
 - Workflow logs include a dedicated `alert_agent` node when the Alert subagent is called.
+- The chat pending assistant bubble is updated from live run events instead of showing a static `חושב...` message.
 
 ## Recent Changes
 
 - 2026-05-09 -- Main chat now builds a structured alert-agent request with `dateFilter`, `dateFrom`, and `dateTo`.
 - 2026-05-10 -- Workflow logs now show Alert as its own `Alert Agent` node instead of hiding it inside safety/tool steps.
+- 2026-05-10 -- Chat pending state now shows live Hebrew progress text such as project search, Alert, meetings, and source-quality checks.
 
 ## Related
 

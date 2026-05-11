@@ -1,7 +1,4 @@
 {
-  "permissions": {
-    "defaultMode": "default"
-  },
   "hooks": {
     "SessionStart": [
       {
@@ -9,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project \"C:/Users/dor thalamus/Documents/bidoc agent\" && bedrock refresh-system --project \"C:/Users/dor thalamus/Documents/bidoc agent\""
+            "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent && bedrock refresh-system --project C:/Users/dor thalamus/Documents/bidoc agent"
           }
         ]
       }
@@ -20,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project \"C:/Users/dor thalamus/Documents/bidoc agent\""
+            "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent"
           }
         ]
       }
@@ -31,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project \"C:/Users/dor thalamus/Documents/bidoc agent\""
+            "command": "bedrock sync --project C:/Users/dor thalamus/Documents/bidoc agent"
           }
         ]
       }
