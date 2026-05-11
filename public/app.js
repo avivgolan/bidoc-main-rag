@@ -42,7 +42,8 @@ const state = {
   selectedKnowledgeAgent: "schedule",
   knowledgeAgents: [],
   runEvents: [],
-  fullLogVisible: false
+  fullLogVisible: false,
+  chatProgress: null
 };
 
 const WORKFLOW_NODE_WIDTH = 152;
@@ -167,6 +168,7 @@ function startNewSession(options = {}) {
   state.lastWorkflow = null;
   state.runEvents = [];
   state.fullLogVisible = false;
+  state.chatProgress = null;
   if ($("liveRunList")) $("liveRunList").innerHTML = "";
   if ($("liveRunStatus")) $("liveRunStatus").textContent = "ממתין לבקשה";
   if ($("fullLogView")) {
@@ -351,7 +353,9 @@ function wireChat() {
     const runId = `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     $("messageInput").value = "";
     addMessage(message, "user");
-    const pending = addMessage("חושב...", "assistant");
+    const pending = addMessage("מבין את הבקשה...", "assistant");
+    pending.classList.add("progress");
+    state.chatProgress = { runId, node: pending, lastText: pending.textContent };
     startLiveRun(runId);
     const button = event.submitter;
     button.disabled = true;
@@ -360,15 +364,18 @@ function wireChat() {
         method: "POST",
         body: { message, sessionId: $("sessionId").value, runId }
       });
+      clearChatProgress(pending);
       pending.textContent = result.answer || "לא התקבלה תשובה.";
       if (result.messageId) attachAnnotation(pending, result.messageId);
       appendDebug(pending, result);
       state.lastWorkflow = result.workflowLog || null;
       renderWorkflow(state.lastWorkflow);
     } catch (error) {
+      clearChatProgress(pending);
       pending.textContent = `שגיאה: ${error.message}`;
       appendLiveRunEvent({ step: "client", message: "Request failed", data: { error: error.message }, time: new Date().toISOString() });
     } finally {
+      if (state.chatProgress?.node === pending) state.chatProgress = null;
       button.disabled = false;
     }
   });
@@ -401,6 +408,7 @@ function startLiveRun(runId) {
 
 function appendLiveRunEvent(item) {
   updateAgentRuntime(item);
+  updateChatProgress(item);
   state.runEvents.push(item);
   const row = document.createElement("details");
   row.className = `liveRunItem ${item.step === "error" ? "error" : ""}`;
@@ -413,6 +421,85 @@ function appendLiveRunEvent(item) {
   $("liveRunList").append(row);
   row.scrollIntoView({ block: "end" });
   if (state.fullLogVisible) refreshFullLogView();
+}
+
+function updateChatProgress(item) {
+  const progress = state.chatProgress;
+  if (!progress?.node?.isConnected) return;
+  const text = progressTextForRunEvent(item);
+  if (!text) return;
+  progress.node.textContent = text;
+  progress.lastText = text;
+  progress.node.scrollIntoView({ block: "end" });
+}
+
+function clearChatProgress(node) {
+  node?.classList.remove("progress");
+}
+
+function progressTextForRunEvent(item) {
+  const step = String(item?.step || "");
+  const message = String(item?.message || "");
+  const tool = toolNameFromRunEvent(item);
+
+  if (step === "complete" || step === "created" || step === "local_memory" || step === "update_message") return "";
+  if (step === "client" && !/failed|error/i.test(message)) return "";
+  if (step === "error" || /failed|error/i.test(message)) return "ממשיך לבדוק...";
+  if (tool) return progressTextForTool(tool);
+
+  return {
+    classifier: "מבין את הבקשה...",
+    memory: "בודק את היסטוריית השיחה...",
+    knowledge_vocabulary: "בודק מאגר ידע...",
+    knowledge_planner: "בודק מאגר ידע...",
+    hybrid_search: "בודק מאגר פרויקט...",
+    alert_agent: "בודק מול סוכן התראות...",
+    reranker: "מסדר את הממצאים...",
+    source_quality: "בודק אמינות מקורות...",
+    conflict_detection: "בודק אמינות מקורות...",
+    main_agent: "מרכיב תשובה...",
+    lite_agent: "מרכיב תשובה...",
+    safety_precheck: "בודק אירועי בטיחות...",
+    n8n_tools: "בודק מול סוכני הפרויקט...",
+    switch: "בוחר את מסלול הבדיקה...",
+    sanitize: "מכין את הבקשה...",
+    save_message: "פותח ריצה חדשה...",
+    investigation: "בודק לעומק את הממצאים..."
+  }[step] || "ממשיך לבדוק...";
+}
+
+function toolNameFromRunEvent(item) {
+  const message = String(item?.message || "");
+  const data = item?.data || {};
+  const explicitTool = String(data.toolName || data.tool || "").trim();
+  if (explicitTool) return explicitTool;
+
+  const toolMatch = message.match(/\b(?:Tool|tool|precheck)\s+([a-z_]+)\b/i);
+  if (toolMatch) return toolMatch[1];
+
+  const tools = Array.isArray(data.tools) ? data.tools : [];
+  if (tools.length === 1) return String(tools[0] || "").trim();
+  if (tools.includes("alert")) return "alert";
+  if (tools.includes("meetings")) return "meetings";
+  if (tools.includes("emails")) return "emails";
+  if (tools.includes("whatsapp_messages")) return "whatsapp_messages";
+  return "";
+}
+
+function progressTextForTool(tool) {
+  return {
+    alert: "בודק מול סוכן התראות...",
+    meetings: "בודק מול סוכן ישיבות...",
+    emails: "בודק מול מיילים...",
+    whatsapp_messages: "בודק מול הודעות וואטסאפ...",
+    safety_report: "בודק אירועי בטיחות...",
+    financial_transactions: "בודק נתונים פיננסיים...",
+    consultants_reports: "בודק דוחות יועצים...",
+    exceptions_report: "בודק דוח חריגים...",
+    quality_control: "בודק בקרת איכות...",
+    schedule: "בודק לוחות זמנים...",
+    submittals: "בודק אישורי חומרים..."
+  }[tool] || "בודק מול סוכני הפרויקט...";
 }
 
 function buildFullLogText() {
@@ -2542,6 +2629,7 @@ function wireTimeline() {
 
 function wireQa() {
   $("refreshQa")?.addEventListener("click", loadQaList);
+  $("trendQa")?.addEventListener("click", runTrendAnalysis);
 }
 
 async function loadQaList() {
@@ -2654,6 +2742,82 @@ function renderQaReport(report, messageId, card) {
       ${rootCauses ? `<div class="qaSection"><strong>שלבים שנכשלו:</strong> ${rootCauses}</div>` : ""}
       ${stepRows ? `<div class="qaSection"><strong>ממצאים לפי שלב:</strong><div class="qaStepList">${stepRows}</div></div>` : ""}
       ${recs ? `<div class="qaSection"><strong>המלצות:</strong><ul class="qaRecs">${recs}</ul></div>` : ""}
+    </div>
+  `;
+}
+
+async function runTrendAnalysis() {
+  const btn = $("trendQa");
+  const trendEl = $("qaTrendReport");
+  btn.disabled = true;
+  btn.textContent = "מנתח מגמות...";
+  trendEl.hidden = false;
+  trendEl.innerHTML = '<div class="qaRunning">מריץ ניתוח מגמות על כל דוחות ה-QA...</div>';
+
+  try {
+    const result = await api("/api/qa/trends", { method: "POST" });
+    renderTrendReport(result.trend);
+    showToast("דוח מגמות הושלם");
+  } catch (err) {
+    trendEl.innerHTML = `<div class="qaError">שגיאה: ${escapeHtml(err.message)}</div>`;
+    showToast("ניתוח מגמות נכשל", "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "דוח מגמות";
+  }
+}
+
+function renderTrendReport(trend) {
+  const trendEl = $("qaTrendReport");
+  if (!trend || !trendEl) return;
+
+  const healthClass = { critical: "qaHigh", poor: "qaHigh", fair: "qaMedium", good: "qaLow" };
+  const healthLabel = { critical: "קריטי", poor: "גרוע", fair: "בינוני", good: "טוב" };
+
+  const stepsRows = (trend.top_failure_steps || []).map((s) => `
+    <div class="trendStepRow">
+      <code>${escapeHtml(s.step)}</code>
+      <span class="trendStepBar" style="width:${Math.round(s.pct)}%"></span>
+      <span>${s.count} כישלונות (${Math.round(s.pct)}%)</span>
+    </div>
+  `).join("");
+
+  const patterns = (trend.patterns || []).map((p) => `
+    <div class="trendPattern">
+      <strong>${escapeHtml(p.title)}</strong>
+      <span class="trendPatternCount">${p.affected_reports} דוחות</span>
+      <p>${escapeHtml(p.description)}</p>
+    </div>
+  `).join("");
+
+  const recs = (trend.recommendations || []).map((r) => `
+    <div class="trendRec ${r.priority === "high" ? "qaHigh" : r.priority === "medium" ? "qaMedium" : "qaLow"}">
+      <span class="trendRecPriority">${r.priority === "high" ? "גבוה" : r.priority === "medium" ? "בינוני" : "נמוך"}</span>
+      <div>
+        <strong>${escapeHtml(r.target_step || "")}</strong>
+        <p>${escapeHtml(r.action)}</p>
+      </div>
+    </div>
+  `).join("");
+
+  const aqBreak = trend.answer_quality_breakdown || {};
+  const aqItems = Object.entries(aqBreak).map(([k, v]) =>
+    v ? `<span class="trendAqItem">${escapeHtml(k)}: ${v}</span>` : ""
+  ).join("");
+
+  trendEl.innerHTML = `
+    <div class="trendReportBox">
+      <div class="trendReportHeader">
+        <h3>דוח מגמות QA</h3>
+        <span class="qaOverallSeverity ${healthClass[trend.overall_health] || ""}">
+          בריאות מערכת: ${escapeHtml(healthLabel[trend.overall_health] || trend.overall_health || "")}
+        </span>
+        <span class="trendTotal">${trend.total_reports || 0} דוחות נותחו</span>
+      </div>
+      ${stepsRows ? `<div class="trendSection"><strong>שלבים עם הכי הרבה כישלונות:</strong><div class="trendStepList">${stepsRows}</div></div>` : ""}
+      ${patterns ? `<div class="trendSection"><strong>דפוסים שחוזרים:</strong><div class="trendPatternList">${patterns}</div></div>` : ""}
+      ${aqItems ? `<div class="trendSection"><strong>פילוח איכות תשובות:</strong><div class="trendAqBreak">${aqItems}</div></div>` : ""}
+      ${recs ? `<div class="trendSection"><strong>המלצות עדיפות:</strong><div class="trendRecList">${recs}</div></div>` : ""}
     </div>
   `;
 }

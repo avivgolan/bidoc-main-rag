@@ -7,8 +7,8 @@ import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, re
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listSessions, saveQaReport } from "./supabase.js";
-import { runQaAgent } from "./qaAgent.js";
+import { annotateMessage, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listQaReports, listSessions, saveQaReport } from "./supabase.js";
+import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { createRun, failRun, subscribeRun } from "./runLog.js";
@@ -342,6 +342,17 @@ async function handleApi(req, res, url) {
     const report = await getLatestQaReport({ config: config(), messageId }).catch(() => null);
     if (!report) return sendJson(res, 404, { error: "No report found" });
     return sendJson(res, 200, { report });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/qa/trends") {
+    const reports = await listQaReports({ config: config() }).catch(() => []);
+    if (!reports.length) return sendJson(res, 422, { error: "אין דוחות QA שמורים עדיין" });
+    try {
+      const trend = await runQaTrendAnalysis({ config: config(), reports });
+      return sendJson(res, 200, { ok: true, trend });
+    } catch (err) {
+      return sendJson(res, 500, { ok: false, error: err.message });
+    }
   }
 
   sendJson(res, 404, { error: "Not found" });

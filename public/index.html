@@ -474,8 +474,12 @@
             <h2>QA — ניתוח תשובות שנדחו</h2>
             <p class="hint">הודעות שקיבלו דיסלייק. לחץ "הרץ QA" לניתוח ה-pipeline ולהפקת דוח שיפורים.</p>
           </div>
-          <button id="refreshQa" type="button">רענן</button>
+          <div class="qaHeaderActions">
+            <button id="trendQa" type="button">דוח מגמות</button>
+            <button id="refreshQa" type="button">רענן</button>
+          </div>
         </header>
+        <div id="qaTrendReport" class="qaTrendReport" hidden></div>
         <div class="qaList" id="qaList">טוען...</div>
       </section>
 

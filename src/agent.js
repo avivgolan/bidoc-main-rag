@@ -1029,10 +1029,11 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         candidates: countRows(hybridCall?.data)
       }, rerankerCall?.ok ? {
         records_returned: countRows(rerankerCall.data),
-        sample: previewRows(rerankerCall.data)
+        top_chunks: qaChunksPreview(rerankerCall.data)
       } : {
         error: rerankerCall?.error || "not called",
-        fallback: rerankerCall?.fallback || false
+        fallback: rerankerCall?.fallback || false,
+        fallback_chunks: rerankerCall?.fallback ? qaChunksPreview(hybridCall?.data) : undefined
       }),
       workflowNode("n8n_tools", "n8n Tool Adapters", "tool", n8nCalls.some((call) => call.ok) ? "done" : "skipped", {
         hinted_tools: classification.tool_hint,
@@ -1122,9 +1123,18 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         ["main_agent", "update_message"]
       ];
 
+  const activePrompts = {
+    classifier: config.prompts?.classifier || null,
+    main: config.prompts?.main || null,
+    lite: config.prompts?.lite || null,
+    reranker: config.prompts?.reranker || null,
+    knowledge_planner: config.prompts?.knowledge_planner || null
+  };
+
   return {
     nodes,
     edges: edges.map(([from, to]) => ({ from, to })),
+    activePrompts,
     trace
   };
 }
@@ -1149,6 +1159,21 @@ function previewRows(results) {
     return {
       score: row.similarity || row.score || row.distance || row.match_score || null,
       text: String(text).slice(0, 600),
+      metadata: row.metadata || null
+    };
+  });
+}
+
+function qaChunksPreview(results) {
+  return normalizeRows(results).slice(0, 10).map((row, i) => {
+    const text = row.content || row.text || row.chunk || row.page_content || row.document || row.metadata?.text || JSON.stringify(row);
+    return {
+      rank: i + 1,
+      hybrid_score: row.hybrid_score || row.similarity || row.score || row.match_score || null,
+      rerank_score: row.rerank_score ?? null,
+      rerank_reason: row.rerank_reason || null,
+      text: String(text).slice(0, 1500),
+      url: row.url || row.metadata?.url || null,
       metadata: row.metadata || null
     };
   });

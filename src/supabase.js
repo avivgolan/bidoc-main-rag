@@ -62,6 +62,13 @@ export async function getLatestQaReport({ config, messageId }) {
   return rows?.[0] || null;
 }
 
+export async function listQaReports({ config, limit = 200 }) {
+  if (!isConfigured(config)) return [];
+  return supabaseFetch(config,
+    `/rest/v1/${QA_TABLE}?status=eq.done&order=created_at.desc&limit=${limit}&select=id,message_id,created_at,report`
+  );
+}
+
 export async function annotateMessage({ config, messageId, annotation }) {
   if (!isConfigured(config) || String(messageId).startsWith("local_")) return null;
   return supabaseFetch(config, `/rest/v1/${MESSAGES_TABLE}?id=eq.${encodeURIComponent(messageId)}`, {

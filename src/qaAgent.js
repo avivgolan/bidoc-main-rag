@@ -5,18 +5,21 @@ const QA_SYSTEM_PROMPT = `You are a QA engineer analyzing a RAG pipeline run tha
 You receive:
 - user_message: the original question
 - ai_response: the answer that was disliked
-- workflow_log: JSON with nodes (pipeline steps), edges, and a trace
-- user_feedback (optional): a human description of what was wrong — treat this as the primary signal when present
+- workflow_log: JSON with nodes (pipeline steps), edges, activePrompts, and trace
+- user_feedback (optional): a human description of what was wrong — treat this as the PRIMARY signal when present
 
 Each node has: id, label, kind, status ("done"|"error"|"skipped"), input, output.
+The reranker node output includes top_chunks: [{rank, hybrid_score, rerank_score, rerank_reason, text, url}]
+workflow_log.activePrompts contains the live prompts for: classifier, main, lite, reranker, knowledge_planner
 
 Your job:
 1. Identify which pipeline step(s) caused the bad answer
-2. Explain what went wrong at each problematic step, citing actual values from input/output
-3. Give 2-4 concrete, actionable recommendations to fix the pipeline
+2. Examine the retrieved chunks — were the right documents returned? were they ranked correctly?
+3. Examine the active prompts — are there missing instructions that would have prevented this failure?
+4. Give 2-4 concrete, actionable recommendations (cite specific prompt lines or chunk ranks when relevant)
 
 Rules:
-- Be specific. Reference node IDs and actual values from the log.
+- Be specific. Reference node IDs, chunk ranks, and actual prompt text when relevant.
 - Do not invent problems. Only diagnose what is visible in the data.
 - If the answer looks acceptable but the user disliked it anyway, say so with answer_quality: "acceptable".
 
@@ -53,5 +56,51 @@ export async function runQaAgent({ config, userMessage, aiResponse, workflowLog,
 
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) throw new Error("QA agent returned invalid JSON");
+  return JSON.parse(match[0]);
+}
+
+const TREND_SYSTEM_PROMPT = `You are a QA lead analyzing a batch of RAG pipeline failure reports.
+
+You receive an array of QA reports, each containing: summary, root_cause_steps, step_issues, recommendations, answer_quality, confidence.
+
+Your job:
+1. Find the most common failure patterns across all reports
+2. Rank pipeline steps by failure frequency
+3. Identify systemic issues vs. one-off failures
+4. Give 3-6 high-priority actionable recommendations to fix the most impactful problems
+
+Output ONLY valid JSON:
+{
+  "total_reports": number,
+  "top_failure_steps": [{ "step": string, "count": number, "pct": number }],
+  "patterns": [{ "title": string, "description": string, "affected_reports": number }],
+  "answer_quality_breakdown": { "irrelevant": number, "hallucinated": number, "incomplete": number, "wrong_sources": number, "acceptable": number },
+  "recommendations": [{ "priority": "high"|"medium"|"low", "action": string, "target_step": string }],
+  "overall_health": "critical"|"poor"|"fair"|"good"
+}`;
+
+export async function runQaTrendAnalysis({ config, reports }) {
+  if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+  if (!reports.length) throw new Error("No reports to analyze");
+
+  const userContent = JSON.stringify(
+    reports.map((r) => r.report).filter(Boolean),
+    null,
+    2
+  );
+
+  const raw = await chatCompletion({
+    apiKey: config.openRouterApiKey,
+    model: config.models.qa,
+    temperature: 0.1,
+    maxTokens: 3000,
+    messages: [
+      { role: "system", content: TREND_SYSTEM_PROMPT },
+      { role: "user", content: userContent }
+    ]
+  });
+
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("Trend agent returned invalid JSON");
   return JSON.parse(match[0]);
 }
