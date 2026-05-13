@@ -1,7 +1,12 @@
 import { createEmbedding } from "./openrouter.js";
 import { supabaseHeaders } from "./config.js";
+import { addDurationToLink, TIMELINE_RELATION_TYPES } from "./timelineLinks.js";
 
 const MESSAGES_TABLE = "chat_messages_gf";
+const TIMELINE_LINKS_TABLE = "timeline_event_links";
+const TIMELINE_ENTITIES_TABLE = "timeline_entities";
+const TIMELINE_EVENT_ENTITIES_TABLE = "timeline_event_entities";
+const TIMELINE_GRAPH_EDGES_TABLE = "timeline_graph_edges";
 
 export async function saveMessage({ config, userMessage, sanitizedMessage, sessionId }) {
   if (!isConfigured(config)) return localMessage({ userMessage, sanitizedMessage, sessionId });
@@ -221,6 +226,129 @@ export async function fetchTimelineEvents({ config, limit = 1000 }) {
     content: row.content || (typeof row.metadata === "object" && row.metadata ? row.metadata.summary || row.metadata.text || row.metadata.content || "" : "") || "",
     metadata: row.metadata ?? null
   }));
+}
+
+export async function listTimelineEventLinks({ config, source = "", limit = 1000 } = {}) {
+  if (!isConfigured(config)) return [];
+  const params = new URLSearchParams({
+    select: "*",
+    order: "created_at.desc",
+    limit: String(limit)
+  });
+  if (source === "index" || source === "alerts") {
+    params.set("or", `(source_event_source.eq.${source},target_event_source.eq.${source})`);
+  }
+  const rows = await supabaseFetch(config, `/rest/v1/${TIMELINE_LINKS_TABLE}?${params.toString()}`);
+  return (rows || []).map(addDurationToLink);
+}
+
+export async function createTimelineEventLink({ config, link }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const payload = sanitizeTimelineEventLink(link);
+  const rows = await supabaseFetch(config, `/rest/v1/${TIMELINE_LINKS_TABLE}?select=*`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return addDurationToLink(rows?.[0] || payload);
+}
+
+export async function deleteTimelineEventLink({ config, id }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  if (!id) throw new Error("Timeline link id is required");
+  await supabaseFetch(config, `/rest/v1/${TIMELINE_LINKS_TABLE}?id=eq.${encodeURIComponent(id)}`, {
+    method: "DELETE"
+  });
+  return { ok: true };
+}
+
+export async function listTimelineGraphData({ config, source = "index", limit = 5000 } = {}) {
+  if (!isConfigured(config)) return { entities: [], eventEntities: [], graphEdges: [] };
+  const eventParams = new URLSearchParams({
+    select: "*,entity:timeline_entities(*)",
+    event_source: `eq.${source}`,
+    limit: String(limit)
+  });
+  const edgeParams = new URLSearchParams({
+    select: "*",
+    limit: String(limit)
+  });
+  const eventEntities = await supabaseFetch(config, `/rest/v1/${TIMELINE_EVENT_ENTITIES_TABLE}?${eventParams.toString()}`).catch(() => []);
+  const graphEdges = await supabaseFetch(config, `/rest/v1/${TIMELINE_GRAPH_EDGES_TABLE}?${edgeParams.toString()}`).catch(() => []);
+  const entities = [...new Map((eventEntities || []).map((item) => [item.entity_id, item.entity]).filter(([, entity]) => entity)).values()];
+  return { entities, eventEntities: eventEntities || [], graphEdges: graphEdges || [] };
+}
+
+export async function upsertTimelineGraphData({ config, entities = [], eventEntities = [] }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  if (entities.length) {
+    await supabaseFetch(config, `/rest/v1/${TIMELINE_ENTITIES_TABLE}`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify(entities.map(sanitizeTimelineEntity))
+    });
+  }
+  if (eventEntities.length) {
+    await supabaseFetch(config, `/rest/v1/${TIMELINE_EVENT_ENTITIES_TABLE}`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify(eventEntities.map(sanitizeTimelineEventEntity))
+    });
+  }
+  return { entities: entities.length, eventEntities: eventEntities.length };
+}
+
+function sanitizeTimelineEventLink(link = {}) {
+  const payload = {
+    source_event_source: link.source_event_source === "alerts" ? "alerts" : "index",
+    source_event_id: requiredString(link.source_event_id, "source_event_id"),
+    target_event_source: link.target_event_source === "alerts" ? "alerts" : "index",
+    target_event_id: requiredString(link.target_event_id, "target_event_id"),
+    relation_type: TIMELINE_RELATION_TYPES.includes(link.relation_type) ? link.relation_type : "related",
+    source_date: nullableString(link.source_date),
+    target_date: nullableString(link.target_date),
+    source_title: nullableString(link.source_title),
+    target_title: nullableString(link.target_title),
+    approver: nullableString(link.approver),
+    note: nullableString(link.note),
+    created_by: nullableString(link.created_by)
+  };
+  if (payload.source_event_source === payload.target_event_source && payload.source_event_id === payload.target_event_id) {
+    throw new Error("Cannot link an event to itself");
+  }
+  return payload;
+}
+
+function requiredString(value, label) {
+  const text = String(value || "").trim();
+  if (!text) throw new Error(`${label} is required`);
+  return text;
+}
+
+function nullableString(value) {
+  const text = String(value || "").trim();
+  return text || null;
+}
+
+function sanitizeTimelineEntity(entity = {}) {
+  return {
+    id: requiredString(entity.id, "entity.id"),
+    entity_type: nullableString(entity.entity_type) || "topic",
+    name: requiredString(entity.name, "entity.name"),
+    normalized_name: requiredString(entity.normalized_name || entity.name, "entity.normalized_name"),
+    metadata: entity.metadata && typeof entity.metadata === "object" ? entity.metadata : {}
+  };
+}
+
+function sanitizeTimelineEventEntity(item = {}) {
+  return {
+    event_source: item.event_source === "alerts" ? "alerts" : "index",
+    event_id: requiredString(item.event_id, "event_id"),
+    entity_id: requiredString(item.entity_id, "entity_id"),
+    role: nullableString(item.role) || "mentioned",
+    confidence: Number(item.confidence || 0.5),
+    evidence_text: nullableString(item.evidence_text)
+  };
 }
 
 function parseHashtags(raw) {

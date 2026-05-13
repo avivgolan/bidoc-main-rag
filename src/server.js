@@ -5,9 +5,11 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
-import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrouter.js";
+import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listQaReports, listRunHistory, listSessions, saveQaReport } from "./supabase.js";
+import { annotateMessage, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, upsertTimelineGraphData } from "./supabase.js";
+import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
+import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
@@ -313,6 +315,81 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { events });
   }
 
+  if (req.method === "GET" && url.pathname === "/api/timeline/links") {
+    const source = normalizeTimelineSource(url.searchParams.get("source") || "index");
+    const links = await listTimelineEventLinks({ config: config(), source });
+    return sendJson(res, 200, { links });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/timeline/link-suggestions") {
+    const source = normalizeTimelineSource(url.searchParams.get("source") || "index");
+    const smart = ["1", "true", "yes", "ai", "smart"].includes(String(url.searchParams.get("smart") || "").toLowerCase());
+    const focusEventId = String(url.searchParams.get("eventId") || "").trim();
+    const linkAgent = config().timelineLinks || {};
+    const requestedLimit = Math.min(Math.max(Number(url.searchParams.get("limit") || 0) || (focusEventId ? linkAgent.suggestionLimit || 12 : 40), 1), 200);
+    const events = source === "alerts"
+      ? await fetchAlertsTimelineEvents({ config: config() }).catch(() => [])
+      : await fetchTimelineEvents({ config: config() }).catch(() => []);
+    const links = await listTimelineEventLinks({ config: config(), source }).catch(() => []);
+    const graphData = await listTimelineGraphData({ config: config(), source }).catch(() => ({ eventEntities: [], graphEdges: [] }));
+    await buildTimelineKnowledgeGraph({ events, links, source, eventEntities: graphData.eventEntities || [], graphEdges: graphData.graphEdges || [] });
+    const graphScorer = createTimelineGraphScorer({ eventEntities: graphData.eventEntities || [], source });
+    const baseSuggestions = buildTimelineLinkSuggestions({
+      events,
+      links,
+      source,
+      limit: focusEventId ? 200 : requestedLimit,
+      pairScorer: graphScorer
+    });
+    const focusedBaseSuggestions = focusEventId
+      ? baseSuggestions.filter((item) => String(item.source_event_id) === focusEventId || String(item.target_event_id) === focusEventId)
+      : baseSuggestions;
+    const relatedSuggestions = focusEventId
+      ? buildFocusedRelatedTimelineSuggestions({ events, links, source, focusEventId, graphScorer, limit: requestedLimit, settings: linkAgent })
+      : [];
+    const focusedSuggestions = mergeTimelineSuggestions([...focusedBaseSuggestions, ...relatedSuggestions], requestedLimit);
+    const suggestions = smart
+      ? await enrichTimelineSuggestionsWithModel({
+        cfg: config(),
+        events,
+        links,
+        source,
+        baseSuggestions: focusedSuggestions,
+        graphScorer,
+        focusEventId,
+        limit: requestedLimit
+      }).catch((error) => {
+        console.warn("[timeline] smart suggestions failed:", error.message);
+        return focusedSuggestions.map((item) => ({ ...item, modelStatus: "fallback", modelError: error.message }));
+      })
+      : focusedSuggestions;
+    return sendJson(res, 200, { suggestions, mode: smart ? "smart" : "rules" });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/timeline/graph/rebuild") {
+    const body = await readJson(req).catch(() => ({}));
+    const source = normalizeTimelineSource(body.source || url.searchParams.get("source") || "index");
+    const events = source === "alerts"
+      ? await fetchAlertsTimelineEvents({ config: config() }).catch(() => [])
+      : await fetchTimelineEvents({ config: config() }).catch(() => []);
+    const rows = buildEntityGraphRowsForEvents(events, source);
+    const saved = await upsertTimelineGraphData({ config: config(), entities: rows.entities, eventEntities: rows.eventEntities });
+    return sendJson(res, 200, { ok: true, source, events: events.length, ...saved });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/timeline/links") {
+    const body = await readJson(req);
+    const link = await createTimelineEventLink({ config: config(), link: body });
+    return sendJson(res, 200, { link });
+  }
+
+  const timelineLinkDeleteMatch = url.pathname.match(/^\/api\/timeline\/links\/([^/]+)$/);
+  if (req.method === "DELETE" && timelineLinkDeleteMatch) {
+    const id = decodeURIComponent(timelineLinkDeleteMatch[1]);
+    const result = await deleteTimelineEventLink({ config: config(), id });
+    return sendJson(res, 200, result);
+  }
+
 
   if (req.method === "GET" && url.pathname === "/api/qa/dislikes") {
     const messages = await listDislikedMessages({ config: config() }).catch(() => []);
@@ -396,6 +473,301 @@ function parseHashtags(value) {
     .split(/[,\s]+/)
     .map((tag) => tag.trim().replace(/^#+/, ""))
     .filter(Boolean);
+}
+
+async function enrichTimelineSuggestionsWithModel({ cfg, events = [], links = [], source = "index", baseSuggestions = [], graphScorer, focusEventId = "", limit = 8 }) {
+  if (!cfg.openRouterApiKey) return baseSuggestions;
+  const linkAgent = cfg.timelineLinks || {};
+  const semanticSuggestions = linkAgent.useSemanticSearch === false
+    ? []
+    : await buildSemanticTimelineSuggestions({ cfg, events, links, source, graphScorer, focusEventId }).catch((error) => {
+      console.warn("[timeline] semantic suggestions failed:", error.message);
+      return [];
+    });
+  const candidates = mergeTimelineSuggestions([...baseSuggestions, ...semanticSuggestions], Math.max(limit * 2, 14));
+  if (!candidates.length) return [];
+
+  const byId = new Map(events.map((event) => [String(event.id), event]));
+  const reviewInput = candidates.map((item, index) => {
+    const sourceEvent = byId.get(String(item.source_event_id));
+    const targetEvent = byId.get(String(item.target_event_id));
+    return {
+      index,
+      relation_type: item.relation_type,
+      durationDays: item.durationDays,
+      score: Number(item.score || 0),
+      semantic: item.semantic || null,
+      graph: {
+        score: Number(item.graphScore || 0),
+        sharedEntities: (item.graphSharedEntities || []).slice(0, 8)
+      },
+      source: compactTimelineEvent(sourceEvent),
+      target: compactTimelineEvent(targetEvent)
+    };
+  });
+
+  const content = await chatCompletion({
+    apiKey: cfg.openRouterApiKey,
+    model: linkAgent.model || cfg.models.reranker || cfg.models.lite || cfg.models.main,
+    temperature: 0,
+    maxTokens: 1800,
+    messages: [
+      {
+        role: "system",
+        content: [
+          linkAgent.prompt || "You verify timeline event links for a construction project.",
+          "Return ONLY valid JSON with the requested schema. Do not include markdown."
+        ].join(" ")
+      },
+      {
+        role: "user",
+        content: JSON.stringify({ source, candidates: reviewInput }, null, 2)
+      }
+    ]
+  });
+  const parsed = extractJsonObject(content);
+  const reviews = Array.isArray(parsed.links) ? parsed.links : [];
+  const accepted = [];
+  for (const review of reviews) {
+    const index = Number(review.index);
+    if (!Number.isInteger(index) || index < 0 || index >= candidates.length) continue;
+    if (review.accepted === false || Number(review.confidence || 0) < Number(linkAgent.minConfidence ?? 0.42)) continue;
+    const candidate = candidates[index];
+    accepted.push({
+      ...candidate,
+      relation_type: normalizeTimelineRelationType(review.relation_type, candidate.relation_type),
+      approver: String(review.approver || candidate.approver || "").trim(),
+      modelStatus: "reviewed",
+      modelConfidence: Number(review.confidence || 0),
+      modelReason: String(review.reason || "").slice(0, 240),
+      score: Number(candidate.score || 0) + Math.round(Number(review.confidence || 0) * 35)
+    });
+  }
+  return mergeTimelineSuggestions(accepted.length ? accepted : candidates.map((item) => ({ ...item, modelStatus: "reviewed_no_accept" })), limit);
+}
+
+async function buildSemanticTimelineSuggestions({ cfg, events = [], links = [], source = "index", graphScorer, focusEventId = "" }) {
+  if (source !== "index") return [];
+  const existing = new Set(links.map((link) => [
+    link.source_event_source,
+    link.source_event_id,
+    link.target_event_source,
+    link.target_event_id,
+    link.relation_type
+  ].join("|")));
+  const eventsById = new Map(events.map((event) => [String(event.id), event]));
+  const focusEvent = focusEventId ? events.find((event) => String(event.id) === focusEventId) : null;
+  const quoteEvents = selectTimelineQuoteSeeds(events, focusEvent)
+    .sort((a, b) => new Date(b.date) - new Date(a.date))
+    .slice(0, focusEvent ? 20 : 10);
+  const suggestions = [];
+  for (const quote of quoteEvents) {
+    const query = [
+      "approval accepted approved אישור אושר אושרה",
+      eventTitle(quote),
+      (quote.tags || []).join(" "),
+      String(quote.content || "").slice(0, 500)
+    ].filter(Boolean).join("\n");
+    const rows = await hybridSearch({
+      config: cfg,
+      query,
+      dateFrom: quote.date || null,
+      dateTo: null,
+      hashtags: quote.tags || [],
+      topK: Number(cfg.timelineLinks?.semanticTopK || 8)
+    }).catch(() => []);
+    for (const row of rows || []) {
+      const target = findTimelineEventForSearchRow(row, eventsById);
+      if (!target || String(target.id) === String(quote.id) || !isTimelineEventAfter(target, quote)) continue;
+      const graph = typeof graphScorer === "function"
+        ? graphScorer({ sourceEvent: quote, targetEvent: target, source })
+        : { graphScore: 0, graphSharedEntities: [] };
+      const looksApproval = isTimelineApprovalEvent(target);
+      if (!looksApproval && Number(graph.graphScore || 0) < 18) continue;
+      const key = [source, quote.id, source, target.id, "quote_approved"].join("|");
+      if (existing.has(key)) continue;
+      const semanticScore = Number(row.hybrid_score ?? row.match_score ?? row.score ?? row.similarity ?? 0);
+      suggestions.push(buildTimelineSuggestionFromEvents({
+        sourceEvent: quote,
+        targetEvent: target,
+        source,
+        relationType: "quote_approved",
+        score: 25 + Number(graph.graphScore || 0) + Math.round(semanticScore * 20),
+        sharedTags: sharedTimelineTags(quote, target),
+        graph,
+        semantic: {
+          score: semanticScore,
+          source: "hybrid_search"
+        }
+      }));
+    }
+  }
+  return mergeTimelineSuggestions(suggestions, 12);
+}
+
+function findTimelineEventForSearchRow(row, eventsById) {
+  const candidates = [
+    row?.id,
+    row?.document_id,
+    row?.metadata?.id,
+    row?.metadata?.document_id,
+    row?.metadata?.source_id
+  ].filter((value) => value !== undefined && value !== null);
+  for (const id of candidates) {
+    const event = eventsById.get(String(id));
+    if (event) return event;
+  }
+  const text = String(row?.content || row?.text || row?.metadata?.content || "");
+  if (!text) return null;
+  for (const event of eventsById.values()) {
+    const eventText = timelineEventText(event);
+    if (eventText && (eventText.includes(text.slice(0, 80)) || text.includes(eventText.slice(0, 80)))) return event;
+  }
+  return null;
+}
+
+function compactTimelineEvent(event) {
+  if (!event) return null;
+  return {
+    id: String(event.id),
+    date: event.date || null,
+    title: eventTitle(event),
+    tags: event.tags || [],
+    text: timelineEventText(event).slice(0, 900)
+  };
+}
+
+function sharedTimelineTags(a, b) {
+  const aTags = new Set((a?.tags || []).map((tag) => String(tag).toLowerCase()));
+  return (b?.tags || []).filter((tag) => aTags.has(String(tag).toLowerCase())).length;
+}
+
+function normalizeTimelineRelationType(value, fallback = "related") {
+  const allowed = new Set(["quote_approved", "invoice_sent", "payment_received", "change_order", "related"]);
+  return allowed.has(value) ? value : fallback;
+}
+
+function selectTimelineQuoteSeeds(events, focusEvent) {
+  if (!focusEvent) return events.filter(isTimelineQuoteEvent);
+  if (isTimelineQuoteEvent(focusEvent)) return [focusEvent];
+  if (isTimelineApprovalEvent(focusEvent)) {
+    return events.filter((event) =>
+      isTimelineQuoteEvent(event) &&
+      isTimelineEventAfter(focusEvent, event) &&
+      event.id !== focusEvent.id &&
+      hasTimelineOverlap(event, focusEvent)
+    );
+  }
+  return events.filter((event) =>
+    isTimelineQuoteEvent(event) &&
+    event.id !== focusEvent.id &&
+    hasTimelineOverlap(event, focusEvent)
+  );
+}
+
+function buildFocusedRelatedTimelineSuggestions({ events = [], links = [], source = "index", focusEventId = "", graphScorer, limit = 12, settings = {} }) {
+  if (settings.useGraphFallback === false) return [];
+  const focus = events.find((event) => String(event.id) === String(focusEventId));
+  if (!focus) return [];
+  const existing = new Set(links.map((link) => [
+    link.source_event_source,
+    link.source_event_id,
+    link.target_event_source,
+    link.target_event_id,
+    link.relation_type
+  ].join("|")));
+  const focusDate = new Date(focus.date);
+  const proposals = [];
+  for (const candidate of events) {
+    if (String(candidate.id) === String(focus.id)) continue;
+    const candidateDate = new Date(candidate.date);
+    if (Number.isNaN(focusDate.getTime()) || Number.isNaN(candidateDate.getTime())) continue;
+    const distanceDays = Math.abs(candidateDate.getTime() - focusDate.getTime()) / 86400000;
+    if (distanceDays > Number(settings.timeWindowDays || 120)) continue;
+    const graph = typeof graphScorer === "function"
+      ? graphScorer({ sourceEvent: focus, targetEvent: candidate, source })
+      : { graphScore: 0, graphSharedEntities: [] };
+    const ignoredTerms = timelineIgnoredTerms(settings);
+    const meaningfulEntities = (graph.graphSharedEntities || []).filter((entity) => isMeaningfulTimelineEntity(entity, ignoredTerms));
+    const meaningfulTags = sharedMeaningfulTimelineTags(focus, candidate, ignoredTerms);
+    if (!meaningfulEntities.length && !meaningfulTags.length) continue;
+
+    const focusIsBefore = candidateDate >= focusDate;
+    const sourceEvent = focusIsBefore ? focus : candidate;
+    const targetEvent = focusIsBefore ? candidate : focus;
+    const relationType = isTimelineQuoteEvent(sourceEvent) && isTimelineApprovalEvent(targetEvent)
+      ? "quote_approved"
+      : "related";
+    const key = [source, sourceEvent.id, source, targetEvent.id, relationType].join("|");
+    if (existing.has(key)) continue;
+
+    const timeScore = Math.max(0, 35 - Math.min(distanceDays, 35));
+    const score = Math.round(timeScore + meaningfulTags.length * 18 + meaningfulEntities.length * 14 + Number(graph.graphScore || 0) * 0.35);
+    proposals.push(buildTimelineSuggestionFromEvents({
+      sourceEvent,
+      targetEvent,
+      source,
+      relationType,
+      score,
+      sharedTags: meaningfulTags.length,
+      graph: {
+        graphScore: score,
+        graphSharedEntities: meaningfulEntities
+      },
+      semantic: { source: "timeline_graph_focus" }
+    }));
+  }
+  return mergeTimelineSuggestions(proposals, limit);
+}
+
+function isMeaningfulTimelineEntity(entity, ignoredTerms = GENERIC_TIMELINE_TERMS) {
+  const name = String(entity?.name || "").trim().toLowerCase().replace(/^#+/, "");
+  if (!name || ignoredTerms.has(name)) return false;
+  return name.length > 2 || /[0-9_-]/.test(name);
+}
+
+function sharedMeaningfulTimelineTags(a, b, ignoredTerms = GENERIC_TIMELINE_TERMS) {
+  const bTags = new Set((b?.tags || []).map(normalizeTimelineTerm).filter((tag) => tag && !ignoredTerms.has(tag)));
+  return (a?.tags || [])
+    .map(normalizeTimelineTerm)
+    .filter((tag, index, all) => tag && all.indexOf(tag) === index && bTags.has(tag) && !ignoredTerms.has(tag));
+}
+
+function normalizeTimelineTerm(value) {
+  return String(value || "").trim().toLowerCase().replace(/^#+/, "");
+}
+
+const GENERIC_TIMELINE_TERMS = new Set([
+  "פרויקט",
+  "project",
+  "כללי",
+  "general",
+  "בנייה",
+  "construction",
+  "תכניות",
+  "תכנית",
+  "מסמך",
+  "מסמכים",
+  "document",
+  "documents",
+  "לידיעה",
+  "סטטוס"
+]);
+
+function timelineIgnoredTerms(settings = {}) {
+  const terms = Array.isArray(settings.ignoredTerms) && settings.ignoredTerms.length
+    ? settings.ignoredTerms
+    : [...GENERIC_TIMELINE_TERMS];
+  return new Set(terms.map(normalizeTimelineTerm).filter(Boolean));
+}
+
+function hasTimelineOverlap(a, b) {
+  const aTags = new Set((a?.tags || []).map(normalizeTimelineTerm).filter((tag) => tag && !GENERIC_TIMELINE_TERMS.has(tag)));
+  if ((b?.tags || []).some((tag) => aTags.has(normalizeTimelineTerm(tag)))) return true;
+  const aText = timelineEventText(a).toLowerCase();
+  const bText = timelineEventText(b).toLowerCase();
+  return (a?.tags || []).some((tag) => bText.includes(String(tag).toLowerCase())) ||
+    (b?.tags || []).some((tag) => aText.includes(String(tag).toLowerCase()));
 }
 
 function sendJson(res, status, value) {

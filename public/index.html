@@ -79,6 +79,12 @@
             </span>
             <span class="tabLabel">ציר זמן</span>
           </button>
+          <button class="tab" data-tab="linkAgent">
+            <span class="tabIcon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.43"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.33"/></svg>
+            </span>
+            <span class="tabLabel">סוכן הקשרים</span>
+          </button>
           <button class="tab" data-tab="qa">
             <span class="tabIcon">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
@@ -473,6 +479,76 @@
           </div>
         </div>
         <div class="timelineContainer" id="timelineContainer">טוען...</div>
+      </section>
+
+      <!-- ======================================================
+           LINK AGENT
+           ====================================================== -->
+      <section class="panel" id="linkAgent">
+        <header class="panelHeader">
+          <div>
+            <h2>סוכן הקשרים</h2>
+            <p class="hint">הגדרות המודל שמציע קשרים בין אירועים בציר הזמן.</p>
+          </div>
+          <div class="headerActions">
+            <button id="testLinkAgent" type="button">בדוק על אירוע</button>
+            <button id="saveLinkAgent" type="button">שמור</button>
+          </div>
+        </header>
+
+        <div class="linkAgentLayout">
+          <section class="linkAgentPanel">
+            <h3>מודל והחלטה</h3>
+            <div class="grid">
+              <label class="wide">מודל בדיקה
+                <select id="linkAgentModel"></select>
+              </label>
+              <label>כמות הצעות
+                <input id="linkAgentSuggestionLimit" type="number" min="1" max="50" />
+              </label>
+              <label>Top K סמנטי
+                <input id="linkAgentSemanticTopK" type="number" min="1" max="30" />
+              </label>
+              <label>חלון זמן בימים
+                <input id="linkAgentTimeWindowDays" type="number" min="1" max="730" />
+              </label>
+              <label>סף ביטחון
+                <input id="linkAgentMinConfidence" type="number" min="0" max="1" step="0.01" />
+              </label>
+            </div>
+
+            <div class="linkAgentToggles">
+              <label><input id="linkAgentUseSemanticSearch" type="checkbox" /> חיפוש סמנטי</label>
+              <label><input id="linkAgentUseGraphFallback" type="checkbox" /> השלמה דרך הגרף</label>
+            </div>
+          </section>
+
+          <section class="linkAgentPanel">
+            <h3>פרומפט</h3>
+            <textarea id="linkAgentPrompt" rows="12" spellcheck="false"></textarea>
+          </section>
+
+          <section class="linkAgentPanel">
+            <h3>מילים שלא יוצרות קשר לבד</h3>
+            <textarea id="linkAgentIgnoredTerms" rows="10" spellcheck="false"></textarea>
+          </section>
+
+          <section class="linkAgentPanel">
+            <h3>בדיקה מהירה</h3>
+            <div class="grid">
+              <label>Event ID
+                <input id="linkAgentTestEventId" placeholder="לדוגמה: 2051" />
+              </label>
+              <label>מקור
+                <select id="linkAgentTestSource">
+                  <option value="index">הכל</option>
+                  <option value="alerts">אירועים</option>
+                </select>
+              </label>
+            </div>
+            <pre class="result" id="linkAgentTestResult">אין תוצאה עדיין.</pre>
+          </section>
+        </div>
       </section>
 
       <!-- ======================================================

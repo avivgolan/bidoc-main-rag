@@ -128,6 +128,7 @@ async function init() {
   wireEvaluation();
   wireReset();
   wireTimeline();
+  wireLinkAgent();
   wireQa();
   $("refreshHistory").addEventListener("click", loadHistory);
 
@@ -187,6 +188,7 @@ const TAB_LOADERS = {
   knowledge:  () => loadKnowledgeDocuments(),
   history:    () => loadHistory(),
   timeline:   () => loadTimeline(),
+  linkAgent:  () => loadLinkAgent(),
   qa:         () => loadQaList(),
   workflow:   () => loadRunHistory()
 };
@@ -666,6 +668,7 @@ async function loadOpenRouterModels() {
     if ($("modelListStatus")) $("modelListStatus").textContent = `לא ניתן לטעון מודלים: ${error.message}`;
   }
   renderAgents();
+  applyLinkAgentSettingsToForm();
 }
 
 function modelOptions(selectedModel) {
@@ -680,6 +683,12 @@ function modelOptions(selectedModel) {
     const label = `${model.name || model.id}${model.contextLength ? ` · ${Number(model.contextLength).toLocaleString()} ctx` : ""}`;
     return `<option value="${escapeHtml(model.id)}" ${model.id === selectedModel ? "selected" : ""}>${escapeHtml(label)}</option>`;
   }).join("");
+}
+
+function fillModelSelect(select, selectedModel) {
+  if (!select) return;
+  select.innerHTML = modelOptions(selectedModel);
+  select.value = selectedModel || "";
 }
 
 function agentStatusLabel(status) {
@@ -1290,6 +1299,88 @@ function wireSettings() {
   });
 }
 
+function wireLinkAgent() {
+  $("saveLinkAgent")?.addEventListener("click", saveLinkAgentSettings);
+  $("testLinkAgent")?.addEventListener("click", testLinkAgentSettings);
+}
+
+async function loadLinkAgent() {
+  if (!state.settings) await loadSettings();
+  if (!state.openRouterModels.length) await loadOpenRouterModels();
+  applyLinkAgentSettingsToForm();
+}
+
+function applyLinkAgentSettingsToForm() {
+  const settings = state.settings?.timelineLinks || {};
+  fillModelSelect($("linkAgentModel"), settings.model || state.settings?.models?.reranker || "");
+  if ($("linkAgentSuggestionLimit")) $("linkAgentSuggestionLimit").value = settings.suggestionLimit ?? 12;
+  if ($("linkAgentSemanticTopK")) $("linkAgentSemanticTopK").value = settings.semanticTopK ?? 8;
+  if ($("linkAgentTimeWindowDays")) $("linkAgentTimeWindowDays").value = settings.timeWindowDays ?? 120;
+  if ($("linkAgentMinConfidence")) $("linkAgentMinConfidence").value = settings.minConfidence ?? 0.42;
+  if ($("linkAgentUseSemanticSearch")) $("linkAgentUseSemanticSearch").checked = settings.useSemanticSearch !== false;
+  if ($("linkAgentUseGraphFallback")) $("linkAgentUseGraphFallback").checked = settings.useGraphFallback !== false;
+  if ($("linkAgentPrompt")) $("linkAgentPrompt").value = settings.prompt || "";
+  if ($("linkAgentIgnoredTerms")) $("linkAgentIgnoredTerms").value = (settings.ignoredTerms || []).join("\n");
+}
+
+function readLinkAgentSettingsFromForm() {
+  return {
+    model: $("linkAgentModel")?.value || "",
+    prompt: $("linkAgentPrompt")?.value || "",
+    suggestionLimit: Number($("linkAgentSuggestionLimit")?.value || 12),
+    semanticTopK: Number($("linkAgentSemanticTopK")?.value || 8),
+    timeWindowDays: Number($("linkAgentTimeWindowDays")?.value || 120),
+    minConfidence: Number($("linkAgentMinConfidence")?.value || 0.42),
+    useSemanticSearch: Boolean($("linkAgentUseSemanticSearch")?.checked),
+    useGraphFallback: Boolean($("linkAgentUseGraphFallback")?.checked),
+    ignoredTerms: parseMultilineList($("linkAgentIgnoredTerms")?.value || "")
+  };
+}
+
+async function saveLinkAgentSettings() {
+  const button = $("saveLinkAgent");
+  button.disabled = true;
+  try {
+    const body = {
+      models: state.settings?.models || {},
+      retrieval: state.settings?.retrieval || {},
+      knowledge: state.settings?.knowledge || {},
+      timelineLinks: readLinkAgentSettingsFromForm(),
+      secrets: {},
+      n8nBaseUrl: state.settings?.n8nBaseUrl || "",
+      timezone: state.settings?.timezone || "UTC+3",
+      tools: Object.fromEntries(n8nTools.map((tool) => [tool, state.settings?.tools?.[tool]?.url || ""])),
+      subagents: state.settings?.subagents || {}
+    };
+    const result = await api("/api/settings", { method: "PUT", body });
+    state.settings = result.settings;
+    applyLinkAgentSettingsToForm();
+    showToast("הגדרות סוכן הקשרים נשמרו");
+  } catch (error) {
+    showToast(`שגיאה בשמירה: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function testLinkAgentSettings() {
+  const resultBox = $("linkAgentTestResult");
+  const eventId = $("linkAgentTestEventId")?.value?.trim();
+  const source = $("linkAgentTestSource")?.value || "index";
+  if (!eventId) {
+    resultBox.textContent = "צריך להזין Event ID.";
+    return;
+  }
+  resultBox.textContent = "בודק...";
+  try {
+    await saveLinkAgentSettings();
+    const result = await api(`/api/timeline/link-suggestions?source=${encodeURIComponent(source)}&smart=1&eventId=${encodeURIComponent(eventId)}&limit=${encodeURIComponent($("linkAgentSuggestionLimit")?.value || 12)}`);
+    resultBox.textContent = JSON.stringify(result, null, 2);
+  } catch (error) {
+    resultBox.textContent = error.message;
+  }
+}
+
 function wireTools() {
   $("runTool").addEventListener("click", async () => {
     $("toolResult").textContent = "מריץ...";
@@ -1420,6 +1511,7 @@ function applySettingsToForm() {
     `Tools: ${configured}/${n8nTools.length}`
   ].join("<br>");
   renderSettingsSourceStatus();
+  applyLinkAgentSettingsToForm();
   renderAgents();
 }
 
@@ -1630,7 +1722,11 @@ const timelineState = {
   selectedEventId: null,
   searchQuery: "",
   viewportStart: null,
-  visibleListFields: new Set()
+  visibleListFields: new Set(),
+  links: [],
+  suggestions: [],
+  suggestionsLoaded: false,
+  suggestionsMode: "rules"
 };
 
 function timelineDebug(message, data = {}) {
@@ -1642,8 +1738,16 @@ async function loadTimeline() {
   container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#2e4050;font-size:13px;">טוען...</div>';
   const endpoint = timelineState.source === "alerts" ? "/api/timeline/alerts" : "/api/timeline";
   try {
-    const { events } = await api(endpoint);
-    timelineState.events = events || [];
+    const [{ events }, linksResult, suggestionsResult] = await Promise.all([
+      api(endpoint),
+      loadTimelineLinks().catch((error) => ({ links: [], error })),
+      loadTimelineSuggestions().catch((error) => ({ suggestions: [], error }))
+    ]);
+    timelineState.events = (events || []).map((event) => ({ ...event, source: getActiveTimelineSource() }));
+    timelineState.links = linksResult.links || [];
+    timelineState.suggestions = suggestionsResult.suggestions || [];
+    timelineState.suggestionsLoaded = true;
+    timelineState.suggestionsMode = suggestionsResult.mode || "rules";
     timelineState.calYear = null;
     timelineState.calMonth = null;
     timelineState.calSelectedDate = null;
@@ -1659,6 +1763,37 @@ async function loadTimeline() {
     console.error("Timeline error:", e);
     container.innerHTML = `<p style="padding:24px;color:#fb923c;">שגיאה בטעינת ציר הזמן. נסה לרענן.</p>`;
   }
+}
+
+async function loadTimelineLinks() {
+  return api(`/api/timeline/links?source=${encodeURIComponent(getActiveTimelineSource())}`);
+}
+
+async function loadTimelineSuggestions() {
+  return api(`/api/timeline/link-suggestions?source=${encodeURIComponent(getActiveTimelineSource())}`);
+}
+
+async function loadSmartTimelineSuggestions() {
+  return api(`/api/timeline/link-suggestions?source=${encodeURIComponent(getActiveTimelineSource())}&smart=1`);
+}
+
+async function loadSmartTimelineSuggestionsForEvent(eventId) {
+  return api(`/api/timeline/link-suggestions?source=${encodeURIComponent(getActiveTimelineSource())}&smart=1&eventId=${encodeURIComponent(eventId)}&limit=12`);
+}
+
+async function refreshTimelineLinks({ rerender = true } = {}) {
+  const result = await loadTimelineLinks();
+  timelineState.links = result.links || [];
+  const suggestions = await loadTimelineSuggestions().catch(() => ({ suggestions: [] }));
+  timelineState.suggestions = suggestions.suggestions || [];
+  timelineState.suggestionsLoaded = true;
+  timelineState.suggestionsMode = suggestions.mode || "rules";
+  if (rerender) renderTimeline();
+  return timelineState.links;
+}
+
+function getActiveTimelineSource() {
+  return timelineState.source === "alerts" ? "alerts" : "index";
 }
 
 function renderTimelineFilters() {
@@ -1715,6 +1850,7 @@ function getFilteredTimelineEvents() {
     const haystack = [
       event.content || "",
       ...(event.tags || []),
+      String(event.id || ""),
       event.date || ""
     ].join(" ").toLowerCase();
     return haystack.includes(query);
@@ -2013,7 +2149,8 @@ function buildWaveLayer(events, buckets, minDate, maxDate) {
       const xPct = xBase + spread;
       const yPct = waveYpct - 9 - (k2 % 2) * 4;
       const node = document.createElement("div");
-      node.className = `tlNode tl-${type}` + (isCluster ? " tlCluster" : "");
+      node.className = `tlNode ${timelineTypeClass(type)}` + (isCluster ? " tlCluster" : "");
+      if (!isCluster && timelineHasSuggestions(ev)) node.classList.add("tlHasSuggestion");
       node.style.left = `${xPct}%`; node.style.top = `${yPct}%`;
       if (isCluster) {
         buildClusterPieNode(node, evs);
@@ -2199,11 +2336,19 @@ function buildListPanel(events) {
     for (const ev of evs) {
       const d = new Date(ev.date); const type = classifyEvent(ev);
       const item = document.createElement("div"); item.className = "tlListItem"; item.dataset.eventId = ev.id;
+      if (timelineHasSuggestions(ev)) item.classList.add("tlHasSuggestion");
       const dot = document.createElement("div"); dot.className = "tlListDot"; dot.style.background = getTypeColor(type);
       const inner = document.createElement("div"); inner.style.cssText = "flex:1;min-width:0;";
       const metaEl = document.createElement("div"); metaEl.className = "tlListMeta"; metaEl.textContent = d.toLocaleDateString("he-IL",{day:"numeric",month:"short"});
       const txt = document.createElement("div"); txt.className = "tlListText"; txt.textContent = ev.content || getMailSummarize(ev) || ev.tags.join(", ") || "—";
       inner.appendChild(metaEl); inner.appendChild(txt);
+      const suggestionCount = timelineSuggestionCount(ev);
+      if (suggestionCount) {
+        const badge = document.createElement("div");
+        badge.className = "tlSuggestionBadge";
+        badge.textContent = `${suggestionCount} הצעות קישור`;
+        inner.appendChild(badge);
+      }
       for (const fk of timelineState.visibleListFields) {
         const val = formatFieldValue(getFieldValue(ev, fk));
         if (!val) continue;
@@ -2227,6 +2372,7 @@ function buildListPanel(events) {
 function buildAiPanel(events) {
   const panel = document.createElement("div"); panel.className = "tlAi";
   const total = events.length;
+  const suggestedEvents = timelineSuggestionEventIds().size;
   const types = {};
   for (const ev of events) { const t = classifyEvent(ev); types[t] = (types[t]||0)+1; }
   const allTags = [...new Set(events.flatMap(e => e.tags))];
@@ -2236,6 +2382,7 @@ function buildAiPanel(events) {
   const typeLabels = { meeting:"פגישות", document:"מסמכים", alert:"התראות", email:"אימייל", decision:"החלטות", default:"כללי", critical:"קריטי" };
 
   panel.appendChild(mkAiCard("סה״כ אירועים", String(total), `${allTags.length} תגיות ייחודיות`));
+  panel.appendChild(mkAiCard("הצעות קישור", String(timelineState.suggestions.length || 0), `${suggestedEvents} אירועים מסומנים`));
   if (topType) panel.appendChild(mkAiCard("קטגוריה מובילה", String(topType[1]), typeLabels[topType[0]] || topType[0]));
   if (dayRange) panel.appendChild(mkAiCard("טווח זמן", `${dayRange}`, "ימים של פעילות"));
 
@@ -2294,8 +2441,312 @@ function selectTlEvent(ev, scroll = true) {
     metaSection.appendChild(box);
     metaBtn.textContent = "הסתר metadata";
   });
+  metaSection.appendChild(buildTimelineLinksPanel(ev));
   metaSection.appendChild(metaBtn);
   if (scroll) { const listItem = document.querySelector(`.tlListItem[data-event-id="${ev.id}"]`); listItem?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
+}
+
+function buildTimelineLinksPanel(ev) {
+  const panel = document.createElement("div");
+  panel.className = "tlLinksPanel";
+  const title = document.createElement("div");
+  title.className = "tlLinksTitle";
+  title.innerHTML = `<strong>קשרים</strong><span>${timelineLinksForEvent(ev).length} קשרים</span>`;
+  panel.appendChild(title);
+
+  const list = document.createElement("div");
+  list.className = "tlLinksList";
+  const links = timelineLinksForEvent(ev);
+  if (!links.length) {
+    const empty = document.createElement("div");
+    empty.className = "tlLinksEmpty";
+    empty.textContent = "אין עדיין קשרים לאירוע הזה.";
+    list.appendChild(empty);
+  } else {
+    for (const link of links) list.appendChild(buildTimelineLinkRow(link, ev));
+  }
+  panel.appendChild(list);
+  panel.appendChild(buildTimelineLinkForm(ev));
+  panel.appendChild(buildTimelineSuggestionsPanel(ev));
+  return panel;
+}
+
+function buildTimelineLinkRow(link, ev) {
+  const row = document.createElement("div");
+  row.className = "tlLinkRow";
+  const isOutgoing = String(link.source_event_id) === String(ev.id) && link.source_event_source === getTimelineEventSource(ev);
+  const otherTitle = isOutgoing ? link.target_title : link.source_title;
+  const meta = [
+    isOutgoing ? "יוצא" : "נכנס",
+    relationLabel(link.relation_type),
+    formatTimelineLinkDuration(link),
+    link.approver ? `מאשר: ${link.approver}` : ""
+  ].filter(Boolean).join(" · ");
+  const text = document.createElement("div");
+  text.className = "tlLinkText";
+  text.innerHTML = `<strong>${escapeHtml(otherTitle || "אירוע קשור")}</strong><span>${escapeHtml(meta)}</span>${link.note ? `<small>${escapeHtml(link.note)}</small>` : ""}`;
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "tlLinkDelete";
+  del.textContent = "מחק";
+  del.addEventListener("click", async () => {
+    del.disabled = true;
+    try {
+      await api(`/api/timeline/links/${encodeURIComponent(link.id)}`, { method: "DELETE" });
+      await refreshTimelineLinks();
+    } catch (error) {
+      showToast(`שגיאה במחיקת קשר: ${error.message}`, "error");
+      del.disabled = false;
+    }
+  });
+  row.append(text, del);
+  return row;
+}
+
+function buildTimelineLinkForm(sourceEvent) {
+  const form = document.createElement("form");
+  form.className = "tlLinkForm";
+  const candidates = timelineState.events.filter((event) => event.id !== sourceEvent.id);
+  form.innerHTML = `
+    <div class="tlFormGrid">
+      <label>אירוע יעד<select name="target">${candidates.map((event) => `<option value="${escapeHtml(String(event.id))}">${escapeHtml(shortEventOption(event))}</option>`).join("")}</select></label>
+      <label>סוג קשר<select name="relation">
+        ${Object.entries(timelineRelationLabels()).map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}
+      </select></label>
+      <label>מי אישר<input name="approver" placeholder="שם המאשר, אם ידוע" /></label>
+      <label>הערה<input name="note" placeholder="הערה קצרה" /></label>
+    </div>
+    <button type="submit" ${candidates.length ? "" : "disabled"}>קשר אירוע</button>
+  `;
+  const targetSelect = form.elements.target;
+  const approverInput = form.elements.approver;
+  const fillApprover = () => {
+    const target = findTimelineEventById(targetSelect.value);
+    if (target && !approverInput.value) approverInput.value = extractTimelineApprover(target);
+  };
+  targetSelect?.addEventListener("change", fillApprover);
+  fillApprover();
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const target = findTimelineEventById(form.elements.target.value);
+    if (!target) return;
+    const submit = form.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      await saveTimelineLinkFromEvents({
+        sourceEvent,
+        targetEvent: target,
+        relationType: form.elements.relation.value,
+        approver: form.elements.approver.value,
+        note: form.elements.note.value
+      });
+      showToast("הקשר נשמר");
+      await refreshTimelineLinks();
+    } catch (error) {
+      showToast(`שגיאה בשמירת קשר: ${error.message}`, "error");
+      submit.disabled = false;
+    }
+  });
+  return form;
+}
+
+function buildTimelineSuggestionsPanel(currentEvent) {
+  const wrap = document.createElement("div");
+  wrap.className = "tlSuggestions";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "tlSuggestBtn";
+  btn.textContent = timelineState.suggestionsMode === "smart" ? "רענן הצעות חכמות" : "בדוק הצעות חכמות";
+  const list = document.createElement("div");
+  list.className = "tlSuggestList";
+  btn.textContent = timelineState.suggestionsMode === "smart" ? "רענן הצעות חכמות" : "בדוק הצעות חכמות";
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    list.textContent = "בודק הצעות...";
+    try {
+      list.textContent = "בודק סמנטית עם הגרף והמודל...";
+      const result = await loadSmartTimelineSuggestionsForEvent(currentEvent.id);
+      timelineState.suggestions = mergeTimelineSuggestionState(timelineState.suggestions, result.suggestions || []);
+      timelineState.suggestionsLoaded = true;
+      timelineState.suggestionsMode = result.mode || "smart";
+      btn.textContent = "רענן הצעות חכמות";
+      renderTimelineSuggestions(list, currentEvent);
+    } catch (error) {
+      list.textContent = `שגיאה: ${error.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  wrap.append(btn, list);
+  if (timelineState.suggestionsLoaded) renderTimelineSuggestions(list, currentEvent);
+  return wrap;
+}
+
+function renderTimelineSuggestions(container, currentEvent) {
+  const currentSource = getTimelineEventSource(currentEvent);
+  const items = timelineState.suggestions.filter((item) =>
+    (item.source_event_source === currentSource && String(item.source_event_id) === String(currentEvent.id)) ||
+    (item.target_event_source === currentSource && String(item.target_event_id) === String(currentEvent.id))
+  );
+  container.innerHTML = "";
+  if (!items.length) {
+    container.textContent = "אין הצעות רלוונטיות לאירוע הזה כרגע.";
+    return;
+  }
+  for (const suggestion of items.slice(0, 5)) {
+    const row = document.createElement("div");
+    row.className = "tlSuggestRow";
+    row.innerHTML = `
+      <div><strong>${escapeHtml(suggestion.source_title)}</strong><span>← ${escapeHtml(suggestion.target_title)}</span><small>${escapeHtml(formatTimelineLinkDuration(suggestion))}${suggestion.approver ? ` · מאשר: ${escapeHtml(suggestion.approver)}` : ""}</small></div>
+    `;
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "שמור";
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        await api("/api/timeline/links", { method: "POST", body: suggestion });
+        showToast("ההצעה נשמרה כקשר");
+        await refreshTimelineLinks();
+      } catch (error) {
+        showToast(`שגיאה בשמירת הצעה: ${error.message}`, "error");
+        save.disabled = false;
+      }
+    });
+    row.appendChild(save);
+    container.appendChild(row);
+  }
+}
+
+function timelineLinksForEvent(ev) {
+  const source = getTimelineEventSource(ev);
+  return (timelineState.links || []).filter((link) =>
+    (link.source_event_source === source && String(link.source_event_id) === String(ev.id)) ||
+    (link.target_event_source === source && String(link.target_event_id) === String(ev.id))
+  );
+}
+
+function timelineSuggestionsForEvent(ev) {
+  const source = getTimelineEventSource(ev);
+  return (timelineState.suggestions || []).filter((item) =>
+    (item.source_event_source === source && String(item.source_event_id) === String(ev.id)) ||
+    (item.target_event_source === source && String(item.target_event_id) === String(ev.id))
+  );
+}
+
+function mergeTimelineSuggestionState(current = [], incoming = []) {
+  const byKey = new Map();
+  for (const item of [...current, ...incoming]) {
+    if (!item) continue;
+    const key = [
+      item.source_event_source,
+      item.source_event_id,
+      item.target_event_source,
+      item.target_event_id,
+      item.relation_type
+    ].join("|");
+    const previous = byKey.get(key);
+    if (!previous || Number(item.score || 0) > Number(previous.score || 0)) byKey.set(key, item);
+  }
+  return [...byKey.values()].sort((a, b) => Number(b.score || 0) - Number(a.score || 0));
+}
+
+function timelineHasSuggestions(ev) {
+  return timelineSuggestionCount(ev) > 0;
+}
+
+function timelineSuggestionCount(ev) {
+  return timelineSuggestionsForEvent(ev).length;
+}
+
+function timelineSuggestionEventIds() {
+  const ids = new Set();
+  const source = getActiveTimelineSource();
+  for (const item of timelineState.suggestions || []) {
+    if (item.source_event_source === source) ids.add(String(item.source_event_id));
+    if (item.target_event_source === source) ids.add(String(item.target_event_id));
+  }
+  return ids;
+}
+
+function getTimelineEventSource(ev) {
+  return ev?.source === "alerts" ? "alerts" : getActiveTimelineSource();
+}
+
+function findTimelineEventById(id) {
+  return timelineState.events.find((event) => String(event.id) === String(id));
+}
+
+function saveTimelineLinkFromEvents({ sourceEvent, targetEvent, relationType, approver, note }) {
+  return api("/api/timeline/links", {
+    method: "POST",
+    body: {
+      source_event_source: getTimelineEventSource(sourceEvent),
+      source_event_id: sourceEvent.id,
+      target_event_source: getTimelineEventSource(targetEvent),
+      target_event_id: targetEvent.id,
+      relation_type: relationType,
+      source_date: sourceEvent.date,
+      target_date: targetEvent.date,
+      source_title: timelineEventTitle(sourceEvent),
+      target_title: timelineEventTitle(targetEvent),
+      approver,
+      note
+    }
+  });
+}
+
+function timelineRelationLabels() {
+  return {
+    quote_sent: "הצעת מחיר נשלחה",
+    quote_approved: "הצעת מחיר אושרה",
+    invoice_sent: "חשבונית נשלחה",
+    payment_received: "תשלום התקבל",
+    change_order: "חריג / שינוי",
+    related: "קשור"
+  };
+}
+
+function relationLabel(type) {
+  return timelineRelationLabels()[type] || type || "קשור";
+}
+
+function timelineEventTitle(event) {
+  return (event?.content || getMailSummarize(event) || event?.tags?.join(", ") || "אירוע ללא כותרת").slice(0, 180);
+}
+
+function shortEventOption(event) {
+  const date = new Date(event.date);
+  const dateText = Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("he-IL");
+  return `${dateText} · ${timelineEventTitle(event).slice(0, 72)}`;
+}
+
+function formatTimelineLinkDuration(link) {
+  const days = Number.isFinite(Number(link.durationDays)) ? Number(link.durationDays) : daysBetweenTimelineDates(link.source_date, link.target_date);
+  if (days === null) return "";
+  if (days === 0) return "באותו יום";
+  if (days === 1) return "עבר יום אחד";
+  return `עברו ${days} ימים`;
+}
+
+function daysBetweenTimelineDates(sourceDate, targetDate) {
+  const start = new Date(sourceDate);
+  const end = new Date(targetDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 86400000));
+}
+
+function extractTimelineApprover(event) {
+  const value = `${event?.content || ""} ${JSON.stringify(event?.metadata || {})}`;
+  const patterns = [
+    /(?:אושר(?:ה)?\s+על\s+ידי|אושר(?:ה)?\s+ע"י|מאשר[:\s]+|אישר[:\s]+)\s*([א-תA-Za-z][א-תA-Za-z .'-]{1,60})/i,
+    /(?:approved\s+by|approver[:\s]+)\s*([A-Za-z][A-Za-z .'-]{1,60})/i
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match?.[1]) return match[1].replace(/[.,;:|]+.*$/, "").replace(/\s+/g, " ").trim().slice(0, 80);
+  }
+  return "";
 }
 
 // ---- Wave helper: Catmull-Rom ----
@@ -2382,7 +2833,7 @@ function formatFieldValue(val) {
 }
 
 function classifyEvent(ev) {
-  if (ev.source === "alert") return ev.tags[0] || "התראה";
+  if (ev.source === "alert" || ev.source === "alerts") return ev.tags[0] || "התראה";
   const tags = ev.tags.map(t => t.toLowerCase());
   if (tags.some(t => /פגישה|ישיבה|meeting|zoom|call/.test(t)))    return "meeting";
   if (tags.some(t => /מסמך|דוח|תכנ|document|report|plan/.test(t))) return "document";
@@ -2390,7 +2841,7 @@ function classifyEvent(ev) {
   if (tags.some(t => /אימייל|email|mail|הודעה/.test(t)))            return "email";
   if (tags.some(t => /החלטה|decision|approval|אישור/.test(t)))      return "decision";
   if (tags.some(t => /קריטי|critical|urgent|דחוף/.test(t)))         return "critical";
-  return "default";
+  return ev.tags[0] || "default";
 }
 
 function getEventIcon(type) {
@@ -2398,6 +2849,10 @@ function getEventIcon(type) {
 }
 
 function getTypeColor(type) { return TYPE_COLORS[type] || getTagColor(type); }
+
+function timelineTypeClass(type) {
+  return TYPE_COLORS[type] ? `tl-${type}` : "tl-tag";
+}
 
 function mixEventColors(evs) {
   if (!evs.length) return "#00c9a7";

@@ -9,6 +9,8 @@ import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../s
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { isMaskedSecret, mergeSecret, resolveSecret, supabaseHeaders } from "../src/config.js";
+import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
+import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -269,6 +271,97 @@ test("conflict detection flags approval disagreements", () => {
   ]);
   assert.equal(conflicts.length, 1);
   assert.equal(conflicts[0].type, "approval");
+});
+
+test("timeline links calculate duration in days", () => {
+  assert.equal(daysBetweenDates("2026-05-01T08:00:00Z", "2026-05-06T09:00:00Z"), 5);
+  assert.equal(daysBetweenDates("bad", "2026-05-06T09:00:00Z"), null);
+});
+
+test("timeline suggestions pair quotes only with later approvals", () => {
+  const suggestions = buildTimelineLinkSuggestions({
+    source: "index",
+    events: [
+      { id: "approval_before", date: "2026-04-30T10:00:00Z", tags: ["חשמל"], content: "אישור מוקדם" },
+      { id: "quote_1", date: "2026-05-01T10:00:00Z", tags: ["חשמל"], content: "נשלחה הצעת מחיר לעבודות חשמל" },
+      { id: "approval_1", date: "2026-05-04T10:00:00Z", tags: ["חשמל"], content: "הצעת המחיר אושרה על ידי דני כהן" }
+    ],
+    links: []
+  });
+  assert.equal(suggestions.length, 1);
+  assert.equal(suggestions[0].source_event_id, "quote_1");
+  assert.equal(suggestions[0].target_event_id, "approval_1");
+  assert.equal(suggestions[0].durationDays, 3);
+  assert.equal(suggestions[0].approver, "דני כהן");
+});
+
+test("timeline suggestions skip existing links", () => {
+  const suggestions = buildTimelineLinkSuggestions({
+    source: "index",
+    events: [
+      { id: "quote_1", date: "2026-05-01T10:00:00Z", tags: [], content: "quotation was sent" },
+      { id: "approval_1", date: "2026-05-02T10:00:00Z", tags: [], content: "approved by Dana" }
+    ],
+    links: [{
+      source_event_source: "index",
+      source_event_id: "quote_1",
+      target_event_source: "index",
+      target_event_id: "approval_1",
+      relation_type: "quote_approved"
+    }]
+  });
+  assert.equal(suggestions.length, 0);
+});
+
+test("timeline approver extraction supports English labels", () => {
+  assert.equal(extractApprover("The proposal was approved by Dana Levi."), "Dana Levi");
+});
+
+test("timeline graph extracts reusable event entities", () => {
+  const rows = buildEntityGraphRowsForEvents([
+    { id: "e1", date: "2026-05-01T00:00:00Z", tags: ["חשמל"], content: "הצעת מחיר quote Q-42 נשלחה על ידי ACME Construction" },
+    { id: "e2", date: "2026-05-02T00:00:00Z", tags: ["חשמל"], content: "הצעת המחיר אושרה על ידי דני כהן" }
+  ], "index");
+  assert.ok(rows.entities.some((entity) => entity.entity_type === "topic" && entity.normalized_name === "חשמל"));
+  assert.ok(rows.eventEntities.some((item) => item.role === "approver"));
+});
+
+test("timeline graph scoring boosts shared entities", () => {
+  const score = scoreTimelinePairWithGraph({
+    source: "index",
+    sourceEvent: { id: "q1", date: "2026-05-01T00:00:00Z", tags: ["חשמל"], content: "נשלחה הצעת מחיר לעבודות חשמל" },
+    targetEvent: { id: "a1", date: "2026-05-03T00:00:00Z", tags: ["חשמל"], content: "הצעת המחיר אושרה על ידי דני כהן" }
+  });
+  assert.ok(score.graphScore > 0);
+  assert.ok(score.graphSharedEntities.some((entity) => entity.name === "חשמל"));
+});
+
+test("timeline graph scorer can use persisted event entities", () => {
+  const scorer = createTimelineGraphScorer({
+    source: "index",
+    eventEntities: [
+      {
+        event_source: "index",
+        event_id: "q1",
+        role: "topic",
+        confidence: 0.9,
+        entity: { id: "topic:facade", entity_type: "topic", name: "facade", normalized_name: "facade" }
+      },
+      {
+        event_source: "index",
+        event_id: "a1",
+        role: "topic",
+        confidence: 0.9,
+        entity: { id: "topic:facade", entity_type: "topic", name: "facade", normalized_name: "facade" }
+      }
+    ]
+  });
+  const score = scorer({
+    sourceEvent: { id: "q1", date: "2026-05-01T00:00:00Z", tags: [], content: "quote was sent" },
+    targetEvent: { id: "a1", date: "2026-05-02T00:00:00Z", tags: [], content: "approved" }
+  });
+  assert.ok(score.graphScore > 0);
+  assert.equal(score.graphSharedEntities[0].name, "facade");
 });
 
 let failed = 0;

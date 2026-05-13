@@ -49,6 +49,42 @@ const DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS = [
   "dependencies"
 ];
 
+export const DEFAULT_TIMELINE_LINK_AGENT_PROMPT = [
+  "You verify timeline event links for a construction project.",
+  "Use semantic search, timeline distance, saved links, and Knowledge Graph shared entities as evidence.",
+  "Accept only links where the target event plausibly confirms, approves, pays, changes, or continues the source event.",
+  "Prefer concrete shared entities such as people, suppliers, locations, quote numbers, document names, work packages, and specific tags.",
+  "Do not accept a link only because both events share generic words like project, document, construction, or status.",
+  "Return ONLY valid JSON: {\"links\":[{\"index\":number,\"accepted\":boolean,\"confidence\":number,\"relation_type\":\"quote_approved|invoice_sent|payment_received|change_order|related\",\"reason\":string,\"approver\":string}]}."
+].join(" ");
+
+const DEFAULT_TIMELINE_LINK_AGENT = {
+  model: "",
+  prompt: DEFAULT_TIMELINE_LINK_AGENT_PROMPT,
+  suggestionLimit: 12,
+  semanticTopK: 8,
+  timeWindowDays: 120,
+  minConfidence: 0.42,
+  useSemanticSearch: true,
+  useGraphFallback: true,
+  ignoredTerms: [
+    "פרויקט",
+    "project",
+    "כללי",
+    "general",
+    "בנייה",
+    "construction",
+    "תכניות",
+    "תכנית",
+    "מסמך",
+    "מסמכים",
+    "document",
+    "documents",
+    "לידיעה",
+    "סטטוס"
+  ]
+};
+
 async function sbFetch(path, options = {}, operation = "read") {
   const url = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -204,6 +240,7 @@ export function getConfig() {
     knowledge: {
       triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS)
     },
+    timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks),
     n8n: {
       baseUrl: trimSlash(settings.n8nBaseUrl || process.env.N8N_BASE_URL || ""),
       tools: Object.fromEntries(
@@ -220,6 +257,7 @@ export function publicSettings(config = getConfig()) {
     models: config.models,
     retrieval: config.retrieval,
     knowledge: config.knowledge,
+    timelineLinks: config.timelineLinks,
     timezone: config.timezone,
     supabaseConfigured: Boolean(config.supabaseUrl && config.supabaseServiceRoleKey),
     openRouterConfigured: Boolean(config.openRouterApiKey),
@@ -271,6 +309,27 @@ function normalizeStringList(value, fallback = []) {
   return [...new Set(raw.map((item) => String(item || "").trim()).filter(Boolean))];
 }
 
+function normalizeTimelineLinkAgentSettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    model: String(raw.model || DEFAULT_TIMELINE_LINK_AGENT.model || "").trim(),
+    prompt: String(raw.prompt || DEFAULT_TIMELINE_LINK_AGENT.prompt).trim(),
+    suggestionLimit: clampNumber(raw.suggestionLimit, 1, 50, DEFAULT_TIMELINE_LINK_AGENT.suggestionLimit),
+    semanticTopK: clampNumber(raw.semanticTopK, 1, 30, DEFAULT_TIMELINE_LINK_AGENT.semanticTopK),
+    timeWindowDays: clampNumber(raw.timeWindowDays, 1, 730, DEFAULT_TIMELINE_LINK_AGENT.timeWindowDays),
+    minConfidence: clampNumber(raw.minConfidence, 0, 1, DEFAULT_TIMELINE_LINK_AGENT.minConfidence),
+    useSemanticSearch: raw.useSemanticSearch !== false,
+    useGraphFallback: raw.useGraphFallback !== false,
+    ignoredTerms: normalizeStringList(raw.ignoredTerms, DEFAULT_TIMELINE_LINK_AGENT.ignoredTerms)
+  };
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
 export function readLocalSettings() {
   return _settingsCache;
 }
@@ -309,6 +368,7 @@ export async function writeLocalSettings(settings) {
     knowledge: {
       triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, existing.knowledge?.triggerKeywords || DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS)
     },
+    timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks || existing.timelineLinks),
     n8nBaseUrl: settings.n8nBaseUrl || "",
     secrets: {
       openRouterApiKey: mergeSecret(existing.secrets?.openRouterApiKey, incomingSecrets.openRouterApiKey),
