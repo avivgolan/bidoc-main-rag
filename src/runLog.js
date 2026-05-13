@@ -46,6 +46,10 @@ export function subscribeRun(runId, res) {
   };
 }
 
+export function getRunEvents(runId) {
+  return [...(runs.get(runId) || [])];
+}
+
 function closeRunSubscribers(runId) {
   for (const res of subscribers.get(runId) || []) {
     res.end();

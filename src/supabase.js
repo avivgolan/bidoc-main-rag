@@ -17,10 +17,11 @@ export async function saveMessage({ config, userMessage, sanitizedMessage, sessi
   return response?.[0] || localMessage({ userMessage, sanitizedMessage, sessionId });
 }
 
-export async function updateMessage({ config, messageId, aiResponse, status = "done", workflowLog = null }) {
+export async function updateMessage({ config, messageId, aiResponse, status = "done", workflowLog = null, runEvents = null }) {
   if (!isConfigured(config) || String(messageId).startsWith("local_")) return null;
   const patch = { ai_response: aiResponse, status };
   if (workflowLog !== null) patch.workflow_log = workflowLog;
+  if (runEvents !== null) patch.run_events = runEvents;
   return supabaseFetch(config, `/rest/v1/${MESSAGES_TABLE}?id=eq.${encodeURIComponent(messageId)}`, {
     method: "PATCH",
     headers: { Prefer: "return=representation" },
@@ -87,6 +88,12 @@ export async function listSessions({ config, limit = 30 }) {
     if (!seen.has(row.session_id)) seen.set(row.session_id, row);
   }
   return [...seen.entries()].map(([sessionId, row]) => ({ sessionId, ...row }));
+}
+
+export async function listRunHistory({ config, limit = 30 }) {
+  if (!isConfigured(config)) return [];
+  const query = `/rest/v1/${MESSAGES_TABLE}?select=id,created_at,user_message,workflow_log,run_events&workflow_log=not.is.null&status=eq.done&order=created_at.desc&limit=${limit}`;
+  return supabaseFetch(config, query);
 }
 
 export async function listMessages({ config, sessionId }) {
