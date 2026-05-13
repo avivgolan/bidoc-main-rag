@@ -1035,7 +1035,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         fallback: rerankerCall?.fallback || false,
         fallback_chunks: rerankerCall?.fallback ? qaChunksPreview(hybridCall?.data) : undefined
       }),
-      workflowNode("n8n_tools", "n8n Tool Adapters", "tool", n8nCalls.some((call) => call.ok) ? "done" : "skipped", {
+      workflowNode("n8n_tools", "n8n Tool Adapters", "tool", n8nCalls.some((c) => c.ok) ? "done" : n8nCalls.some((c) => !c.ok && !c.skipped) ? "error" : "skipped", {
         hinted_tools: classification.tool_hint,
         calls: n8nCalls.map((call) => call.toolName)
       }, {

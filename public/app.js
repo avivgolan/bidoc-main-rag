@@ -1011,6 +1011,20 @@ function renderWorkflow(workflow) {
   });
 
   if (view.nodes[0]) renderWorkflowInspector(view.nodes[0]);
+
+  pulseErrorNodes(_cy);
+}
+
+function pulseErrorNodes(cy) {
+  const errorNodes = cy.nodes('[status="error"]');
+  if (!errorNodes.length) return;
+  const step = (nodes, big) => {
+    nodes.animate(
+      { style: { "border-width": big ? 5.5 : 3.5, "shadow-blur": big ? 36 : 22 } },
+      { duration: 700, easing: "ease-in-out", complete: () => { if (cy.destroyed()) return; step(nodes, !big); } }
+    );
+  };
+  step(errorNodes, true);
 }
 
 function cytoscapeStyle() {
@@ -1045,7 +1059,12 @@ function cytoscapeStyle() {
     },
     {
       selector: "node[status='error']",
-      style: { "border-color": "#e05555", "border-width": 2.5 }
+      style: {
+        "background-color": "#3d1212",
+        "border-color": "#ff3333", "border-width": 3.5,
+        "shadow-blur": 22, "shadow-color": "rgb(255 51 51 / 0.65)",
+        "shadow-offset-x": 0, "shadow-offset-y": 0, "shadow-opacity": 1
+      }
     },
     {
       selector: "node:selected",
