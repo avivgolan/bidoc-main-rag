@@ -187,7 +187,8 @@ const TAB_LOADERS = {
   knowledge:  () => loadKnowledgeDocuments(),
   history:    () => loadHistory(),
   timeline:   () => loadTimeline(),
-  qa:         () => loadQaList()
+  qa:         () => loadQaList(),
+  workflow:   () => loadRunHistory()
 };
 
 async function loadAgentsTabData() {
@@ -370,6 +371,7 @@ function wireChat() {
       appendDebug(pending, result);
       state.lastWorkflow = result.workflowLog || null;
       renderWorkflow(state.lastWorkflow);
+      loadRunHistory();
     } catch (error) {
       clearChatProgress(pending);
       if (state.chatProgress?.node === pending) state.chatProgress = null;
@@ -384,6 +386,7 @@ function wireChat() {
 
 function startLiveRun(runId) {
   if (state.eventSource) state.eventSource.close();
+  document.querySelectorAll(".runHistoryItem.active").forEach((el) => el.classList.remove("active"));
   $("liveRunList").innerHTML = "";
   $("liveRunStatus").textContent = `רץ: ${runId}`;
   state.runEvents = [];
@@ -1486,6 +1489,77 @@ async function loadHistory() {
     });
     $("historyList").append(item);
   }
+}
+
+async function loadRunHistory() {
+  const listEl = $("runHistoryList");
+  if (!listEl) return;
+  try {
+    const { runs } = await api("/api/run-history?limit=30");
+    renderRunHistoryStrip(runs || []);
+  } catch {
+    listEl.innerHTML = '<div class="runHistoryEmpty">שגיאה בטעינת היסטוריה</div>';
+  }
+}
+
+function renderRunHistoryStrip(runs) {
+  const listEl = $("runHistoryList");
+  if (!listEl) return;
+  if (!runs.length) {
+    listEl.innerHTML = '<div class="runHistoryEmpty">אין ריצות שמורות</div>';
+    return;
+  }
+  listEl.innerHTML = "";
+  for (const run of runs) {
+    const hasError = (run.workflow_log?.nodes || []).some((n) => n.status === "error");
+    const item = document.createElement("div");
+    item.className = "runHistoryItem" + (hasError ? " hasError" : "");
+    item.dataset.runId = run.id;
+    const time = run.created_at ? timeAgo(new Date(run.created_at)) : "";
+    const msg = (run.user_message || "").slice(0, 60);
+    item.innerHTML = `
+      <div class="rhTime">${escapeHtml(time)}</div>
+      <div class="rhMsg">${escapeHtml(msg)}</div>
+      ${hasError ? '<div class="rhErr">⚠ שגיאה בריצה</div>' : ""}
+    `;
+    item.addEventListener("click", () => showHistoricalRun(run, item));
+    listEl.append(item);
+  }
+}
+
+function showHistoricalRun(run, itemEl) {
+  document.querySelectorAll(".runHistoryItem.active").forEach((el) => el.classList.remove("active"));
+  if (itemEl) itemEl.classList.add("active");
+
+  const events = run.run_events || [];
+  const liveRunList = $("liveRunList");
+  const liveRunStatus = $("liveRunStatus");
+  const fullLogView = $("fullLogView");
+
+  state.runEvents = [];
+  if (liveRunList) {
+    liveRunList.innerHTML = "";
+    liveRunList.hidden = false;
+    for (const ev of events) {
+      appendLiveRunEvent(ev);
+    }
+  }
+  if (liveRunStatus) liveRunStatus.textContent = `היסטוריה · ${timeAgo(new Date(run.created_at))}`;
+  if (fullLogView) { fullLogView.hidden = true; fullLogView.textContent = ""; }
+  state.lastWorkflow = run.workflow_log || null;
+  state.fullLogVisible = false;
+  renderWorkflow(run.workflow_log || null);
+}
+
+function timeAgo(date) {
+  const diff = Date.now() - date.getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "עכשיו";
+  if (min < 60) return `לפני ${min} דק׳`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `לפני ${h} שעות`;
+  const d = Math.floor(h / 24);
+  return `לפני ${d} ימים`;
 }
 
 async function loadSessionMessages(sessionId) {

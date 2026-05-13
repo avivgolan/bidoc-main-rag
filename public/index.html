@@ -165,24 +165,35 @@
           </div>
         </header>
 
-        <section class="liveRun" id="liveRun">
-          <header>
-            <strong>לוג ריצה חי</strong>
-            <span id="liveRunStatus">ממתין לבקשה</span>
-          </header>
-          <div class="liveRunList" id="liveRunList"></div>
-          <pre class="fullLogView" id="fullLogView" hidden></pre>
-        </section>
+        <div class="workflowLayout">
+          <aside class="runHistoryStrip" id="runHistoryStrip">
+            <div class="runHistoryStripHeader">היסטוריית ריצות</div>
+            <div class="runHistoryList" id="runHistoryList">
+              <div class="runHistoryEmpty">אין ריצות שמורות</div>
+            </div>
+          </aside>
 
-        <div class="workflowHint" id="workflowHint">
-          שלח הודעה בצ׳אט כדי לראות את רכיבי המערכת, הקווים ביניהם והלוגים של ההרצה האחרונה.
+          <div class="workflowMain">
+            <section class="liveRun" id="liveRun">
+              <header>
+                <strong>לוג ריצה חי</strong>
+                <span id="liveRunStatus">ממתין לבקשה</span>
+              </header>
+              <div class="liveRunList" id="liveRunList"></div>
+              <pre class="fullLogView" id="fullLogView" hidden></pre>
+            </section>
+
+            <div class="workflowHint" id="workflowHint">
+              שלח הודעה בצ׳אט כדי לראות את רכיבי המערכת, הקווים ביניהם והלוגים של ההרצה האחרונה.
+            </div>
+            <div class="workflowBoard" id="workflowBoard">
+              <div id="workflowCy"></div>
+            </div>
+            <aside class="workflowInspector" id="workflowInspector">
+              <div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>
+            </aside>
+          </div>
         </div>
-        <div class="workflowBoard" id="workflowBoard">
-          <div id="workflowCy"></div>
-        </div>
-        <aside class="workflowInspector" id="workflowInspector">
-          <div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>
-        </aside>
       </section>
 
       <!-- ======================================================

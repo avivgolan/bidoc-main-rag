@@ -7,7 +7,7 @@ import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, re
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listQaReports, listSessions, saveQaReport } from "./supabase.js";
+import { annotateMessage, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listQaReports, listRunHistory, listSessions, saveQaReport } from "./supabase.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
@@ -85,6 +85,12 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/sessions") {
     const sessions = await listSessions({ config: config() }).catch(() => []);
     return sendJson(res, 200, { sessions });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/run-history") {
+    const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
+    const runs = await listRunHistory({ config: config(), limit }).catch(() => []);
+    return sendJson(res, 200, { runs });
   }
 
   if (req.method === "POST" && url.pathname === "/api/evaluations/run") {

@@ -6,7 +6,7 @@ import { hybridSearch, recentMemory, saveMessage, updateMessage } from "./supaba
 import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
-import { completeRun, emitRunEvent } from "./runLog.js";
+import { completeRun, emitRunEvent, getRunEvents } from "./runLog.js";
 import { renderPrompt } from "./prompts.js";
 import { getProjectDateTime } from "./clock.js";
 import { routeKnowledgeAgents, searchKnowledgeBase } from "./knowledge.js";
@@ -84,12 +84,14 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     config
   });
 
+  const runEvents = getRunEvents(runId);
   await updateMessage({
     config,
     messageId: saved.id,
     aiResponse: result.answer,
     status: "done",
-    workflowLog
+    workflowLog,
+    runEvents
   }).then(() => {
     emitRunEvent(runId, "update_message", "Message updated with AI response", { id: saved.id, status: "done" });
   }).catch((error) => {
