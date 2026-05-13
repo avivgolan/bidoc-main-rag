@@ -8,6 +8,7 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
+import { isMaskedSecret, mergeSecret, resolveSecret, supabaseHeaders } from "../src/config.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -233,6 +234,23 @@ test("alert date filter and row filtering use explicit range", () => {
     { id: 3, metadata: { date: "2026-05-10T12:00:00Z" } }
   ], "2026-05-01T00:00:00Z", "2026-05-09T23:59:59Z");
   assert.deepEqual(rows.map((row) => row.id), [2]);
+});
+
+test("secret helpers ignore masked values", () => {
+  assert.equal(isMaskedSecret("sk-o...abcd"), true);
+  assert.equal(isMaskedSecret("********"), true);
+  assert.equal(isMaskedSecret("sk-real-secret"), false);
+  assert.equal(resolveSecret("sk-o...abcd", "sk-env-secret"), "sk-env-secret");
+  assert.equal(mergeSecret("sk-real-secret", "sk-o...abcd"), "sk-real-secret");
+  assert.equal(mergeSecret("sk-o...abcd", ""), "");
+});
+
+test("supabase headers handle secret and legacy service keys", () => {
+  assert.deepEqual(supabaseHeaders("sb_secret_123"), {
+    apikey: "sb_secret_123",
+    "Content-Type": "application/json"
+  });
+  assert.equal(supabaseHeaders("eyJabc").Authorization, "Bearer eyJabc");
 });
 
 test("source quality prefers official reports over whatsapp", () => {

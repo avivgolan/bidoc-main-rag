@@ -362,7 +362,8 @@ function wireChat() {
     try {
       const result = await api("/api/chat", {
         method: "POST",
-        body: { message, sessionId: $("sessionId").value, runId }
+        body: { message, sessionId: $("sessionId").value, runId },
+        timeoutMs: 120000
       });
       clearChatProgress(pending);
       pending.textContent = result.answer || "לא התקבלה תשובה.";
@@ -372,6 +373,7 @@ function wireChat() {
       renderWorkflow(state.lastWorkflow);
     } catch (error) {
       clearChatProgress(pending);
+      if (state.chatProgress?.node === pending) state.chatProgress = null;
       pending.textContent = `שגיאה: ${error.message}`;
       appendLiveRunEvent({ step: "client", message: "Request failed", data: { error: error.message }, time: new Date().toISOString() });
     } finally {
@@ -1384,6 +1386,7 @@ function diagnosticStatusLabel(status) {
     missing_rpc_or_schema: "RPC או סכימה חסרים",
     missing_table_or_column: "טבלה או עמודה חסרה",
     missing_config: "חסר קונפיגורציה",
+    network_error: "בעיית רשת / חסימה",
     error: "שגיאה"
   }[status] || "שגיאה";
 }
@@ -1422,9 +1425,11 @@ function applySettingsToForm() {
   }
   $("n8nBaseUrl").value = state.settings.n8nBaseUrl || "";
   if ($("timezone")) $("timezone").value = state.settings.timezone || "UTC+3";
-  $("openRouterApiKey").value = state.settings.secrets.openRouterApiKey || "";
+  $("openRouterApiKey").value = "";
+  $("openRouterApiKey").placeholder = state.settings.secrets.openRouterApiKey || "sk-or-...";
   $("supabaseUrl").value = state.settings.secrets.supabaseUrl || "";
-  $("supabaseServiceRoleKey").value = state.settings.secrets.supabaseServiceRoleKey || "";
+  $("supabaseServiceRoleKey").value = "";
+  $("supabaseServiceRoleKey").placeholder = state.settings.secrets.supabaseServiceRoleKey || "eyJ...";
 
   $("toolSettings").innerHTML = "";
   for (const tool of n8nTools) {
@@ -2823,12 +2828,26 @@ function renderTrendReport(trend) {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    method: options.method || "GET",
-    headers: { "Content-Type": "application/json" },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "Request failed");
-  return data;
+  const controller = options.timeoutMs ? new AbortController() : null;
+  const timeoutId = controller
+    ? setTimeout(() => controller.abort(), options.timeoutMs)
+    : null;
+  try {
+    const response = await fetch(path, {
+      method: options.method || "GET",
+      headers: { "Content-Type": "application/json" },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller?.signal
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Request failed");
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("הבקשה נתקעה יותר מדי זמן. נסה שוב או בדוק את חיבורי השירותים.");
+    }
+    throw error;
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }

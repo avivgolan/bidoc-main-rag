@@ -1,5 +1,5 @@
 import { chatCompletion, createEmbedding } from "../openrouter.js";
-import { getConfig, readLocalSettings } from "../config.js";
+import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
 
 const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 
@@ -32,11 +32,7 @@ async function searchAlertsEmbeddings(config, query, table, topK = 20) {
   const rpcName = `match_${table}`;
   const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${rpcName}`, {
     method: "POST",
-    headers: {
-      apikey: config.supabaseServiceRoleKey,
-      Authorization: `Bearer ${config.supabaseServiceRoleKey}`,
-      "Content-Type": "application/json"
-    },
+    headers: supabaseHeaders(config.supabaseServiceRoleKey),
     body: JSON.stringify({ query_embedding: embedding, match_count: topK })
   });
 

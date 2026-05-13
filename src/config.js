@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildAgentList, defaultPrompts } from "./prompts.js";
 
-const ROOT = process.cwd();
+export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_FILES = [".env", ".env.local"];
 
 // ---------------------------------------------------------------------------
@@ -59,9 +60,7 @@ async function sbFetch(path, options = {}, operation = "read") {
     const response = await fetch(`${url}${path}`, {
       ...options,
       headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
+        ...supabaseHeaders(key),
         ...(options.headers || {})
       }
     });
@@ -174,10 +173,10 @@ export function getConfig() {
   const secrets = settings.secrets || {};
   return {
     port: Number(process.env.PORT || 4000),
-    openRouterApiKey: secrets.openRouterApiKey || process.env.OPENROUTER_API_KEY || "",
+    openRouterApiKey: resolveSecret(secrets.openRouterApiKey, process.env.OPENROUTER_API_KEY),
     openAiApiKey: "",
     supabaseUrl: trimSlash(secrets.supabaseUrl || process.env.SUPABASE_URL || ""),
-    supabaseServiceRoleKey: secrets.supabaseServiceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+    supabaseServiceRoleKey: resolveSecret(secrets.supabaseServiceRoleKey, process.env.SUPABASE_SERVICE_ROLE_KEY),
     postgresUrl: process.env.POSTGRES_URL || "",
     models: {
       classifier: settings.models?.classifier || process.env.CLASSIFIER_MODEL || "openai/gpt-4o-mini",
@@ -350,8 +349,32 @@ function maskSecret(value) {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
-function mergeSecret(existing = "", incoming = "") {
-  if (!incoming) return existing || "";
-  if (incoming.includes("...") || /^\*+$/.test(incoming)) return existing || "";
+export function isMaskedSecret(value = "") {
+  return Boolean(value && (String(value).includes("...") || /^\*+$/.test(String(value))));
+}
+
+export function resolveSecret(settingsValue = "", envValue = "") {
+  if (settingsValue && !isMaskedSecret(settingsValue)) return settingsValue;
+  return envValue || "";
+}
+
+export function mergeSecret(existing = "", incoming = "") {
+  const current = isMaskedSecret(existing) ? "" : existing || "";
+  if (!incoming) return current;
+  if (isMaskedSecret(incoming)) return current;
   return incoming;
+}
+
+export function supabaseHeaders(key, extra = {}) {
+  const headers = {
+    apikey: key,
+    "Content-Type": "application/json",
+    ...extra
+  };
+  if (isLegacyJwtKey(key)) headers.Authorization = `Bearer ${key}`;
+  return headers;
+}
+
+function isLegacyJwtKey(key = "") {
+  return String(key || "").startsWith("eyJ");
 }

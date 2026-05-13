@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
@@ -468,13 +468,14 @@ async function diagnosticCheck(id, label, fn) {
     const details = await fn();
     return { id, label, ok: true, status: "ok", ms: Date.now() - startedAt, details };
   } catch (error) {
+    const errorText = diagnosticErrorText(error);
     return {
       id,
       label,
       ok: false,
-      status: classifyDiagnosticError(error.message),
+      status: classifyDiagnosticError(errorText),
       ms: Date.now() - startedAt,
-      error: error.message
+      error: errorText
     };
   }
 }
@@ -483,9 +484,7 @@ async function rawSupabaseFetch(cfg, path, options = {}) {
   const response = await fetch(`${cfg.supabaseUrl}${path}`, {
     ...options,
     headers: {
-      apikey: cfg.supabaseServiceRoleKey,
-      Authorization: `Bearer ${cfg.supabaseServiceRoleKey}`,
-      "Content-Type": "application/json",
+      ...supabaseHeaders(cfg.supabaseServiceRoleKey),
       ...(options.headers || {})
     }
   });
@@ -502,7 +501,20 @@ function classifyDiagnosticError(message) {
   if (/could not find|PGRST202|function|rpc|schema cache/i.test(value)) return "missing_rpc_or_schema";
   if (/relation|table|column/i.test(value)) return "missing_table_or_column";
   if (/Supabase URL|Service Role/i.test(value)) return "missing_config";
+  if (/EACCES|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|fetch failed|network/i.test(value)) return "network_error";
   return "error";
+}
+
+function diagnosticErrorText(error) {
+  const parts = [error?.message || String(error)];
+  const causes = Array.isArray(error?.cause?.errors) ? error.cause.errors : error?.cause ? [error.cause] : [];
+  for (const cause of causes) {
+    const code = cause?.code || cause?.name || "";
+    const message = cause?.message || "";
+    const text = [code, message].filter(Boolean).join(": ");
+    if (text && !parts.includes(text)) parts.push(text);
+  }
+  return parts.join(" | ");
 }
 
 function summarizeEvaluationCase({ index, testCase, output, runId }) {

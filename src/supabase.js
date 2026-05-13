@@ -1,4 +1,5 @@
 import { createEmbedding } from "./openrouter.js";
+import { supabaseHeaders } from "./config.js";
 
 const MESSAGES_TABLE = "chat_messages_gf";
 
@@ -149,9 +150,7 @@ async function supabaseFetch(config, path, options = {}) {
   const response = await fetch(`${config.supabaseUrl}${path}`, {
     ...options,
     headers: {
-      apikey: config.supabaseServiceRoleKey,
-      Authorization: `Bearer ${config.supabaseServiceRoleKey}`,
-      "Content-Type": "application/json",
+      ...supabaseHeaders(config.supabaseServiceRoleKey),
       ...(options.headers || {})
     }
   });
