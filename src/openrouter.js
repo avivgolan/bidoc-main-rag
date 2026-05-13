@@ -1,6 +1,13 @@
+function fetchWithTimeout(url, options = {}, timeoutMs = 30_000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(id));
+}
+
 export async function chatCompletion({ apiKey, model, messages, temperature = 0.2, maxTokens = 4096 }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const response = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -14,7 +21,7 @@ export async function chatCompletion({ apiKey, model, messages, temperature = 0.
       temperature,
       max_tokens: maxTokens
     })
-  });
+  }, 90_000);
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -31,7 +38,7 @@ export async function listOpenRouterModels({ apiKey = "" } = {}) {
   };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
-  const response = await fetch("https://openrouter.ai/api/v1/models", { headers });
+  const response = await fetchWithTimeout("https://openrouter.ai/api/v1/models", { headers }, 15_000);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data?.error?.message || `OpenRouter models request failed: ${response.status}`);
@@ -51,14 +58,14 @@ export async function listOpenRouterModels({ apiKey = "" } = {}) {
 export async function createEmbedding({ apiKey, model, input }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const normalizedModel = normalizeEmbeddingModel(model);
-  const response = await fetch("https://openrouter.ai/api/v1/embeddings", {
+  const response = await fetchWithTimeout("https://openrouter.ai/api/v1/embeddings", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({ model: normalizedModel, input })
-  });
+  }, 30_000);
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

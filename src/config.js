@@ -57,13 +57,16 @@ async function sbFetch(path, options = {}, operation = "read") {
     return null;
   }
   try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 10_000);
     const response = await fetch(`${url}${path}`, {
       ...options,
+      signal: controller.signal,
       headers: {
         ...supabaseHeaders(key),
         ...(options.headers || {})
       }
-    });
+    }).finally(() => clearTimeout(id));
     const text = await response.text();
     const data = text ? JSON.parse(text) : null;
     if (!response.ok) {

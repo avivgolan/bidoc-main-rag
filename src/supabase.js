@@ -147,13 +147,16 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
 export const vectorSearch = hybridSearch;
 
 async function supabaseFetch(config, path, options = {}) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), 20_000);
   const response = await fetch(`${config.supabaseUrl}${path}`, {
     ...options,
+    signal: controller.signal,
     headers: {
       ...supabaseHeaders(config.supabaseServiceRoleKey),
       ...(options.headers || {})
     }
-  });
+  }).finally(() => clearTimeout(id));
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) throw new Error(data?.message || `Supabase request failed: ${response.status}`);

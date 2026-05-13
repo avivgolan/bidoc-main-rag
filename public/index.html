@@ -178,8 +178,7 @@
           שלח הודעה בצ׳אט כדי לראות את רכיבי המערכת, הקווים ביניהם והלוגים של ההרצה האחרונה.
         </div>
         <div class="workflowBoard" id="workflowBoard">
-          <svg class="workflowCables" id="workflowCables" aria-hidden="true"></svg>
-          <div class="workflowNodes" id="workflowNodes"></div>
+          <div id="workflowCy"></div>
         </div>
         <aside class="workflowInspector" id="workflowInspector">
           <div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>
@@ -503,6 +502,9 @@
 
     </main>
     <div class="toastContainer" id="toastContainer" aria-live="polite"></div>
+    <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
     <script src="/app.js" type="module"></script>
   </body>
 </html>

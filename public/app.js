@@ -46,8 +46,7 @@ const state = {
   chatProgress: null
 };
 
-const WORKFLOW_NODE_WIDTH = 152;
-const WORKFLOW_NODE_HEIGHT = 124;
+let _cy = null;
 
 const WORKFLOW_TEMPLATE_NODES = [
   { id: "chat_input", label: "Chat Trigger", kind: "trigger", x: 70, y: 92, description: "Receives the user message and session id." },
@@ -980,101 +979,159 @@ function wireWorkflow() {
 }
 
 function renderWorkflow(workflow) {
-  const board = $("workflowBoard");
-  const nodesLayer = $("workflowNodes");
-  const cables = $("workflowCables");
   const inspector = $("workflowInspector");
-  nodesLayer.innerHTML = "";
-  cables.innerHTML = "";
   if (inspector) inspector.innerHTML = '<div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>';
+
+  if (_cy) { _cy.destroy(); _cy = null; }
 
   const view = buildWorkflowView(workflow);
   const hasRun = Boolean(workflow?.nodes?.length);
   $("workflowHint").style.display = hasRun ? "none" : "block";
-  board.classList.toggle("hasWorkflow", hasRun);
+  $("workflowBoard").classList.toggle("hasWorkflow", hasRun);
 
-  const positions = layoutWorkflow(view.nodes, view.edges);
-  const bounds = workflowBounds(positions);
-  board.style.minHeight = `${Math.max(660, bounds.height + 120)}px`;
-  nodesLayer.style.width = `${Math.max(1180, bounds.width + 420)}px`;
-  nodesLayer.style.height = `${Math.max(620, bounds.height + 120)}px`;
+  if (!hasRun || !view.nodes.length) return;
 
-  view.nodes.forEach((node, index) => {
-    const position = positions[node.id] || { x: 40, y: 40 };
-    const element = document.createElement("button");
-    element.type = "button";
-    element.className = [
-      "workflowNode",
-      node.kind,
-      node.status,
-      node.used ? "used" : "unused",
-      node.disconnected ? "disconnected" : "",
-      index === 0 ? "selected" : ""
-    ].filter(Boolean).join(" ");
-    element.id = `workflow_${node.id}`;
-    element.style.left = `${position.x}px`;
-    element.style.top = `${position.y}px`;
-    element.setAttribute("aria-label", node.label);
-    element.innerHTML = `
-      <span class="workflowNodeHalo"></span>
-      <span class="workflowIcon">${iconForNode(node.kind)}</span>
-      <span class="workflowNodeText">
-        <strong>${escapeHtml(node.label)}</strong>
-        <small>${escapeHtml(node.id)}</small>
-      </span>
-      <span class="workflowStatus">${statusLabel(node.status)}</span>
-    `;
-    element.addEventListener("click", () => {
-      document.querySelectorAll(".workflowNode").forEach((item) => item.classList.remove("selected"));
-      element.classList.add("selected");
-      renderWorkflowInspector(node);
-    });
-    nodesLayer.append(element);
+  const elements = view.nodes.map((node) => ({
+    group: "nodes",
+    data: { id: node.id, label: node.label, subtitle: node.id, kind: node.kind, status: node.status, nodeData: node }
+  })).concat(view.edges.map((edge) => ({
+    group: "edges",
+    data: { id: `${edge.from}_${edge.to}`, source: edge.from, target: edge.to, active: edge.active ? true : false }
+  })));
+
+  _cy = cytoscape({
+    container: $("workflowCy"),
+    elements,
+    style: cytoscapeStyle(),
+    layout: { name: "dagre", rankDir: "LR", nodeSep: 50, rankSep: 90, padding: 48, animate: false }
+  });
+
+  _cy.on("tap", "node", (evt) => {
+    renderWorkflowInspector(evt.target.data("nodeData"));
   });
 
   if (view.nodes[0]) renderWorkflowInspector(view.nodes[0]);
+}
 
-  requestAnimationFrame(() => drawCables(view.edges, positions, view.activeEdgeKeys));
+function cytoscapeStyle() {
+  const kindColor = {
+    trigger: "#148c72", code: "#2e6b24", database: "#6a4c93",
+    memory: "#1a5a8c", ai: "#148c72", router: "#b07d1a",
+    vector: "#1a5a8c", tool: "#b07d1a"
+  };
+  return [
+    {
+      selector: "node",
+      style: {
+        shape: "round-rectangle",
+        width: 148, height: 64,
+        "background-color": (e) => kindColor[e.data("kind")] || "#2a3d28",
+        "border-width": 2, "border-color": "#3a5238",
+        color: "#e4ede0",
+        "font-family": "Inter, system-ui, sans-serif",
+        "text-valign": "center", "text-halign": "center",
+        "text-wrap": "wrap", "text-max-width": "132px",
+        label: (e) => `${e.data("label")}\n${e.data("subtitle")}`,
+        "line-height": 1.5, "font-size": 12
+      }
+    },
+    {
+      selector: "node[status='done']",
+      style: {
+        "border-color": "#8ee0c8", "border-width": 2.5,
+        "shadow-blur": 14, "shadow-color": "rgb(142 224 200 / 0.45)",
+        "shadow-offset-x": 0, "shadow-offset-y": 0, "shadow-opacity": 1
+      }
+    },
+    {
+      selector: "node[status='error']",
+      style: { "border-color": "#e05555", "border-width": 2.5 }
+    },
+    {
+      selector: "node:selected",
+      style: {
+        "border-color": "#f4c36a", "border-width": 3,
+        "shadow-blur": 16, "shadow-color": "rgb(244 195 106 / 0.5)",
+        "shadow-offset-x": 0, "shadow-offset-y": 0, "shadow-opacity": 1
+      }
+    },
+    {
+      selector: "edge",
+      style: {
+        width: 1.5,
+        "line-color": "rgb(202 213 195 / 0.28)",
+        "target-arrow-color": "rgb(202 213 195 / 0.28)",
+        "target-arrow-shape": "triangle",
+        "curve-style": "bezier",
+        "line-style": "dashed",
+        "line-dash-pattern": [7, 6],
+        opacity: 0.55
+      }
+    },
+    {
+      selector: "edge[?active]",
+      style: {
+        width: 2.8,
+        "line-color": "#8ee0c8",
+        "target-arrow-color": "#8ee0c8",
+        "line-style": "solid",
+        opacity: 1,
+        "shadow-blur": 8, "shadow-color": "rgb(142 224 200 / 0.4)",
+        "shadow-offset-x": 0, "shadow-offset-y": 0, "shadow-opacity": 1
+      }
+    }
+  ];
 }
 
 function buildWorkflowView(workflow) {
   const runtimeNodes = new Map((workflow?.nodes || []).map((node) => [node.id, node]));
   const runtimeIds = new Set(runtimeNodes.keys());
   const activeEdgeKeys = new Set((workflow?.edges || []).map(edgeKey));
+  const hasRun = runtimeIds.size > 0;
   const templateIds = new Set(WORKFLOW_TEMPLATE_NODES.map((node) => node.id));
-  const nodes = WORKFLOW_TEMPLATE_NODES.map((node) => {
-    const runtime = runtimeNodes.get(node.id);
-    const input = runtime?.input ?? { description: node.description || "", configured_component: true };
-    const output = runtime?.output ?? (node.disconnected
-      ? { isolated: true, reason: "This management component is not connected to automatic chat runs." }
-      : { status: "not used in the last run" });
-    return {
-      ...node,
-      ...(runtime || {}),
-      label: runtime?.label || node.label,
-      kind: runtime?.kind || node.kind,
-      status: runtime?.status || (node.disconnected ? "disconnected" : "idle"),
-      used: runtimeIds.has(node.id),
-      disconnected: Boolean(node.disconnected),
-      input,
-      output
-    };
-  });
+
+  // When a run has happened: only show nodes that actually executed (no disconnected, no idle).
+  // When no run yet: show nothing (hint is displayed instead).
+  const nodes = WORKFLOW_TEMPLATE_NODES
+    .filter((node) => !node.disconnected && (!hasRun || runtimeIds.has(node.id)))
+    .map((node) => {
+      const runtime = runtimeNodes.get(node.id);
+      const input = runtime?.input ?? { description: node.description || "", configured_component: true };
+      const output = runtime?.output ?? { status: "not used in the last run" };
+      return {
+        ...node,
+        ...(runtime || {}),
+        x: hasRun ? undefined : node.x,
+        y: hasRun ? undefined : node.y,
+        label: runtime?.label || node.label,
+        kind: runtime?.kind || node.kind,
+        status: runtime?.status || "idle",
+        used: runtimeIds.has(node.id),
+        disconnected: false,
+        input,
+        output
+      };
+    });
 
   for (const runtime of runtimeNodes.values()) {
     if (!templateIds.has(runtime.id)) nodes.push({ ...runtime, used: true });
   }
 
+  // Only draw edges where both endpoints are in the rendered set.
+  const visibleIds = new Set(nodes.map((n) => n.id));
   const edgeKeys = new Set();
   const edges = [];
   for (const edge of WORKFLOW_TEMPLATE_EDGES) {
+    if (!visibleIds.has(edge.from) || !visibleIds.has(edge.to)) continue;
     const key = edgeKey(edge);
     edgeKeys.add(key);
     edges.push({ ...edge, active: activeEdgeKeys.has(key) });
   }
   for (const edge of workflow?.edges || []) {
     const key = edgeKey(edge);
-    if (!edgeKeys.has(key)) edges.push({ ...edge, active: true });
+    if (!edgeKeys.has(key) && visibleIds.has(edge.from) && visibleIds.has(edge.to)) {
+      edges.push({ ...edge, active: true });
+    }
   }
 
   return { nodes, edges, activeEdgeKeys };
@@ -1102,123 +1159,14 @@ function renderWorkflowInspector(node) {
   `;
 }
 
-function layoutWorkflow(nodes, edges = []) {
-  if (nodes.some((node) => Number.isFinite(node.x) && Number.isFinite(node.y))) {
-    return Object.fromEntries(nodes.map((node) => [
-      node.id,
-      Number.isFinite(node.x) && Number.isFinite(node.y)
-        ? { x: node.x, y: node.y }
-        : { x: 40, y: 40 }
-    ]));
-  }
-  const order = topologicalWorkflowOrder(nodes, edges);
-  const positions = {};
-  const colWidth = 210;
-  const rowHeight = 150;
-  const startX = 70;
-  const startY = 86;
-  order.forEach((id, index) => {
-    const row = index % 2;
-    const col = Math.floor(index / 2);
-    positions[id] = {
-      x: startX + col * colWidth,
-      y: startY + row * rowHeight
-    };
-  });
-  return positions;
-}
-
-function topologicalWorkflowOrder(nodes, edges) {
-  const ids = nodes.map((node) => node.id);
-  const byId = new Set(ids);
-  const incoming = Object.fromEntries(ids.map((id) => [id, 0]));
-  const outgoing = Object.fromEntries(ids.map((id) => [id, []]));
-  for (const edge of edges) {
-    if (!byId.has(edge.from) || !byId.has(edge.to)) continue;
-    incoming[edge.to] += 1;
-    outgoing[edge.from].push(edge.to);
-  }
-  const queue = ids.filter((id) => incoming[id] === 0);
-  const ordered = [];
-  while (queue.length) {
-    const id = queue.shift();
-    ordered.push(id);
-    for (const next of outgoing[id]) {
-      incoming[next] -= 1;
-      if (incoming[next] === 0) queue.push(next);
-    }
-  }
-  return ordered.length === ids.length ? ordered : ids;
-}
-
-function workflowBounds(positions) {
-  const values = Object.values(positions);
-  if (!values.length) return { width: 0, height: 0 };
-  return {
-    width: Math.max(...values.map((position) => position.x)) + WORKFLOW_NODE_WIDTH + 70,
-    height: Math.max(...values.map((position) => position.y)) + WORKFLOW_NODE_HEIGHT + 70
-  };
-}
-
 function edgeKey(edge) {
   return `${edge.from}->${edge.to}`;
 }
 
-function drawCables(edges, positions, activeEdgeKeys = new Set()) {
-  const cables = $("workflowCables");
-  const board = $("workflowBoard");
-  cables.innerHTML = `
-    <defs>
-      <marker id="workflowArrowActive" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z"></path>
-      </marker>
-      <marker id="workflowArrowDormant" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z"></path>
-      </marker>
-    </defs>
-  `;
-  cables.setAttribute("width", board.scrollWidth);
-  cables.setAttribute("height", board.scrollHeight);
-  cables.setAttribute("viewBox", `0 0 ${board.scrollWidth} ${board.scrollHeight}`);
-
-  for (const edge of edges) {
-    const from = positions[edge.from];
-    const to = positions[edge.to];
-    if (!from || !to) continue;
-    const start = {
-      x: from.x + WORKFLOW_NODE_WIDTH,
-      y: from.y + WORKFLOW_NODE_HEIGHT / 2
-    };
-    const end = {
-      x: to.x,
-      y: to.y + WORKFLOW_NODE_HEIGHT / 2
-    };
-    const distance = Math.max(70, Math.abs(end.x - start.x) / 2);
-    const active = Boolean(edge.active || activeEdgeKeys.has(edgeKey(edge)));
-    const cableClass = active ? "active" : "dormant";
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", `M ${start.x} ${start.y} C ${start.x + distance} ${start.y}, ${end.x - distance} ${end.y}, ${end.x} ${end.y}`);
-    path.setAttribute("class", `workflowCable ${cableClass}`);
-    path.setAttribute("marker-end", active ? "url(#workflowArrowActive)" : "url(#workflowArrowDormant)");
-    cables.append(path);
-
-    const hitPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    hitPath.setAttribute("d", path.getAttribute("d"));
-    hitPath.setAttribute("class", `workflowCable workflowCableGlow ${cableClass}`);
-    cables.insertBefore(hitPath, path);
-  }
-}
-
 function iconForNode(kind) {
   return {
-    trigger: "▶",
-    code: "{}",
-    database: "DB",
-    memory: "MEM",
-    ai: "AI",
-    router: "↯",
-    vector: "IDX",
-    tool: "API"
+    trigger: "▶", code: "{}", database: "DB", memory: "MEM",
+    ai: "AI", router: "↯", vector: "IDX", tool: "API"
   }[kind] || "•";
 }
 
