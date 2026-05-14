@@ -1,5 +1,6 @@
 const runs = new Map();
 const subscribers = new Map();
+const runHistory = [];
 
 export function createRun(runId) {
   runs.set(runId, []);
@@ -48,6 +49,26 @@ export function subscribeRun(runId, res) {
 
 export function getRunEvents(runId) {
   return [...(runs.get(runId) || [])];
+}
+
+export function recordRunHistory({ id, title, workflowLog = null, runEvents = null, createdAt = new Date().toISOString(), kind = "run" }) {
+  if (!id) return;
+  const item = {
+    id,
+    created_at: createdAt,
+    user_message: title || id,
+    workflow_log: workflowLog,
+    run_events: runEvents || getRunEvents(id),
+    kind
+  };
+  const existingIndex = runHistory.findIndex((run) => run.id === id);
+  if (existingIndex >= 0) runHistory.splice(existingIndex, 1);
+  runHistory.unshift(item);
+  if (runHistory.length > 50) runHistory.splice(50);
+}
+
+export function listLocalRunHistory({ limit = 30 } = {}) {
+  return runHistory.slice(0, limit);
 }
 
 function closeRunSubscribers(runId) {

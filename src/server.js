@@ -13,7 +13,7 @@ import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimel
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
-import { createRun, failRun, subscribeRun } from "./runLog.js";
+import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 
 loadEnv();
@@ -91,7 +91,11 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/run-history") {
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
-    const runs = await listRunHistory({ config: config(), limit }).catch(() => []);
+    const dbRuns = await listRunHistory({ config: config(), limit }).catch(() => []);
+    const localRuns = listLocalRunHistory({ limit });
+    const runs = [...localRuns, ...dbRuns]
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+      .slice(0, limit);
     return sendJson(res, 200, { runs });
   }
 
@@ -325,15 +329,36 @@ async function handleApi(req, res, url) {
     const source = normalizeTimelineSource(url.searchParams.get("source") || "index");
     const smart = ["1", "true", "yes", "ai", "smart"].includes(String(url.searchParams.get("smart") || "").toLowerCase());
     const focusEventId = String(url.searchParams.get("eventId") || "").trim();
+    const runId = String(url.searchParams.get("runId") || "").trim();
+    if (runId) createRun(runId);
     const linkAgent = config().timelineLinks || {};
     const requestedLimit = Math.min(Math.max(Number(url.searchParams.get("limit") || 0) || (focusEventId ? linkAgent.suggestionLimit || 12 : 40), 1), 200);
+    const trace = [];
+    trace.push(timelineLinkTrace("link_agent_start", "סוכן הקשרים הופעל", {
+      source,
+      smart,
+      focusEventId: focusEventId || null,
+      requestedLimit
+    }));
+    emitTimelineLinkRun(runId, trace.at(-1));
     const events = source === "alerts"
       ? await fetchAlertsTimelineEvents({ config: config() }).catch(() => [])
       : await fetchTimelineEvents({ config: config() }).catch(() => []);
+    trace.push(timelineLinkTrace("timeline_events", "נטענו אירועי ציר זמן", { count: events.length, source }));
+    emitTimelineLinkRun(runId, trace.at(-1));
     const links = await listTimelineEventLinks({ config: config(), source }).catch(() => []);
+    trace.push(timelineLinkTrace("saved_links", "נטענו קשרים קיימים", { count: links.length }));
+    emitTimelineLinkRun(runId, trace.at(-1));
     const graphData = await listTimelineGraphData({ config: config(), source }).catch(() => ({ eventEntities: [], graphEdges: [] }));
+    trace.push(timelineLinkTrace("timeline_graph_data", "נטענו נתוני Knowledge Graph", {
+      eventEntities: graphData.eventEntities?.length || 0,
+      graphEdges: graphData.graphEdges?.length || 0
+    }));
+    emitTimelineLinkRun(runId, trace.at(-1));
     await buildTimelineKnowledgeGraph({ events, links, source, eventEntities: graphData.eventEntities || [], graphEdges: graphData.graphEdges || [] });
     const graphScorer = createTimelineGraphScorer({ eventEntities: graphData.eventEntities || [], source });
+    trace.push(timelineLinkTrace("graph_scorer", "נבנה scorer מהגרף", { persistedEventEntities: graphData.eventEntities?.length || 0 }));
+    emitTimelineLinkRun(runId, trace.at(-1));
     const baseSuggestions = buildTimelineLinkSuggestions({
       events,
       links,
@@ -341,13 +366,29 @@ async function handleApi(req, res, url) {
       limit: focusEventId ? 200 : requestedLimit,
       pairScorer: graphScorer
     });
+    trace.push(timelineLinkTrace("quote_rules", "הופעלו חוקי הצעת מחיר לאישור", {
+      suggestions: baseSuggestions.length,
+      filteredByEvent: Boolean(focusEventId)
+    }));
+    emitTimelineLinkRun(runId, trace.at(-1));
     const focusedBaseSuggestions = focusEventId
       ? baseSuggestions.filter((item) => String(item.source_event_id) === focusEventId || String(item.target_event_id) === focusEventId)
       : baseSuggestions;
     const relatedSuggestions = focusEventId
       ? buildFocusedRelatedTimelineSuggestions({ events, links, source, focusEventId, graphScorer, limit: requestedLimit, settings: linkAgent })
       : [];
+    trace.push(timelineLinkTrace("related_fallback", "הופעלה השלמה דרך הגרף", {
+      enabled: Boolean(focusEventId && linkAgent.useGraphFallback !== false),
+      suggestions: relatedSuggestions.length
+    }));
+    emitTimelineLinkRun(runId, trace.at(-1));
     const focusedSuggestions = mergeTimelineSuggestions([...focusedBaseSuggestions, ...relatedSuggestions], requestedLimit);
+    trace.push(timelineLinkTrace("candidate_merge", "אוחדו מועמדים לפני מודל", {
+      ruleSuggestions: focusedBaseSuggestions.length,
+      relatedSuggestions: relatedSuggestions.length,
+      candidates: focusedSuggestions.length
+    }));
+    emitTimelineLinkRun(runId, trace.at(-1));
     const suggestions = smart
       ? await enrichTimelineSuggestionsWithModel({
         cfg: config(),
@@ -357,13 +398,45 @@ async function handleApi(req, res, url) {
         baseSuggestions: focusedSuggestions,
         graphScorer,
         focusEventId,
-        limit: requestedLimit
+        limit: requestedLimit,
+        trace,
+        runId
       }).catch((error) => {
         console.warn("[timeline] smart suggestions failed:", error.message);
+        trace.push(timelineLinkTrace("model_review", "בדיקת מודל נכשלה", { error: error.message }, "error"));
+        emitTimelineLinkRun(runId, trace.at(-1));
         return focusedSuggestions.map((item) => ({ ...item, modelStatus: "fallback", modelError: error.message }));
       })
       : focusedSuggestions;
-    return sendJson(res, 200, { suggestions, mode: smart ? "smart" : "rules" });
+    trace.push(timelineLinkTrace("link_agent_result", "סוכן הקשרים סיים", { suggestions: suggestions.length }));
+    emitTimelineLinkRun(runId, trace.at(-1));
+    const workflowLog = buildTimelineLinkWorkflowLog({
+      source,
+      smart,
+      focusEventId,
+      requestedLimit,
+      events,
+      links,
+      graphData,
+      baseSuggestions,
+      focusedBaseSuggestions,
+      relatedSuggestions,
+      focusedSuggestions,
+      suggestions,
+      linkAgent,
+      trace
+    });
+    if (runId) {
+      completeRun(runId, { suggestions: suggestions.length, workflowLog });
+      recordRunHistory({
+        id: runId,
+        title: `סוכן הקשרים · ${focusEventId || source}`,
+        workflowLog,
+        runEvents: getRunEvents(runId),
+        kind: "link_agent"
+      });
+    }
+    return sendJson(res, 200, { suggestions, mode: smart ? "smart" : "rules", workflowLog, runId: runId || null });
   }
 
   if (req.method === "POST" && url.pathname === "/api/timeline/graph/rebuild") {
@@ -475,16 +548,31 @@ function parseHashtags(value) {
     .filter(Boolean);
 }
 
-async function enrichTimelineSuggestionsWithModel({ cfg, events = [], links = [], source = "index", baseSuggestions = [], graphScorer, focusEventId = "", limit = 8 }) {
+async function enrichTimelineSuggestionsWithModel({ cfg, events = [], links = [], source = "index", baseSuggestions = [], graphScorer, focusEventId = "", limit = 8, trace = [], runId = "" }) {
   if (!cfg.openRouterApiKey) return baseSuggestions;
   const linkAgent = cfg.timelineLinks || {};
   const semanticSuggestions = linkAgent.useSemanticSearch === false
-    ? []
+    ? (trace.push(timelineLinkTrace("semantic_search", "חיפוש סמנטי דולג", { enabled: false })), emitTimelineLinkRun(runId, trace.at(-1)), [])
     : await buildSemanticTimelineSuggestions({ cfg, events, links, source, graphScorer, focusEventId }).catch((error) => {
       console.warn("[timeline] semantic suggestions failed:", error.message);
+      trace.push(timelineLinkTrace("semantic_search", "חיפוש סמנטי נכשל", { error: error.message }, "error"));
+      emitTimelineLinkRun(runId, trace.at(-1));
       return [];
     });
+  if (linkAgent.useSemanticSearch !== false) {
+    trace.push(timelineLinkTrace("semantic_search", "הופעל חיפוש סמנטי", {
+      suggestions: semanticSuggestions.length,
+      topK: Number(linkAgent.semanticTopK || 8)
+    }));
+    emitTimelineLinkRun(runId, trace.at(-1));
+  }
   const candidates = mergeTimelineSuggestions([...baseSuggestions, ...semanticSuggestions], Math.max(limit * 2, 14));
+  trace.push(timelineLinkTrace("candidate_merge", "אוחדו מועמדים סמנטיים", {
+    baseSuggestions: baseSuggestions.length,
+    semanticSuggestions: semanticSuggestions.length,
+    candidates: candidates.length
+  }));
+  emitTimelineLinkRun(runId, trace.at(-1));
   if (!candidates.length) return [];
 
   const byId = new Map(events.map((event) => [String(event.id), event]));
@@ -527,6 +615,13 @@ async function enrichTimelineSuggestionsWithModel({ cfg, events = [], links = []
   });
   const parsed = extractJsonObject(content);
   const reviews = Array.isArray(parsed.links) ? parsed.links : [];
+  trace.push(timelineLinkTrace("model_review", "המודל בדק את המועמדים", {
+    model: linkAgent.model || cfg.models.reranker || cfg.models.lite || cfg.models.main,
+    candidates: candidates.length,
+    reviews: reviews.length,
+    minConfidence: Number(linkAgent.minConfidence ?? 0.42)
+  }));
+  emitTimelineLinkRun(runId, trace.at(-1));
   const accepted = [];
   for (const review of reviews) {
     const index = Number(review.index);
@@ -543,6 +638,11 @@ async function enrichTimelineSuggestionsWithModel({ cfg, events = [], links = []
       score: Number(candidate.score || 0) + Math.round(Number(review.confidence || 0) * 35)
     });
   }
+  trace.push(timelineLinkTrace("review_filter", "סוננו תוצאות לפי סף ביטחון", {
+    accepted: accepted.length,
+    rejected: Math.max(0, reviews.length - accepted.length)
+  }));
+  emitTimelineLinkRun(runId, trace.at(-1));
   return mergeTimelineSuggestions(accepted.length ? accepted : candidates.map((item) => ({ ...item, modelStatus: "reviewed_no_accept" })), limit);
 }
 
@@ -768,6 +868,183 @@ function hasTimelineOverlap(a, b) {
   const bText = timelineEventText(b).toLowerCase();
   return (a?.tags || []).some((tag) => bText.includes(String(tag).toLowerCase())) ||
     (b?.tags || []).some((tag) => aText.includes(String(tag).toLowerCase()));
+}
+
+function timelineLinkTrace(step, message, data = {}, status = "done") {
+  return {
+    step,
+    message,
+    status,
+    time: new Date().toISOString(),
+    data
+  };
+}
+
+function emitTimelineLinkRun(runId, item) {
+  if (!runId || !item) return;
+  emitRunEvent(runId, item.step, item.message, { ...(item.data || {}), status: item.status });
+}
+
+function buildTimelineLinkWorkflowLog({
+  source,
+  smart,
+  focusEventId,
+  requestedLimit,
+  events = [],
+  links = [],
+  graphData = {},
+  baseSuggestions = [],
+  focusedBaseSuggestions = [],
+  relatedSuggestions = [],
+  focusedSuggestions = [],
+  suggestions = [],
+  linkAgent = {},
+  trace = []
+}) {
+  const hasFocus = Boolean(focusEventId);
+  const semanticTrace = latestTrace(trace, "semantic_search");
+  const modelTrace = latestTrace(trace, "model_review");
+  const reviewTrace = latestTrace(trace, "review_filter");
+  const nodes = [
+    workflowNode("link_agent_start", "Link Agent Trigger", "trigger", "done", {
+      source,
+      smart,
+      focusEventId: focusEventId || null
+    }, {
+      requestedLimit,
+      settings: {
+        model: linkAgent.model || "",
+        useSemanticSearch: linkAgent.useSemanticSearch !== false,
+        useGraphFallback: linkAgent.useGraphFallback !== false,
+        minConfidence: linkAgent.minConfidence,
+        timeWindowDays: linkAgent.timeWindowDays
+      }
+    }),
+    workflowNode("timeline_events", "Load Timeline Events", "database", "done", {
+      source
+    }, {
+      count: events.length,
+      sample: events.slice(0, 3).map(compactTimelineEvent)
+    }),
+    workflowNode("saved_links", "Load Saved Links", "database", "done", {
+      source
+    }, {
+      count: links.length
+    }),
+    workflowNode("timeline_graph_data", "Load Knowledge Graph", "database", "done", {
+      source
+    }, {
+      eventEntities: graphData.eventEntities?.length || 0,
+      graphEdges: graphData.graphEdges?.length || 0
+    }),
+    workflowNode("graph_scorer", "Graph Scorer", "router", "done", {
+      eventEntities: graphData.eventEntities?.length || 0
+    }, {
+      ready: true
+    }),
+    workflowNode("quote_rules", "Quote Approval Rules", "router", "done", {
+      focusEventId: focusEventId || null,
+      limit: hasFocus ? 200 : requestedLimit
+    }, {
+      suggestions: baseSuggestions.length,
+      focusedSuggestions: focusedBaseSuggestions.length
+    }),
+    workflowNode("related_fallback", "Graph Related Fallback", "router", hasFocus && linkAgent.useGraphFallback !== false ? "done" : "skipped", {
+      focusEventId: focusEventId || null,
+      timeWindowDays: linkAgent.timeWindowDays || 120,
+      ignoredTerms: linkAgent.ignoredTerms || []
+    }, {
+      suggestions: relatedSuggestions.length
+    }),
+    workflowNode("candidate_merge", "Merge Candidates", "code", "done", {
+      ruleSuggestions: focusedBaseSuggestions.length,
+      relatedSuggestions: relatedSuggestions.length,
+      semanticSuggestions: semanticTrace?.data?.suggestions || 0
+    }, {
+      candidates: focusedSuggestions.length,
+      afterSemanticMerge: latestTrace(trace, "candidate_merge")?.data?.candidates || focusedSuggestions.length
+    })
+  ];
+
+  if (smart) {
+    nodes.push(
+      workflowNode("semantic_search", "Semantic Search", "vector", linkAgent.useSemanticSearch === false ? "skipped" : semanticTrace?.status || "done", {
+        enabled: linkAgent.useSemanticSearch !== false,
+        topK: linkAgent.semanticTopK || 8
+      }, semanticTrace?.data || {
+        suggestions: 0
+      }),
+      workflowNode("model_review", "Model Review", "ai", modelTrace?.status || "done", {
+        model: linkAgent.model || "default reranker",
+        prompt: linkAgent.prompt || "",
+        minConfidence: linkAgent.minConfidence
+      }, modelTrace?.data || {
+        candidates: focusedSuggestions.length
+      }),
+      workflowNode("review_filter", "Confidence Filter", "router", reviewTrace?.status || "done", {
+        minConfidence: linkAgent.minConfidence
+      }, reviewTrace?.data || {
+        accepted: suggestions.filter((item) => item.modelStatus === "reviewed").length
+      })
+    );
+  }
+
+  nodes.push(
+    workflowNode("link_agent_result", "Link Suggestions", "database", "done", {
+      mode: smart ? "smart" : "rules",
+      requestedLimit
+    }, {
+      suggestions: suggestions.length,
+      sample: suggestions.slice(0, 5).map((item) => ({
+        source_event_id: item.source_event_id,
+        target_event_id: item.target_event_id,
+        relation_type: item.relation_type,
+        score: item.score,
+        modelConfidence: item.modelConfidence || null
+      }))
+    })
+  );
+
+  const edges = [
+    ["link_agent_start", "timeline_events"],
+    ["timeline_events", "saved_links"],
+    ["saved_links", "timeline_graph_data"],
+    ["timeline_graph_data", "graph_scorer"],
+    ["graph_scorer", "quote_rules"],
+    ["quote_rules", "related_fallback"],
+    ["related_fallback", "candidate_merge"],
+    ...(smart
+      ? [
+          ["candidate_merge", "semantic_search"],
+          ["semantic_search", "model_review"],
+          ["model_review", "review_filter"],
+          ["review_filter", "link_agent_result"]
+        ]
+      : [["candidate_merge", "link_agent_result"]])
+  ];
+
+  return {
+    nodes,
+    edges: edges.map(([from, to]) => ({ from, to })),
+    trace,
+    activePrompts: {
+      timeline_link_agent: linkAgent.prompt || null
+    }
+  };
+}
+
+function workflowNode(id, label, kind, status, input, output) {
+  return { id, label, kind, status, input: compactWorkflowLog(input), output: compactWorkflowLog(output) };
+}
+
+function compactWorkflowLog(value) {
+  const text = JSON.stringify(value, null, 2);
+  if (text.length <= 5000) return value;
+  return { preview: `${text.slice(0, 5000)}...`, truncated: true };
+}
+
+function latestTrace(trace, step) {
+  return [...(trace || [])].reverse().find((item) => item.step === step) || null;
 }
 
 function sendJson(res, status, value) {

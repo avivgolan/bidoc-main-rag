@@ -1374,11 +1374,42 @@ async function testLinkAgentSettings() {
   resultBox.textContent = "בודק...";
   try {
     await saveLinkAgentSettings();
-    const result = await api(`/api/timeline/link-suggestions?source=${encodeURIComponent(source)}&smart=1&eventId=${encodeURIComponent(eventId)}&limit=${encodeURIComponent($("linkAgentSuggestionLimit")?.value || 12)}`);
+    const runId = startLinkAgentLiveRun();
+    const result = await api(`/api/timeline/link-suggestions?source=${encodeURIComponent(source)}&smart=1&eventId=${encodeURIComponent(eventId)}&limit=${encodeURIComponent($("linkAgentSuggestionLimit")?.value || 12)}&runId=${encodeURIComponent(runId)}`);
+    applyLinkAgentWorkflow(result);
     resultBox.textContent = JSON.stringify(result, null, 2);
   } catch (error) {
     resultBox.textContent = error.message;
   }
+}
+
+function startLinkAgentLiveRun() {
+  const runId = `link_agent_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  startLiveRun(runId);
+  if ($("liveRunStatus")) $("liveRunStatus").textContent = `סוכן הקשרים רץ: ${runId}`;
+  renderWorkflow(null);
+  return runId;
+}
+
+function applyLinkAgentWorkflow(result) {
+  if (!result?.workflowLog) return;
+  state.lastWorkflow = result.workflowLog;
+  const events = (result.workflowLog.trace || []).map((item) => ({
+    id: item.id || `${item.time}_${item.step}`,
+    time: item.time || new Date().toISOString(),
+    step: item.step,
+    message: item.message,
+    data: item.data || {}
+  }));
+  state.runEvents = [];
+  const liveRunList = $("liveRunList");
+  if (liveRunList) {
+    liveRunList.innerHTML = "";
+    liveRunList.hidden = false;
+    for (const item of events) appendLiveRunEvent(item);
+  }
+  if ($("liveRunStatus")) $("liveRunStatus").textContent = "סוכן הקשרים · ריצה אחרונה";
+  renderWorkflow(state.lastWorkflow);
 }
 
 function wireTools() {
@@ -1609,9 +1640,11 @@ function renderRunHistoryStrip(runs) {
     item.dataset.runId = run.id;
     const time = run.created_at ? timeAgo(new Date(run.created_at)) : "";
     const msg = (run.user_message || "").slice(0, 60);
+    const kindLabel = run.kind === "link_agent" ? "סוכן הקשרים" : "צ׳אט";
     item.innerHTML = `
       <div class="rhTime">${escapeHtml(time)}</div>
       <div class="rhMsg">${escapeHtml(msg)}</div>
+      <small>${escapeHtml(kindLabel)}</small>
       ${hasError ? '<div class="rhErr">⚠ שגיאה בריצה</div>' : ""}
     `;
     item.addEventListener("click", () => showHistoricalRun(run, item));
@@ -1777,8 +1810,9 @@ async function loadSmartTimelineSuggestions() {
   return api(`/api/timeline/link-suggestions?source=${encodeURIComponent(getActiveTimelineSource())}&smart=1`);
 }
 
-async function loadSmartTimelineSuggestionsForEvent(eventId) {
-  return api(`/api/timeline/link-suggestions?source=${encodeURIComponent(getActiveTimelineSource())}&smart=1&eventId=${encodeURIComponent(eventId)}&limit=12`);
+async function loadSmartTimelineSuggestionsForEvent(eventId, runId = "") {
+  const runParam = runId ? `&runId=${encodeURIComponent(runId)}` : "";
+  return api(`/api/timeline/link-suggestions?source=${encodeURIComponent(getActiveTimelineSource())}&smart=1&eventId=${encodeURIComponent(eventId)}&limit=12${runParam}`);
 }
 
 async function refreshTimelineLinks({ rerender = true } = {}) {
@@ -2565,7 +2599,9 @@ function buildTimelineSuggestionsPanel(currentEvent) {
     list.textContent = "בודק הצעות...";
     try {
       list.textContent = "בודק סמנטית עם הגרף והמודל...";
-      const result = await loadSmartTimelineSuggestionsForEvent(currentEvent.id);
+      const runId = startLinkAgentLiveRun();
+      const result = await loadSmartTimelineSuggestionsForEvent(currentEvent.id, runId);
+      applyLinkAgentWorkflow(result);
       timelineState.suggestions = mergeTimelineSuggestionState(timelineState.suggestions, result.suggestions || []);
       timelineState.suggestionsLoaded = true;
       timelineState.suggestionsMode = result.mode || "smart";

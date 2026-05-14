@@ -23,6 +23,8 @@ tags:
 - Smart timeline suggestions can request semantic search plus LLM review; the review prompt includes Knowledge Graph shared entities/scores as evidence.
 - Event-specific smart suggestions use the selected timeline event id and include fallback related-event suggestions from meaningful shared tags/entities.
 - `#linkAgent` is a settings page for the timeline link agent, including model, prompt, semantic/graph toggles, limits, confidence threshold, ignored generic terms, and a quick event-id test.
+- Smart link-agent runs accept a `runId`, stream live run events through `/api/runs/:id/events`, return a `workflowLog`, and the UI renders the trace in the Workflow tab.
+- Link-agent runs are recorded in local run history and merged into `/api/run-history` alongside persisted chat workflow rows.
 - `public/app.js` uses `timelineState.resolution` for day/week/month bucket sizing and `timelineState.viewportStart` for the lower strip viewport.
 - The lower strip window is draggable/clickable and updates the visible time range; it also supports keyboard movement with Arrow/Home/End keys.
 
@@ -36,6 +38,9 @@ tags:
 - 2026-05-13 -- Added smart timeline suggestion review that combines hybrid search, Knowledge Graph evidence, and an OpenRouter model.
 - 2026-05-13 -- Made smart suggestions event-focused and added related-event fallback scoring so selected events are not limited by the global top suggestions.
 - 2026-05-13 -- Added the Link Agent settings page and persisted `timelineLinks` settings used by smart timeline suggestions.
+- 2026-05-14 -- Added Workflow visibility for link-agent runs, including event loading, saved links, graph data, rules, semantic search, model review, filtering, and final suggestions.
+- 2026-05-14 -- Link-agent smart suggestion requests now start a live run id and stream each link-agent step into the existing live run log.
+- 2026-05-14 -- Merged non-chat link-agent runs into the Workflow history strip so they appear next to chat runs during the current server session.
 
 ## Gotchas
 
