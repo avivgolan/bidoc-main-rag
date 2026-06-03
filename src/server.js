@@ -3,11 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { getConfig, initSettings, loadEnv, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, upsertTimelineGraphData } from "./supabase.js";
+import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
@@ -50,7 +50,8 @@ if (!process.env.VERCEL) {
     const cfg = config();
     console.log(`bidoc agent running at http://localhost:${cfg.port}`);
     console.log(`[startup] OpenRouter : ${cfg.openRouterApiKey ? "✓ configured" : "✗ MISSING — RAG agent will use fallback"}`);
-    console.log(`[startup] Supabase   : ${cfg.supabaseUrl ? "✓ configured" : "✗ MISSING"}`);
+    console.log(`[startup] App DB     : ${cfg.supabaseUrl ? "✓ configured" : "✗ MISSING"}`);
+    console.log(`[startup] Content DB : ${cfg.contentSource?.supabaseUrl ? "✓ configured" : "✗ MISSING"}`);
     console.log(`[startup] Timezone   : ${cfg.timezone}`);
   });
 }
@@ -717,7 +718,7 @@ function findTimelineEventForSearchRow(row, eventsById) {
     const event = eventsById.get(String(id));
     if (event) return event;
   }
-  const text = String(row?.content || row?.text || row?.metadata?.content || "");
+  const text = String(row?.content || row?.index_text || row?.summary || row?.title || row?.text || row?.metadata?.content || "");
   if (!text) return null;
   for (const event of eventsById.values()) {
     const eventText = timelineEventText(event);
@@ -1059,6 +1060,7 @@ function sendText(res, status, value) {
 
 async function runConnectionDiagnostics(cfg) {
   const results = [];
+  const contentCfg = contentSupabaseConfig(cfg);
   results.push(await diagnosticCheck("openrouter_chat", "OpenRouter Chat", async () => {
     if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
     const answer = await chatCompletion({
@@ -1084,21 +1086,33 @@ async function runConnectionDiagnostics(cfg) {
     return { model: cfg.models.embedding, dimensions: embedding.length };
   }));
 
-  results.push(await diagnosticCheck("supabase_rest", "Supabase REST", async () => {
+  results.push(await diagnosticCheck("app_supabase_rest", "App Supabase REST", async () => {
     if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
     const rows = await rawSupabaseFetch(cfg, "/rest/v1/chat_messages_gf?select=id&limit=1");
     return { table: "chat_messages_gf", rows: Array.isArray(rows) ? rows.length : 0 };
   }));
 
-  results.push(await diagnosticCheck("supabase_hybrid_rpc", "Supabase Hybrid RPC", async () => {
-    if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
+  results.push(await diagnosticCheck("content_supabase_index_table", "Content Supabase Index Table", async () => {
+    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
+    const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/${contentCfg.indexTable}?select=id&limit=1`);
+    return { table: contentCfg.indexTable, rows: Array.isArray(rows) ? rows.length : 0, keyRole: supabaseKeyRole(contentCfg.supabaseServiceRoleKey) };
+  }));
+
+  results.push(await diagnosticCheck("content_supabase_alerts_table", "Content Supabase Alerts Table", async () => {
+    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
+    const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/${contentCfg.alertsTable}?select=id&limit=1`);
+    return { table: contentCfg.alertsTable, rows: Array.isArray(rows) ? rows.length : 0, keyRole: supabaseKeyRole(contentCfg.supabaseServiceRoleKey) };
+  }));
+
+  results.push(await diagnosticCheck("content_supabase_hybrid_rpc", "Content Supabase Hybrid RPC", async () => {
+    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
     if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing because RPC test needs a query embedding");
     const embedding = await createEmbedding({
       apiKey: cfg.openRouterApiKey,
       model: cfg.models.embedding,
       input: "connection test"
     });
-    const rows = await rawSupabaseFetch(cfg, `/rest/v1/rpc/${cfg.retrieval.rpcName}`, {
+    const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/rpc/${contentCfg.hybridRpcName}`, {
       method: "POST",
       body: JSON.stringify({
         query_text: "connection test",
@@ -1111,7 +1125,7 @@ async function runConnectionDiagnostics(cfg) {
         keyword_weight: cfg.retrieval.keywordWeight
       })
     });
-    return { rpc: cfg.retrieval.rpcName, rows: Array.isArray(rows) ? rows.length : 0 };
+    return { rpc: contentCfg.hybridRpcName, rows: Array.isArray(rows) ? rows.length : 0 };
   }));
 
   return results;

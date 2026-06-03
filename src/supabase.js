@@ -122,7 +122,8 @@ export async function recentMemory({ config, sessionId, limit = 8 }) {
 
 export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags = [], topK = config.retrieval.candidates }) {
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
-  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig)) throw new Error("Content Supabase is not configured");
 
   const embedding = await createEmbedding({
     apiKey: config.openRouterApiKey,
@@ -142,14 +143,14 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
   };
 
   try {
-    return await supabaseFetch(config, `/rest/v1/rpc/${config.retrieval.rpcName}`, {
+    return await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
       method: "POST",
       body: JSON.stringify(payload)
     });
   } catch (error) {
     if (!payload.hashtags.length || !looksLikeRpcSignatureError(error.message)) throw error;
     const { hashtags: _hashtags, ...payloadWithoutHashtags } = payload;
-    return supabaseFetch(config, `/rest/v1/rpc/${config.retrieval.rpcName}`, {
+    return supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
       method: "POST",
       body: JSON.stringify(payloadWithoutHashtags)
     });
@@ -179,6 +180,17 @@ function isConfigured(config) {
   return Boolean(config.supabaseUrl && config.supabaseServiceRoleKey);
 }
 
+export function contentSupabaseConfig(config) {
+  return {
+    supabaseUrl: config.contentSource?.supabaseUrl || config.supabaseUrl || "",
+    supabaseServiceRoleKey: config.contentSource?.supabaseServiceRoleKey || config.supabaseServiceRoleKey || "",
+    hybridRpcName: config.contentSource?.hybridRpcName || config.retrieval?.rpcName || "hybrid_match_data_index_embeddings_gf_dor_agent",
+    indexTable: config.contentSource?.indexTable || "data_index_embeddings_gf_dor_agent",
+    alertsTable: config.contentSource?.alertsTable || "alerts_embeddings_gf",
+    alertsRpcName: config.contentSource?.alertsRpcName || `match_${config.contentSource?.alertsTable || "alerts_embeddings_gf"}`
+  };
+}
+
 function normalizeHashtags(hashtags) {
   if (!Array.isArray(hashtags)) return [];
   return [...new Set(hashtags.map((tag) => String(tag || "").trim().replace(/^#+/, "")).filter(Boolean))];
@@ -189,43 +201,120 @@ function looksLikeRpcSignatureError(message) {
 }
 
 export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {
-  if (!isConfigured(config)) return [];
-  const TABLE = "alerts_embeddings_gf";
-  const query = `/rest/v1/${TABLE}?select=id,date,content,metadata&order=date.asc&limit=${limit}&date=not.is.null`;
-  const rows = await supabaseFetch(config, query);
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig)) return [];
+  const query = `/rest/v1/${contentConfig.alertsTable}?select=id,created_at,question,answer,alert_description,alert_type,severity_level,input_data_type,input_data_id,analyzed_data,data_link,data_date,status,item_status,hashtags,summary,content,metadata,is_relevant&order=data_date.asc.nullslast,created_at.asc&limit=${limit}`;
+  const rows = await supabaseFetch(contentConfig, query);
   return (rows || []).map((row) => {
-    const parsed = parseAlertContent(row.content || "");
+    const date = timelineRowDate(row);
     return {
       id: `alert_${row.id}`,
-      date: row.date,
-      tags: parsed.type ? [parsed.type] : ["התראה"],
-      content: parsed.summary || (row.content || "").slice(0, 120),
-      metadata: row.metadata ?? null,
+      date,
+      tags: parseHashtags(row.hashtags || row.metadata?.hashtags || row.metadata?.tags || row.alert_type).concat(row.alert_type ? [row.alert_type] : []).filter((tag, index, all) => tag && all.indexOf(tag) === index),
+      content: alertRowContent(row),
+      metadata: alertRowMetadata(row),
       source: "alert",
-      severity: parsed.severity
+      severity: Number(row.severity_level || row.metadata?.severity_level || 1)
     };
-  });
+  }).filter((event) => event.date);
 }
 
-function parseAlertContent(text) {
-  const summary = text.match(/Summary:\s*(.+)/)?.[1]?.trim() || "";
-  const type = text.match(/Type:\s*(.+)/)?.[1]?.trim() || "";
-  const severity = parseInt(text.match(/Severity:\s*(\d)/)?.[1] || "1", 10);
-  return { summary, type, severity };
+function alertRowContent(row = {}) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return row.summary ||
+    row.alert_description ||
+    row.content ||
+    row.answer ||
+    row.analyzed_data ||
+    row.question ||
+    metadata.summary ||
+    metadata.alert_description ||
+    metadata.content ||
+    "";
+}
+
+function alertRowMetadata(row = {}) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return {
+    ...metadata,
+    question: row.question ?? metadata.question,
+    answer: row.answer ?? metadata.answer,
+    alert_description: row.alert_description ?? metadata.alert_description,
+    alert_type: row.alert_type ?? metadata.alert_type,
+    severity_level: row.severity_level ?? metadata.severity_level,
+    input_data_type: row.input_data_type ?? metadata.input_data_type,
+    input_data_id: row.input_data_id ?? metadata.input_data_id,
+    analyzed_data: row.analyzed_data ?? metadata.analyzed_data,
+    data_link: row.data_link ?? metadata.data_link,
+    data_date: row.data_date ?? metadata.data_date,
+    status: row.status ?? metadata.status,
+    item_status: row.item_status ?? metadata.item_status,
+    is_relevant: row.is_relevant ?? metadata.is_relevant,
+    url: row.data_link ?? metadata.url
+  };
 }
 
 export async function fetchTimelineEvents({ config, limit = 1000 }) {
-  if (!isConfigured(config)) return [];
-  const TABLE = "data_index_embeddings_gf_dor_agent";
-  const query = `/rest/v1/${TABLE}?select=id,date,hashtags,content,metadata&order=date.asc&limit=${limit}&date=not.is.null`;
-  const rows = await supabaseFetch(config, query);
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig)) return [];
+  const query = `/rest/v1/${contentConfig.indexTable}?select=id,created_at,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,source_url&order=primary_date.asc.nullslast,created_at.asc&limit=${limit}`;
+  const rows = await supabaseFetch(contentConfig, query);
   return (rows || []).map((row) => ({
     id: row.id,
-    date: row.date,
-    tags: parseHashtags(row.hashtags),
-    content: row.content || (typeof row.metadata === "object" && row.metadata ? row.metadata.summary || row.metadata.text || row.metadata.content || "" : "") || "",
-    metadata: row.metadata ?? null
-  }));
+    date: timelineRowDate(row),
+    tags: parseHashtags(row.hashtags || row.metadata?.hashtags || row.metadata?.tags),
+    content: timelineRowContent(row),
+    metadata: timelineRowMetadata(row)
+  })).filter((event) => event.date);
+}
+
+function timelineRowDate(row = {}) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const candidates = [
+    row.primary_date,
+    row.data_date,
+    row.date,
+    row.created_at,
+    metadata.date,
+    metadata.primary_date,
+    metadata.event_date,
+    metadata.created_at,
+    metadata.timestamp,
+    metadata.time,
+    metadata.datetime,
+    metadata.document_date
+  ];
+  const value = candidates.find((item) => item && !Number.isNaN(Date.parse(item)));
+  return value ? String(value) : "";
+}
+
+function timelineRowContent(row = {}) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return row.title ||
+    row.summary ||
+    row.index_text ||
+    row.content ||
+    metadata.summary ||
+    metadata.title ||
+    metadata.text ||
+    metadata.content ||
+    "";
+}
+
+function timelineRowMetadata(row = {}) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return {
+    ...metadata,
+    source_table: row.source_table ?? metadata.source_table,
+    source_id: row.source_id ?? metadata.source_id,
+    title: row.title ?? metadata.title,
+    summary: row.summary ?? metadata.summary,
+    index_text: row.index_text ?? metadata.index_text,
+    item_status: row.item_status ?? metadata.item_status,
+    severity_or_risk: row.severity_or_risk ?? metadata.severity_or_risk,
+    source_url: row.source_url ?? metadata.source_url,
+    url: row.source_url ?? metadata.url
+  };
 }
 
 export async function listTimelineEventLinks({ config, source = "", limit = 1000 } = {}) {

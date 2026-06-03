@@ -5,6 +5,9 @@ import { buildAgentList, defaultPrompts } from "./prompts.js";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_FILES = [".env", ".env.local"];
+const DEFAULT_HYBRID_RPC_NAME = "hybrid_match_data_index_embeddings_gf_dor_agent";
+const DEFAULT_INDEX_TABLE = "data_index_embeddings_gf_dor_agent";
+const DEFAULT_ALERTS_TABLE = "alerts_embeddings_gf";
 
 // ---------------------------------------------------------------------------
 // Supabase persistence for settings
@@ -210,12 +213,20 @@ export function getConfig() {
   const settings = readLocalSettings();
   const toolSettings = settings.tools || {};
   const secrets = settings.secrets || {};
+  const appSupabaseUrl = trimSlash(secrets.supabaseUrl || process.env.SUPABASE_URL || "");
+  const appSupabaseServiceRoleKey = resolveSecret(secrets.supabaseServiceRoleKey, process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const contentSource = normalizeContentSourceSettings(settings.contentSource, {
+    fallbackSupabaseUrl: appSupabaseUrl,
+    fallbackSupabaseServiceRoleKey: appSupabaseServiceRoleKey,
+    fallbackHybridRpcName: settings.retrieval?.rpcName || process.env.HYBRID_RPC_NAME || DEFAULT_HYBRID_RPC_NAME
+  });
   return {
     port: Number(process.env.PORT || 4000),
     openRouterApiKey: resolveSecret(secrets.openRouterApiKey, process.env.OPENROUTER_API_KEY),
     openAiApiKey: "",
-    supabaseUrl: trimSlash(secrets.supabaseUrl || process.env.SUPABASE_URL || ""),
-    supabaseServiceRoleKey: resolveSecret(secrets.supabaseServiceRoleKey, process.env.SUPABASE_SERVICE_ROLE_KEY),
+    supabaseUrl: appSupabaseUrl,
+    supabaseServiceRoleKey: appSupabaseServiceRoleKey,
+    contentSource,
     postgresUrl: process.env.POSTGRES_URL || "",
     models: {
       classifier: settings.models?.classifier || process.env.CLASSIFIER_MODEL || "openai/gpt-4o-mini",
@@ -231,7 +242,7 @@ export function getConfig() {
       ...(settings.prompts || {})
     },
     retrieval: {
-      rpcName: settings.retrieval?.rpcName || process.env.HYBRID_RPC_NAME || "hybrid_match_data_index_embeddings_gf_dor_agent",
+      rpcName: contentSource.hybridRpcName,
       candidates: Number(settings.retrieval?.candidates || process.env.HYBRID_CANDIDATES || 40),
       rerankTopK: Number(settings.retrieval?.rerankTopK || process.env.RERANK_TOP_K || 10),
       vectorWeight: Number(settings.retrieval?.vectorWeight || process.env.HYBRID_VECTOR_WEIGHT || 0.65),
@@ -258,8 +269,14 @@ export function publicSettings(config = getConfig()) {
     retrieval: config.retrieval,
     knowledge: config.knowledge,
     timelineLinks: config.timelineLinks,
+    contentSource: {
+      ...config.contentSource,
+      supabaseServiceRoleKey: maskSecret(config.contentSource.supabaseServiceRoleKey),
+      keyRole: supabaseKeyRole(config.contentSource.supabaseServiceRoleKey)
+    },
     timezone: config.timezone,
     supabaseConfigured: Boolean(config.supabaseUrl && config.supabaseServiceRoleKey),
+    contentSupabaseConfigured: Boolean(config.contentSource.supabaseUrl && config.contentSource.supabaseServiceRoleKey),
     openRouterConfigured: Boolean(config.openRouterApiKey),
     n8nBaseUrl: config.n8n.baseUrl,
     secrets: {
@@ -275,7 +292,9 @@ export function publicSettings(config = getConfig()) {
       secretSources: {
         openRouterApiKey: secretSource(settings.secrets?.openRouterApiKey, process.env.OPENROUTER_API_KEY),
         supabaseUrl: secretSource(settings.secrets?.supabaseUrl, process.env.SUPABASE_URL),
-        supabaseServiceRoleKey: secretSource(settings.secrets?.supabaseServiceRoleKey, process.env.SUPABASE_SERVICE_ROLE_KEY)
+        supabaseServiceRoleKey: secretSource(settings.secrets?.supabaseServiceRoleKey, process.env.SUPABASE_SERVICE_ROLE_KEY),
+        contentSupabaseUrl: contentSecretSource(settings.contentSource?.supabaseUrl, process.env.CONTENT_SUPABASE_URL, config.contentSource.usesAppSupabase),
+        contentSupabaseServiceRoleKey: contentSecretSource(settings.contentSource?.supabaseServiceRoleKey, process.env.CONTENT_SUPABASE_SERVICE_ROLE_KEY, config.contentSource.usesAppSupabase)
       }
     },
     tools: Object.fromEntries(
@@ -324,6 +343,27 @@ function normalizeTimelineLinkAgentSettings(value = {}) {
   };
 }
 
+export function normalizeContentSourceSettings(value = {}, fallback = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const fallbackUrl = fallback.fallbackSupabaseUrl || "";
+  const fallbackKey = fallback.fallbackSupabaseServiceRoleKey || "";
+  const configuredUrl = raw.supabaseUrl || process.env.CONTENT_SUPABASE_URL || "";
+  const configuredKey = resolveSecret(raw.supabaseServiceRoleKey, process.env.CONTENT_SUPABASE_SERVICE_ROLE_KEY);
+  const supabaseUrl = trimSlash(configuredUrl || fallbackUrl);
+  const supabaseServiceRoleKey = configuredKey || fallbackKey;
+  const indexTable = String(raw.indexTable || process.env.CONTENT_INDEX_TABLE || DEFAULT_INDEX_TABLE).trim();
+  const alertsTable = String(raw.alertsTable || process.env.CONTENT_ALERTS_TABLE || DEFAULT_ALERTS_TABLE).trim();
+  return {
+    supabaseUrl,
+    supabaseServiceRoleKey,
+    hybridRpcName: String(raw.hybridRpcName || process.env.CONTENT_HYBRID_RPC_NAME || fallback.fallbackHybridRpcName || DEFAULT_HYBRID_RPC_NAME).trim(),
+    indexTable,
+    alertsTable,
+    alertsRpcName: String(raw.alertsRpcName || process.env.CONTENT_ALERTS_RPC_NAME || `match_${alertsTable}`).trim(),
+    usesAppSupabase: !configuredUrl && !configuredKey
+  };
+}
+
 function clampNumber(value, min, max, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -337,6 +377,8 @@ export function readLocalSettings() {
 export async function writeLocalSettings(settings) {
   const existing = _settingsCache;
   const incomingSecrets = settings.secrets || {};
+  const incomingContentSource = settings.contentSource || {};
+  const existingContentSource = existing.contentSource || {};
 
   // Only persist prompts that DIFFER from the current defaults.
   // This ensures that whenever prompts.js is updated, new defaults always take
@@ -359,11 +401,19 @@ export async function writeLocalSettings(settings) {
     prompts: resolvedPrompts,
     [PROMPTS_MIGRATION_FLAG]: true, // mark this record as migrated
     retrieval: {
-      rpcName: settings.retrieval?.rpcName || existing.retrieval?.rpcName || "hybrid_match_data_index_embeddings_gf_dor_agent",
+      rpcName: settings.retrieval?.rpcName || settings.contentSource?.hybridRpcName || existing.retrieval?.rpcName || existing.contentSource?.hybridRpcName || DEFAULT_HYBRID_RPC_NAME,
       candidates: Number(settings.retrieval?.candidates || existing.retrieval?.candidates || 40),
       rerankTopK: Number(settings.retrieval?.rerankTopK || existing.retrieval?.rerankTopK || 10),
       vectorWeight: Number(settings.retrieval?.vectorWeight || existing.retrieval?.vectorWeight || 0.65),
       keywordWeight: Number(settings.retrieval?.keywordWeight || existing.retrieval?.keywordWeight || 0.35)
+    },
+    contentSource: {
+      supabaseUrl: incomingContentSource.supabaseUrl || existingContentSource.supabaseUrl || "",
+      supabaseServiceRoleKey: mergeSecret(existingContentSource.supabaseServiceRoleKey, incomingContentSource.supabaseServiceRoleKey),
+      hybridRpcName: incomingContentSource.hybridRpcName || existingContentSource.hybridRpcName || settings.retrieval?.rpcName || existing.retrieval?.rpcName || DEFAULT_HYBRID_RPC_NAME,
+      indexTable: incomingContentSource.indexTable || existingContentSource.indexTable || DEFAULT_INDEX_TABLE,
+      alertsTable: incomingContentSource.alertsTable || existingContentSource.alertsTable || DEFAULT_ALERTS_TABLE,
+      alertsRpcName: incomingContentSource.alertsRpcName || existingContentSource.alertsRpcName || `match_${incomingContentSource.alertsTable || existingContentSource.alertsTable || DEFAULT_ALERTS_TABLE}`
     },
     knowledge: {
       triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, existing.knowledge?.triggerKeywords || DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS)
@@ -406,6 +456,13 @@ function secretSource(settingsValue, envValue) {
   return "missing";
 }
 
+function contentSecretSource(settingsValue, envValue, usesAppSupabase) {
+  if (settingsValue) return _settingsLoadedFromDb ? "supabase_settings" : "runtime_settings";
+  if (envValue) return "env";
+  if (usesAppSupabase) return "app_supabase_fallback";
+  return "missing";
+}
+
 function maskSecret(value) {
   if (!value) return "";
   if (value.length <= 8) return "********";
@@ -436,6 +493,19 @@ export function supabaseHeaders(key, extra = {}) {
   };
   if (isLegacyJwtKey(key)) headers.Authorization = `Bearer ${key}`;
   return headers;
+}
+
+export function supabaseKeyRole(key = "") {
+  const value = String(key || "");
+  if (!value) return "missing";
+  if (value.startsWith("sb_secret_")) return "service_role";
+  if (!value.startsWith("eyJ")) return "unknown";
+  try {
+    const payload = JSON.parse(Buffer.from(value.split(".")[1] || "", "base64url").toString("utf8"));
+    return String(payload.role || "unknown");
+  } catch {
+    return "unknown";
+  }
 }
 
 function isLegacyJwtKey(key = "") {

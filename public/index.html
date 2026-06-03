@@ -273,15 +273,38 @@
           <label class="wide">OpenRouter API Key
             <input id="openRouterApiKey" type="password" autocomplete="off" placeholder="sk-or-..." />
           </label>
-          <label class="wide">Supabase URL
+          <label class="wide">App Supabase URL
             <input id="supabaseUrl" placeholder="https://xxxx.supabase.co" />
           </label>
-          <label class="wide">Supabase Service Role Key
+          <label class="wide">App Supabase Service Role Key
             <input id="supabaseServiceRoleKey" type="password" autocomplete="off" placeholder="eyJ..." />
           </label>
         </div>
         <p class="hint">המפתחות נשמרים בטבלת Supabase <code style="background:var(--surface-3);padding:1px 5px;border-radius:4px;font-size:12.5px;">agent_settings</code>. השאר שדות ריקים כדי לשמור את הערכים הקיימים.</p>
         <div class="settingsSourceStatus" id="settingsSourceStatus">טוען סטטוס הגדרות...</div>
+
+        <h3>Content Supabase</h3>
+        <div class="grid">
+          <label class="wide">Content Supabase URL
+            <input id="contentSupabaseUrl" placeholder="https://content-project.supabase.co" />
+          </label>
+          <label class="wide">Content Supabase Service Role Key
+            <input id="contentSupabaseServiceRoleKey" type="password" autocomplete="off" placeholder="sb_secret_..." />
+          </label>
+          <label class="wide">Hybrid RPC Name
+            <input id="contentHybridRpcName" placeholder="hybrid_match_data_index_embeddings_gf_dor_agent" />
+          </label>
+          <label>Index Table
+            <input id="contentIndexTable" placeholder="data_index_embeddings_gf_dor_agent" />
+          </label>
+          <label>Alerts Table
+            <input id="contentAlertsTable" placeholder="alerts_embeddings_gf" />
+          </label>
+          <label>Alerts RPC Name
+            <input id="contentAlertsRpcName" placeholder="match_alerts_embeddings_gf" />
+          </label>
+        </div>
+        <p class="hint">Content Supabase משמש רק לשליפת תוכן: RAG, timeline, alerts וסוכן ההתראות. אם URL או Key ריקים, המערכת תשתמש ב-App Supabase הקיים.</p>
 
         <h3>מודלים</h3>
         <div class="grid">

@@ -837,6 +837,9 @@ function formatRetrievalContext(results) {
     .map((row, index) => {
       const text =
         row.content ||
+        row.index_text ||
+        row.summary ||
+        row.title ||
         row.text ||
         row.chunk ||
         row.page_content ||
@@ -1157,7 +1160,7 @@ function countRows(results) {
 
 function previewRows(results) {
   return normalizeRows(results).slice(0, 3).map((row) => {
-    const text = row.content || row.text || row.chunk || row.page_content || row.document || row.metadata?.text || JSON.stringify(row);
+    const text = row.content || row.index_text || row.summary || row.title || row.text || row.chunk || row.page_content || row.document || row.metadata?.text || JSON.stringify(row);
     return {
       score: row.similarity || row.score || row.distance || row.match_score || null,
       text: String(text).slice(0, 600),
@@ -1168,7 +1171,7 @@ function previewRows(results) {
 
 function qaChunksPreview(results) {
   return normalizeRows(results).slice(0, 10).map((row, i) => {
-    const text = row.content || row.text || row.chunk || row.page_content || row.document || row.metadata?.text || JSON.stringify(row);
+    const text = row.content || row.index_text || row.summary || row.title || row.text || row.chunk || row.page_content || row.document || row.metadata?.text || JSON.stringify(row);
     return {
       rank: i + 1,
       hybrid_score: row.hybrid_score || row.similarity || row.score || row.match_score || null,

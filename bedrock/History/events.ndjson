@@ -2,3 +2,6 @@
 {"ts":"2026-05-07T22:58:20Z","type":"integration_cursor","tool":"cli","slug":"bidoc agent","summary":"cursor integration detected"}
 {"ts":"2026-05-07T22:58:20Z","type":"integration_claude","tool":"cli","slug":"bidoc agent","summary":"claude integration detected"}
 {"ts":"2026-05-07T22:58:20Z","type":"backfill","tool":"cli","slug":"bidoc agent","summary":"History backfill: 23 commits, 0 releases, 2 integrations"}
+{"ts":"2026-06-03T10:31:06Z","type":"integration_cursor","tool":"cli","slug":"bidoc agent","summary":"cursor integration detected"}
+{"ts":"2026-06-03T10:31:06Z","type":"integration_claude","tool":"cli","slug":"bidoc agent","summary":"claude integration detected"}
+{"ts":"2026-06-03T10:31:06Z","type":"backfill","tool":"cli","slug":"bidoc agent","summary":"History backfill: 41 commits, 0 releases, 2 integrations"}

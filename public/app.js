@@ -1263,6 +1263,14 @@ function wireSettings() {
       knowledge: {
         triggerKeywords: parseMultilineList($("knowledgeTriggerKeywords")?.value || "")
       },
+      contentSource: {
+        supabaseUrl: $("contentSupabaseUrl")?.value || "",
+        supabaseServiceRoleKey: $("contentSupabaseServiceRoleKey")?.value || "",
+        hybridRpcName: $("contentHybridRpcName")?.value || $("hybridRpcName").value,
+        indexTable: $("contentIndexTable")?.value || "",
+        alertsTable: $("contentAlertsTable")?.value || "",
+        alertsRpcName: $("contentAlertsRpcName")?.value || ""
+      },
       secrets: {
         openRouterApiKey: $("openRouterApiKey").value,
         supabaseUrl: $("supabaseUrl").value,
@@ -1345,6 +1353,7 @@ async function saveLinkAgentSettings() {
       models: state.settings?.models || {},
       retrieval: state.settings?.retrieval || {},
       knowledge: state.settings?.knowledge || {},
+      contentSource: state.settings?.contentSource || {},
       timelineLinks: readLinkAgentSettingsFromForm(),
       secrets: {},
       n8nBaseUrl: state.settings?.n8nBaseUrl || "",
@@ -1522,6 +1531,16 @@ function applySettingsToForm() {
   $("supabaseUrl").value = state.settings.secrets.supabaseUrl || "";
   $("supabaseServiceRoleKey").value = "";
   $("supabaseServiceRoleKey").placeholder = state.settings.secrets.supabaseServiceRoleKey || "eyJ...";
+  const contentSource = state.settings.contentSource || {};
+  if ($("contentSupabaseUrl")) $("contentSupabaseUrl").value = contentSource.supabaseUrl || "";
+  if ($("contentSupabaseServiceRoleKey")) {
+    $("contentSupabaseServiceRoleKey").value = "";
+    $("contentSupabaseServiceRoleKey").placeholder = contentSource.supabaseServiceRoleKey || "sb_secret_...";
+  }
+  if ($("contentHybridRpcName")) $("contentHybridRpcName").value = contentSource.hybridRpcName || state.settings.retrieval.rpcName || "";
+  if ($("contentIndexTable")) $("contentIndexTable").value = contentSource.indexTable || "";
+  if ($("contentAlertsTable")) $("contentAlertsTable").value = contentSource.alertsTable || "";
+  if ($("contentAlertsRpcName")) $("contentAlertsRpcName").value = contentSource.alertsRpcName || "";
 
   $("toolSettings").innerHTML = "";
   for (const tool of n8nTools) {
@@ -1538,7 +1557,8 @@ function applySettingsToForm() {
   const configured = Object.entries(state.settings.tools).filter(([, value]) => value.configured).length;
   $("configStatus").innerHTML = [
     `OpenRouter: ${state.settings.openRouterConfigured ? "מוגדר" : "חסר"}`,
-    `Supabase: ${state.settings.supabaseConfigured ? "מוגדר" : "חסר"}`,
+    `App DB: ${state.settings.supabaseConfigured ? "מוגדר" : "חסר"}`,
+    `Content DB: ${state.settings.contentSupabaseConfigured ? "מוגדר" : "חסר"}`,
     `Tools: ${configured}/${n8nTools.length}`
   ].join("<br>");
   renderSettingsSourceStatus();
@@ -1558,8 +1578,13 @@ function renderSettingsSourceStatus() {
     </div>
     <div class="settingsSourceGrid">
       <span>OpenRouter Key: <b>${secretSourceLabel(source.openRouterApiKey)}</b></span>
-      <span>Supabase URL: <b>${secretSourceLabel(source.supabaseUrl)}</b></span>
-      <span>Supabase Service Role: <b>${secretSourceLabel(source.supabaseServiceRoleKey)}</b></span>
+      <span>App DB URL: <b>${secretSourceLabel(source.supabaseUrl)}</b></span>
+      <span>App DB Service Role: <b>${secretSourceLabel(source.supabaseServiceRoleKey)}</b></span>
+      <span>Content DB URL: <b>${secretSourceLabel(source.contentSupabaseUrl)}</b></span>
+      <span>Content DB Service Role: <b>${secretSourceLabel(source.contentSupabaseServiceRoleKey)}</b></span>
+      <span>Content Key Role: <b>${escapeHtml(state.settings.contentSource?.keyRole || "")}</b></span>
+      <span>Content RPC: <b>${escapeHtml(state.settings.contentSource?.hybridRpcName || "")}</b></span>
+      <span>Content Tables: <b>${escapeHtml([state.settings.contentSource?.indexTable, state.settings.contentSource?.alertsTable].filter(Boolean).join(" / "))}</b></span>
       <span>קריאה אחרונה: <b>${store.read?.ok ? "תקינה" : "נכשלה"}</b></span>
     </div>
     ${store.write?.error ? `<small>${escapeHtml(store.write.error)}</small>` : ""}
@@ -1577,6 +1602,7 @@ function secretSourceLabel(source) {
     supabase_settings: "Supabase agent_settings",
     runtime_settings: "Runtime cache",
     env: ".env / environment",
+    app_supabase_fallback: "App DB fallback",
     missing: "חסר"
   }[source] || source || "לא ידוע";
 }

@@ -128,6 +128,9 @@ export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, 
 function extractResultText(row) {
   return String(
     row?.content ||
+      row?.index_text ||
+      row?.summary ||
+      row?.title ||
       row?.text ||
       row?.chunk ||
       row?.page_content ||

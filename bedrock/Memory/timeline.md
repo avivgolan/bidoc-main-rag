@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: timeline
-last_updated: 2026-05-13
+last_updated: 2026-06-03
 tags:
   - timeline
   - frontend
@@ -13,8 +13,9 @@ tags:
 ## Current State
 
 - Timeline UI lives in `public/index.html`, `public/app.js`, and `public/styles.css` under the `#timeline` panel.
-- Timeline data is loaded client-side from `GET /api/timeline`.
+- Timeline data is loaded client-side from `GET /api/timeline`; server-side event reads use Content Supabase when configured.
 - Timeline event links are stored in Supabase `timeline_event_links` and exposed via `/api/timeline/links`.
+- Timeline links, timeline entities, event-entity rows, and graph edges remain stored in App Supabase even when event content is read from a separate Content Supabase project.
 - Timeline Knowledge Graph tables are defined in `supabase/timeline-knowledge-graph.sql`; graph extraction can rebuild event/entity rows via `/api/timeline/graph/rebuild`.
 - The timeline supports filters, search, calendar view, and a dark interactive timeline view.
 - Event details include a links panel for saving manual links, deleting links, and accepting quote-to-approval suggestions.
@@ -41,6 +42,7 @@ tags:
 - 2026-05-14 -- Added Workflow visibility for link-agent runs, including event loading, saved links, graph data, rules, semantic search, model review, filtering, and final suggestions.
 - 2026-05-14 -- Link-agent smart suggestion requests now start a live run id and stream each link-agent step into the existing live run log.
 - 2026-05-14 -- Merged non-chat link-agent runs into the Workflow history strip so they appear next to chat runs during the current server session.
+- 2026-06-03 -- Split timeline event content reads to optional Content Supabase while preserving links and graph persistence on App Supabase.
 
 ## Gotchas
 

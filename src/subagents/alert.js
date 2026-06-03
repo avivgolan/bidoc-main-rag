@@ -1,5 +1,6 @@
 import { chatCompletion, createEmbedding } from "../openrouter.js";
 import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
+import { contentSupabaseConfig } from "../supabase.js";
 
 const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 
@@ -23,16 +24,17 @@ const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 אם לא נמצאו נתונים: "לא נמצאו התראות רלוונטיות."`;
 
 async function searchAlertsEmbeddings(config, query, table, topK = 20) {
+  const contentConfig = contentSupabaseConfig(config);
   const embedding = await createEmbedding({
     apiKey: config.openRouterApiKey,
     model: config.models.embedding,
     input: query
   });
 
-  const rpcName = `match_${table}`;
-  const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${rpcName}`, {
+  const rpcName = contentConfig.alertsRpcName || `match_${table}`;
+  const response = await fetch(`${contentConfig.supabaseUrl}/rest/v1/rpc/${rpcName}`, {
     method: "POST",
-    headers: supabaseHeaders(config.supabaseServiceRoleKey),
+    headers: supabaseHeaders(contentConfig.supabaseServiceRoleKey),
     body: JSON.stringify({ query_embedding: embedding, match_count: topK })
   });
 
@@ -45,13 +47,14 @@ async function searchAlertsEmbeddings(config, query, table, topK = 20) {
 export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, dateTo = null }) {
   const config = getConfig();
   const saved = readLocalSettings().subagents?.alert || {};
+  const contentConfig = contentSupabaseConfig(config);
 
-  const table = saved.table || "alerts_embeddings_gf";
+  const table = saved.table || contentConfig.alertsTable || "alerts_embeddings_gf";
   const model = saved.model || config.models.main;
   const systemPrompt = saved.systemPrompt || SYSTEM_PROMPT;
+  if (!contentConfig.supabaseUrl || !contentConfig.supabaseServiceRoleKey) throw new Error("Content Supabase is not configured");
 
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY לא מוגדר");
-  if (!config.supabaseUrl || !config.supabaseServiceRoleKey) throw new Error("Supabase לא מוגדר");
 
   const normalizedDateFrom = normalizeDateBoundary(dateFrom);
   const normalizedDateTo = normalizeDateBoundary(dateTo);
