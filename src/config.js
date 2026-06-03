@@ -343,6 +343,59 @@ function normalizeTimelineLinkAgentSettings(value = {}) {
   };
 }
 
+export function exportFullSettings(config = getConfig()) {
+  const settings = readLocalSettings();
+  return {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    app: "bidoc-agent",
+    settings: {
+      models: config.models,
+      prompts: settings.prompts || {},
+      retrieval: config.retrieval,
+      knowledge: config.knowledge,
+      timelineLinks: config.timelineLinks,
+      contentSource: {
+        supabaseUrl: config.contentSource.supabaseUrl,
+        supabaseServiceRoleKey: config.contentSource.supabaseServiceRoleKey,
+        hybridRpcName: config.contentSource.hybridRpcName,
+        indexTable: config.contentSource.indexTable,
+        alertsTable: config.contentSource.alertsTable,
+        alertsRpcName: config.contentSource.alertsRpcName
+      },
+      secrets: {
+        openRouterApiKey: config.openRouterApiKey,
+        supabaseUrl: config.supabaseUrl,
+        supabaseServiceRoleKey: config.supabaseServiceRoleKey
+      },
+      n8nBaseUrl: config.n8n.baseUrl,
+      timezone: config.timezone,
+      tools: Object.fromEntries(TOOL_NAMES.map((tool) => [tool, resolveToolUrl(tool, config)])),
+      subagents: settings.subagents || {}
+    }
+  };
+}
+
+export function normalizeImportedSettingsFile(value = {}) {
+  const raw = value && typeof value === "object" && value.settings && typeof value.settings === "object"
+    ? value.settings
+    : value;
+  if (!raw || typeof raw !== "object") throw new Error("Settings file must contain a JSON object");
+  return {
+    models: raw.models || {},
+    prompts: raw.prompts || {},
+    retrieval: raw.retrieval || {},
+    knowledge: raw.knowledge || {},
+    timelineLinks: raw.timelineLinks || {},
+    contentSource: raw.contentSource || {},
+    secrets: raw.secrets || {},
+    n8nBaseUrl: raw.n8nBaseUrl || "",
+    timezone: raw.timezone || "UTC+0",
+    tools: raw.tools || {},
+    subagents: raw.subagents || {}
+  };
+}
+
 export function normalizeContentSourceSettings(value = {}, fallback = {}) {
   const raw = value && typeof value === "object" ? value : {};
   const fallbackUrl = fallback.fallbackSupabaseUrl || "";

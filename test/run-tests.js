@@ -8,7 +8,7 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
-import { isMaskedSecret, mergeSecret, normalizeContentSourceSettings, resolveSecret, supabaseHeaders, supabaseKeyRole } from "../src/config.js";
+import { exportFullSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, resolveSecret, supabaseHeaders, supabaseKeyRole } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, saveMessage } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
@@ -322,6 +322,50 @@ test("content source accepts separate Supabase and custom content names", () => 
   assert.equal(output.usesAppSupabase, false);
 });
 
+test("settings export includes resolved unmasked secrets", () => {
+  const exported = exportFullSettings({
+    openRouterApiKey: "sk-real-openrouter",
+    supabaseUrl: "https://app.supabase.co",
+    supabaseServiceRoleKey: "app-service-key",
+    contentSource: {
+      supabaseUrl: "https://content.supabase.co",
+      supabaseServiceRoleKey: "content-service-key",
+      hybridRpcName: "hybrid_match_data_index",
+      indexTable: "data_index",
+      alertsTable: "alerts",
+      alertsRpcName: "match_alerts"
+    },
+    models: { main: "openai/gpt-4o" },
+    retrieval: { rpcName: "hybrid_match_data_index", candidates: 40, rerankTopK: 10, vectorWeight: 0.65, keywordWeight: 0.35 },
+    knowledge: { triggerKeywords: ["עיכוב"] },
+    timelineLinks: { suggestionLimit: 12 },
+    n8n: { baseUrl: "https://n8n.test", tools: Object.fromEntries(["alert", "meetings", "emails", "whatsapp_messages", "financial_transactions", "consultants_reports", "exceptions_report", "quality_control", "safety_report", "submittals"].map((tool) => [tool, ""])) },
+    timezone: "UTC+3"
+  });
+  assert.equal(exported.schemaVersion, 1);
+  assert.equal(exported.settings.secrets.openRouterApiKey, "sk-real-openrouter");
+  assert.equal(exported.settings.secrets.supabaseServiceRoleKey, "app-service-key");
+  assert.equal(exported.settings.contentSource.supabaseServiceRoleKey, "content-service-key");
+});
+
+test("settings import accepts wrapped and raw settings files", () => {
+  const wrapped = normalizeImportedSettingsFile({
+    schemaVersion: 1,
+    settings: {
+      secrets: { openRouterApiKey: "sk-imported" },
+      contentSource: { indexTable: "data_index" },
+      tools: { alert: "https://tool.test" }
+    }
+  });
+  assert.equal(wrapped.secrets.openRouterApiKey, "sk-imported");
+  assert.equal(wrapped.contentSource.indexTable, "data_index");
+  assert.equal(wrapped.tools.alert, "https://tool.test");
+
+  const raw = normalizeImportedSettingsFile({ secrets: { openRouterApiKey: "sk-raw" } });
+  assert.equal(raw.secrets.openRouterApiKey, "sk-raw");
+  assert.deepEqual(raw.models, {});
+});
+
 test("hybridSearch uses Content Supabase while app persistence uses App Supabase", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -448,7 +492,10 @@ test("timeline events map data_index schema fields", async () => {
         title: "Primary title",
         item_status: "open",
         severity_or_risk: "medium",
-        source_url: "https://example.test/source"
+        mail_id: "mail-row-1",
+        attachment_id: "att-row-1",
+        source_url: "https://example.test/source",
+        mentioned_dates: ["2026-06-02", "2026-06-05"]
       }
     ]), { status: 200 });
   };
@@ -462,13 +509,17 @@ test("timeline events map data_index schema fields", async () => {
         }
       }
     });
-    assert.match(requestedUrl, /select=id,created_at,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,source_url/);
+    assert.match(requestedUrl, /select=id,created_at,project_id,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,mail_id,attachment_id,source_url,mentioned_dates/);
     assert.equal(events.length, 1);
     assert.equal(events[0].date, "2026-06-02T09:30:00Z");
     assert.equal(events[0].content, "Primary title");
     assert.deepEqual(events[0].tags, ["approval", "schedule"]);
     assert.equal(events[0].metadata.source_table, "emails");
     assert.equal(events[0].metadata.source_id, "mail-42");
+    assert.equal(events[0].metadata.project_id, "00000000-0000-0000-0000-000000000000");
+    assert.equal(events[0].metadata.mail_id, "mail-row-1");
+    assert.equal(events[0].metadata.attachment_id, "att-row-1");
+    assert.deepEqual(events[0].metadata.mentioned_dates, ["2026-06-02", "2026-06-05"]);
     assert.equal(events[0].metadata.source_url, "https://example.test/source");
   } finally {
     globalThis.fetch = originalFetch;

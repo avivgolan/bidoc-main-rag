@@ -264,6 +264,9 @@
           <h2>הגדרות</h2>
           <div class="headerActions">
             <button id="reloadSettings" type="button">רענן מ-Supabase</button>
+            <button id="exportSettings" type="button">הורד קובץ הגדרות</button>
+            <button id="importSettings" type="button">טען קובץ הגדרות</button>
+            <input id="settingsImportFile" type="file" accept="application/json,.json" hidden />
             <button id="saveSettings">שמור</button>
           </div>
         </header>
@@ -309,22 +312,22 @@
         <h3>מודלים</h3>
         <div class="grid">
           <label>Classifier
-            <input id="modelClassifier" />
+            <select id="modelClassifier"></select>
           </label>
           <label>Knowledge Planner
-            <input id="modelKnowledgePlanner" />
+            <select id="modelKnowledgePlanner"></select>
           </label>
           <label>Main
-            <input id="modelMain" />
+            <select id="modelMain"></select>
           </label>
           <label>Lite
-            <input id="modelLite" />
+            <select id="modelLite"></select>
           </label>
           <label>Embedding
-            <input id="modelEmbedding" />
+            <select id="modelEmbedding"></select>
           </label>
           <label>Reranker
-            <input id="modelReranker" />
+            <select id="modelReranker"></select>
           </label>
           <label class="wide">N8N Base URL
             <input id="n8nBaseUrl" placeholder="https://..." />

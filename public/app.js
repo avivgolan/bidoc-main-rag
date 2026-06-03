@@ -668,13 +668,14 @@ async function loadOpenRouterModels() {
     if ($("modelListStatus")) $("modelListStatus").textContent = `לא ניתן לטעון מודלים: ${error.message}`;
   }
   renderAgents();
+  applyModelSelectsToSettingsForm();
   applyLinkAgentSettingsToForm();
 }
 
 function modelOptions(selectedModel) {
   const models = [...state.openRouterModels];
   if (selectedModel && !models.some((model) => model.id === selectedModel)) {
-    models.unshift({ id: selectedModel, name: selectedModel, contextLength: null });
+    models.unshift({ id: selectedModel, name: selectedModel, contextLength: null, pricing: null });
   }
   if (!models.length) {
     return `<option value="${escapeHtml(selectedModel)}">${escapeHtml(selectedModel || "אין רשימת מודלים זמינה")}</option>`;
@@ -687,8 +688,71 @@ function modelOptions(selectedModel) {
 
 function fillModelSelect(select, selectedModel) {
   if (!select) return;
-  select.innerHTML = modelOptions(selectedModel);
+  select.innerHTML = modelOptionsWithPricing(selectedModel);
   select.value = selectedModel || "";
+}
+
+function modelOptionsWithPricing(selectedModel) {
+  const models = [...state.openRouterModels];
+  if (selectedModel && !models.some((model) => model.id === selectedModel)) {
+    models.unshift({ id: selectedModel, name: selectedModel, contextLength: null, pricing: null });
+  }
+  if (!models.length) {
+    return `<option value="${escapeHtml(selectedModel)}">${escapeHtml(selectedModel || "No models available")}</option>`;
+  }
+  return models.map((model) => {
+    const label = [
+      model.name || model.id,
+      formatContextLength(model.contextLength),
+      formatModelPricing(model.pricing)
+    ].filter(Boolean).join(" · ");
+    return `<option value="${escapeHtml(model.id)}" ${model.id === selectedModel ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
+}
+
+function formatContextLength(contextLength) {
+  const value = Number(contextLength);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  if (value >= 1_000_000) return `${trimNumber(value / 1_000_000)}M ctx`;
+  if (value >= 1_000) return `${trimNumber(value / 1_000)}K ctx`;
+  return `${value.toLocaleString()} ctx`;
+}
+
+function formatModelPricing(pricing = {}) {
+  const input = pricePerMillion(pricing?.prompt ?? pricing?.input);
+  const output = pricePerMillion(pricing?.completion ?? pricing?.output);
+  return [
+    input != null ? `in $${formatPrice(input)}/M` : "",
+    output != null ? `out $${formatPrice(output)}/M` : ""
+  ].filter(Boolean).join(" · ");
+}
+
+function pricePerMillion(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return number * 1_000_000;
+}
+
+function formatPrice(value) {
+  if (value === 0) return "0";
+  if (value < 0.01) return value.toPrecision(2);
+  if (value < 1) return trimNumber(value.toFixed(4));
+  return trimNumber(value.toFixed(2));
+}
+
+function trimNumber(value) {
+  return String(value).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+}
+
+function applyModelSelectsToSettingsForm() {
+  const models = state.settings?.models || {};
+  fillModelSelect($("modelClassifier"), models.classifier || "");
+  fillModelSelect($("modelKnowledgePlanner"), models.knowledgePlanner || "");
+  fillModelSelect($("modelMain"), models.main || "");
+  fillModelSelect($("modelLite"), models.lite || "");
+  fillModelSelect($("modelEmbedding"), models.embedding || "");
+  fillModelSelect($("modelReranker"), models.reranker || "");
 }
 
 function agentStatusLabel(status) {
@@ -1510,12 +1574,7 @@ async function loadSettings() {
 
 function applySettingsToForm() {
   if (!state.settings) return;
-  $("modelClassifier").value = state.settings.models.classifier;
-  $("modelKnowledgePlanner").value = state.settings.models.knowledgePlanner;
-  $("modelMain").value = state.settings.models.main;
-  $("modelLite").value = state.settings.models.lite;
-  $("modelEmbedding").value = state.settings.models.embedding;
-  $("modelReranker").value = state.settings.models.reranker;
+  applyModelSelectsToSettingsForm();
   $("hybridRpcName").value = state.settings.retrieval.rpcName;
   $("hybridCandidates").value = state.settings.retrieval.candidates;
   $("rerankTopK").value = state.settings.retrieval.rerankTopK;
@@ -2756,6 +2815,54 @@ function saveTimelineLinkFromEvents({ sourceEvent, targetEvent, relationType, ap
       note
     }
   });
+
+  $("exportSettings")?.addEventListener("click", exportSettingsFile);
+  $("importSettings")?.addEventListener("click", () => $("settingsImportFile")?.click());
+  $("settingsImportFile")?.addEventListener("change", importSettingsFile);
+}
+
+async function exportSettingsFile() {
+  const button = $("exportSettings");
+  button.disabled = true;
+  try {
+    const data = await api("/api/settings/export");
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    link.href = url;
+    link.download = `bidoc-settings-${stamp}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showToast("קובץ ההגדרות ירד למחשב");
+  } catch (error) {
+    showToast(`שגיאה בהורדת קובץ הגדרות: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function importSettingsFile(event) {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  const button = $("importSettings");
+  button.disabled = true;
+  try {
+    const text = await file.text();
+    const body = JSON.parse(text);
+    const result = await api("/api/settings/import", { method: "POST", body });
+    state.settings = result.settings;
+    applySettingsToForm();
+    showToast("קובץ ההגדרות נטען ונשמר");
+  } catch (error) {
+    showToast(`שגיאה בטעינת קובץ הגדרות: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function timelineRelationLabels() {

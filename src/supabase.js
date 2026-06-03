@@ -257,7 +257,7 @@ function alertRowMetadata(row = {}) {
 export async function fetchTimelineEvents({ config, limit = 1000 }) {
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig)) return [];
-  const query = `/rest/v1/${contentConfig.indexTable}?select=id,created_at,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,source_url&order=primary_date.asc.nullslast,created_at.asc&limit=${limit}`;
+  const query = `/rest/v1/${contentConfig.indexTable}?select=id,created_at,project_id,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,mail_id,attachment_id,source_url,mentioned_dates&order=primary_date.asc.nullslast,created_at.asc&limit=${limit}`;
   const rows = await supabaseFetch(contentConfig, query);
   return (rows || []).map((row) => ({
     id: row.id,
@@ -307,11 +307,15 @@ function timelineRowMetadata(row = {}) {
     ...metadata,
     source_table: row.source_table ?? metadata.source_table,
     source_id: row.source_id ?? metadata.source_id,
+    project_id: row.project_id ?? metadata.project_id,
     title: row.title ?? metadata.title,
     summary: row.summary ?? metadata.summary,
     index_text: row.index_text ?? metadata.index_text,
     item_status: row.item_status ?? metadata.item_status,
     severity_or_risk: row.severity_or_risk ?? metadata.severity_or_risk,
+    mail_id: row.mail_id ?? metadata.mail_id,
+    attachment_id: row.attachment_id ?? metadata.attachment_id,
+    mentioned_dates: row.mentioned_dates ?? metadata.mentioned_dates,
     source_url: row.source_url ?? metadata.source_url,
     url: row.source_url ?? metadata.url
   };
