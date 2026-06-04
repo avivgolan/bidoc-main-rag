@@ -7,7 +7,7 @@ import { exportFullSettings, getConfig, initSettings, loadEnv, normalizeImported
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, graphSearch, hybridSearch, listDislikedMessages, listMessages, listProjectGraph, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
+import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, graphSearch, hybridSearch, listDislikedMessages, listMessages, listProjectGraph, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
@@ -526,6 +526,51 @@ async function handleApi(req, res, url) {
       await saveQaReport({ config: config(), messageId, status: "error", error: err.message });
       return sendJson(res, 500, { ok: false, error: err.message });
     }
+  }
+
+  const aiReportRunMatch = url.pathname.match(/^\/api\/ai-report\/([^/]+)\/run$/);
+  if (req.method === "POST" && aiReportRunMatch) {
+    const messageId = decodeURIComponent(aiReportRunMatch[1]);
+    const body = await readJson(req).catch(() => ({}));
+    const row = await getMessage({ config: config(), messageId });
+    if (!row) return sendJson(res, 404, { error: "Run was not found in history" });
+    try {
+      const report = await runQaAgent({
+        config: config(),
+        userMessage: row.user_message,
+        aiResponse: row.ai_response,
+        workflowLog: row.workflow_log,
+        userFeedback: body.userFeedback || "Analyze this workflow run as an AI run report. Focus on how to improve retrieval, graph use, tool calls, prompt behavior, and final answer quality."
+      });
+      const reportEnvelope = {
+        kind: "ai_report",
+        generated_at: new Date().toISOString(),
+        report
+      };
+      await saveQaReport({ config: config(), messageId, status: "done", report: reportEnvelope });
+      await updateMessage({
+        config: config(),
+        messageId,
+        aiResponse: row.ai_response,
+        status: row.status || "done",
+        workflowLog: { ...(row.workflow_log || {}), ai_report: reportEnvelope },
+        runEvents: row.run_events || null
+      });
+      return sendJson(res, 200, { ok: true, report: reportEnvelope });
+    } catch (err) {
+      await saveQaReport({ config: config(), messageId, status: "error", error: err.message });
+      return sendJson(res, 500, { ok: false, error: err.message });
+    }
+  }
+
+  const aiReportMatch = url.pathname.match(/^\/api\/ai-report\/([^/]+)$/);
+  if (req.method === "GET" && aiReportMatch) {
+    const messageId = decodeURIComponent(aiReportMatch[1]);
+    const row = await getMessage({ config: config(), messageId }).catch(() => null);
+    if (row?.workflow_log?.ai_report) return sendJson(res, 200, { report: row.workflow_log.ai_report });
+    const saved = await getLatestQaReport({ config: config(), messageId }).catch(() => null);
+    if (saved?.report?.kind === "ai_report") return sendJson(res, 200, { report: saved.report });
+    return sendJson(res, 404, { error: "No AI report found" });
   }
 
   const qaReportMatch = url.pathname.match(/^\/api\/qa\/([^/]+)\/report$/);

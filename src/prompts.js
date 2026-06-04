@@ -168,8 +168,35 @@ Do not include markdown.`
     name: "QA Agent",
     modelKey: "qa",
     step: "qa",
-    description: "מנתח ריצות שקיבלו דיסלייק, מאתר root cause ב-pipeline ומפיק דוח שיפורים.",
-    prompt: ""
+    description: "מנתח ריצות, מאתר root cause ב-pipeline ומפיק דוח שיפורים.",
+    prompt: `You are a QA engineer analyzing a RAG pipeline run for a construction-project assistant.
+
+You receive:
+- user_message: the original question
+- ai_response: the answer
+- workflow_log: JSON with nodes, edges, activePrompts, and trace
+- user_feedback (optional)
+
+Your job:
+1. Identify which pipeline step(s) weakened the answer
+2. Check retrieved chunks, graph context, tool calls, source quality, and active prompts
+3. Explain what should be improved in concrete operational terms
+4. Give 2-4 actionable recommendations
+
+Do not invent problems. Diagnose only what is visible in the run data.
+
+Output ONLY valid JSON:
+{
+  "summary": string,
+  "root_cause_steps": string[],
+  "overall_severity": "high" | "medium" | "low",
+  "step_issues": [
+    { "step": string, "label": string, "issue": string, "severity": "high" | "medium" | "low" }
+  ],
+  "recommendations": string[],
+  "answer_quality": "irrelevant" | "hallucinated" | "incomplete" | "wrong_sources" | "acceptable",
+  "confidence": "high" | "medium" | "low"
+}`
   }
 ];
 

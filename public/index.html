@@ -166,6 +166,7 @@
         <header class="panelHeader">
           <h2>זרימת עבודה</h2>
           <div class="headerActions">
+            <button id="runAiReport" type="button">דוח AI</button>
             <button id="toggleFullLog">לוג מלא</button>
             <button id="copyLog">העתק</button>
             <button id="clearWorkflow">נקה</button>
@@ -199,6 +200,13 @@
             <aside class="workflowInspector" id="workflowInspector">
               <div class="workflowInspectorEmpty">בחר רכיב בגרף כדי לראות Input / Output.</div>
             </aside>
+            <section class="workflowAiReport" id="workflowAiReport" hidden>
+              <header>
+                <strong>דוח AI</strong>
+                <span id="workflowAiReportStatus">ממתין להרצה</span>
+              </header>
+              <div id="workflowAiReportBody"></div>
+            </section>
           </div>
         </div>
       </section>
@@ -474,6 +482,37 @@
                 </label>
               </div>
               <p class="hint">שולט בדירוג המקורות לפני שהם נכנסים לתשובה.</p>
+            </details>
+          </article>
+
+          <article class="chatAgentSettingsCard">
+            <header>
+              <div class="agentCardInfo">
+                <strong>דוח AI</strong>
+                <span>QA לריצה ולזרימת העבודה</span>
+              </div>
+            </header>
+            <label class="modelLabel">מודל
+              <select id="modelQa"></select>
+            </label>
+            <details class="promptDetails">
+              <summary>פרומפט</summary>
+              <textarea id="chatPrompt_qa" rows="9" spellcheck="false"></textarea>
+            </details>
+            <details class="advancedSettings">
+              <summary>הגדרות מודל</summary>
+              <div class="grid compactSettingsGrid">
+                <label>Temperature
+                  <input id="ai_qa_temperature" type="number" min="0" max="2" step="0.05" />
+                </label>
+                <label>Max Output Tokens
+                  <input id="ai_qa_maxTokens" type="number" min="16" max="32000" step="50" />
+                </label>
+                <label>Request Timeout (ms)
+                  <input id="ai_qa_timeoutMs" type="number" min="5000" max="180000" step="1000" />
+                </label>
+              </div>
+              <p class="hint">שולט בדוח שמנתח את הלוג, הגרף והתשובה ומציע שיפורים לריצה.</p>
             </details>
           </article>
         </div>

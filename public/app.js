@@ -34,13 +34,15 @@ const chatPromptFields = {
   knowledge_planner: "chatPrompt_knowledge_planner",
   main: "chatPrompt_main",
   lite: "chatPrompt_lite",
-  reranker: "chatPrompt_reranker"
+  reranker: "chatPrompt_reranker",
+  qa: "chatPrompt_qa"
 };
-const aiSettingAgents = ["classifier", "knowledgePlanner", "main", "lite", "reranker", "alert"];
+const aiSettingAgents = ["classifier", "knowledgePlanner", "main", "lite", "reranker", "alert", "qa"];
 
 const state = {
   settings: null,
   lastWorkflow: null,
+  currentWorkflowMessageId: null,
   eventSource: null,
   agents: [],
   openRouterModels: [],
@@ -388,6 +390,7 @@ function wireChat() {
       if (result.messageId) attachAnnotation(pending, result.messageId);
       appendDebug(pending, result);
       state.lastWorkflow = result.workflowLog || null;
+      state.currentWorkflowMessageId = result.messageId || null;
       renderWorkflow(state.lastWorkflow);
       loadRunHistory();
     } catch (error) {
@@ -741,6 +744,7 @@ function applyModelSelectsToSettingsForm() {
   fillModelSelect($("modelLite"), models.lite || "");
   fillModelSelect($("modelEmbedding"), models.embedding || "");
   fillModelSelect($("modelReranker"), models.reranker || "");
+  fillModelSelect($("modelQa"), models.qa || models.main || "");
 }
 
 function agentStatusLabel(status) {
@@ -1004,12 +1008,14 @@ async function runKnowledgeSearch() {
 function wireWorkflow() {
   $("clearWorkflow").addEventListener("click", () => {
     state.lastWorkflow = null;
+    state.currentWorkflowMessageId = null;
     state.runEvents = [];
     state.fullLogVisible = false;
     $("liveRunList").innerHTML = "";
     $("liveRunStatus").textContent = "ממתין לבקשה";
     if ($("fullLogView")) { $("fullLogView").hidden = true; $("fullLogView").textContent = ""; }
     if ($("liveRunList")) $("liveRunList").hidden = false;
+    renderWorkflowAiReport(null);
     renderWorkflow(null);
   });
 
@@ -1040,6 +1046,7 @@ function wireWorkflow() {
       showToast("לא ניתן להעתיק", "error");
     }
   });
+  $("runAiReport")?.addEventListener("click", runWorkflowAiReport);
 }
 
 function renderWorkflow(workflow) {
@@ -1549,7 +1556,8 @@ function wireSettings() {
         main: $("modelMain").value,
         lite: $("modelLite").value,
         embedding: $("modelEmbedding").value,
-        reranker: $("modelReranker").value
+        reranker: $("modelReranker").value,
+        qa: $("modelQa")?.value || $("modelMain").value
       },
       retrieval: {
         rpcName: $("hybridRpcName").value,
@@ -2177,8 +2185,9 @@ function renderRunHistoryStrip(runs) {
   listEl.innerHTML = "";
   for (const run of runs) {
     const hasError = (run.workflow_log?.nodes || []).some((n) => n.status === "error");
+    const hasAiReport = Boolean(run.workflow_log?.ai_report);
     const item = document.createElement("div");
-    item.className = "runHistoryItem" + (hasError ? " hasError" : "");
+    item.className = `runHistoryItem${hasError ? " hasError" : ""}${hasAiReport ? " hasAiReport" : ""}`;
     item.dataset.runId = run.id;
     const time = run.created_at ? timeAgo(new Date(run.created_at)) : "";
     const msg = (run.user_message || "").slice(0, 60);
@@ -2188,6 +2197,7 @@ function renderRunHistoryStrip(runs) {
       <div class="rhMsg">${escapeHtml(msg)}</div>
       <small>${escapeHtml(kindLabel)}</small>
       ${hasError ? '<div class="rhErr">⚠ שגיאה בריצה</div>' : ""}
+      ${hasAiReport ? '<div class="rhAiReport">דוח AI</div>' : ""}
     `;
     item.addEventListener("click", () => showHistoricalRun(run, item));
     listEl.append(item);
@@ -2214,8 +2224,60 @@ function showHistoricalRun(run, itemEl) {
   if (liveRunStatus) liveRunStatus.textContent = `היסטוריה · ${timeAgo(new Date(run.created_at))}`;
   if (fullLogView) { fullLogView.hidden = true; fullLogView.textContent = ""; }
   state.lastWorkflow = run.workflow_log || null;
+  state.currentWorkflowMessageId = run.id || null;
   state.fullLogVisible = false;
   renderWorkflow(run.workflow_log || null);
+  renderWorkflowAiReport(run.workflow_log?.ai_report || null);
+}
+
+async function runWorkflowAiReport() {
+  const messageId = state.currentWorkflowMessageId;
+  if (!messageId) {
+    showToast("אין ריצה נבחרת לדוח AI", "error");
+    return;
+  }
+  const button = $("runAiReport");
+  const panel = $("workflowAiReport");
+  const status = $("workflowAiReportStatus");
+  const body = $("workflowAiReportBody");
+  if (button) button.disabled = true;
+  if (panel) panel.hidden = false;
+  if (status) status.textContent = "מריץ סוכן QA...";
+  if (body) body.innerHTML = '<div class="qaRunning">מריץ דוח AI על הלוג וזרימת העבודה...</div>';
+  try {
+    const result = await api(`/api/ai-report/${encodeURIComponent(messageId)}/run`, { method: "POST", body: {} });
+    renderWorkflowAiReport(result.report || null);
+    if (state.lastWorkflow && result.report) {
+      state.lastWorkflow = { ...state.lastWorkflow, ai_report: result.report };
+    }
+    showToast("דוח AI הסתיים");
+    await loadRunHistory();
+  } catch (error) {
+    if (body) body.innerHTML = `<div class="qaError">שגיאה: ${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = "נכשל";
+    showToast("דוח AI נכשל", "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function renderWorkflowAiReport(reportEnvelope) {
+  const panel = $("workflowAiReport");
+  const status = $("workflowAiReportStatus");
+  const body = $("workflowAiReportBody");
+  if (!panel || !status || !body) return;
+  if (!reportEnvelope) {
+    panel.hidden = true;
+    status.textContent = "ממתין להרצה";
+    body.innerHTML = "";
+    return;
+  }
+  const report = reportEnvelope.report || reportEnvelope;
+  panel.hidden = false;
+  status.textContent = reportEnvelope.generated_at
+    ? `נוצר ${new Date(reportEnvelope.generated_at).toLocaleString("he-IL")}`
+    : "דוח שמור";
+  body.innerHTML = qaReportHtml(report);
 }
 
 function timeAgo(date) {
@@ -3841,7 +3903,10 @@ async function runQa(messageId, card) {
 function renderQaReport(report, messageId, card) {
   const reportEl = card.querySelector(`#qaReport_${messageId}`);
   if (!report || !reportEl) return;
+  reportEl.innerHTML = qaReportHtml(report.report || report);
+}
 
+function qaReportHtml(report) {
   const sevClass = { high: "qaHigh", medium: "qaMedium", low: "qaLow" };
   const sevLabel = { high: "גבוה", medium: "בינוני", low: "נמוך" };
 
@@ -3858,7 +3923,7 @@ function renderQaReport(report, messageId, card) {
   const recs = (report.recommendations || []).map((rec) => `<li>${escapeHtml(rec)}</li>`).join("");
   const rootCauses = (report.root_cause_steps || []).map((s) => `<code>${escapeHtml(s)}</code>`).join(", ");
 
-  reportEl.innerHTML = `
+  return `
     <div class="qaReportBox">
       <div class="qaReportHeader">
         <span class="qaOverallSeverity ${sevClass[report.overall_severity] || ""}">חומרה: ${escapeHtml(sevLabel[report.overall_severity] || report.overall_severity || "")}</span>

@@ -62,6 +62,7 @@ tags:
 - 2026-06-04 -- Added balanced advanced AI settings for per-agent generation parameters, RAG/graph context limits, Knowledge Base chunking, and tool runtime controls.
 - 2026-06-04 -- Improved advanced AI settings UX by keeping model controls collapsed by default and adding common OpenRouter sampling controls (`top_p`, penalties, seed).
 - 2026-06-04 -- Added inline Hebrew info buttons for advanced AI, RAG, graph, knowledge, and tool runtime settings.
+- 2026-06-04 -- Added Workflow "AI Report" runs that invoke the QA agent on a selected run, save the result in QA reports, and attach it to run history workflow logs.
 
 ## Gotchas
 

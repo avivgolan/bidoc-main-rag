@@ -14,7 +14,8 @@ const DEFAULT_AI_SETTINGS = {
   main: { temperature: 0.2, maxTokens: 4096, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
   lite: { temperature: 0.3, maxTokens: 1800, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
   reranker: { temperature: 0, maxTokens: 4096, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
-  alert: { temperature: 0.1, maxTokens: 2200, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null }
+  alert: { temperature: 0.1, maxTokens: 2200, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
+  qa: { temperature: 0.1, maxTokens: 3000, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null }
 };
 const DEFAULT_RAG_SETTINGS = {
   contextRecordsLimit: 12,

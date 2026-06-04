@@ -1,6 +1,6 @@
 import { chatCompletion } from "./openrouter.js";
 
-const QA_SYSTEM_PROMPT = `You are a QA engineer analyzing a RAG pipeline run that received a dislike rating from the user.
+export const QA_SYSTEM_PROMPT = `You are a QA engineer analyzing a RAG pipeline run that received a dislike rating from the user.
 
 You receive:
 - user_message: the original question
@@ -46,10 +46,15 @@ export async function runQaAgent({ config, userMessage, aiResponse, workflowLog,
   const raw = await chatCompletion({
     apiKey: config.openRouterApiKey,
     model: config.models.qa,
-    temperature: 0.1,
-    maxTokens: 2048,
+    temperature: config.ai?.qa?.temperature ?? 0.1,
+    maxTokens: config.ai?.qa?.maxTokens ?? 3000,
+    timeoutMs: config.ai?.qa?.timeoutMs ?? 90_000,
+    topP: config.ai?.qa?.topP ?? 1,
+    frequencyPenalty: config.ai?.qa?.frequencyPenalty ?? 0,
+    presencePenalty: config.ai?.qa?.presencePenalty ?? 0,
+    seed: config.ai?.qa?.seed ?? null,
     messages: [
-      { role: "system", content: QA_SYSTEM_PROMPT },
+      { role: "system", content: config.prompts?.qa || QA_SYSTEM_PROMPT },
       { role: "user", content: userContent }
     ]
   });

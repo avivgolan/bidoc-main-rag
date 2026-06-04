@@ -982,6 +982,46 @@ label {
   font-weight: 700;
 }
 
+.runHistoryItem .rhAiReport {
+  display: inline-flex;
+  margin-top: 5px;
+  padding: 2px 7px;
+  border: 1px solid var(--brand-100);
+  border-radius: var(--r-full);
+  background: var(--brand-50);
+  color: var(--brand-300);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workflowAiReport {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.workflowAiReport > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+
+.workflowAiReport > header span {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+#workflowAiReportBody {
+  padding: 14px;
+}
+
 /* Knowledge */
 .knowledgeAgents {
   display: grid;
