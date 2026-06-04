@@ -29,6 +29,14 @@ const tools = [
   "hybrid_search",
   ...n8nTools
 ];
+const chatPromptFields = {
+  classifier: "chatPrompt_classifier",
+  knowledge_planner: "chatPrompt_knowledge_planner",
+  main: "chatPrompt_main",
+  lite: "chatPrompt_lite",
+  reranker: "chatPrompt_reranker"
+};
+const aiSettingAgents = ["classifier", "knowledgePlanner", "main", "lite", "reranker", "alert"];
 
 const state = {
   settings: null,
@@ -43,10 +51,12 @@ const state = {
   knowledgeAgents: [],
   runEvents: [],
   fullLogVisible: false,
-  chatProgress: null
+  chatProgress: null,
+  projectGraph: { nodes: [], edges: [], stats: null }
 };
 
 let _cy = null;
+let _graphCy = null;
 
 const WORKFLOW_TEMPLATE_NODES = [
   { id: "chat_input", label: "Chat Trigger", kind: "trigger", x: 70, y: 92, description: "Receives the user message and session id." },
@@ -62,13 +72,14 @@ const WORKFLOW_TEMPLATE_NODES = [
   { id: "investigation", label: "Investigation Mode", kind: "router", x: 1802, y: 176, description: "Builds a deeper inspection plan for root-cause and responsibility questions." },
   { id: "knowledge_planner", label: "Professional Knowledge Agent", kind: "ai", x: 2018, y: 176, description: "Uses the Knowledge Base as planning guidance for professional questions." },
   { id: "hybrid_search", label: "Hybrid Search", kind: "vector", x: 2234, y: 176, description: "Runs vector + keyword retrieval against Supabase with date and hashtag filters." },
-  { id: "reranker", label: "OpenRouter Reranker", kind: "ai", x: 2450, y: 176, description: "Reorders retrieved records by relevance to the user question." },
-  { id: "alert_agent", label: "Alert Agent", kind: "ai", x: 2666, y: 176, description: "Runs the local Alert subagent with the query and structured date range." },
-  { id: "n8n_tools", label: "n8n Tool Adapters", kind: "tool", x: 2882, y: 176, description: "Calls configured external n8n tool webhooks." },
-  { id: "source_quality", label: "Source Quality", kind: "router", x: 3098, y: 176, description: "Scores the reliability and freshness of retrieved/tool sources." },
-  { id: "conflict_detection", label: "Conflict Detection", kind: "router", x: 3314, y: 176, description: "Highlights possible contradictions across sources before synthesis." },
-  { id: "main_agent", label: "Main RAG Agent", kind: "ai", x: 3530, y: 176, description: "Synthesizes the final grounded answer from retrieval, tools and plans." },
-  { id: "update_message", label: "Update DB", kind: "database", x: 3746, y: 92, description: "Updates chat_messages_gf with the final answer and status." },
+  { id: "graph_search", label: "Project Graph Search", kind: "database", x: 2450, y: 176, description: "Finds project graph relationships around retrieved records." },
+  { id: "reranker", label: "OpenRouter Reranker", kind: "ai", x: 2666, y: 176, description: "Reorders retrieved records by relevance to the user question." },
+  { id: "alert_agent", label: "Alert Agent", kind: "ai", x: 2882, y: 176, description: "Runs the local Alert subagent with the query and structured date range." },
+  { id: "n8n_tools", label: "n8n Tool Adapters", kind: "tool", x: 3098, y: 176, description: "Calls configured external n8n tool webhooks." },
+  { id: "source_quality", label: "Source Quality", kind: "router", x: 3314, y: 176, description: "Scores the reliability and freshness of retrieved/tool sources." },
+  { id: "conflict_detection", label: "Conflict Detection", kind: "router", x: 3530, y: 176, description: "Highlights possible contradictions across sources before synthesis." },
+  { id: "main_agent", label: "Main RAG Agent", kind: "ai", x: 3746, y: 176, description: "Synthesizes the final grounded answer from retrieval, tools and plans." },
+  { id: "update_message", label: "Update DB", kind: "database", x: 3962, y: 92, description: "Updates chat_messages_gf with the final answer and status." },
 
   { id: "settings", label: "Settings", kind: "database", x: 70, y: 438, disconnected: true, description: "Configuration screen. Not part of a chat run." },
   { id: "knowledge_manager", label: "Knowledge Manager", kind: "database", x: 286, y: 438, disconnected: true, description: "Uploads and manages KB documents. Not part of a chat run unless the planner reads KB data." },
@@ -100,7 +111,8 @@ const WORKFLOW_TEMPLATE_EDGES = [
   ["safety_precheck", "hybrid_search"],
   ["investigation", "hybrid_search"],
   ["knowledge_planner", "hybrid_search"],
-  ["hybrid_search", "reranker"],
+  ["hybrid_search", "graph_search"],
+  ["graph_search", "reranker"],
   ["reranker", "alert_agent"],
   ["alert_agent", "n8n_tools"],
   ["alert_agent", "source_quality"],
@@ -118,6 +130,8 @@ init();
 async function init() {
   startNewSession({ showToast: false });
   tools.forEach((tool) => $("toolSelect").append(new Option(tool, tool)));
+  enhanceAdvancedAiControls();
+  enhanceParameterInfoControls();
   wireTabs();
   wireChat();
   wireSettings();
@@ -128,6 +142,7 @@ async function init() {
   wireEvaluation();
   wireReset();
   wireTimeline();
+  wireProjectGraph();
   wireLinkAgent();
   wireQa();
   $("refreshHistory").addEventListener("click", loadHistory);
@@ -188,6 +203,7 @@ const TAB_LOADERS = {
   knowledge:  () => loadKnowledgeDocuments(),
   history:    () => loadHistory(),
   timeline:   () => loadTimeline(),
+  graph:      () => loadProjectGraph(),
   linkAgent:  () => loadLinkAgent(),
   qa:         () => loadQaList(),
   workflow:   () => loadRunHistory()
@@ -528,26 +544,7 @@ function refreshFullLogView() {
 }
 
 function wireAgents() {
-  $("refreshModels").addEventListener("click", loadOpenRouterModels);
-  $("saveAgents").addEventListener("click", async () => {
-    const prompts = Object.fromEntries(
-      state.agents.map((agent) => [agent.id, $(`agentPrompt_${agent.id}`)?.value || agent.prompt || ""])
-    );
-    const models = Object.fromEntries(
-      state.agents.map((agent) => [agent.modelKey, $(`agentModel_${agent.id}`)?.value || agent.model || ""])
-    );
-    $("saveAgents").disabled = true;
-    try {
-      const result = await api("/api/agents", { method: "PUT", body: { prompts, models } });
-      state.agents = result.agents || [];
-      renderAgents();
-      showToast("הסוכנים נשמרו בהצלחה");
-    } catch (error) {
-      showToast(`שגיאה בשמירה: ${error.message}`, "error");
-    } finally {
-      $("saveAgents").disabled = false;
-    }
-  });
+  $("refreshModels")?.addEventListener("click", loadOpenRouterModels);
 }
 
 function resetAgentRuntime() {
@@ -604,12 +601,6 @@ function statusForRunEvent(item) {
 function renderAgents() {
   const grid = $("agentGrid");
   if (!grid) return;
-  const draftPrompts = Object.fromEntries(
-    state.agents.map((agent) => [agent.id, $(`agentPrompt_${agent.id}`)?.value])
-  );
-  const draftModels = Object.fromEntries(
-    state.agents.map((agent) => [agent.id, $(`agentModel_${agent.id}`)?.value])
-  );
   grid.innerHTML = "";
   if (!state.agents.length) {
     grid.textContent = "טוען סוכנים...";
@@ -629,15 +620,12 @@ function renderAgents() {
       </header>
       <div class="agentMeta">
         <span>Step: ${escapeHtml(agent.step || "")}</span>
+        <span>Model: ${escapeHtml(agent.model || "")}</span>
       </div>
-      <label>Model
-        <select id="agentModel_${escapeHtml(agent.id)}">
-          ${modelOptions(draftModels[agent.id] || agent.model || "")}
-        </select>
-      </label>
-      <label>Prompt
-        <textarea id="agentPrompt_${escapeHtml(agent.id)}" rows="10" spellcheck="false">${escapeHtml(draftPrompts[agent.id] ?? agent.prompt ?? "")}</textarea>
-      </label>
+      <details open>
+        <summary>פרומפט פעיל</summary>
+        <pre class="agentPromptPreview">${escapeHtml(agent.prompt || "")}</pre>
+      </details>
       <details>
         <summary>לוג אחרון של הסוכן</summary>
         <pre>${escapeHtml(JSON.stringify({
@@ -1254,6 +1242,252 @@ function renderWorkflowInspector(node) {
   `;
 }
 
+function wireProjectGraph() {
+  $("refreshGraph")?.addEventListener("click", loadProjectGraph);
+  for (const id of ["graphNodeType", "graphEdgeType", "graphLimit"]) {
+    $(id)?.addEventListener("change", loadProjectGraph);
+  }
+  $("graphQuery")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") loadProjectGraph();
+  });
+}
+
+async function loadProjectGraph() {
+  if (!$("projectGraphCy")) return;
+  $("graphSummary").textContent = "טוען גרף...";
+  $("projectGraphInspector").innerHTML = '<div class="workflowInspectorEmpty">טוען קשרים...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: $("graphLimit")?.value || "300",
+      nodeType: $("graphNodeType")?.value || "",
+      edgeType: $("graphEdgeType")?.value || "",
+      q: $("graphQuery")?.value || ""
+    });
+    state.projectGraph = await api(`/api/graph?${params.toString()}`);
+    renderProjectGraph();
+  } catch (error) {
+    $("graphSummary").textContent = `שגיאה בטעינת הגרף: ${error.message}`;
+    $("projectGraphInspector").innerHTML = `<div class="workflowInspectorEmpty">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderProjectGraph() {
+  const graph = state.projectGraph || { nodes: [], edges: [], stats: null };
+  if (_graphCy) { _graphCy.destroy(); _graphCy = null; }
+  const summary = graph.skipped
+    ? `הגרף לא זמין: ${graph.reason || "אין נתונים"}`
+    : `${graph.stats?.nodeCount || 0} nodes · ${graph.stats?.edgeCount || 0} edges`;
+  $("graphSummary").textContent = summary;
+  $("projectGraphInspector").innerHTML = renderGraphStats(graph.stats, graph.reason);
+  if (!graph.nodes?.length) return;
+
+  const elements = graph.nodes.map((node) => ({
+    group: "nodes",
+    data: {
+      id: node.id,
+      label: node.label,
+      nodeType: node.node_type,
+      entityKind: node.entity_kind || node.node_type,
+      sourceTable: node.source_table || "",
+      sourceId: node.source_id || "",
+      graphData: node
+    }
+  })).concat((graph.edges || []).map((edge) => ({
+    group: "edges",
+    data: {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.edge_kind || edge.edge_type,
+      edgeType: edge.edge_type,
+      edgeKind: edge.edge_kind || edge.edge_type,
+      confidence: Number(edge.confidence || edge.weight || 0.5),
+      graphData: edge
+    }
+  })));
+
+  _graphCy = cytoscape({
+    container: $("projectGraphCy"),
+    elements,
+    style: projectGraphStyle(),
+    layout: { name: "cose", animate: false, fit: true, padding: 36, nodeRepulsion: 9000, idealEdgeLength: 130 }
+  });
+  _graphCy.on("tap", "node", (evt) => renderProjectGraphInspector("node", evt.target.data("graphData")));
+  _graphCy.on("tap", "edge", (evt) => renderProjectGraphInspector("edge", evt.target.data("graphData")));
+}
+
+function renderGraphStats(stats = {}, reason = "") {
+  if (reason) return `<div class="workflowInspectorEmpty">${escapeHtml(reason)}</div>`;
+  const nodeTypes = (stats?.entityKinds || stats?.nodeTypes || []).slice(0, 10).map((item) => `<span>${escapeHtml(item.name)} <b>${item.count}</b></span>`).join("");
+  const edgeTypes = (stats?.edgeKinds || stats?.edgeTypes || []).slice(0, 10).map((item) => `<span>${escapeHtml(item.name)} <b>${item.count}</b></span>`).join("");
+  return `
+    <div class="graphStats">
+      <strong>${stats?.nodeCount || 0} nodes · ${stats?.edgeCount || 0} edges</strong>
+      <div>${nodeTypes || "<span>אין node types</span>"}</div>
+      <div>${edgeTypes || "<span>אין edge types</span>"}</div>
+    </div>
+  `;
+}
+
+function renderProjectGraphInspector(kind, item = {}) {
+  const title = kind === "edge" ? item.edge_kind || item.edge_type : item.label;
+  const rows = kind === "edge"
+    ? {
+        type: item.edge_type,
+        relation: item.edge_kind,
+        source: item.source,
+        target: item.target,
+        confidence: item.confidence,
+        weight: item.weight,
+        evidence: item.evidence_text
+      }
+    : {
+        type: item.node_type,
+        kind: item.entity_kind,
+        id: item.id,
+        source_table: item.source_table,
+        source_id: item.source_id,
+        event_date: item.event_date
+      };
+  $("projectGraphInspector").innerHTML = `
+    <header class="workflowInspectorHeader">
+      <span class="workflowIcon database">${kind === "edge" ? "EDGE" : "NODE"}</span>
+      <div>
+        <strong>${escapeHtml(title || item.id || "")}</strong>
+        <small>${escapeHtml(kind)}</small>
+      </div>
+    </header>
+    <details open>
+      <summary>Details</summary>
+      <pre>${escapeHtml(JSON.stringify(rows, null, 2))}</pre>
+    </details>
+    <details>
+      <summary>Metadata</summary>
+      <pre>${escapeHtml(JSON.stringify(item.metadata || {}, null, 2))}</pre>
+    </details>
+  `;
+}
+
+function projectGraphStyle() {
+  const nodeColor = {
+    event:            "#4fa8d8",
+    alert:            "#f06060",
+    hashtag:          "#26c99a",
+    topic:            "#26c99a",
+    risk:             "#ffab40",
+    vendor:           "#b07fff",
+    supplier:         "#b07fff",
+    source_table:     "#78909c",
+    source:           "#78909c",
+    quote:            "#4db6ac",
+    invoice:          "#ff8a65",
+    person:           "#29b6f6",
+    document:         "#66bb6a",
+    attachment:       "#81c784",
+    email:            "#42a5f5",
+    category:         "#ffd54f",
+    status:           "#90a4ae",
+    date:             "#80cbc4",
+    transaction_type: "#ffcc80",
+    submitter:        "#ce93d8"
+  };
+  const nodeBorder = {
+    event:            "#7ec8ec",
+    alert:            "#ff8a80",
+    hashtag:          "#5eefc0",
+    topic:            "#5eefc0",
+    risk:             "#ffd180",
+    vendor:           "#d0a8ff",
+    supplier:         "#d0a8ff",
+    source_table:     "#b0bec5",
+    source:           "#b0bec5",
+    quote:            "#80cbc4",
+    invoice:          "#ffab91",
+    person:           "#81d4fa",
+    document:         "#a5d6a7",
+    attachment:       "#c8e6c9",
+    email:            "#90caf9",
+    category:         "#ffe082",
+    status:           "#b0bec5",
+    date:             "#b2dfdb",
+    transaction_type: "#ffe0b2",
+    submitter:        "#e1bee7"
+  };
+  const getColor  = (e) => nodeColor[e.data("entityKind")]  || nodeColor[e.data("nodeType")]  || "#78909c";
+  const getBorder = (e) => nodeBorder[e.data("entityKind")] || nodeBorder[e.data("nodeType")] || "#b0bec5";
+  return [
+    {
+      selector: "node",
+      style: {
+        shape: "ellipse",
+        width: 44,
+        height: 44,
+        "background-color": getColor,
+        "background-opacity": 0.92,
+        "border-width": 2,
+        "border-color": getBorder,
+        "border-opacity": 0.8,
+        "shadow-blur": 18,
+        "shadow-color": getColor,
+        "shadow-opacity": 0.45,
+        "shadow-offset-x": 0,
+        "shadow-offset-y": 0,
+        color: "#e8f0f8",
+        "text-outline-color": "#080e1a",
+        "text-outline-width": 2,
+        label: (e) => String(e.data("label") || e.id()).slice(0, 36),
+        "font-size": 10.5,
+        "font-weight": 600,
+        "text-wrap": "wrap",
+        "text-max-width": 100,
+        "text-valign": "bottom",
+        "text-halign": "center",
+        "text-margin-y": 8,
+        "transition-property": "border-width, shadow-blur, shadow-opacity",
+        "transition-duration": "180ms"
+      }
+    },
+    {
+      selector: "node:active, node:hover",
+      style: {
+        "border-width": 3,
+        "shadow-blur": 32,
+        "shadow-opacity": 0.72
+      }
+    },
+    {
+      selector: "edge",
+      style: {
+        width: (e) => Math.max(1, Math.min(4, Number(e.data("confidence") || 0.5) * 4)),
+        "line-color": "rgba(148,163,184,0.28)",
+        "target-arrow-color": "rgba(148,163,184,0.4)",
+        "target-arrow-shape": "triangle",
+        "arrow-scale": 0.9,
+        "curve-style": "bezier",
+        "line-opacity": 0.7,
+        label: "data(label)",
+        "font-size": 8,
+        color: "rgba(189,208,228,0.7)",
+        "text-outline-color": "#080e1a",
+        "text-outline-width": 1.5,
+        "text-rotation": "autorotate"
+      }
+    },
+    {
+      selector: ":selected",
+      style: {
+        "border-color": "#ffd54f",
+        "border-width": 3,
+        "shadow-color": "#ffd54f",
+        "shadow-blur": 24,
+        "shadow-opacity": 0.65,
+        "line-color": "rgba(255,213,79,0.6)",
+        "target-arrow-color": "rgba(255,213,79,0.8)"
+      }
+    }
+  ];
+}
+
 function edgeKey(edge) {
   return `${edge.from}->${edge.to}`;
 }
@@ -1324,9 +1558,25 @@ function wireSettings() {
         vectorWeight: Number($("vectorWeight").value || 0.65),
         keywordWeight: Number($("keywordWeight").value || 0.35)
       },
-      knowledge: {
-        triggerKeywords: parseMultilineList($("knowledgeTriggerKeywords")?.value || "")
+      ai: readAiSettingsFromForm(),
+      rag: {
+        contextRecordsLimit: Number($("ragContextRecordsLimit")?.value || 12),
+        chunkTextLimit: Number($("ragChunkTextLimit")?.value || 1800),
+        plannerExtraQueriesLimit: Number($("ragPlannerExtraQueriesLimit")?.value || 2)
       },
+      graph: {
+        enabled: Boolean($("graphEnabled")?.checked),
+        searchLimit: Number($("graphSearchLimit")?.value || 30),
+        contextLimit: Number($("graphContextLimit")?.value || 12),
+        expandedForListQuestions: Boolean($("graphExpandedForListQuestions")?.checked)
+      },
+      knowledge: {
+        triggerKeywords: parseMultilineList($("knowledgeTriggerKeywords")?.value || ""),
+        agentLimit: Number($("knowledgeAgentLimit")?.value || 2),
+        topK: Number($("knowledgeTopKSetting")?.value || 4),
+        chunkSize: Number($("knowledgeChunkSize")?.value || 1800)
+      },
+      prompts: readChatPromptFieldsFromSettingsForm(),
       contentSource: {
         supabaseUrl: $("contentSupabaseUrl")?.value || "",
         supabaseServiceRoleKey: $("contentSupabaseServiceRoleKey")?.value || "",
@@ -1342,6 +1592,12 @@ function wireSettings() {
       },
       n8nBaseUrl: $("n8nBaseUrl").value,
       timezone: $("timezone").value,
+      toolsRuntime: {
+        enabled: Boolean($("toolsEnabled")?.checked),
+        parallelLimit: Number($("toolsParallelLimit")?.value || 6),
+        alertAgentEnabled: Boolean($("toolsAlertAgentEnabled")?.checked),
+        safetyPrecheckEnabled: Boolean($("toolsSafetyPrecheckEnabled")?.checked)
+      },
       tools: Object.fromEntries(n8nTools.map((tool) => [tool, $(`tool_${tool}`).value]))
     };
     $("saveSettings").disabled = true;
@@ -1575,6 +1831,7 @@ async function loadSettings() {
 function applySettingsToForm() {
   if (!state.settings) return;
   applyModelSelectsToSettingsForm();
+  applyChatPromptFieldsToSettingsForm();
   $("hybridRpcName").value = state.settings.retrieval.rpcName;
   $("hybridCandidates").value = state.settings.retrieval.candidates;
   $("rerankTopK").value = state.settings.retrieval.rerankTopK;
@@ -1583,6 +1840,7 @@ function applySettingsToForm() {
   if ($("knowledgeTriggerKeywords")) {
     $("knowledgeTriggerKeywords").value = (state.settings.knowledge?.triggerKeywords || []).join("\n");
   }
+  applyAdvancedAiSettingsToForm();
   $("n8nBaseUrl").value = state.settings.n8nBaseUrl || "";
   if ($("timezone")) $("timezone").value = state.settings.timezone || "UTC+3";
   $("openRouterApiKey").value = "";
@@ -1623,6 +1881,205 @@ function applySettingsToForm() {
   renderSettingsSourceStatus();
   applyLinkAgentSettingsToForm();
   renderAgents();
+}
+
+function applyChatPromptFieldsToSettingsForm() {
+  const byId = Object.fromEntries((state.agents || []).map((agent) => [agent.id, agent]));
+  for (const [agentId, fieldId] of Object.entries(chatPromptFields)) {
+    const field = $(fieldId);
+    if (!field) continue;
+    field.value = byId[agentId]?.prompt || state.settings?.prompts?.[agentId] || "";
+  }
+}
+
+function applyAdvancedAiSettingsToForm() {
+  const ai = state.settings?.ai || {};
+  for (const agent of aiSettingAgents) {
+    const values = ai[agent] || {};
+    setInputValue(`ai_${agent}_temperature`, values.temperature);
+    setInputValue(`ai_${agent}_maxTokens`, values.maxTokens);
+    setInputValue(`ai_${agent}_timeoutMs`, values.timeoutMs);
+    setInputValue(`ai_${agent}_topP`, values.topP);
+    setInputValue(`ai_${agent}_frequencyPenalty`, values.frequencyPenalty);
+    setInputValue(`ai_${agent}_presencePenalty`, values.presencePenalty);
+    setInputValue(`ai_${agent}_seed`, values.seed ?? "");
+  }
+  setInputValue("ragContextRecordsLimit", state.settings?.rag?.contextRecordsLimit);
+  setInputValue("ragChunkTextLimit", state.settings?.rag?.chunkTextLimit);
+  setInputValue("ragPlannerExtraQueriesLimit", state.settings?.rag?.plannerExtraQueriesLimit);
+  setInputValue("graphSearchLimit", state.settings?.graph?.searchLimit);
+  setInputValue("graphContextLimit", state.settings?.graph?.contextLimit);
+  setCheckboxValue("graphEnabled", state.settings?.graph?.enabled !== false);
+  setCheckboxValue("graphExpandedForListQuestions", state.settings?.graph?.expandedForListQuestions !== false);
+  setInputValue("knowledgeAgentLimit", state.settings?.knowledge?.agentLimit);
+  setInputValue("knowledgeTopKSetting", state.settings?.knowledge?.topK);
+  setInputValue("knowledgeChunkSize", state.settings?.knowledge?.chunkSize);
+  setInputValue("toolsParallelLimit", state.settings?.toolsRuntime?.parallelLimit);
+  setCheckboxValue("toolsEnabled", state.settings?.toolsRuntime?.enabled !== false);
+  setCheckboxValue("toolsAlertAgentEnabled", state.settings?.toolsRuntime?.alertAgentEnabled !== false);
+  setCheckboxValue("toolsSafetyPrecheckEnabled", state.settings?.toolsRuntime?.safetyPrecheckEnabled !== false);
+}
+
+function readAiSettingsFromForm() {
+  return Object.fromEntries(aiSettingAgents.map((agent) => [agent, {
+    temperature: Number($(`ai_${agent}_temperature`)?.value || 0),
+    maxTokens: Number($(`ai_${agent}_maxTokens`)?.value || 4096),
+    timeoutMs: Number($(`ai_${agent}_timeoutMs`)?.value || 90_000),
+    topP: Number($(`ai_${agent}_topP`)?.value || 1),
+    frequencyPenalty: Number($(`ai_${agent}_frequencyPenalty`)?.value || 0),
+    presencePenalty: Number($(`ai_${agent}_presencePenalty`)?.value || 0),
+    seed: optionalNumberFromInput(`ai_${agent}_seed`)
+  }]));
+}
+
+function enhanceAdvancedAiControls() {
+  for (const agent of aiSettingAgents) {
+    const grid = $(`ai_${agent}_timeoutMs`)?.closest(".compactSettingsGrid");
+    if (!grid || grid.dataset.enhanced === "true") continue;
+    grid.dataset.enhanced = "true";
+    grid.append(
+      advancedNumberLabel("Top P", `ai_${agent}_topP`, { min: 0, max: 1, step: 0.05 }),
+      advancedNumberLabel("Frequency Penalty", `ai_${agent}_frequencyPenalty`, { min: -2, max: 2, step: 0.1 }),
+      advancedNumberLabel("Presence Penalty", `ai_${agent}_presencePenalty`, { min: -2, max: 2, step: 0.1 }),
+      advancedNumberLabel("Seed", `ai_${agent}_seed`, { step: 1, placeholder: "ריק = ללא seed" })
+    );
+  }
+  enhanceParameterInfoControls();
+}
+
+function advancedNumberLabel(text, id, attrs = {}) {
+  const label = document.createElement("label");
+  label.textContent = text;
+  const input = document.createElement("input");
+  input.id = id;
+  input.type = "number";
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value !== undefined && value !== null) input.setAttribute(key, value);
+  }
+  label.append(input);
+  return label;
+}
+
+function enhanceParameterInfoControls() {
+  document.querySelectorAll(".advancedSettings .compactSettingsGrid label").forEach((label) => {
+    if (label.dataset.infoEnhanced === "true") return;
+    const control = label.querySelector("input, select, textarea");
+    if (!control?.id) return;
+    const title = parameterLabelText(label, control);
+    const explanation = parameterExplanation(control.id, title);
+    if (!explanation) return;
+    label.dataset.infoEnhanced = "true";
+
+    const row = document.createElement("span");
+    row.className = "parameterLabelRow";
+
+    if (label.classList.contains("toggleLabel")) {
+      row.append(control);
+    }
+
+    const text = document.createElement("span");
+    text.className = "parameterLabelText";
+    text.textContent = title;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "parameterInfoButton";
+    button.setAttribute("aria-label", `מידע על ${title}`);
+    button.setAttribute("aria-expanded", "false");
+    button.textContent = "i";
+
+    const info = document.createElement("span");
+    info.className = "parameterInfoText";
+    info.hidden = true;
+    info.textContent = explanation;
+
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const isOpen = !info.hidden;
+      info.hidden = isOpen;
+      button.setAttribute("aria-expanded", String(!isOpen));
+      label.classList.toggle("infoOpen", !isOpen);
+    });
+
+    row.append(text, button);
+    removeDirectTextNodes(label);
+    label.prepend(row);
+    if (!label.classList.contains("toggleLabel")) label.append(control);
+    label.append(info);
+  });
+}
+
+function parameterLabelText(label, control) {
+  const direct = [...label.childNodes]
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent.trim())
+    .filter(Boolean)
+    .join(" ");
+  if (direct) return direct;
+  return control.id
+    .replace(/^ai_[^_]+_/, "")
+    .replace(/([A-Z])/g, " $1")
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+function removeDirectTextNodes(label) {
+  [...label.childNodes].forEach((node) => {
+    if (node.nodeType === Node.TEXT_NODE) node.remove();
+  });
+}
+
+function parameterExplanation(id, title) {
+  if (id.includes("_temperature")) return "קובע כמה התשובה תהיה יצירתית או צפויה. ערך נמוך נותן תשובות יציבות ומדויקות יותר; ערך גבוה נותן ניסוח מגוון יותר.";
+  if (id.includes("_maxTokens")) return "מגביל את אורך התשובה שהמודל יכול לייצר. ערך גבוה מאפשר תשובה מפורטת יותר, אבל יכול לעלות יותר ולקחת יותר זמן.";
+  if (id.includes("_timeoutMs")) return "כמה זמן המערכת תחכה לתשובת המודל לפני שהיא מחשיבה את הקריאה כתקועה. נמדד במילישניות.";
+  if (id.includes("_topP")) return "מסנן את בחירת המילים של המודל לפי הסתברות. לרוב משאירים 1; ערך נמוך הופך את התשובה לצפויה יותר.";
+  if (id.includes("_frequencyPenalty")) return "מפחית חזרה על מילים או ביטויים שכבר הופיעו הרבה. שימושי כשרואים תשובות שחוזרות על עצמן.";
+  if (id.includes("_presencePenalty")) return "מעודד את המודל לפתוח נושאים חדשים במקום להישאר רק על אותם ביטויים. בפרויקט מקצועי לרוב משאירים קרוב ל-0.";
+  if (id.includes("_seed")) return "מספר קבוע שמנסה להפוך תשובות לחזרתיות יותר באותם תנאים. לא כל מודל מבטיח דטרמיניזם מלא.";
+  const explanations = {
+    ragContextRecordsLimit: "כמה מקורות אחרי החיפוש והדירוג ייכנסו בפועל לסוכן הראשי. יותר מקורות נותנים כיסוי רחב יותר אבל עלולים להעמיס.",
+    ragChunkTextLimit: "כמה תווים מכל מקור ייכנסו לפרומפט. ערך גבוה נותן יותר הקשר מכל מקור, אבל מגדיל עלות וזמן.",
+    ragPlannerExtraQueriesLimit: "כמה שאילתות נוספות Knowledge Planner רשאי להריץ מעבר לשאלה המקורית.",
+    graphSearchLimit: "כמה קשרים/צמתים לחפש בגרף סביב תוצאות ה-RAG.",
+    graphContextLimit: "כמה קשרים מהגרף ייכנסו בפועל לתשובת הצ׳אט.",
+    graphEnabled: "כאשר פעיל, הצ׳אט משתמש בגרף הפרויקט כדי לזהות קשרים בין אירועים, ספקים, נושאים וסיכונים.",
+    graphExpandedForListQuestions: "בשאלות כמו 'מי', 'מה עוד', או 'רשימה', מאפשר להכניס יותר קשרי גרף כדי לא לפספס מועמדים.",
+    knowledgeAgentLimit: "כמה סוכני Knowledge Base מקומיים אפשר לבחור לשאלה אחת.",
+    knowledgeTopKSetting: "כמה קטעי ידע מקומי יוחזרו מכל סוכן ידע שנבחר.",
+    knowledgeChunkSize: "האורך המקסימלי של כל קטע ידע מקומי שנכנס לתכנון החיפוש.",
+    toolsParallelLimit: "כמה כלי N8N אפשר להריץ במקביל באותה שאלה.",
+    toolsEnabled: "כאשר כבוי, הצ׳אט לא יקרא לכלי N8N חיצוניים, אבל RAG ו-Graph עדיין יכולים לעבוד.",
+    toolsAlertAgentEnabled: "כאשר פעיל, סוכן ההתראות יכול למשוך ולסכם נתונים מטבלת alerts.",
+    toolsSafetyPrecheckEnabled: "כאשר פעיל, שאלות דחופות או בטיחותיות מפעילות בדיקה מוקדמת לפני שאר הכלים."
+  };
+  return explanations[id] || `הגדרה מתקדמת עבור ${title}.`;
+}
+
+function optionalNumberFromInput(id) {
+  const value = $(id)?.value;
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function setInputValue(id, value) {
+  const input = $(id);
+  if (input && value !== undefined && value !== null) input.value = value;
+}
+
+function setCheckboxValue(id, checked) {
+  const input = $(id);
+  if (input) input.checked = Boolean(checked);
+}
+
+function readChatPromptFieldsFromSettingsForm() {
+  const prompts = {};
+  for (const [agentId, fieldId] of Object.entries(chatPromptFields)) {
+    const field = $(fieldId);
+    if (field) prompts[agentId] = field.value || "";
+  }
+  return prompts;
 }
 
 function renderSettingsSourceStatus() {

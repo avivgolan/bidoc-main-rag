@@ -5,7 +5,18 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 30_000) {
     .finally(() => clearTimeout(id));
 }
 
-export async function chatCompletion({ apiKey, model, messages, temperature = 0.2, maxTokens = 4096 }) {
+export async function chatCompletion({
+  apiKey,
+  model,
+  messages,
+  temperature = 0.2,
+  maxTokens = 4096,
+  timeoutMs = 90_000,
+  topP = 1,
+  frequencyPenalty = 0,
+  presencePenalty = 0,
+  seed = null
+}) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const response = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -15,13 +26,17 @@ export async function chatCompletion({ apiKey, model, messages, temperature = 0.
       "HTTP-Referer": "http://localhost",
       "X-Title": "bidoc-agent"
     },
-    body: JSON.stringify({
+    body: JSON.stringify(omitNullish({
       model,
       messages,
       temperature,
-      max_tokens: maxTokens
-    })
-  }, 90_000);
+      max_tokens: maxTokens,
+      top_p: topP,
+      frequency_penalty: frequencyPenalty,
+      presence_penalty: presencePenalty,
+      seed
+    }))
+  }, timeoutMs);
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -76,7 +91,7 @@ export async function createEmbedding({ apiKey, model, input }) {
   return embedding;
 }
 
-export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, systemPrompt = "" }) {
+export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, systemPrompt = "", temperature = 0, maxTokens = 4096, timeoutMs = 90_000, topP = 1, frequencyPenalty = 0, presencePenalty = 0, seed = null }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const candidates = results.map((row, index) => ({
     index,
@@ -91,7 +106,13 @@ export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, 
   const content = await chatCompletion({
     apiKey,
     model,
-    temperature: 0,
+    temperature,
+    maxTokens,
+    timeoutMs,
+    topP,
+    frequencyPenalty,
+    presencePenalty,
+    seed,
     messages: [
       {
         role: "system",
@@ -123,6 +144,10 @@ export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, 
     if (!used.has(index)) reranked.push(results[index]);
   }
   return reranked;
+}
+
+function omitNullish(value = {}) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== ""));
 }
 
 function extractResultText(row) {

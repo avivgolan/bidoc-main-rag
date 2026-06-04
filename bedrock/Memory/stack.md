@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: stack
-last_updated: 2026-06-03
+last_updated: 2026-06-04
 tags:
   - stack
   - runtime
@@ -19,13 +19,21 @@ tags:
 - Deployment routes all requests through `src/server.js` using `vercel.json`.
 - Persistent mutable state is expected to live in Supabase, not local data files.
 - Runtime config separates App Supabase from optional Content Supabase: App DB stores settings, chat history, QA, timeline links, and graph tables; Content DB serves RAG, timeline event, and alert retrieval.
+- App Supabase now also owns the general Project Graph tables (`graph_nodes`, `graph_edges`) defined by `supabase/project-graph.sql`.
+- The Project Graph viewer is exposed through `GET /api/graph` and the `#graph` SPA tab, rendering App Supabase graph data with Cytoscape.
+- Project Graph extraction now maps real Content `data_index` fields into semantic graph kinds: hashtags, vendors, people, submitters, categories, transaction types, statuses, source tables, documents, emails, attachments, mentioned dates, risks, quotes, and invoices.
+- Main RAG synthesis receives a dedicated `project_graph_findings` payload and switches to `ranked_entity_list` mode for who/what/which/more style investigation questions.
+- Agent prompts now distinguish true project delays from incidental lateness, avoid invented broad delay hashtags for retrieval, and rerank delay/blocker questions by project impact rather than keyword overlap alone.
 - Content Supabase can be configured with separate URL/key plus custom hybrid RPC, index table, alerts table, and alerts RPC; when omitted, content retrieval falls back to App Supabase and legacy table/RPC names.
 - The current Content `data_index` schema uses `primary_date` for timeline dates and `index_text`/`summary`/`title` for content text, plus `source_url`, `source_table`, `source_id`, `project_id`, `mail_id`, `attachment_id`, and `mentioned_dates` for provenance.
 - The current Content `alerts` schema uses `data_date` for timeline dates and `summary`/`alert_description`/`content`/`answer` for alert text, plus `alert_type`, `severity_level`, `data_link`, and `item_status`.
 - `.env` and `.env.local` are resolved from the repository root based on `src/config.js`, not from the process working directory.
 - Settings UI displays masked secrets only as placeholders; password fields stay empty so masked values are not submitted as real keys.
 - Settings UI can export/import a local JSON settings file; export includes full unmasked API keys and connection fields, so the file must be handled as a secret.
+- Settings UI has a dedicated Chat section that owns chat-affecting models, prompts, hybrid search tuning, knowledge vocabulary, timezone, and Content Supabase settings.
 - Settings UI model fields are OpenRouter-backed dropdowns that show context tokens and input/output pricing when available.
+- Settings UI exposes balanced advanced AI controls for model temperature/max tokens/timeouts, RAG context budget, graph context, Knowledge Base limits, and tool runtime toggles.
+- The Agents page is read-only monitoring/status UI; prompt and model edits are saved through `/api/settings`, and `/api/agents` rejects writes.
 - Runtime config ignores masked secret values such as `sk-o...abcd` or `********` and falls back to environment variables.
 - Supabase requests use `apikey` for `sb_secret_...` keys and add `Authorization: Bearer ...` only for legacy JWT keys that start with `eyJ`.
 
@@ -40,6 +48,20 @@ tags:
 - 2026-06-03 -- Mapped alert timeline events to the new `alerts` schema fields (`data_date`, `alert_description`, `alert_type`, `severity_level`, `data_link`).
 - 2026-06-03 -- Added local JSON settings export/import from the Settings page, including full secret values.
 - 2026-06-03 -- Changed Settings model fields from free text to OpenRouter model dropdowns with context/pricing labels.
+- 2026-06-03 -- Added a general Supabase Project Graph layer with `graph_nodes`, `graph_edges`, and `graph_search` support for chat/timeline context.
+- 2026-06-04 -- Fixed timeline/project graph rebuild upserts to dedupe payload rows and use explicit `on_conflict` constraints for non-primary-key unique indexes.
+- 2026-06-04 -- Batched Project Graph upserts and compacted graph node metadata so alert graph rebuild avoids Supabase statement timeouts.
+- 2026-06-04 -- Added the `#graph` UI tab and `/api/graph` endpoint for browsing Project Graph nodes and relationships.
+- 2026-06-04 -- Improved Project Graph browsing so filters use semantic entity/relation kinds from project data (`hashtag`, `vendor`, `document`, `has_vendor`, etc.) and hide noisy raw URL source nodes by default.
+- 2026-06-04 -- Strengthened Main Agent graph instructions so graph context is used actively for ranked multi-candidate answers instead of only as supporting evidence.
+- 2026-06-04 -- Updated Agents prompts for delay investigations: classifier avoids broad fake delay hashtags, reranker demotes meeting lateness without project impact, and stale stored prompt overrides are cleared selectively.
+- 2026-06-04 -- Consolidated chat configuration under Settings and made Agents a read-only monitoring view.
+- 2026-06-04 -- Reorganized Settings chat configuration so each editable chat agent shows its model selector next to its prompt textarea.
+- 2026-06-04 -- Strengthened Settings visual hierarchy with clearer subsection dividers and a framed chat agent model/prompt area.
+- 2026-06-04 -- Moved the N8N Base URL field from the model area to the webhook tools section with inline guidance.
+- 2026-06-04 -- Added balanced advanced AI settings for per-agent generation parameters, RAG/graph context limits, Knowledge Base chunking, and tool runtime controls.
+- 2026-06-04 -- Improved advanced AI settings UX by keeping model controls collapsed by default and adding common OpenRouter sampling controls (`top_p`, penalties, seed).
+- 2026-06-04 -- Added inline Hebrew info buttons for advanced AI, RAG, graph, knowledge, and tool runtime settings.
 
 ## Gotchas
 

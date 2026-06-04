@@ -119,12 +119,12 @@ export async function deleteKnowledgeDocument(filename, { agentId } = {}) {
   return { agentId: resolved.agentId, filename: resolved.filename, deleted: true };
 }
 
-export async function searchKnowledgeBase({ query, tags = [], topK = 6, agentId } = {}) {
+export async function searchKnowledgeBase({ query, tags = [], topK = 6, agentId, chunkSize = 1800 } = {}) {
   const documents = await loadKnowledgeDocuments(agentId);
   const queryText = String(query || "");
   const queryTokens = tokenize(queryText);
   const normalizedTags = normalizeTags(tags);
-  const chunks = documents.flatMap((doc) => chunkDocument(doc));
+  const chunks = documents.flatMap((doc) => chunkDocument(doc, { chunkSize }));
 
   const matches = chunks
     .map((chunk) => ({ ...chunk, score: scoreChunk({ chunk, queryText, queryTokens, tags: normalizedTags }) }))
@@ -151,7 +151,8 @@ async function loadKnowledgeDocuments(agentId) {
   })));
 }
 
-function chunkDocument(document) {
+function chunkDocument(document, { chunkSize = 1800 } = {}) {
+  const max = Math.min(Math.max(Number(chunkSize || 1800), 300), 6000);
   const blocks = document.content.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
   return blocks.map((text, index) => ({
     agentId: document.agentId,
@@ -159,7 +160,7 @@ function chunkDocument(document) {
     filename: document.filename,
     storedFilename: document.storedFilename,
     chunkIndex: index,
-    text: text.length > 1800 ? text.slice(0, 1800) : text,
+    text: text.length > max ? text.slice(0, max) : text,
     tokens: tokenize(text)
   }));
 }

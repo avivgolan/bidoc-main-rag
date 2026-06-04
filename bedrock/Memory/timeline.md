@@ -17,6 +17,7 @@ tags:
 - Timeline event links are stored in Supabase `timeline_event_links` and exposed via `/api/timeline/links`.
 - Timeline links, timeline entities, event-entity rows, and graph edges remain stored in App Supabase even when event content is read from a separate Content Supabase project.
 - Timeline Knowledge Graph tables are defined in `supabase/timeline-knowledge-graph.sql`; graph extraction can rebuild event/entity rows via `/api/timeline/graph/rebuild`.
+- `/api/timeline/graph/rebuild` also populates the general Project Graph (`graph_nodes`, `graph_edges`) from timeline/content events when the App Supabase schema exists.
 - The timeline supports filters, search, calendar view, and a dark interactive timeline view.
 - Event details include a links panel for saving manual links, deleting links, and accepting quote-to-approval suggestions.
 - Events with link suggestions are marked in the timeline node and list item, and the AI side panel shows the total suggestion count.
@@ -43,6 +44,7 @@ tags:
 - 2026-05-14 -- Link-agent smart suggestion requests now start a live run id and stream each link-agent step into the existing live run log.
 - 2026-05-14 -- Merged non-chat link-agent runs into the Workflow history strip so they appear next to chat runs during the current server session.
 - 2026-06-03 -- Split timeline event content reads to optional Content Supabase while preserving links and graph persistence on App Supabase.
+- 2026-06-03 -- Extended timeline graph rebuild and link-agent traces to include the general Project Graph search layer.
 
 ## Gotchas
 

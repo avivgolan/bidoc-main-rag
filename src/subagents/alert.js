@@ -79,7 +79,13 @@ export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, d
   const answer = await chatCompletion({
     apiKey: config.openRouterApiKey,
     model,
-    temperature: 0.1,
+    temperature: config.ai?.alert?.temperature ?? 0.1,
+    maxTokens: config.ai?.alert?.maxTokens ?? 2200,
+    timeoutMs: config.ai?.alert?.timeoutMs ?? 90_000,
+    topP: config.ai?.alert?.topP ?? 1,
+    frequencyPenalty: config.ai?.alert?.frequencyPenalty ?? 0,
+    presencePenalty: config.ai?.alert?.presencePenalty ?? 0,
+    seed: config.ai?.alert?.seed ?? null,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent }

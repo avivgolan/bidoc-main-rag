@@ -56,6 +56,8 @@ Classification Logic:
 Hashtag Extraction:
 - Extract short topic tags that likely exist in the project index.
 - Prefer exact project/domain topics from the user query.
+- For broad delay/blocker questions such as "היו עיכובים בפרויקט?", "מי התעכב?", "what delays happened?", do NOT invent broad tags like "גורמי_עיכוב" or "עיכובים" as retrieval hashtags unless the user explicitly asks for that exact tag. Use [] for hashtags and put the concept in knowledge_tags instead.
+- Only add hashtags for concrete work packages/entities mentioned by the user, for example "חשמל", "מעליות", "איטום", vendor names, document areas, or specific disciplines.
 - Use Hebrew when the user writes Hebrew.
 - Examples: "מעליות", "בטיחות", "חשמל", "איטום", "אלומיניום", "חשבוניות", "ריצוף", "מיזוג", "אינסטלציה", "חריגים", "אישורים", "בקרת_איכות".
 - Return tags without "#".
@@ -117,9 +119,16 @@ Use retrieval_context as the primary source when it contains items.
 Do not say "no relevant information found" if retrieval_context or retrieval_results contains records.
 If optional n8n tools are skipped because they are not configured, mention that only under missing info and still answer from vector results.
 If knowledge_plan is supplied, use it only as professional planning guidance. Do not treat it as project evidence.
+If graph_context or project_graph_findings is supplied, use it actively to identify connected suppliers, people, documents, hashtags, statuses, risks, alerts, and events. Treat graph links as relationship evidence connected to retrieved records, not as decoration.
 If source_quality is supplied, prefer higher-quality sources when sources disagree.
 If potential_conflicts is not empty, explicitly mention the possible conflict and avoid presenting one side as certain.
 If investigation_plan is supplied, include a concise "**מה בדקתי:**" section before the final answer.
+
+Project delay interpretation:
+- "עיכוב בפרויקט" means schedule/work/procurement/approval/payment/delivery impact, blocked execution, dependency, unresolved risk, or delayed project deliverable.
+- Do NOT treat a person being late to a meeting, a short meeting start delay, or ordinary coordination lateness as a project delay unless the record explicitly says it affected project schedule, work progress, delivery, approval, cost, or critical dependency.
+- For broad questions about delays, blockers, "who was delayed", "what else", or recurring causes, return a ranked list of all supported cases. Do not answer with only one case unless only one supported case exists.
+- Separate strong supported delays from weak/possible mentions.
 Response format:
 **תשובה:**
 - Detailed bullets with names, dates, amounts
@@ -139,7 +148,20 @@ Response format:
     modelKey: "reranker",
     step: "reranker",
     description: "מדרג מחדש תוצאות Hybrid Search לפי רלוונטיות לשאלת המשתמש.",
-    prompt: "You are a strict RAG reranker. Return ONLY valid JSON: {\"ranked\":[{\"index\":number,\"relevance\":number,\"reason\":string}]}. Rank by relevance to the user query. Use scores as hints, but judge semantic relevance. Do not include markdown."
+    prompt: `You are a strict construction-project RAG reranker.
+Return ONLY valid JSON: {"ranked":[{"index":number,"relevance":number,"reason":string}]}.
+
+Rank by true project-management relevance to the user query, not by keyword overlap alone.
+Use vector/hybrid scores as hints only.
+
+For delay/blocker questions:
+- HIGH relevance: records about schedule impact, blocked work, delayed delivery, vendor delay, missing approval, payment/procurement hold, dependency, unresolved risk, critical path, or project deliverable delay.
+- MEDIUM relevance: records that may indicate delay but need qualification, such as open status, pending response, missing information, or related alerts.
+- LOW relevance: someone was late to a meeting, a meeting started late, generic "delay" wording without project impact, routine coordination, or unrelated historic chatter.
+- If the user asks "who/what/which/more", preserve diversity across entities and sources. Do not rank only one repeated entity when several supported candidates exist.
+
+Prefer concrete evidence fields: title, summary, index_text/content, status/item_status, severity/risk, hashtags, primary_date/data_date, vendor/person/document metadata.
+Do not include markdown.`
   },
   {
     id: "qa",

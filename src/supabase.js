@@ -7,6 +7,11 @@ const TIMELINE_LINKS_TABLE = "timeline_event_links";
 const TIMELINE_ENTITIES_TABLE = "timeline_entities";
 const TIMELINE_EVENT_ENTITIES_TABLE = "timeline_event_entities";
 const TIMELINE_GRAPH_EDGES_TABLE = "timeline_graph_edges";
+const GRAPH_NODES_TABLE = "graph_nodes";
+const GRAPH_EDGES_TABLE = "graph_edges";
+const GRAPH_UPSERT_BATCH_SIZE = 300;
+const GRAPH_NODE_TYPES = new Set(["event", "alert", "supplier", "person", "company", "document", "topic", "risk", "invoice", "quote", "source"]);
+const GRAPH_EDGE_TYPES = new Set(["mentions", "caused_by", "blocks", "approved_by", "related_to", "same_topic", "from_document", "has_status", "has_risk"]);
 
 export async function saveMessage({ config, userMessage, sanitizedMessage, sessionId }) {
   if (!isConfigured(config)) return localMessage({ userMessage, sanitizedMessage, sessionId });
@@ -374,21 +379,281 @@ export async function listTimelineGraphData({ config, source = "index", limit = 
 
 export async function upsertTimelineGraphData({ config, entities = [], eventEntities = [] }) {
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
-  if (entities.length) {
+  const uniqueEntities = uniqueByKey(entities, (entity) => entity.id);
+  const uniqueEventEntities = uniqueByKey(eventEntities, (item) => [
+    item.event_source === "alerts" ? "alerts" : "index",
+    item.event_id,
+    item.entity_id,
+    item.role || "mentioned"
+  ].join("|"));
+  if (uniqueEntities.length) {
     await supabaseFetch(config, `/rest/v1/${TIMELINE_ENTITIES_TABLE}`, {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(entities.map(sanitizeTimelineEntity))
+      body: JSON.stringify(uniqueEntities.map(sanitizeTimelineEntity))
     });
   }
-  if (eventEntities.length) {
-    await supabaseFetch(config, `/rest/v1/${TIMELINE_EVENT_ENTITIES_TABLE}`, {
+  if (uniqueEventEntities.length) {
+    await supabaseFetch(config, `/rest/v1/${TIMELINE_EVENT_ENTITIES_TABLE}?on_conflict=event_source,event_id,entity_id,role`, {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(eventEntities.map(sanitizeTimelineEventEntity))
+      body: JSON.stringify(uniqueEventEntities.map(sanitizeTimelineEventEntity))
     });
   }
-  return { entities: entities.length, eventEntities: eventEntities.length };
+  return { entities: uniqueEntities.length, eventEntities: uniqueEventEntities.length };
+}
+
+export async function upsertProjectGraphData({ config, nodes = [], edges = [] }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const uniqueNodes = uniqueByKey(nodes, (node) => node.id);
+  const uniqueEdges = uniqueByKey(edges, (edge) => [
+    edge.from_node_id,
+    edge.to_node_id,
+    edge.edge_type || "related_to"
+  ].join("|"));
+  for (const batch of chunk(uniqueNodes, GRAPH_UPSERT_BATCH_SIZE)) {
+    await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify(batch.map(sanitizeGraphNode))
+    });
+  }
+  for (const batch of chunk(uniqueEdges, GRAPH_UPSERT_BATCH_SIZE)) {
+    await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?on_conflict=from_node_id,to_node_id,edge_type`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates" },
+      body: JSON.stringify(batch.map(sanitizeGraphEdge))
+    });
+  }
+  return { nodes: uniqueNodes.length, edges: uniqueEdges.length };
+}
+
+export async function graphSearch({ config, payload = {}, limit = 30 } = {}) {
+  if (!isConfigured(config)) return { results: [], skipped: true, reason: "App Supabase is not configured" };
+  const body = {
+    query_text: payload.query_text || "",
+    source_refs: Array.isArray(payload.source_refs) ? payload.source_refs : [],
+    max_rows: Number(payload.max_rows || limit || 30)
+  };
+  try {
+    const results = await supabaseFetch(config, "/rest/v1/rpc/graph_search", {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+    return { results: results || [], skipped: false, mode: "rpc" };
+  } catch (error) {
+    if (!looksLikeRpcSignatureError(error.message) && !/graph_search/i.test(error.message)) throw error;
+    const results = await graphSearchFallback({ config, payload: body, limit: body.max_rows }).catch(() => []);
+    return { results, skipped: !results.length, mode: "rest_fallback", error: error.message };
+  }
+}
+
+export async function listProjectGraph({ config, limit = 300, nodeType = "", edgeType = "", query = "" } = {}) {
+  if (!isConfigured(config)) return emptyProjectGraph("App Supabase is not configured");
+  const max = Math.min(Math.max(Number(limit || 300), 1), 1000);
+  if (nodeType) {
+    const graph = await listProjectGraphByNodeFilter({ config, limit: max, nodeType, edgeType, query }).catch(() => null);
+    if (graph && (graph.nodes.length || graph.edges.length)) return graph;
+  }
+  const needsSemanticFilter = Boolean(
+    query ||
+    (nodeType && !GRAPH_NODE_TYPES.has(nodeType)) ||
+    (edgeType && !GRAPH_EDGE_TYPES.has(edgeType))
+  );
+  const fetchLimit = needsSemanticFilter ? Math.min(Math.max(max * 200, 5000), 10000) : max;
+  const filters = [];
+  if (edgeType && GRAPH_EDGE_TYPES.has(edgeType)) filters.push(`edge_type=eq.${encodeURIComponent(edgeType)}`);
+  if (edgeType && !GRAPH_EDGE_TYPES.has(edgeType)) filters.push(`metadata->>edge_kind=eq.${encodeURIComponent(edgeType)}`);
+  const params = new URLSearchParams({
+    select: "id,edge_type,weight,confidence,evidence_text,metadata,from_node:graph_nodes!graph_edges_from_node_id_fkey(*),to_node:graph_nodes!graph_edges_to_node_id_fkey(*)",
+    order: "confidence.desc",
+    limit: String(fetchLimit)
+  });
+  const edgePath = `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}${filters.length ? `&${filters.join("&")}` : ""}`;
+  try {
+    const rows = await supabaseFetch(config, edgePath);
+    return projectGraphResponse(rows || [], { nodeType, edgeType, query, limit: max });
+  } catch (error) {
+    if (/graph_nodes|graph_edges|schema cache|could not find/i.test(error.message)) {
+      return emptyProjectGraph(error.message);
+    }
+    throw error;
+  }
+}
+
+async function listProjectGraphByNodeFilter({ config, limit = 300, nodeType = "", edgeType = "", query = "" } = {}) {
+  const max = Math.min(Math.max(Number(limit || 300), 1), 1000);
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const nodeRows = await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}?select=*&limit=10000`);
+  const selectedNodes = (nodeRows || [])
+    .map(normalizeProjectGraphNode)
+    .filter((node) => node && nodeMatchesType(node, nodeType))
+    .filter((node) => !normalizedQuery || projectGraphNodeMatches({ node, query: normalizedQuery }))
+    .slice(0, max);
+  if (!selectedNodes.length) return projectGraphResponse([], { nodeType, edgeType, query, limit: max });
+  const edgeRows = [];
+  for (const batch of chunk(selectedNodes.map((node) => node.id), 50)) {
+    const encoded = batch.map((id) => `"${String(id).replace(/"/g, '\\"')}"`).join(",");
+    const params = new URLSearchParams({
+      select: "id,edge_type,weight,confidence,evidence_text,metadata,from_node:graph_nodes!graph_edges_from_node_id_fkey(*),to_node:graph_nodes!graph_edges_to_node_id_fkey(*)",
+      or: `(from_node_id.in.(${encoded}),to_node_id.in.(${encoded}))`,
+      order: "confidence.desc",
+      limit: String(Math.min(max * 10, 1000))
+    });
+    if (edgeType && GRAPH_EDGE_TYPES.has(edgeType)) params.set("edge_type", `eq.${edgeType}`);
+    const rows = await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}`).catch(() => []);
+    edgeRows.push(...(rows || []));
+  }
+  return projectGraphResponse(edgeRows, { nodeType, edgeType, query, limit: max, extraNodes: selectedNodes });
+}
+
+export function projectGraphResponse(rows = [], { nodeType = "", edgeType = "", query = "", limit = 300, extraNodes = [] } = {}) {
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const selectedType = String(nodeType || "").trim();
+  const selectedEdgeType = String(edgeType || "").trim();
+  const nodes = new Map();
+  const edges = [];
+  for (const node of extraNodes || []) {
+    if (node?.id && (!selectedType || nodeMatchesType(node, selectedType))) nodes.set(node.id, node);
+  }
+  for (const row of rows || []) {
+    const source = normalizeProjectGraphNode(row.from_node || row.source_node);
+    const target = normalizeProjectGraphNode(row.to_node || row.target_node);
+    if (!source?.id || !target?.id) continue;
+    if (!normalizedQuery && (isNoisySourceNode(source) || isNoisySourceNode(target))) continue;
+    if (selectedType && !nodeMatchesType(source, selectedType) && !nodeMatchesType(target, selectedType)) continue;
+    if (selectedEdgeType && row.edge_type !== selectedEdgeType && row.metadata?.edge_kind !== selectedEdgeType) continue;
+    if (normalizedQuery && !projectGraphRowMatches({ row, source, target, query: normalizedQuery })) continue;
+    nodes.set(source.id, source);
+    nodes.set(target.id, target);
+    edges.push({
+      id: row.id || row.edge_id || `${source.id}->${target.id}:${row.edge_type}`,
+      source: source.id,
+      target: target.id,
+      edge_type: row.edge_type || "related_to",
+      edge_kind: row.metadata?.edge_kind || row.edge_type || "related_to",
+      weight: Number(row.weight || 0.5),
+      confidence: Number(row.confidence || row.weight || 0.5),
+      evidence_text: row.evidence_text || "",
+      metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {}
+    });
+  }
+  const graphNodes = [...nodes.values()].slice(0, Number(limit || 300));
+  const visible = new Set(graphNodes.map((node) => node.id));
+  const graphEdges = edges.filter((edge) => visible.has(edge.source) && visible.has(edge.target)).slice(0, Number(limit || 300));
+  return {
+    nodes: graphNodes,
+    edges: graphEdges,
+    stats: projectGraphStats(graphNodes, graphEdges),
+    skipped: false
+  };
+}
+
+function emptyProjectGraph(reason = "") {
+  return {
+    nodes: [],
+    edges: [],
+    stats: { nodeCount: 0, edgeCount: 0, nodeTypes: [], entityKinds: [], edgeTypes: [], edgeKinds: [] },
+    skipped: Boolean(reason),
+    reason
+  };
+}
+
+function normalizeProjectGraphNode(node = {}) {
+  if (!node || typeof node !== "object" || !node.id) return null;
+  return {
+    id: String(node.id),
+    node_type: node.node_type || "topic",
+    entity_kind: node.metadata?.entity_kind || node.node_type || "topic",
+    label: node.label || node.id,
+    normalized_label: node.normalized_label || "",
+    source_table: node.source_table || null,
+    source_id: node.source_id || null,
+    event_date: node.event_date || null,
+    metadata: node.metadata && typeof node.metadata === "object" ? node.metadata : {}
+  };
+}
+
+function projectGraphRowMatches({ row, source, target, query }) {
+  const haystack = [
+    source.id, source.label, source.node_type, source.entity_kind, source.source_table, source.source_id,
+    target.id, target.label, target.node_type, target.entity_kind, target.source_table, target.source_id,
+    row.edge_type, row.metadata?.edge_kind, row.evidence_text
+  ].filter(Boolean).join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function projectGraphNodeMatches({ node, query }) {
+  const haystack = [
+    node.id, node.label, node.node_type, node.entity_kind, node.source_table, node.source_id
+  ].filter(Boolean).join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function projectGraphStats(nodes = [], edges = []) {
+  return {
+    nodeCount: nodes.length,
+    edgeCount: edges.length,
+    nodeTypes: countBy(nodes, (node) => node.node_type),
+    entityKinds: countBy(nodes, (node) => node.entity_kind || node.node_type),
+    edgeTypes: countBy(edges, (edge) => edge.edge_type),
+    edgeKinds: countBy(edges, (edge) => edge.edge_kind || edge.edge_type)
+  };
+}
+
+function nodeMatchesType(node, selectedType) {
+  return node.node_type === selectedType || node.entity_kind === selectedType || node.metadata?.entity_kind === selectedType;
+}
+
+function isNoisySourceNode(node = {}) {
+  if (node.node_type !== "source") return false;
+  if (node.entity_kind && node.entity_kind !== "source") return false;
+  const label = String(node.label || node.id || "");
+  return /^https?:\/\//i.test(label) || /^source:https?:/i.test(node.id || "");
+}
+
+function countBy(items, keyFn) {
+  const counts = new Map();
+  for (const item of items || []) {
+    const key = keyFn(item) || "unknown";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+async function graphSearchFallback({ config, payload = {}, limit = 30 }) {
+  const refs = Array.isArray(payload.source_refs) ? payload.source_refs : [];
+  const nodeIds = refs.map((ref) => ref.node_id).filter(Boolean);
+  const sourcePairs = refs.filter((ref) => ref.source_table && ref.source_id);
+  let sourceNodes = [];
+  if (sourcePairs.length) {
+    const or = sourcePairs
+      .slice(0, 20)
+      .map((ref) => `and(source_table.eq.${encodeURIComponent(ref.source_table)},source_id.eq.${encodeURIComponent(ref.source_id)})`)
+      .join(",");
+    sourceNodes = await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}?select=id&or=(${or})&limit=50`).catch(() => []);
+  }
+  const ids = [...new Set([...nodeIds, ...(sourceNodes || []).map((node) => node.id)].filter(Boolean))];
+  if (!ids.length) return [];
+  const encoded = ids.map((id) => `"${String(id).replace(/"/g, '\\"')}"`).join(",");
+  const params = new URLSearchParams({
+    select: "id,edge_type,weight,confidence,evidence_text,from_node:graph_nodes!graph_edges_from_node_id_fkey(*),to_node:graph_nodes!graph_edges_to_node_id_fkey(*)",
+    or: `(from_node_id.in.(${encoded}),to_node_id.in.(${encoded}))`,
+    order: "confidence.desc",
+    limit: String(Math.min(Number(limit || 30), 200))
+  });
+  const rows = await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}`).catch(() => []);
+  return (rows || []).map((row) => ({
+    edge_id: row.id,
+    edge_type: row.edge_type,
+    weight: row.weight,
+    confidence: row.confidence,
+    evidence_text: row.evidence_text,
+    source_node: row.from_node,
+    target_node: row.to_node
+  }));
 }
 
 function sanitizeTimelineEventLink(link = {}) {
@@ -442,6 +707,51 @@ function sanitizeTimelineEventEntity(item = {}) {
     confidence: Number(item.confidence || 0.5),
     evidence_text: nullableString(item.evidence_text)
   };
+}
+
+function sanitizeGraphNode(node = {}) {
+  return {
+    id: requiredString(node.id, "node.id"),
+    node_type: nullableString(node.node_type) || "topic",
+    label: requiredString(node.label, "node.label"),
+    normalized_label: requiredString(node.normalized_label || node.label, "node.normalized_label"),
+    source_table: nullableString(node.source_table),
+    source_id: nullableString(node.source_id),
+    event_date: nullableString(node.event_date),
+    metadata: node.metadata && typeof node.metadata === "object" ? node.metadata : {}
+  };
+}
+
+function sanitizeGraphEdge(edge = {}) {
+  return {
+    from_node_id: requiredString(edge.from_node_id, "from_node_id"),
+    to_node_id: requiredString(edge.to_node_id, "to_node_id"),
+    edge_type: nullableString(edge.edge_type) || "related_to",
+    weight: Number(edge.weight || 0.5),
+    confidence: Number(edge.confidence || edge.weight || 0.5),
+    evidence_text: nullableString(edge.evidence_text),
+    metadata: edge.metadata && typeof edge.metadata === "object" ? edge.metadata : {}
+  };
+}
+
+function uniqueByKey(items = [], keyFn) {
+  const seen = new Set();
+  const output = [];
+  for (const item of items || []) {
+    const key = keyFn(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(item);
+  }
+  return output;
+}
+
+function chunk(items = [], size = 500) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function parseHashtags(raw) {

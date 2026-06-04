@@ -2,7 +2,7 @@ import { sanitizeMessage } from "./sanitize.js";
 import { classifyMessage, hintedTools } from "./classifier.js";
 import { heuristicClassification, isHebrew } from "./heuristics.js";
 import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.js";
-import { hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
+import { graphSearch, hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
@@ -12,6 +12,7 @@ import { getProjectDateTime } from "./clock.js";
 import { routeKnowledgeAgents, searchKnowledgeBase } from "./knowledge.js";
 import { TOOL_NAMES } from "./config.js";
 import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./sourceQuality.js";
+import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 
 export async function runChatPipeline({ message, sessionId, config, runId }) {
   emitRunEvent(runId, "chat_input", "Received user message", { sessionId, preview: message.slice(0, 300) });
@@ -131,7 +132,10 @@ async function runLiteAgent({ message, memory, memorySummary, config, trace, run
     const answer = await chatCompletion({
       apiKey: config.openRouterApiKey,
       model: config.models.lite,
-      temperature: 0.3,
+      temperature: config.ai?.lite?.temperature ?? 0.3,
+      maxTokens: config.ai?.lite?.maxTokens ?? 1800,
+      timeoutMs: config.ai?.lite?.timeoutMs ?? 90_000,
+      ...samplingSettings(config, "lite"),
       messages: [
         {
           role: "system",
@@ -156,13 +160,18 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   const sources = [];
   let hybridResults = null;
   let rerankedResults = null;
+  let graphContext = [];
   let knowledgePlan = null;
+  const listIntent = isEntityListQuestion(message);
   const investigationPlan = buildInvestigationPlan({ message, classification, memorySummary });
   if (investigationPlan) {
     emitRunEvent(runId, "investigation", "Investigation Mode enabled", investigationPlan);
   }
 
-  const safetyPrecheckTools = classification.urgency === "HIGH" ? ["safety_report", "alert"] : [];
+  const toolsRuntime = config.n8n?.runtime || {};
+  const safetyPrecheckTools = toolsRuntime.safetyPrecheckEnabled !== false && classification.urgency === "HIGH"
+    ? ["safety_report", ...(toolsRuntime.alertAgentEnabled === false ? [] : ["alert"])]
+    : [];
   const safetyResults = await Promise.all(
     safetyPrecheckTools.map((toolName) =>
       callProjectTool({ toolName, message, classification, sessionId, config }).then((result) => {
@@ -203,7 +212,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     hybridResults = primarySearch.results;
     const allRows = normalizeRows(hybridResults);
 
-    const planQueries = plannedRagQueries(knowledgePlan, message);
+    const planQueries = plannedRagQueries(knowledgePlan, message, config);
     const planResults = await Promise.all(
       planQueries.map(async (query) => {
         try {
@@ -245,23 +254,56 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     emitRunEvent(runId, "hybrid_search", "Hybrid Search failed", { error: error.message });
   }
 
+  if (hybridResults && config.graph?.enabled !== false) {
+    const graphSearchLimit = Number(config.graph?.searchLimit || 30);
+    const graphContextLimit = graphContextLimitForQuestion({ config, listIntent });
+    const payload = buildGraphSearchPayload({ query: message, records: normalizeRows(hybridResults), maxRows: graphSearchLimit });
+    try {
+      emitRunEvent(runId, "graph_search", "Running Project Graph Search", { sourceRefs: payload.source_refs.length });
+      const graph = await graphSearch({ config, payload, limit: graphSearchLimit });
+      graphContext = summarizeGraphContext(graph, graphContextLimit);
+      toolCalls.push(annotateToolCall({
+        toolName: "graph_search",
+        ok: !graph.skipped,
+        skipped: Boolean(graph.skipped),
+        rawQuery: message,
+        data: graphContext,
+        error: graph.skipped ? graph.reason || graph.error || "No graph context found" : null,
+        sources: []
+      }));
+      emitRunEvent(runId, "graph_search", graph.skipped ? "Project Graph Search skipped" : "Project Graph Search completed", {
+        mode: graph.mode || "unknown",
+        records: graphContext.length,
+        error: graph.error || null
+      });
+    } catch (error) {
+      toolCalls.push(annotateToolCall({ toolName: "graph_search", ok: false, rawQuery: message, error: error.message, data: null, sources: [] }));
+      emitRunEvent(runId, "graph_search", "Project Graph Search failed", { error: error.message });
+    }
+  }
+
   if (hybridResults) {
     try {
-      emitRunEvent(runId, "reranker", "Running reranker", { model: config.models.reranker, candidates: countRows(hybridResults), topK: config.retrieval.rerankTopK });
+      const rerankTopK = retrievalTopKForQuestion({ config, message, classification });
+      emitRunEvent(runId, "reranker", "Running reranker", { model: config.models.reranker, candidates: countRows(hybridResults), topK: rerankTopK, listIntent });
       rerankedResults = await rerankWithLlm({
         apiKey: config.openRouterApiKey,
         model: config.models.reranker,
         query: message,
         results: normalizeRows(hybridResults),
-        topK: config.retrieval.rerankTopK,
-        systemPrompt: config.prompts?.reranker
+        topK: rerankTopK,
+        systemPrompt: config.prompts?.reranker,
+        temperature: config.ai?.reranker?.temperature ?? 0,
+        maxTokens: config.ai?.reranker?.maxTokens ?? 4096,
+        timeoutMs: config.ai?.reranker?.timeoutMs ?? 90_000,
+        ...samplingSettings(config, "reranker")
       });
       const rerankSources = extractLinks(rerankedResults);
       sources.push(...rerankSources);
       toolCalls.push(annotateToolCall({ toolName: "reranker", ok: true, rawQuery: message, data: rerankedResults, sources: rerankSources }));
       emitRunEvent(runId, "reranker", "Reranker completed", { records: countRows(rerankedResults) });
     } catch (error) {
-      const fallbackRows = normalizeRows(hybridResults).slice(0, config.retrieval.rerankTopK);
+      const fallbackRows = normalizeRows(hybridResults).slice(0, retrievalTopKForQuestion({ config, message, classification }));
       rerankedResults = fallbackRows;
       toolCalls.push(annotateToolCall({ toolName: "reranker", ok: false, fallback: true, rawQuery: message, error: error.message, data: fallbackRows, sources: [] }));
       emitRunEvent(runId, "reranker", "Reranker failed, using hybrid order", { error: error.message, fallbackRecords: fallbackRows.length });
@@ -270,7 +312,10 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
 
   const plannerTools = recommendedProjectTools(knowledgePlan);
   const tools = buildToolOrder(classification, [...hintedTools(classification), ...plannerTools])
-    .filter((toolName) => !safetyPrecheckTools.includes(toolName));
+    .filter((toolName) => !safetyPrecheckTools.includes(toolName))
+    .filter((toolName) => toolsRuntime.enabled !== false)
+    .filter((toolName) => toolsRuntime.alertAgentEnabled !== false || toolName !== "alert")
+    .slice(0, Number(toolsRuntime.parallelLimit || 6));
   emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools in parallel", { tools });
   const toolResults = await Promise.all(
     tools.map((toolName) =>
@@ -294,8 +339,8 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     emitRunEvent(runId, "conflict_detection", "No obvious source conflicts detected", {});
   }
   emitRunEvent(runId, "source_quality", "Source quality scored", sourceQuality);
-  const answer = await synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults: rerankedResults || hybridResults, toolCalls, sources: uniqueSources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId });
-  return { answer, sources: uniqueSources, toolCalls, knowledgePlan, investigationPlan, sourceQuality, conflicts };
+  const answer = await synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults: rerankedResults || hybridResults, graphContext, toolCalls, sources: uniqueSources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId });
+  return { answer, sources: uniqueSources, toolCalls, knowledgePlan, investigationPlan, sourceQuality, conflicts, graphContext };
 }
 
 async function hybridSearchWithRelaxedHashtags({ config, query, dateFrom, dateTo, hashtags = [], topK, runId, context }) {
@@ -330,7 +375,7 @@ async function hybridSearchWithRelaxedHashtags({ config, query, dateFrom, dateTo
 
 async function runKnowledgePlanner({ message, classification, config, trace, runId }) {
   const tags = [...new Set([...(classification.knowledge_tags || []), ...(classification.hashtags || [])])];
-  const routedAgents = routeKnowledgeAgents({ message, tags, limit: 2 });
+  const routedAgents = routeKnowledgeAgents({ message, tags, limit: config.knowledge?.agentLimit || 2 });
   emitRunEvent(runId, "knowledge_planner", "Searching local Knowledge Base", {
     query: message,
     tags,
@@ -339,14 +384,14 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
   let search;
   try {
     const searches = await Promise.all(
-      routedAgents.map((agent) => searchKnowledgeBase({ query: message, tags: [...tags, ...agent.tags], topK: 4, agentId: agent.id }))
+      routedAgents.map((agent) => searchKnowledgeBase({ query: message, tags: [...tags, ...agent.tags], topK: config.knowledge?.topK || 4, agentId: agent.id, chunkSize: config.knowledge?.chunkSize || 1800 }))
     );
     search = {
       agentIds: routedAgents.map((agent) => agent.id),
       agents: routedAgents.map((agent) => ({ id: agent.id, name: agent.name, description: agent.description })),
       matches: searches.flatMap((item) => item.matches || [])
         .sort((a, b) => b.score - a.score)
-        .slice(0, 8),
+        .slice(0, Math.max(1, Number(config.knowledge?.agentLimit || 2)) * Math.max(1, Number(config.knowledge?.topK || 4))),
       totalDocuments: searches.reduce((sum, item) => sum + Number(item.totalDocuments || 0), 0),
       totalChunks: searches.reduce((sum, item) => sum + Number(item.totalChunks || 0), 0)
     };
@@ -381,7 +426,10 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
     const content = await chatCompletion({
       apiKey: config.openRouterApiKey,
       model: config.models.knowledgePlanner,
-      temperature: 0.1,
+      temperature: config.ai?.knowledgePlanner?.temperature ?? 0.1,
+      maxTokens: config.ai?.knowledgePlanner?.maxTokens ?? 2200,
+      timeoutMs: config.ai?.knowledgePlanner?.timeoutMs ?? 90_000,
+      ...samplingSettings(config, "knowledgePlanner"),
       messages: [
         { role: "system", content: config.prompts?.knowledge_planner || "" },
         {
@@ -446,10 +494,13 @@ export function buildAlertAgentRequest({ message, classification }) {
   };
 }
 
-async function synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults, toolCalls, sources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId }) {
+async function synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults, graphContext = [], toolCalls, sources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId }) {
   const successful = toolCalls.filter((call) => call.ok);
   const failed = toolCalls.filter((call) => !call.ok && !call.skipped);
   const skipped = toolCalls.filter((call) => call.skipped);
+  const listIntent = isEntityListQuestion(message);
+  const retrievalLimit = contextRecordsLimitForQuestion({ config, listIntent, classification });
+  const projectGraphFindings = buildProjectGraphFindings(graphContext, { listIntent });
   if (!config.openRouterApiKey) {
     console.warn("[main_agent] OPENROUTER_API_KEY is missing — cannot call LLM, returning structured fallback.");
     trace.push({ step: "mainAgent", ok: false, fallback: true, error: "OPENROUTER_API_KEY is missing" });
@@ -458,11 +509,20 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
   }
 
   try {
-    emitRunEvent(runId, "main_agent", "Calling Main Agent", { model: config.models.main, retrievalRecords: countRows(retrievalResults), toolCalls: toolCalls.length });
+    emitRunEvent(runId, "main_agent", "Calling Main Agent", {
+      model: config.models.main,
+      retrievalRecords: countRows(retrievalResults),
+      graphRelationships: graphContext.length,
+      answerMode: listIntent ? "ranked_entity_list" : "standard_grounded_answer",
+      toolCalls: toolCalls.length
+    });
     const answer = await chatCompletion({
       apiKey: config.openRouterApiKey,
       model: config.models.main,
-      temperature: 0.2,
+      temperature: config.ai?.main?.temperature ?? 0.2,
+      maxTokens: config.ai?.main?.maxTokens ?? 4096,
+      timeoutMs: config.ai?.main?.timeoutMs ?? 90_000,
+      ...samplingSettings(config, "main"),
       messages: [
         { role: "system", content: mainSystemPrompt(classification, config) },
         ...memorySummaryMessages(memorySummary),
@@ -471,8 +531,11 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
           content: JSON.stringify(
             {
               user_message: message,
-              retrieval_context: formatRetrievalContext(retrievalResults),
+              answer_mode: listIntent ? "ranked_entity_list" : "standard_grounded_answer",
+              retrieval_context: formatRetrievalContext(retrievalResults, retrievalLimit, config.rag?.chunkTextLimit || 1800),
               retrieval_results: retrievalResults,
+              graph_context: graphContext,
+              project_graph_findings: projectGraphFindings,
               knowledge_plan: knowledgePlan,
               investigation_plan: investigationPlan,
               source_quality: sourceQuality,
@@ -515,6 +578,7 @@ Use retrieval_context as the primary source when it contains items.
 Do not say "no relevant information found" if retrieval_context or retrieval_results contains records.
 If optional n8n tools are skipped because they are not configured, mention that only under missing info and still answer from vector results.
 If knowledge_plan is supplied, use it only as professional planning guidance. Do not treat it as project evidence.
+If graph_context is supplied, use it as supporting project relationship evidence between retrieved records, alerts, entities, suppliers, risks, documents, and topics. Do not invent facts beyond connected retrieval/tool records.
 Response format:
 **תשובה:**
 - Detailed bullets with names, dates, amounts
@@ -537,9 +601,17 @@ Response format:
 CRITICAL KNOWLEDGE BOUNDARY:
 - knowledge_plan is planning guidance only. It is not project evidence.
 - Use knowledge_plan to decide what to look for and how to reason.
-- Final factual claims must come only from retrieval_context, retrieval_results, tool_results, or explicit user input from the current request.
+- Final factual claims must come only from retrieval_context, retrieval_results, tool_results, graph_context/project_graph_findings when they are connected to retrieved records, or explicit user input from the current request.
 - Conversation memory is only for understanding follow-up wording. Never repeat an earlier assistant answer when current retrieval/tool results contradict it or provide newer evidence.
 - Never cite Knowledge Base excerpts as project sources unless they also appear in retrieval/tool results.
+
+PROJECT GRAPH RULES:
+- When graph_context or project_graph_findings is available, use it actively as project relationship evidence, not as optional decoration.
+- Use graph relationships to find additional connected events, alerts, suppliers/vendors, people, documents, hashtags, statuses, dates, risks, quotes, and invoices around the retrieved records.
+- If answer_mode is "ranked_entity_list", or the user asks who/what/which/which other entities are delayed, blocking, responsible, related, recurring, or connected, return a ranked list of all supported candidates. Do not answer with only one item unless only one supported candidate exists.
+- Group findings by shared graph entities when useful: supplier/vendor, person, document, hashtag, status, risk, or date.
+- Separate strong findings from weaker/possible findings when source support differs.
+- If the graph suggests a connection but retrieval/tool records do not support a factual claim, label it as a relationship clue, not as proof.
 
 SOURCE QUALITY AND CONFLICTS:
 - If source_quality.overall is LOW or NO_SOURCES, clearly qualify the answer.
@@ -565,6 +637,81 @@ function skippedKnowledgePlan(reason, caution = reason) {
     recommended_tools: [],
     risks_or_cautions: [caution]
   };
+}
+
+function isEntityListQuestion(message = "") {
+  const text = String(message || "").toLowerCase();
+  return /(\bwho\b|\bwhat\b|\bwhich\b|\bmore\b|\bothers?\b|\blist\b|\brank\b|מי|מה|איזה|אילו|עוד|כן|כולם|רשימה|דירוג|התעכב|התעכבו|מעכב|מעכבים|חסם|חסמים|קשור|קשורים|אחראי|אחראים)/i.test(text);
+}
+
+function retrievalTopKForQuestion({ config, message, classification } = {}) {
+  const base = Number(config?.retrieval?.rerankTopK || 10);
+  if (isEntityListQuestion(message) || classification?.investigation) {
+    return Math.min(Math.max(base, 18), 25);
+  }
+  return base;
+}
+
+function samplingSettings(config, agentKey) {
+  const settings = config?.ai?.[agentKey] || {};
+  return {
+    topP: settings.topP ?? 1,
+    frequencyPenalty: settings.frequencyPenalty ?? 0,
+    presencePenalty: settings.presencePenalty ?? 0,
+    seed: settings.seed ?? null
+  };
+}
+
+function contextRecordsLimitForQuestion({ config, listIntent = false, classification = {} } = {}) {
+  const base = Number(config?.rag?.contextRecordsLimit || 12);
+  if (listIntent || classification?.investigation) return Math.min(Math.max(base, 20), 50);
+  return base;
+}
+
+function graphContextLimitForQuestion({ config, listIntent = false } = {}) {
+  const base = Number(config?.graph?.contextLimit || 12);
+  if (listIntent && config?.graph?.expandedForListQuestions !== false) return Math.min(Math.max(base, 20), 50);
+  return base;
+}
+
+function buildProjectGraphFindings(graphContext = [], { listIntent = false } = {}) {
+  const rows = Array.isArray(graphContext) ? graphContext : [];
+  const entityCounts = new Map();
+  const relationCounts = new Map();
+  const relationships = rows.slice(0, listIntent ? 20 : 12).map((item) => {
+    const relation = item.relation || "related_to";
+    const source = item.source || "";
+    const target = item.target || "";
+    const confidence = item.confidence ?? null;
+    relationCounts.set(relation, (relationCounts.get(relation) || 0) + 1);
+    for (const entity of [source, target].filter(Boolean)) {
+      entityCounts.set(entity, (entityCounts.get(entity) || 0) + 1);
+    }
+    return {
+      relation,
+      source,
+      target,
+      confidence,
+      evidence: item.evidence || ""
+    };
+  });
+  return {
+    available: relationships.length > 0,
+    instruction: relationships.length
+      ? "Use these graph relationships to broaden the answer beyond the single strongest RAG record. For who/what/which/more questions, produce a ranked list of supported candidates."
+      : "No graph relationships were returned.",
+    relationship_count: relationships.length,
+    top_entities: topCounts(entityCounts, listIntent ? 12 : 8),
+    top_relations: topCounts(relationCounts, 8),
+    relationships
+  };
+}
+
+function topCounts(map, limit = 10) {
+  return [...map.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || String(a.name).localeCompare(String(b.name)))
+    .slice(0, limit);
 }
 
 function buildInvestigationPlan({ message, classification, memorySummary }) {
@@ -756,13 +903,15 @@ function normalizeArray(value) {
   return [];
 }
 
-function plannedRagQueries(knowledgePlan, originalMessage) {
+function plannedRagQueries(knowledgePlan, originalMessage, config = {}) {
   if (!knowledgePlan || knowledgePlan.skipped) return [];
+  const limit = Number(config.rag?.plannerExtraQueriesLimit ?? 2);
+  if (limit <= 0) return [];
   const original = String(originalMessage || "").trim();
   return normalizeArray(knowledgePlan.rag_queries)
     .map((query) => query.trim())
     .filter((query) => query && query !== original)
-    .slice(0, 2);
+    .slice(0, limit);
 }
 
 function recommendedProjectTools(knowledgePlan) {
@@ -830,8 +979,8 @@ function summarizeData(data) {
   return text.length > 450 ? `${text.slice(0, 450)}...` : text;
 }
 
-function formatRetrievalContext(results) {
-  const rows = normalizeRows(results).slice(0, 12);
+function formatRetrievalContext(results, limit = 12, chunkTextLimit = 1800) {
+  const rows = normalizeRows(results).slice(0, limit);
   if (!rows.length) return "No vector records returned.";
   return rows
     .map((row, index) => {
@@ -849,7 +998,7 @@ function formatRetrievalContext(results) {
         JSON.stringify(row);
       const metadata = row.metadata ? `\nmetadata: ${JSON.stringify(row.metadata)}` : "";
       const score = row.similarity || row.score || row.distance || row.match_score || "";
-      return `[${index + 1}] score: ${score}\n${String(text).slice(0, 1800)}${metadata}`;
+      return `[${index + 1}] score: ${score}\n${String(text).slice(0, Number(chunkTextLimit || 1800))}${metadata}`;
     })
     .join("\n\n---\n\n");
 }
@@ -907,9 +1056,10 @@ function uniqueByUrl(sources) {
 function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, classification, result, trace, config }) {
   const toolCalls = result.toolCalls || [];
   const hybridCall = toolCalls.find((call) => call.toolName === "hybrid_search");
+  const graphCall = toolCalls.find((call) => call.toolName === "graph_search");
   const rerankerCall = toolCalls.find((call) => call.toolName === "reranker");
   const alertCall = toolCalls.find((call) => call.toolName === "alert");
-  const retrievalToolNames = ["hybrid_search", "hybrid_search_plan", "reranker"];
+  const retrievalToolNames = ["hybrid_search", "hybrid_search_plan", "graph_search", "reranker"];
   const safetyPrecheckCalls = classification.urgency === "HIGH"
     ? toolCalls.filter((call) => ["safety_report", "alert"].includes(call.toolName))
     : [];
@@ -1028,7 +1178,21 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         sample: previewRows(hybridCall.data)
       } : {
         error: hybridCall?.error || "not called"
-      }),
+      })
+    );
+    if (config.graph?.enabled !== false) {
+      nodes.push(workflowNode("graph_search", "Project Graph Search", "database", graphCall?.ok ? "done" : graphCall?.skipped ? "skipped" : "error", {
+        records_from_hybrid: countRows(hybridCall?.data)
+      }, graphCall?.ok || graphCall?.skipped ? {
+        relationships_returned: countRows(graphCall?.data),
+        sample: graphCall?.data || [],
+        skipped: graphCall?.skipped || false,
+        error: graphCall?.error || null
+      } : {
+        error: graphCall?.error || "not called"
+      }));
+    }
+    nodes.push(
       workflowNode("reranker", "OpenRouter Reranker", "ai", rerankerCall?.ok ? "done" : "error", {
         model: config.models.reranker,
         candidates: countRows(hybridCall?.data)
@@ -1068,6 +1232,8 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         message: sanitized,
         memory_messages: memory.length,
         retrieval_records: countRows(rerankerCall?.data || hybridCall?.data),
+        graph_relationships: countRows(graphCall?.data),
+        answer_mode: isEntityListQuestion(sanitized) ? "ranked_entity_list" : "standard_grounded_answer",
         tool_calls: n8nCalls.length
       }, {
         answer: result.answer,
@@ -1117,7 +1283,9 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
               ["knowledge_planner", "hybrid_search"]
             ]
           : [[result.investigationPlan ? "investigation" : alertRanInSafetyPrecheck ? "alert_agent" : classification.urgency === "HIGH" ? "safety_precheck" : "switch", "hybrid_search"]]),
-        ["hybrid_search", "reranker"],
+        ...(config.graph?.enabled === false
+          ? [["hybrid_search", "reranker"]]
+          : [["hybrid_search", "graph_search"], ["graph_search", "reranker"]]),
         ...(alertCall && !alertRanInSafetyPrecheck
           ? n8nCalls.length
             ? [["reranker", "alert_agent"], ["alert_agent", "n8n_tools"], ["n8n_tools", "source_quality"]]

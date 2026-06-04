@@ -10,7 +10,13 @@ export async function classifyMessage({ message, config }) {
   const content = await chatCompletion({
     apiKey: config.openRouterApiKey,
     model: config.models.classifier,
-    temperature: 0,
+    temperature: config.ai?.classifier?.temperature ?? 0,
+    maxTokens: config.ai?.classifier?.maxTokens ?? 900,
+    timeoutMs: config.ai?.classifier?.timeoutMs ?? 90_000,
+    topP: config.ai?.classifier?.topP ?? 1,
+    frequencyPenalty: config.ai?.classifier?.frequencyPenalty ?? 0,
+    presencePenalty: config.ai?.classifier?.presencePenalty ?? 0,
+    seed: config.ai?.classifier?.seed ?? null,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: message }

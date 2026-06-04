@@ -8,6 +8,31 @@ const ENV_FILES = [".env", ".env.local"];
 const DEFAULT_HYBRID_RPC_NAME = "hybrid_match_data_index_embeddings_gf_dor_agent";
 const DEFAULT_INDEX_TABLE = "data_index_embeddings_gf_dor_agent";
 const DEFAULT_ALERTS_TABLE = "alerts_embeddings_gf";
+const DEFAULT_AI_SETTINGS = {
+  classifier: { temperature: 0, maxTokens: 900, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
+  knowledgePlanner: { temperature: 0.1, maxTokens: 2200, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
+  main: { temperature: 0.2, maxTokens: 4096, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
+  lite: { temperature: 0.3, maxTokens: 1800, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
+  reranker: { temperature: 0, maxTokens: 4096, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
+  alert: { temperature: 0.1, maxTokens: 2200, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null }
+};
+const DEFAULT_RAG_SETTINGS = {
+  contextRecordsLimit: 12,
+  chunkTextLimit: 1800,
+  plannerExtraQueriesLimit: 2
+};
+const DEFAULT_GRAPH_SETTINGS = {
+  enabled: true,
+  searchLimit: 30,
+  contextLimit: 12,
+  expandedForListQuestions: true
+};
+const DEFAULT_TOOL_RUNTIME_SETTINGS = {
+  enabled: true,
+  parallelLimit: 6,
+  alertAgentEnabled: true,
+  safetyPrecheckEnabled: true
+};
 
 // ---------------------------------------------------------------------------
 // Supabase persistence for settings
@@ -138,14 +163,18 @@ async function loadSettingsFromDb() {
 // defaults — causing bugs like the classifier always returning "CHAT".
 // After this migration, only user-customised (non-default) prompts are stored.
 // ---------------------------------------------------------------------------
-const PROMPTS_MIGRATION_FLAG = "__prompts_clean_v1";
+const PROMPTS_MIGRATION_FLAG = "__prompts_clean_v2";
 
 async function migratePromptsIfNeeded() {
   if (_settingsCache[PROMPTS_MIGRATION_FLAG]) return; // already migrated
   console.log("[config] Running one-time prompts migration: clearing stale stored defaults…");
+  const prompts = { ...(_settingsCache.prompts || {}) };
+  for (const key of stalePromptKeys(prompts)) {
+    delete prompts[key];
+  }
   _settingsCache = {
     ..._settingsCache,
-    prompts: {}, // wipe all stored prompts → getConfig() will use fresh defaults
+    prompts,
     [PROMPTS_MIGRATION_FLAG]: true
   };
   _settingsCachedAt = Date.now();
@@ -155,6 +184,23 @@ async function migratePromptsIfNeeded() {
     body: JSON.stringify({ id: "default", data: _settingsCache, updated_at: new Date().toISOString() })
   }, "write");
   console.log("[config] Prompts migration complete.");
+}
+
+function stalePromptKeys(prompts = {}) {
+  const stale = [];
+  const classifier = String(prompts.classifier || "");
+  const main = String(prompts.main || "");
+  const reranker = String(prompts.reranker || "");
+  if (classifier && classifier.includes("You are a Senior Project Manager Assistant") && !classifier.includes("Do NOT invent broad tags")) {
+    stale.push("classifier");
+  }
+  if (main && main.includes("You are RAG-PM") && !main.includes("Project delay interpretation")) {
+    stale.push("main");
+  }
+  if (reranker && reranker.includes("You are a strict RAG reranker") && !reranker.includes("construction-project RAG reranker")) {
+    stale.push("reranker");
+  }
+  return stale;
 }
 
 export async function initSettings() {
@@ -248,12 +294,19 @@ export function getConfig() {
       vectorWeight: Number(settings.retrieval?.vectorWeight || process.env.HYBRID_VECTOR_WEIGHT || 0.65),
       keywordWeight: Number(settings.retrieval?.keywordWeight || process.env.HYBRID_KEYWORD_WEIGHT || 0.35)
     },
+    ai: normalizeAiSettings(settings.ai),
+    rag: normalizeRagSettings(settings.rag),
+    graph: normalizeGraphSettings(settings.graph),
     knowledge: {
-      triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS)
+      triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS),
+      agentLimit: clampNumber(settings.knowledge?.agentLimit, 1, 5, 2),
+      topK: clampNumber(settings.knowledge?.topK, 1, 20, 4),
+      chunkSize: clampNumber(settings.knowledge?.chunkSize, 300, 6000, 1800)
     },
     timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks),
     n8n: {
       baseUrl: trimSlash(settings.n8nBaseUrl || process.env.N8N_BASE_URL || ""),
+      runtime: normalizeToolRuntimeSettings(settings.toolsRuntime || settings.toolRuntime),
       tools: Object.fromEntries(
         TOOL_NAMES.map((tool) => [tool, toolSettings[tool] || process.env[`N8N_TOOL_${tool.toUpperCase()}_URL`] || ""])
       )
@@ -267,6 +320,9 @@ export function publicSettings(config = getConfig()) {
   return {
     models: config.models,
     retrieval: config.retrieval,
+    ai: config.ai,
+    rag: config.rag,
+    graph: config.graph,
     knowledge: config.knowledge,
     timelineLinks: config.timelineLinks,
     contentSource: {
@@ -279,6 +335,7 @@ export function publicSettings(config = getConfig()) {
     contentSupabaseConfigured: Boolean(config.contentSource.supabaseUrl && config.contentSource.supabaseServiceRoleKey),
     openRouterConfigured: Boolean(config.openRouterApiKey),
     n8nBaseUrl: config.n8n.baseUrl,
+    toolsRuntime: config.n8n.runtime,
     secrets: {
       openRouterApiKey: maskSecret(config.openRouterApiKey),
       supabaseUrl: config.supabaseUrl,
@@ -328,6 +385,53 @@ function normalizeStringList(value, fallback = []) {
   return [...new Set(raw.map((item) => String(item || "").trim()).filter(Boolean))];
 }
 
+function normalizeAiSettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  return Object.fromEntries(
+    Object.entries(DEFAULT_AI_SETTINGS).map(([key, defaults]) => {
+      const item = raw[key] && typeof raw[key] === "object" ? raw[key] : {};
+      return [key, {
+        temperature: clampNumber(item.temperature, 0, 2, defaults.temperature),
+        maxTokens: clampNumber(item.maxTokens, 16, 32_000, defaults.maxTokens),
+        timeoutMs: clampNumber(item.timeoutMs, 5_000, 180_000, defaults.timeoutMs),
+        topP: clampNumber(item.topP, 0, 1, defaults.topP),
+        frequencyPenalty: clampNumber(item.frequencyPenalty, -2, 2, defaults.frequencyPenalty),
+        presencePenalty: clampNumber(item.presencePenalty, -2, 2, defaults.presencePenalty),
+        seed: optionalInteger(item.seed)
+      }];
+    })
+  );
+}
+
+function normalizeRagSettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    contextRecordsLimit: clampNumber(raw.contextRecordsLimit, 1, 50, DEFAULT_RAG_SETTINGS.contextRecordsLimit),
+    chunkTextLimit: clampNumber(raw.chunkTextLimit, 300, 6000, DEFAULT_RAG_SETTINGS.chunkTextLimit),
+    plannerExtraQueriesLimit: clampNumber(raw.plannerExtraQueriesLimit, 0, 6, DEFAULT_RAG_SETTINGS.plannerExtraQueriesLimit)
+  };
+}
+
+function normalizeGraphSettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    enabled: raw.enabled !== false,
+    searchLimit: clampNumber(raw.searchLimit, 1, 100, DEFAULT_GRAPH_SETTINGS.searchLimit),
+    contextLimit: clampNumber(raw.contextLimit, 1, 50, DEFAULT_GRAPH_SETTINGS.contextLimit),
+    expandedForListQuestions: raw.expandedForListQuestions !== false
+  };
+}
+
+function normalizeToolRuntimeSettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    enabled: raw.enabled !== false,
+    parallelLimit: clampNumber(raw.parallelLimit, 1, 20, DEFAULT_TOOL_RUNTIME_SETTINGS.parallelLimit),
+    alertAgentEnabled: raw.alertAgentEnabled !== false,
+    safetyPrecheckEnabled: raw.safetyPrecheckEnabled !== false
+  };
+}
+
 function normalizeTimelineLinkAgentSettings(value = {}) {
   const raw = value && typeof value === "object" ? value : {};
   return {
@@ -353,6 +457,9 @@ export function exportFullSettings(config = getConfig()) {
       models: config.models,
       prompts: settings.prompts || {},
       retrieval: config.retrieval,
+      ai: config.ai,
+      rag: config.rag,
+      graph: config.graph,
       knowledge: config.knowledge,
       timelineLinks: config.timelineLinks,
       contentSource: {
@@ -371,6 +478,7 @@ export function exportFullSettings(config = getConfig()) {
       n8nBaseUrl: config.n8n.baseUrl,
       timezone: config.timezone,
       tools: Object.fromEntries(TOOL_NAMES.map((tool) => [tool, resolveToolUrl(tool, config)])),
+      toolsRuntime: config.n8n.runtime,
       subagents: settings.subagents || {}
     }
   };
@@ -385,6 +493,9 @@ export function normalizeImportedSettingsFile(value = {}) {
     models: raw.models || {},
     prompts: raw.prompts || {},
     retrieval: raw.retrieval || {},
+    ai: raw.ai || {},
+    rag: raw.rag || {},
+    graph: raw.graph || {},
     knowledge: raw.knowledge || {},
     timelineLinks: raw.timelineLinks || {},
     contentSource: raw.contentSource || {},
@@ -392,6 +503,7 @@ export function normalizeImportedSettingsFile(value = {}) {
     n8nBaseUrl: raw.n8nBaseUrl || "",
     timezone: raw.timezone || "UTC+0",
     tools: raw.tools || {},
+    toolsRuntime: raw.toolsRuntime || raw.toolRuntime || {},
     subagents: raw.subagents || {}
   };
 }
@@ -421,6 +533,12 @@ function clampNumber(value, min, max, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
+}
+
+function optionalInteger(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isInteger(number) ? number : null;
 }
 
 export function readLocalSettings() {
@@ -460,6 +578,9 @@ export async function writeLocalSettings(settings) {
       vectorWeight: Number(settings.retrieval?.vectorWeight || existing.retrieval?.vectorWeight || 0.65),
       keywordWeight: Number(settings.retrieval?.keywordWeight || existing.retrieval?.keywordWeight || 0.35)
     },
+    ai: normalizeAiSettings(settings.ai || existing.ai),
+    rag: normalizeRagSettings(settings.rag || existing.rag),
+    graph: normalizeGraphSettings(settings.graph || existing.graph),
     contentSource: {
       supabaseUrl: incomingContentSource.supabaseUrl || existingContentSource.supabaseUrl || "",
       supabaseServiceRoleKey: mergeSecret(existingContentSource.supabaseServiceRoleKey, incomingContentSource.supabaseServiceRoleKey),
@@ -469,7 +590,10 @@ export async function writeLocalSettings(settings) {
       alertsRpcName: incomingContentSource.alertsRpcName || existingContentSource.alertsRpcName || `match_${incomingContentSource.alertsTable || existingContentSource.alertsTable || DEFAULT_ALERTS_TABLE}`
     },
     knowledge: {
-      triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, existing.knowledge?.triggerKeywords || DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS)
+      triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, existing.knowledge?.triggerKeywords || DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS),
+      agentLimit: clampNumber(settings.knowledge?.agentLimit ?? existing.knowledge?.agentLimit, 1, 5, 2),
+      topK: clampNumber(settings.knowledge?.topK ?? existing.knowledge?.topK, 1, 20, 4),
+      chunkSize: clampNumber(settings.knowledge?.chunkSize ?? existing.knowledge?.chunkSize, 300, 6000, 1800)
     },
     timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks || existing.timelineLinks),
     n8nBaseUrl: settings.n8nBaseUrl || "",
@@ -481,6 +605,7 @@ export async function writeLocalSettings(settings) {
     tools: Object.fromEntries(
       TOOL_NAMES.map((tool) => [tool, settings.tools?.[tool] || ""])
     ),
+    toolsRuntime: normalizeToolRuntimeSettings(settings.toolsRuntime || existing.toolsRuntime || settings.toolRuntime || existing.toolRuntime),
     timezone: settings.timezone || existing.timezone || "UTC+0",
     subagents: settings.subagents || existing.subagents || {}
   };

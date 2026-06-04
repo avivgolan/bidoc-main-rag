@@ -9,9 +9,11 @@ import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../s
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { exportFullSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, resolveSecret, supabaseHeaders, supabaseKeyRole } from "../src/config.js";
-import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, saveMessage } from "../src/supabase.js";
+import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, projectGraphResponse, saveMessage } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
+import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "../src/projectGraph.js";
+import { chatCompletion } from "../src/openrouter.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -366,6 +368,59 @@ test("settings import accepts wrapped and raw settings files", () => {
   assert.deepEqual(raw.models, {});
 });
 
+test("settings import preserves advanced AI controls", () => {
+  const wrapped = normalizeImportedSettingsFile({
+    settings: {
+      ai: { main: { temperature: 0.4, maxTokens: 3000, timeoutMs: 45000 } },
+      rag: { contextRecordsLimit: 18, chunkTextLimit: 1200, plannerExtraQueriesLimit: 1 },
+      graph: { enabled: false, searchLimit: 15, contextLimit: 6, expandedForListQuestions: false },
+      knowledge: { triggerKeywords: ["delay"], agentLimit: 3, topK: 5, chunkSize: 1400 },
+      toolsRuntime: { enabled: false, parallelLimit: 2, alertAgentEnabled: false, safetyPrecheckEnabled: false }
+    }
+  });
+  assert.equal(wrapped.ai.main.temperature, 0.4);
+  assert.equal(wrapped.rag.contextRecordsLimit, 18);
+  assert.equal(wrapped.graph.enabled, false);
+  assert.equal(wrapped.knowledge.chunkSize, 1400);
+  assert.equal(wrapped.toolsRuntime.parallelLimit, 2);
+});
+
+test("chatCompletion forwards advanced model settings to OpenRouter", async () => {
+  const previousFetch = global.fetch;
+  let captured;
+  global.fetch = async (url, options) => {
+    captured = { url, options };
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: "ok" } }] })
+    };
+  };
+  try {
+    const answer = await chatCompletion({
+      apiKey: "sk-test",
+      model: "openai/gpt-4o-mini",
+      messages: [{ role: "user", content: "hello" }],
+      temperature: 0.42,
+      maxTokens: 1234,
+      timeoutMs: 12_000,
+      topP: 0.8,
+      frequencyPenalty: 0.2,
+      presencePenalty: 0.1,
+      seed: 77
+    });
+    assert.equal(answer, "ok");
+    const body = JSON.parse(captured.options.body);
+    assert.equal(body.temperature, 0.42);
+    assert.equal(body.max_tokens, 1234);
+    assert.equal(body.top_p, 0.8);
+    assert.equal(body.frequency_penalty, 0.2);
+    assert.equal(body.presence_penalty, 0.1);
+    assert.equal(body.seed, 77);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("hybridSearch uses Content Supabase while app persistence uses App Supabase", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
@@ -686,6 +741,111 @@ test("timeline graph scorer can use persisted event entities", () => {
   });
   assert.ok(score.graphScore > 0);
   assert.equal(score.graphSharedEntities[0].name, "facade");
+});
+
+test("project graph builds nodes and edges from data_index records", () => {
+  const rows = buildGraphRowsFromRecords([{
+    id: 101,
+    source_table: "data_index",
+    source_id: "mail-101",
+    title: "Delay risk from supplier",
+    summary: "Supplier ACME Construction reported a blocker and delay for quote Q-42.",
+    hashtags: ["עיכובים", "חשמל"],
+    metadata: {
+      vendor_name: "ACME Construction",
+      people: "Dana Levi, Ron Cohen",
+      category: "Procurement",
+      item_status: "open",
+      document_filename: "meeting.pdf",
+      mentioned_dates: ["2026-06-07"]
+    },
+    primary_date: "2026-06-01T00:00:00Z",
+    source_url: "https://example.test/doc"
+  }]);
+  assert.ok(rows.nodes.some((node) => node.id === "data_index:mail-101" && node.node_type === "event"));
+  assert.ok(rows.nodes.some((node) => node.node_type === "topic" && node.metadata.entity_kind === "hashtag"));
+  assert.ok(rows.nodes.some((node) => node.node_type === "supplier" && node.metadata.entity_kind === "vendor"));
+  assert.ok(rows.nodes.some((node) => node.node_type === "person" && node.label === "Dana Levi"));
+  assert.ok(rows.nodes.some((node) => node.node_type === "document" && node.metadata.entity_kind === "document"));
+  assert.ok(rows.nodes.some((node) => node.node_type === "topic" && node.label === "עיכובים"));
+  assert.ok(rows.nodes.some((node) => node.node_type === "risk"));
+  assert.ok(rows.edges.some((edge) => edge.from_node_id === "data_index:mail-101" && edge.edge_type === "mentions"));
+  assert.ok(rows.edges.some((edge) => edge.from_node_id === "data_index:mail-101" && edge.metadata.edge_kind === "has_hashtag"));
+  assert.ok(rows.edges.some((edge) => edge.from_node_id === "data_index:mail-101" && edge.metadata.edge_kind === "has_vendor"));
+});
+
+test("project graph builds alert source nodes", () => {
+  const rows = buildGraphRowsFromRecords([{
+    id: "alert_7",
+    source: "alert",
+    alert_type: "schedule",
+    alert_description: "חסם ביצוע בגלל סיכון תלות בספק",
+    hashtags: ["חסמים"],
+    data_date: "2026-06-02T00:00:00Z"
+  }]);
+  assert.ok(rows.nodes.some((node) => node.id === "alerts:7" && node.node_type === "alert"));
+  assert.ok(rows.edges.some((edge) => edge.from_node_id === "alerts:7"));
+});
+
+test("project graph search payload and summary keep relationship context compact", () => {
+  const payload = buildGraphSearchPayload({
+    query: "עיכובים",
+    records: [{ id: "55", source_table: "data_index", summary: "עיכוב בגלל ספק" }],
+    maxRows: 5
+  });
+  assert.deepEqual(payload.source_refs[0], { node_id: "data_index:55", source_table: "data_index", source_id: "55" });
+  const summary = summarizeGraphContext({
+    results: [{
+      edge_type: "mentions",
+      confidence: 0.8,
+      evidence_text: "shared supplier",
+      source_node: { id: "data_index:55", label: "Event 55" },
+      target_node: { id: "topic:delay", label: "delay" }
+    }]
+  });
+  assert.equal(summary[0].source, "Event 55");
+  assert.equal(summary[0].target, "delay");
+});
+
+test("project graph response returns cytoscape-ready nodes, edges and stats", () => {
+  const graph = projectGraphResponse([{
+    id: "edge-1",
+    edge_type: "mentions",
+    confidence: 0.8,
+    weight: 0.7,
+    evidence_text: "shared delay topic",
+    metadata: { edge_kind: "has_hashtag" },
+    from_node: { id: "data_index:1", node_type: "event", label: "Event 1", normalized_label: "event 1" },
+    to_node: { id: "hashtag:delay", node_type: "topic", label: "delay", normalized_label: "delay", metadata: { entity_kind: "hashtag" } }
+  }]);
+  assert.equal(graph.nodes.length, 2);
+  assert.equal(graph.edges.length, 1);
+  assert.equal(graph.edges[0].source, "data_index:1");
+  assert.equal(graph.edges[0].edge_kind, "has_hashtag");
+  assert.equal(graph.stats.entityKinds.find((item) => item.name === "hashtag").count, 1);
+});
+
+test("project graph response filters by node type and query", () => {
+  const rows = [
+    {
+      id: "edge-1",
+      edge_type: "mentions",
+      confidence: 0.8,
+      from_node: { id: "event:1", node_type: "event", label: "Schedule delay", normalized_label: "schedule delay" },
+      to_node: { id: "hashtag:delay", node_type: "topic", label: "delay", normalized_label: "delay", metadata: { entity_kind: "hashtag" } }
+    },
+    {
+      id: "edge-2",
+      edge_type: "mentions",
+      confidence: 0.6,
+      from_node: { id: "alert:2", node_type: "alert", label: "Safety", normalized_label: "safety" },
+      to_node: { id: "risk:safety", node_type: "risk", label: "safety", normalized_label: "safety" }
+    }
+  ];
+  const graph = projectGraphResponse(rows, { nodeType: "risk", query: "safety" });
+  assert.equal(graph.edges.length, 1);
+  assert.ok(graph.nodes.some((node) => node.node_type === "risk"));
+  assert.ok(!graph.nodes.some((node) => node.label === "delay"));
 });
 
 let failed = 0;

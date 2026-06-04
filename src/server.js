@@ -7,7 +7,7 @@ import { exportFullSettings, getConfig, initSettings, loadEnv, normalizeImported
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, hybridSearch, listDislikedMessages, listMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, upsertTimelineGraphData } from "./supabase.js";
+import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, graphSearch, hybridSearch, listDislikedMessages, listMessages, listProjectGraph, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
@@ -15,6 +15,7 @@ import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
+import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 
 loadEnv();
 
@@ -142,6 +143,17 @@ async function handleApi(req, res, url) {
     });
   }
 
+  if (req.method === "GET" && url.pathname === "/api/graph") {
+    const graph = await listProjectGraph({
+      config: config(),
+      limit: Number(url.searchParams.get("limit") || 300),
+      nodeType: url.searchParams.get("nodeType") || "",
+      edgeType: url.searchParams.get("edgeType") || "",
+      query: url.searchParams.get("q") || ""
+    });
+    return sendJson(res, 200, graph);
+  }
+
   const messagesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/);
   if (req.method === "GET" && messagesMatch) {
     const messages = await listMessages({ config: config(), sessionId: decodeURIComponent(messagesMatch[1]) }).catch(() => []);
@@ -228,12 +240,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "PUT" && url.pathname === "/api/agents") {
-    const body = await readJson(req);
-    const prompts = body.prompts || {};
-    const models = body.models || {};
-    const current = readLocalSettings();
-    await writeLocalSettings({ ...current, prompts, models: { ...(current.models || {}), ...models } });
-    return sendJson(res, 200, { agents: buildAgentList(config()) });
+    return sendJson(res, 405, { error: "Agents are read-only. Save chat models and prompts through /api/settings." });
   }
 
   if (req.method === "PUT" && url.pathname === "/api/settings") {
@@ -371,6 +378,21 @@ async function handleApi(req, res, url) {
     const graphScorer = createTimelineGraphScorer({ eventEntities: graphData.eventEntities || [], source });
     trace.push(timelineLinkTrace("graph_scorer", "נבנה scorer מהגרף", { persistedEventEntities: graphData.eventEntities?.length || 0 }));
     emitTimelineLinkRun(runId, trace.at(-1));
+    const projectGraphPayload = buildGraphSearchPayload({
+      query: focusEventId || source,
+      records: focusEventId ? events.filter((event) => String(event.id) === focusEventId) : events.slice(0, 50),
+      maxRows: 30
+    });
+    const projectGraph = await graphSearch({ config: config(), payload: projectGraphPayload, limit: 30 })
+      .catch((error) => ({ skipped: true, error: error.message, results: [] }));
+    const projectGraphContext = summarizeGraphContext(projectGraph, 12);
+    trace.push(timelineLinkTrace("project_graph_search", "Project Graph Search checked", {
+      sourceRefs: projectGraphPayload.source_refs.length,
+      relationships: projectGraphContext.length,
+      skipped: Boolean(projectGraph.skipped),
+      error: projectGraph.error || null
+    }, projectGraph.error ? "error" : "done"));
+    emitTimelineLinkRun(runId, trace.at(-1));
     const baseSuggestions = buildTimelineLinkSuggestions({
       events,
       links,
@@ -459,7 +481,9 @@ async function handleApi(req, res, url) {
       : await fetchTimelineEvents({ config: config() }).catch(() => []);
     const rows = buildEntityGraphRowsForEvents(events, source);
     const saved = await upsertTimelineGraphData({ config: config(), entities: rows.entities, eventEntities: rows.eventEntities });
-    return sendJson(res, 200, { ok: true, source, events: events.length, ...saved });
+    const projectRows = buildGraphRowsFromRecords(events, { defaultSource: source === "alerts" ? "alerts" : config().contentSource?.indexTable || "data_index" });
+    const projectSaved = await upsertProjectGraphData({ config: config(), nodes: projectRows.nodes, edges: projectRows.edges }).catch((error) => ({ nodes: 0, edges: 0, error: error.message }));
+    return sendJson(res, 200, { ok: true, source, events: events.length, ...saved, projectGraph: projectSaved });
   }
 
   if (req.method === "POST" && url.pathname === "/api/timeline/links") {

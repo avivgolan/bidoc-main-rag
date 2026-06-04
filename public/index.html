@@ -79,6 +79,12 @@
             </span>
             <span class="tabLabel">ציר זמן</span>
           </button>
+          <button class="tab" data-tab="graph">
+            <span class="tabIcon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="M8.6 7.5 10.7 15"/><path d="M15.4 7.5 13.3 15"/><path d="M9 6h6"/></svg>
+            </span>
+            <span class="tabLabel">גרף</span>
+          </button>
           <button class="tab" data-tab="linkAgent">
             <span class="tabIcon">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.43"/><path d="M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.33-1.33"/></svg>
@@ -134,14 +140,9 @@
         <header class="panelHeader">
           <div>
             <h2>סוכנים</h2>
-            <p class="hint">איזה סוכן פעיל בזמן בקשה, ומה הפרומפט שמפעיל אותו.</p>
-          </div>
-          <div class="headerActions">
-            <button id="refreshModels" type="button">רענן מודלים</button>
-            <button id="saveAgents" type="button">שמור סוכנים</button>
+            <p class="hint">תצוגת ניטור בלבד: איזה סוכן פעיל בזמן בקשה, באיזה מודל הוא משתמש, ומה הפרומפט שמפעיל אותו. עריכה מתבצעת בעמוד ההגדרות.</p>
           </div>
         </header>
-        <p class="hint" id="modelListStatus">טוען רשימת מודלים מ-OpenRouter...</p>
         <div class="agentGrid" id="agentGrid"></div>
       </section>
 
@@ -286,6 +287,16 @@
         <p class="hint">המפתחות נשמרים בטבלת Supabase <code style="background:var(--surface-3);padding:1px 5px;border-radius:4px;font-size:12.5px;">agent_settings</code>. השאר שדות ריקים כדי לשמור את הערכים הקיימים.</p>
         <div class="settingsSourceStatus" id="settingsSourceStatus">טוען סטטוס הגדרות...</div>
 
+        <section class="settingsGroup" id="chatSettingsSection">
+        <header class="settingsGroupHeader">
+          <div>
+            <h3>צ׳אט</h3>
+            <p class="hint">כל מה שמשפיע על תשובות הצ׳אט: מודלים, פרומפטים, RAG, מקור התוכן, אוצר מונחים ואזור זמן.</p>
+          </div>
+          <button id="refreshModels" type="button">רענן מודלים</button>
+        </header>
+        <p class="hint" id="modelListStatus">טוען רשימת מודלים מ-OpenRouter...</p>
+
         <h3>Content Supabase</h3>
         <div class="grid">
           <label class="wide">Content Supabase URL
@@ -309,28 +320,152 @@
         </div>
         <p class="hint">Content Supabase משמש רק לשליפת תוכן: RAG, timeline, alerts וסוכן ההתראות. אם URL או Key ריקים, המערכת תשתמש ב-App Supabase הקיים.</p>
 
-        <h3>מודלים</h3>
-        <div class="grid">
-          <label>Classifier
-            <select id="modelClassifier"></select>
-          </label>
-          <label>Knowledge Planner
-            <select id="modelKnowledgePlanner"></select>
-          </label>
-          <label>Main
-            <select id="modelMain"></select>
-          </label>
-          <label>Lite
-            <select id="modelLite"></select>
-          </label>
+        <h3>סוכני צ׳אט</h3>
+        <div class="chatAgentSettingsGrid">
+          <article class="chatAgentSettingsCard">
+            <header>
+              <strong>Classifier</strong>
+              <span>ניתוב וסיווג השאלה</span>
+            </header>
+            <label>מודל
+              <select id="modelClassifier"></select>
+            </label>
+            <label>פרומפט
+              <textarea id="chatPrompt_classifier" rows="9" spellcheck="false"></textarea>
+            </label>
+            <details class="advancedSettings">
+              <summary>הגדרות מודל</summary>
+              <div class="grid compactSettingsGrid">
+                <label>Temperature
+                  <input id="ai_classifier_temperature" type="number" min="0" max="2" step="0.05" />
+                </label>
+                <label>Max Output Tokens
+                  <input id="ai_classifier_maxTokens" type="number" min="16" max="32000" step="50" />
+                </label>
+                <label>Request Timeout (ms)
+                  <input id="ai_classifier_timeoutMs" type="number" min="5000" max="180000" step="1000" />
+                </label>
+              </div>
+              <p class="hint">שולט כמה הסיווג יהיה יציב וכמה זמן נחכה לתשובה.</p>
+            </details>
+          </article>
+
+          <article class="chatAgentSettingsCard">
+            <header>
+              <strong>Knowledge Planner</strong>
+              <span>תכנון חיפוש ידע מקומי</span>
+            </header>
+            <label>מודל
+              <select id="modelKnowledgePlanner"></select>
+            </label>
+            <label>פרומפט
+              <textarea id="chatPrompt_knowledge_planner" rows="9" spellcheck="false"></textarea>
+            </label>
+            <details class="advancedSettings">
+              <summary>הגדרות מודל</summary>
+              <div class="grid compactSettingsGrid">
+                <label>Temperature
+                  <input id="ai_knowledgePlanner_temperature" type="number" min="0" max="2" step="0.05" />
+                </label>
+                <label>Max Output Tokens
+                  <input id="ai_knowledgePlanner_maxTokens" type="number" min="16" max="32000" step="50" />
+                </label>
+                <label>Request Timeout (ms)
+                  <input id="ai_knowledgePlanner_timeoutMs" type="number" min="5000" max="180000" step="1000" />
+                </label>
+              </div>
+              <p class="hint">שולט כמה רחבה תהיה תוכנית החיפוש המקצועית.</p>
+            </details>
+          </article>
+
+          <article class="chatAgentSettingsCard wide">
+            <header>
+              <strong>Main</strong>
+              <span>תשובת הצ׳אט הראשית</span>
+            </header>
+            <label>מודל
+              <select id="modelMain"></select>
+            </label>
+            <label>פרומפט
+              <textarea id="chatPrompt_main" rows="12" spellcheck="false"></textarea>
+            </label>
+            <details class="advancedSettings">
+              <summary>הגדרות מודל</summary>
+              <div class="grid compactSettingsGrid">
+                <label>Temperature
+                  <input id="ai_main_temperature" type="number" min="0" max="2" step="0.05" />
+                </label>
+                <label>Max Output Tokens
+                  <input id="ai_main_maxTokens" type="number" min="16" max="32000" step="50" />
+                </label>
+                <label>Request Timeout (ms)
+                  <input id="ai_main_timeoutMs" type="number" min="5000" max="180000" step="1000" />
+                </label>
+              </div>
+              <p class="hint">שולט ביצירת התשובה הסופית: יציבות, אורך וזמן המתנה.</p>
+            </details>
+          </article>
+
+          <article class="chatAgentSettingsCard">
+            <header>
+              <strong>Lite</strong>
+              <span>משימות קצרות ועזר</span>
+            </header>
+            <label>מודל
+              <select id="modelLite"></select>
+            </label>
+            <label>פרומפט
+              <textarea id="chatPrompt_lite" rows="7" spellcheck="false"></textarea>
+            </label>
+            <details class="advancedSettings">
+              <summary>הגדרות מודל</summary>
+              <div class="grid compactSettingsGrid">
+                <label>Temperature
+                  <input id="ai_lite_temperature" type="number" min="0" max="2" step="0.05" />
+                </label>
+                <label>Max Output Tokens
+                  <input id="ai_lite_maxTokens" type="number" min="16" max="32000" step="50" />
+                </label>
+                <label>Request Timeout (ms)
+                  <input id="ai_lite_timeoutMs" type="number" min="5000" max="180000" step="1000" />
+                </label>
+              </div>
+              <p class="hint">שולט בתשובות קצרות ושיחות בלי RAG.</p>
+            </details>
+          </article>
+
+          <article class="chatAgentSettingsCard">
+            <header>
+              <strong>Reranker</strong>
+              <span>דירוג מקורות לפני תשובה</span>
+            </header>
+            <label>מודל
+              <select id="modelReranker"></select>
+            </label>
+            <label>פרומפט
+              <textarea id="chatPrompt_reranker" rows="9" spellcheck="false"></textarea>
+            </label>
+            <details class="advancedSettings">
+              <summary>הגדרות מודל</summary>
+              <div class="grid compactSettingsGrid">
+                <label>Temperature
+                  <input id="ai_reranker_temperature" type="number" min="0" max="2" step="0.05" />
+                </label>
+                <label>Max Output Tokens
+                  <input id="ai_reranker_maxTokens" type="number" min="16" max="32000" step="50" />
+                </label>
+                <label>Request Timeout (ms)
+                  <input id="ai_reranker_timeoutMs" type="number" min="5000" max="180000" step="1000" />
+                </label>
+              </div>
+              <p class="hint">שולט בדירוג המקורות לפני שהם נכנסים לתשובה.</p>
+            </details>
+          </article>
+        </div>
+
+        <div class="grid compactSettingsGrid">
           <label>Embedding
             <select id="modelEmbedding"></select>
-          </label>
-          <label>Reranker
-            <select id="modelReranker"></select>
-          </label>
-          <label class="wide">N8N Base URL
-            <input id="n8nBaseUrl" placeholder="https://..." />
           </label>
         </div>
 
@@ -396,7 +531,98 @@
           </label>
         </div>
 
+        <details class="advancedSettings">
+          <summary>RAG Context Budget</summary>
+          <div class="grid compactSettingsGrid">
+            <label>Context Records Limit
+              <input id="ragContextRecordsLimit" type="number" min="1" max="50" />
+            </label>
+            <label>Chunk Text Limit
+              <input id="ragChunkTextLimit" type="number" min="300" max="6000" step="100" />
+            </label>
+            <label>Planner Extra Queries Limit
+              <input id="ragPlannerExtraQueriesLimit" type="number" min="0" max="6" />
+            </label>
+          </div>
+          <p class="hint">קובע כמה מקורות וכמה טקסט מכל מקור נכנסים בפועל לתשובת ה-AI.</p>
+        </details>
+
+        <details class="advancedSettings">
+          <summary>Graph Context</summary>
+          <div class="grid compactSettingsGrid">
+            <label>Graph Search Limit
+              <input id="graphSearchLimit" type="number" min="1" max="100" />
+            </label>
+            <label>Graph Context Limit
+              <input id="graphContextLimit" type="number" min="1" max="50" />
+            </label>
+            <label class="toggleLabel">
+              <input id="graphEnabled" type="checkbox" />
+              להשתמש בגרף בתשובות צ׳אט
+            </label>
+            <label class="toggleLabel">
+              <input id="graphExpandedForListQuestions" type="checkbox" />
+              להרחיב גרף בשאלות רשימה/חקירה
+            </label>
+          </div>
+          <p class="hint">קובע האם וכמה קשרים מהגרף ייכנסו לשאלות RAG.</p>
+        </details>
+
+        <details class="advancedSettings">
+          <summary>Knowledge Base</summary>
+          <div class="grid compactSettingsGrid">
+            <label>Knowledge Agent Limit
+              <input id="knowledgeAgentLimit" type="number" min="1" max="5" />
+            </label>
+            <label>Knowledge Top K
+              <input id="knowledgeTopKSetting" type="number" min="1" max="20" />
+            </label>
+            <label>Knowledge Chunk Size
+              <input id="knowledgeChunkSize" type="number" min="300" max="6000" step="100" />
+            </label>
+          </div>
+          <p class="hint">קובע כמה קטעי ידע מקומי ייכנסו לתכנון החיפוש המקצועי.</p>
+        </details>
+
+        <details class="advancedSettings">
+          <summary>Performance & Tools</summary>
+          <div class="grid compactSettingsGrid">
+            <label>Parallel Tool Calls Limit
+              <input id="toolsParallelLimit" type="number" min="1" max="20" />
+            </label>
+            <label>Alert Agent Temperature
+              <input id="ai_alert_temperature" type="number" min="0" max="2" step="0.05" />
+            </label>
+            <label>Alert Agent Max Tokens
+              <input id="ai_alert_maxTokens" type="number" min="16" max="32000" step="50" />
+            </label>
+            <label>Alert Agent Timeout (ms)
+              <input id="ai_alert_timeoutMs" type="number" min="5000" max="180000" step="1000" />
+            </label>
+            <label class="toggleLabel">
+              <input id="toolsEnabled" type="checkbox" />
+              להפעיל כלי N8N
+            </label>
+            <label class="toggleLabel">
+              <input id="toolsAlertAgentEnabled" type="checkbox" />
+              להפעיל Alert Agent
+            </label>
+            <label class="toggleLabel">
+              <input id="toolsSafetyPrecheckEnabled" type="checkbox" />
+              להפעיל בדיקת בטיחות מוקדמת
+            </label>
+          </div>
+          <p class="hint">שולט בהפעלת כלים חיצוניים וסוכן ההתראות, בלי לשנות את כתובות ה-webhooks.</p>
+        </details>
+        </section>
+
         <h3>כתובות Webhook לכלים</h3>
+        <div class="grid compactSettingsGrid">
+          <label class="wide">N8N Base URL
+            <input id="n8nBaseUrl" placeholder="https://your-n8n-domain.com" />
+          </label>
+        </div>
+        <p class="hint">כאן מעבירים את כתובת הבסיס של שרת N8N שמריץ את ה-webhooks של הכלים. למשל: <code style="background:var(--surface-3);padding:1px 5px;border-radius:4px;font-size:12.5px;">https://n8n.your-domain.com</code>. אם הכלים מוגדרים עם כתובות מלאות או שאין שימוש ב-N8N, אפשר להשאיר ריק.</p>
         <div class="toolSettings" id="toolSettings"></div>
         <p class="hint">מפתחות API נשמרים בקבצי <code style="background:var(--surface-3);padding:1px 5px;border-radius:4px;font-size:12.5px;">.env</code> בלבד ואינם מוצגים כאן.</p>
       </section>
@@ -505,6 +731,75 @@
           </div>
         </div>
         <div class="timelineContainer" id="timelineContainer">טוען...</div>
+      </section>
+
+      <!-- ======================================================
+           PROJECT GRAPH
+           ====================================================== -->
+      <section class="panel" id="graph">
+        <header class="panelHeader">
+          <div>
+            <h2>גרף</h2>
+            <p class="hint" id="graphSummary">טוען קשרים...</p>
+          </div>
+          <div class="headerActions">
+            <button id="refreshGraph" type="button">רענן</button>
+          </div>
+        </header>
+
+        <div class="graphToolbar">
+          <label>חיפוש
+            <input id="graphQuery" type="search" placeholder="עיכוב, risk, supplier..." />
+          </label>
+          <label>Node Type
+            <select id="graphNodeType">
+              <option value="">הכל</option>
+              <option value="event">event</option>
+              <option value="alert">alert</option>
+              <option value="hashtag">hashtag</option>
+              <option value="vendor">vendor</option>
+              <option value="person">person</option>
+              <option value="document">document</option>
+              <option value="attachment">attachment</option>
+              <option value="email">email</option>
+              <option value="date">date</option>
+              <option value="category">category</option>
+              <option value="status">status</option>
+              <option value="source_table">source table</option>
+              <option value="risk">risk</option>
+              <option value="quote">quote</option>
+              <option value="invoice">invoice</option>
+            </select>
+          </label>
+          <label>Relation
+            <select id="graphEdgeType">
+              <option value="">הכל</option>
+              <option value="has_hashtag">has_hashtag</option>
+              <option value="has_vendor">has_vendor</option>
+              <option value="mentions_person">mentions_person</option>
+              <option value="in_document">in_document</option>
+              <option value="from_email">from_email</option>
+              <option value="has_attachment">has_attachment</option>
+              <option value="mentions_date">mentions_date</option>
+              <option value="has_category">has_category</option>
+              <option value="has_status">has_status</option>
+              <option value="from_source_table">from_source_table</option>
+              <option value="has_risk">has_risk</option>
+            </select>
+          </label>
+          <label>Limit
+            <input id="graphLimit" type="number" min="25" max="1000" step="25" value="300" />
+          </label>
+        </div>
+
+        <div class="projectGraphLayout">
+          <section class="projectGraphBoard">
+            <div id="projectGraphCy"></div>
+          </section>
+          <aside class="projectGraphInspector" id="projectGraphInspector">
+            <div class="workflowInspectorEmpty">בחר node או edge כדי לראות פרטים.</div>
+          </aside>
+        </div>
       </section>
 
       <!-- ======================================================

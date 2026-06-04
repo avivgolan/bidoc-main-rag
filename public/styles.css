@@ -6,57 +6,57 @@
 @import url("https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700;800&family=IBM+Plex+Sans+Hebrew:wght@400;500;600;700&display=swap");
 
 :root {
-  --ink: #171916;
-  --ink-2: #22261f;
-  --ink-3: #30362d;
-  --paper: #f4f5f1;
-  --paper-2: #eceee8;
-  --surface: #ffffff;
-  --surface-2: #f9faf7;
-  --surface-3: #eef1ea;
-  --line: #d9ddd2;
-  --line-strong: #b9c1b2;
-  --text-primary: #171916;
-  --text-secondary: #4f574b;
-  --text-muted: #7d8776;
-  --brand-50: #eff8f5;
-  --brand-100: #d6eee6;
+  --ink: #17181c;
+  --ink-2: #1c1d22;
+  --ink-3: #222329;
+  --paper: #0f0f11;
+  --paper-2: #141417;
+  --surface: #17181c;
+  --surface-2: #1c1d22;
+  --surface-3: #222329;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.13);
+  --text-primary: #f0f0f0;
+  --text-secondary: #9096a0;
+  --text-muted: #555a63;
+  --brand-50: rgba(20, 140, 114, 0.12);
+  --brand-100: rgba(20, 140, 114, 0.2);
   --brand-300: #71c3ab;
   --brand-500: #148c72;
   --brand-600: #0f705f;
   --brand-700: #0a554a;
-  --cobalt: #2559b5;
-  --cobalt-soft: #e8efff;
-  --amber: #c27a16;
-  --amber-soft: #fff3d9;
-  --danger: #ba2f2f;
-  --danger-soft: #fff0ef;
-  --success-bg: #edf8f1;
-  --success-text: #247044;
-  --success-border: #badcc6;
-  --error-bg: var(--danger-soft);
-  --error-text: var(--danger);
-  --error-border: #efc2bd;
-  --danger-bg: var(--danger-soft);
-  --danger-text: var(--danger);
-  --danger-border: #efc2bd;
-  --warning-bg: var(--amber-soft);
-  --warning-text: #8a560f;
-  --warning-border: #ead29f;
+  --cobalt: #4a85e8;
+  --cobalt-soft: rgba(74, 133, 232, 0.15);
+  --amber: #d4902a;
+  --amber-soft: rgba(212, 144, 42, 0.15);
+  --danger: #e05252;
+  --danger-soft: rgba(224, 82, 82, 0.12);
+  --success-bg: rgba(20, 140, 114, 0.13);
+  --success-text: #4cd9a5;
+  --success-border: rgba(20, 140, 114, 0.3);
+  --error-bg: rgba(224, 82, 82, 0.1);
+  --error-text: #f87171;
+  --error-border: rgba(224, 82, 82, 0.28);
+  --danger-bg: rgba(224, 82, 82, 0.1);
+  --danger-text: #f87171;
+  --danger-border: rgba(224, 82, 82, 0.28);
+  --warning-bg: rgba(212, 144, 42, 0.12);
+  --warning-text: #e5a94a;
+  --warning-border: rgba(212, 144, 42, 0.3);
   --sidebar-width: 268px;
   --r-xs: 3px;
-  --r-sm: 5px;
+  --r-sm: 6px;
   --r: 8px;
-  --r-lg: 8px;
-  --r-xl: 8px;
+  --r-lg: 10px;
+  --r-xl: 12px;
   --r-md: 8px;
   --r-full: 999px;
-  --shadow-sm: 0 1px 0 rgb(23 25 22 / 0.06);
-  --shadow: 0 10px 24px rgb(23 25 22 / 0.08);
-  --shadow-md: 0 16px 34px rgb(23 25 22 / 0.12);
-  --shadow-lg: 0 28px 60px rgb(23 25 22 / 0.18);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 16px 34px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 28px 60px rgba(0, 0, 0, 0.65);
   --t: 150ms ease;
-  color-scheme: light;
+  color-scheme: dark;
   font-family: "Assistant", "IBM Plex Sans Hebrew", "Noto Sans Hebrew", sans-serif;
   font-size: 15px;
   line-height: 1.55;
@@ -69,12 +69,7 @@
 html { min-width: 320px; }
 body {
   min-height: 100vh;
-  background:
-    linear-gradient(90deg, rgb(23 25 22 / 0.035) 1px, transparent 1px),
-    linear-gradient(0deg, rgb(23 25 22 / 0.03) 1px, transparent 1px),
-    radial-gradient(circle at 18% 8%, rgb(20 140 114 / 0.09), transparent 28rem),
-    var(--paper);
-  background-size: 48px 48px, 48px 48px, auto, auto;
+  background: var(--paper);
 }
 button, input, textarea, select { font: inherit; }
 button, select, .historyItem, .knowledgeItem, .workflowNode { cursor: pointer; }
@@ -104,12 +99,9 @@ select:focus-visible,
   display: flex;
   flex-direction: column;
   overflow: auto;
-  color: #f5f6f1;
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent 34%),
-    repeating-linear-gradient(0deg, transparent 0 35px, rgb(255 255 255 / 0.035) 36px),
-    var(--ink);
-  border-inline-start: 1px solid rgb(255 255 255 / 0.08);
+  color: #f0f0f0;
+  background: #141417;
+  border-inline-start: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .sidebarBrand {
@@ -190,8 +182,9 @@ nav {
 
 .tab.active {
   color: #fff;
-  background: linear-gradient(90deg, rgb(20 140 114 / 0.28), rgb(255 255 255 / 0.055));
-  border-color: rgb(113 195 171 / 0.28);
+  background: rgba(20, 140, 114, 0.16);
+  border-color: rgba(20, 140, 114, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(20, 140, 114, 0.18);
 }
 
 .tab.active::before {
@@ -427,9 +420,9 @@ label {
 .message {
   max-width: min(78%, 920px);
   padding: 13px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: #1e1f24;
   color: var(--text-primary);
   box-shadow: var(--shadow-sm);
   white-space: pre-wrap;
@@ -441,18 +434,14 @@ label {
 .message.user {
   margin-inline-start: auto;
   color: #fff;
-  background:
-    linear-gradient(135deg, rgb(255 255 255 / 0.08), transparent 36%),
-    var(--brand-600);
-  border-color: var(--brand-700);
+  background: rgba(20, 140, 114, 0.22);
+  border-color: rgba(20, 140, 114, 0.38);
 }
 
 .message.progress {
   color: var(--text-secondary);
-  border-color: var(--brand-100);
-  background:
-    linear-gradient(90deg, rgb(20 140 114 / 0.08), transparent 52%),
-    var(--surface);
+  border-color: rgba(20, 140, 114, 0.2);
+  background: rgba(20, 140, 114, 0.07);
 }
 
 .message.progress::after {
@@ -480,10 +469,10 @@ label {
   align-items: end;
   gap: 12px;
   padding: 12px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--r);
-  background: rgb(255 255 255 / 0.92);
-  box-shadow: 0 18px 44px rgb(23 25 22 / 0.14);
+  background: rgba(28, 29, 34, 0.94);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(14px);
 }
 
@@ -511,12 +500,12 @@ label {
 .composer button {
   min-width: 92px;
   min-height: 40px;
-  background: var(--ink);
+  background: var(--brand-600);
 }
 
 .composer button:hover:not(:disabled) {
-  background: var(--ink-3);
-  box-shadow: 0 12px 24px rgb(23 25 22 / 0.22);
+  background: var(--brand-700);
+  box-shadow: 0 12px 24px rgba(15, 112, 95, 0.3);
 }
 
 .shortcutHint {
@@ -778,7 +767,8 @@ label {
 .agentCard label,
 .agentCard details { margin: 0 15px 14px; }
 .agentCard select { direction: ltr; text-align: left; }
-.agentCard textarea {
+.agentCard textarea,
+.agentPromptPreview {
   min-height: 220px;
   direction: ltr;
   text-align: left;
@@ -801,9 +791,9 @@ label {
 
 /* Workflow */
 .workflowHint {
-  border: 1px dashed var(--line-strong);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
   border-radius: var(--r);
-  background: rgb(255 255 255 / 0.72);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text-secondary);
   padding: 12px 16px;
   text-align: center;
@@ -956,7 +946,7 @@ label {
 .runHistoryItem:hover { background: var(--surface-2); }
 
 .runHistoryItem.active {
-  background: var(--brand-50);
+  background: rgba(20, 140, 114, 0.12);
   border-right: 3px solid var(--brand-500);
 }
 
@@ -965,7 +955,7 @@ label {
 }
 
 .runHistoryItem.active.hasError {
-  background: var(--danger-soft);
+  background: rgba(224, 82, 82, 0.1);
   border-right: 3px solid var(--danger);
 }
 
@@ -1054,8 +1044,8 @@ label {
 .knowledgeItem:hover,
 .historyItem:hover {
   border-color: var(--brand-500);
-  background: var(--brand-50);
-  box-shadow: 0 0 0 3px rgb(20 140 114 / 0.1);
+  background: rgba(20, 140, 114, 0.1);
+  box-shadow: 0 0 0 3px rgba(20, 140, 114, 0.1);
   transform: translateY(-1px);
 }
 
@@ -1076,6 +1066,263 @@ label {
 }
 
 /* Settings, tools, diagnostics */
+.settingsGroup {
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)),
+    var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.settingsGroupHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settingsGroupHeader h3 {
+  margin: 0 0 4px;
+}
+
+.settingsGroup > h3 {
+  margin: 28px 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--text-primary);
+  font-size: 17px;
+  letter-spacing: 0;
+}
+
+.settingsGroup > .hint + h3,
+.settingsGroupHeader + .hint + h3 {
+  margin-top: 20px;
+}
+
+.settingsGroup > h3::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 8px;
+  border-radius: var(--r-xs);
+  background: var(--brand-500);
+  vertical-align: 1px;
+}
+
+.chatAgentSettingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+  padding: 14px;
+  border: 1px solid var(--brand-100);
+  border-radius: var(--r);
+  background:
+    linear-gradient(180deg, rgba(20, 140, 114, 0.08), rgba(20, 140, 114, 0.025)),
+    var(--paper-2);
+}
+
+.chatAgentSettingsCard {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  box-shadow: inset 3px 0 0 var(--brand-500);
+}
+
+.chatAgentSettingsCard.wide {
+  grid-column: 1 / -1;
+}
+
+.chatAgentSettingsCard header {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.chatAgentSettingsCard header strong {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.chatAgentSettingsCard header span {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.chatAgentSettingsCard label {
+  min-width: 0;
+}
+
+.chatAgentSettingsCard label:first-of-type {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.chatAgentSettingsCard select {
+  min-width: 0;
+  direction: ltr;
+  text-align: left;
+  font-size: 12.5px;
+}
+
+.chatAgentSettingsCard textarea {
+  min-height: 170px;
+  direction: ltr;
+  text-align: left;
+  font-family: Consolas, "IBM Plex Sans Hebrew", monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.chatAgentSettingsCard.wide textarea {
+  min-height: 240px;
+}
+
+.compactSettingsGrid {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r);
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.advancedSettings {
+  margin-top: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: rgba(255, 255, 255, 0.018);
+  overflow: hidden;
+}
+
+.advancedSettings summary {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 11px;
+  color: var(--text-primary);
+  font-weight: 800;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.advancedSettings[open] summary {
+  border-bottom-color: var(--line);
+}
+
+.advancedSettings .compactSettingsGrid {
+  margin: 10px;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 9px;
+}
+
+.chatAgentSettingsCard .advancedSettings .compactSettingsGrid label {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+}
+
+.chatAgentSettingsCard .advancedSettings input {
+  min-height: 36px;
+  font-size: 12.5px;
+}
+
+.advancedSettings .hint {
+  margin: 0 12px 12px;
+}
+
+.parameterLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.toggleLabel .parameterLabelRow {
+  justify-content: flex-start;
+}
+
+.parameterLabelText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parameterInfoButton {
+  width: 19px;
+  height: 19px;
+  min-height: 19px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  font-family: "IBM Plex Sans Hebrew", "Assistant", sans-serif;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.parameterInfoButton:hover,
+.parameterInfoButton[aria-expanded="true"] {
+  border-color: var(--brand-300);
+  background: var(--brand-50);
+  color: var(--brand-300);
+}
+
+.parameterInfoText {
+  display: block;
+  padding: 8px 9px;
+  border: 1px solid var(--brand-100);
+  border-radius: var(--r-sm);
+  background: rgba(20, 140, 114, 0.08);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+}
+
+.toggleLabel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text-secondary);
+  font-weight: 800;
+}
+
+.toggleLabel input {
+  width: auto;
+  min-height: auto;
+}
+
 .embeddedPanel {
   margin-top: 8px;
   padding: 18px;
@@ -1242,6 +1489,202 @@ label {
   text-align: right;
 }
 
+/* Project Graph */
+.graphToolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(140px, .6fr));
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+}
+.graphToolbar label {
+  display: grid;
+  gap: 5px;
+  color: rgba(148,163,184,0.9);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.graphToolbar input,
+.graphToolbar select {
+  background: rgba(10,20,36,0.7);
+  border-color: rgba(148,163,184,0.18);
+  color: #d6e6f7;
+  border-radius: 7px;
+}
+.graphToolbar input:focus,
+.graphToolbar select:focus {
+  border-color: rgba(38,201,154,0.5);
+  box-shadow: 0 0 0 3px rgba(38,201,154,0.1);
+}
+.projectGraphLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 14px;
+  min-height: 640px;
+}
+.projectGraphBoard {
+  position: relative;
+  min-height: 640px;
+  border: 1px solid rgba(148,163,184,0.1);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.projectGraphInspector {
+  border: 1px solid rgba(148,163,184,0.1);
+  border-radius: 12px;
+  background: rgba(8,18,32,0.82);
+  overflow: hidden;
+  box-shadow: 0 0 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
+  display: flex;
+  flex-direction: column;
+}
+#projectGraphCy {
+  width: 100%;
+  height: 100%;
+  min-height: 640px;
+  background:
+    radial-gradient(ellipse at 30% 20%, rgba(38,201,154,0.07), transparent 40%),
+    radial-gradient(ellipse at 75% 70%, rgba(79,168,216,0.07), transparent 40%),
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px),
+    #060d1a;
+  background-size: auto, auto, 32px 32px, 32px 32px;
+}
+.projectGraphInspector > div {
+  padding: 16px;
+}
+.graphStats {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  height: 100%;
+  overflow-y: auto;
+}
+.graphStats strong {
+  display: block;
+  color: #c8dce8;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(148,163,184,0.1);
+}
+.graphStats div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.graphStats span {
+  border: 1px solid rgba(148,163,184,0.15);
+  border-radius: 20px;
+  padding: 4px 10px;
+  color: #a8c0d8;
+  background: rgba(255,255,255,0.04);
+  font-size: 11.5px;
+  font-weight: 500;
+  transition: background 0.15s, border-color 0.15s;
+  cursor: default;
+}
+.graphStats span:hover {
+  background: rgba(38,201,154,0.1);
+  border-color: rgba(38,201,154,0.3);
+  color: #5eefc0;
+}
+.graphStats b {
+  color: #d8eeff;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.graphInspectorNode {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  direction: rtl;
+  height: 100%;
+  overflow-y: auto;
+}
+.graphInspectorTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f0f8ff;
+  line-height: 1.4;
+}
+.graphInspectorType {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 12px;
+  background: rgba(38,201,154,0.12);
+  color: #5eefc0;
+  border: 1px solid rgba(38,201,154,0.25);
+  margin-bottom: 2px;
+}
+.graphInspectorField {
+  font-size: 12.5px;
+  color: #8fa8c8;
+  line-height: 1.6;
+}
+.graphInspectorField b {
+  color: #b8d0e8;
+  font-weight: 600;
+}
+
+/* Graph node-type legend badges */
+.graphLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(148,163,184,0.08);
+  background: rgba(4,12,24,0.6);
+}
+.graphLegendBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  font-size: 11.5px;
+  color: #a8c0d8;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.graphLegendBadge::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.graphLegendBadge b {
+  color: rgba(255,255,255,0.5);
+  font-weight: 700;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.graphLegendBadge:hover {
+  background: rgba(255,255,255,0.07);
+}
+
+@media (max-width: 980px) {
+  .graphToolbar,
+  .projectGraphLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Toasts */
 .toastContainer {
   position: fixed;
@@ -1338,6 +1781,8 @@ label {
     justify-content: flex-start;
   }
   .grid,
+  .chatAgentSettingsGrid,
+  .advancedSettings .compactSettingsGrid,
   .composer,
   .knowledgeLayout {
     grid-template-columns: 1fr;
@@ -2752,14 +3197,14 @@ body:has(#timeline.active) .sidebar {
   color: var(--text);
 }
 .annotation-btn.active-like {
-  background: #d1fae5;
-  border-color: #6ee7b7;
-  color: #065f46;
+  background: rgba(20, 140, 114, 0.18);
+  border-color: rgba(76, 217, 165, 0.4);
+  color: #4cd9a5;
 }
 .annotation-btn.active-dislike {
-  background: #fee2e2;
-  border-color: #fca5a5;
-  color: #991b1b;
+  background: rgba(224, 82, 82, 0.15);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #f87171;
 }
 
 /* ── QA Tab ──────────────────────────────────────────────────────────────── */
