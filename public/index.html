@@ -324,15 +324,18 @@
         <div class="chatAgentSettingsGrid">
           <article class="chatAgentSettingsCard">
             <header>
-              <strong>Classifier</strong>
-              <span>ניתוב וסיווג השאלה</span>
+              <div class="agentCardInfo">
+                <strong>Classifier</strong>
+                <span>ניתוב וסיווג השאלה</span>
+              </div>
             </header>
-            <label>מודל
+            <label class="modelLabel">מודל
               <select id="modelClassifier"></select>
             </label>
-            <label>פרומפט
+            <details class="promptDetails">
+              <summary>פרומפט</summary>
               <textarea id="chatPrompt_classifier" rows="9" spellcheck="false"></textarea>
-            </label>
+            </details>
             <details class="advancedSettings">
               <summary>הגדרות מודל</summary>
               <div class="grid compactSettingsGrid">
@@ -352,15 +355,18 @@
 
           <article class="chatAgentSettingsCard">
             <header>
-              <strong>Knowledge Planner</strong>
-              <span>תכנון חיפוש ידע מקומי</span>
+              <div class="agentCardInfo">
+                <strong>Knowledge Planner</strong>
+                <span>תכנון חיפוש ידע מקומי</span>
+              </div>
             </header>
-            <label>מודל
+            <label class="modelLabel">מודל
               <select id="modelKnowledgePlanner"></select>
             </label>
-            <label>פרומפט
+            <details class="promptDetails">
+              <summary>פרומפט</summary>
               <textarea id="chatPrompt_knowledge_planner" rows="9" spellcheck="false"></textarea>
-            </label>
+            </details>
             <details class="advancedSettings">
               <summary>הגדרות מודל</summary>
               <div class="grid compactSettingsGrid">
@@ -380,15 +386,18 @@
 
           <article class="chatAgentSettingsCard wide">
             <header>
-              <strong>Main</strong>
-              <span>תשובת הצ׳אט הראשית</span>
+              <div class="agentCardInfo">
+                <strong>Main</strong>
+                <span>תשובת הצ׳אט הראשית</span>
+              </div>
             </header>
-            <label>מודל
+            <label class="modelLabel">מודל
               <select id="modelMain"></select>
             </label>
-            <label>פרומפט
+            <details class="promptDetails">
+              <summary>פרומפט</summary>
               <textarea id="chatPrompt_main" rows="12" spellcheck="false"></textarea>
-            </label>
+            </details>
             <details class="advancedSettings">
               <summary>הגדרות מודל</summary>
               <div class="grid compactSettingsGrid">
@@ -408,15 +417,18 @@
 
           <article class="chatAgentSettingsCard">
             <header>
-              <strong>Lite</strong>
-              <span>משימות קצרות ועזר</span>
+              <div class="agentCardInfo">
+                <strong>Lite</strong>
+                <span>משימות קצרות ועזר</span>
+              </div>
             </header>
-            <label>מודל
+            <label class="modelLabel">מודל
               <select id="modelLite"></select>
             </label>
-            <label>פרומפט
+            <details class="promptDetails">
+              <summary>פרומפט</summary>
               <textarea id="chatPrompt_lite" rows="7" spellcheck="false"></textarea>
-            </label>
+            </details>
             <details class="advancedSettings">
               <summary>הגדרות מודל</summary>
               <div class="grid compactSettingsGrid">
@@ -436,15 +448,18 @@
 
           <article class="chatAgentSettingsCard">
             <header>
-              <strong>Reranker</strong>
-              <span>דירוג מקורות לפני תשובה</span>
+              <div class="agentCardInfo">
+                <strong>Reranker</strong>
+                <span>דירוג מקורות לפני תשובה</span>
+              </div>
             </header>
-            <label>מודל
+            <label class="modelLabel">מודל
               <select id="modelReranker"></select>
             </label>
-            <label>פרומפט
+            <details class="promptDetails">
+              <summary>פרומפט</summary>
               <textarea id="chatPrompt_reranker" rows="9" spellcheck="false"></textarea>
-            </label>
+            </details>
             <details class="advancedSettings">
               <summary>הגדרות מודל</summary>
               <div class="grid compactSettingsGrid">
