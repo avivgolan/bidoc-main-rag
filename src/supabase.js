@@ -1,6 +1,7 @@
 import { createEmbedding } from "./openrouter.js";
 import { supabaseHeaders } from "./config.js";
 import { addDurationToLink, TIMELINE_RELATION_TYPES } from "./timelineLinks.js";
+import { CACHE_TTL, cachedOperation } from "./cache.js";
 
 const MESSAGES_TABLE = "chat_messages_gf";
 const TIMELINE_LINKS_TABLE = "timeline_event_links";
@@ -51,7 +52,15 @@ export async function getMessage({ config, messageId }) {
 export async function listDislikedMessages({ config, limit = 50 }) {
   if (!isConfigured(config)) return [];
   return supabaseFetch(config,
-    `/rest/v1/${MESSAGES_TABLE}?select=id,user_message,ai_response,created_at,session_id&annotation=eq.X&status=eq.done&order=created_at.desc&limit=${limit}`
+    `/rest/v1/${MESSAGES_TABLE}?select=id,user_message,ai_response,created_at,session_id,annotation,workflow_log&annotation=eq.X&status=eq.done&order=created_at.desc&limit=${limit}`
+  );
+}
+
+export async function listQaMessages({ config, limit = 50, dislikedOnly = false }) {
+  if (!isConfigured(config)) return [];
+  const annotationFilter = dislikedOnly ? "&annotation=eq.X" : "";
+  return supabaseFetch(config,
+    `/rest/v1/${MESSAGES_TABLE}?select=id,user_message,ai_response,created_at,session_id,annotation&status=eq.done&workflow_log=not.is.null${annotationFilter}&order=created_at.desc&limit=${limit}`
   );
 }
 
@@ -125,7 +134,7 @@ export async function recentMemory({ config, sessionId, limit = 8 }) {
   });
 }
 
-export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags = [], topK = config.retrieval.candidates }) {
+export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags = [], topK = config.retrieval.candidates, cacheContext = null }) {
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig)) throw new Error("Content Supabase is not configured");
@@ -133,7 +142,8 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
   const embedding = await createEmbedding({
     apiKey: config.openRouterApiKey,
     model: config.models.embedding,
-    input: query
+    input: query,
+    cacheContext
   });
 
   const payload = {
@@ -147,19 +157,38 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
     keyword_weight: config.retrieval.keywordWeight
   };
 
-  try {
-    return await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
-  } catch (error) {
-    if (!payload.hashtags.length || !looksLikeRpcSignatureError(error.message)) throw error;
-    const { hashtags: _hashtags, ...payloadWithoutHashtags } = payload;
-    return supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
-      method: "POST",
-      body: JSON.stringify(payloadWithoutHashtags)
-    });
-  }
+  return cachedOperation({
+    context: cacheContext,
+    type: "hybridSearch",
+    keyParts: {
+      query,
+      dateFrom,
+      dateTo,
+      hashtags: payload.hashtags,
+      topK,
+      rpc: contentConfig.hybridRpcName,
+      vectorWeight: payload.vector_weight,
+      keywordWeight: payload.keyword_weight
+    },
+    ttl: CACHE_TTL.hybridSearch,
+    savedCall: "search",
+    estimatedCost: 0.0002,
+    operation: async () => {
+      try {
+        return await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+      } catch (error) {
+        if (!payload.hashtags.length || !looksLikeRpcSignatureError(error.message)) throw error;
+        const { hashtags: _hashtags, ...payloadWithoutHashtags } = payload;
+        return supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
+          method: "POST",
+          body: JSON.stringify(payloadWithoutHashtags)
+        });
+      }
+    }
+  });
 }
 
 export const vectorSearch = hybridSearch;

@@ -1,3 +1,5 @@
+import { CACHE_TTL, cachedOperation } from "./cache.js";
+
 function fetchWithTimeout(url, options = {}, timeoutMs = 30_000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -70,25 +72,35 @@ export async function listOpenRouterModels({ apiKey = "" } = {}) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export async function createEmbedding({ apiKey, model, input }) {
+export async function createEmbedding({ apiKey, model, input, cacheContext = null }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const normalizedModel = normalizeEmbeddingModel(model);
-  const response = await fetchWithTimeout("https://openrouter.ai/api/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: JSON.stringify({ model: normalizedModel, input })
-  }, 30_000);
+  return cachedOperation({
+    context: cacheContext,
+    type: "embedding",
+    keyParts: { text: String(input || ""), model: normalizedModel },
+    ttl: CACHE_TTL.embedding,
+    savedCall: "embedding",
+    estimatedCost: 0.0001,
+    operation: async () => {
+      const response = await fetchWithTimeout("https://openrouter.ai/api/v1/embeddings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ model: normalizedModel, input })
+      }, 30_000);
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error?.message || `OpenRouter embedding request failed: ${response.status}`);
-  }
-  const embedding = data.data?.[0]?.embedding;
-  if (!Array.isArray(embedding)) throw new Error("OpenRouter embedding response is missing data[0].embedding");
-  return embedding;
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error?.message || `OpenRouter embedding request failed: ${response.status}`);
+      }
+      const embedding = data.data?.[0]?.embedding;
+      if (!Array.isArray(embedding)) throw new Error("OpenRouter embedding response is missing data[0].embedding");
+      return embedding;
+    }
+  });
 }
 
 export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, systemPrompt = "", temperature = 0, maxTokens = 4096, timeoutMs = 90_000, topP = 1, frequencyPenalty = 0, presencePenalty = 0, seed = null }) {

@@ -14,6 +14,7 @@ import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from 
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "../src/projectGraph.js";
 import { chatCompletion } from "../src/openrouter.js";
+import { cachedOperation, cacheKey, createCacheContext, finalizeCacheMetrics, MemoryCacheProvider } from "../src/cache.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -907,6 +908,48 @@ test("project graph response filters by node type and query", () => {
   assert.equal(graph.edges.length, 1);
   assert.ok(graph.nodes.some((node) => node.node_type === "risk"));
   assert.ok(!graph.nodes.some((node) => node.label === "delay"));
+});
+
+test("memory cache provider stores, expires, deletes and checks values", async () => {
+  const provider = new MemoryCacheProvider({ maxEntries: 100 });
+  await provider.set("key", { value: 1 }, 1);
+  assert.deepEqual(await provider.get("key"), { value: 1 });
+  assert.equal(await provider.exists("key"), true);
+  assert.equal(await provider.delete("key"), true);
+  assert.equal(await provider.get("key"), null);
+});
+
+test("cache keys are stable across object key order", () => {
+  assert.equal(
+    cacheKey("hybridSearch", { query: "delay", filters: { b: 2, a: 1 } }),
+    cacheKey("hybridSearch", { filters: { a: 1, b: 2 }, query: "delay" })
+  );
+});
+
+test("cached operation records hits and avoids duplicate execution", async () => {
+  let calls = 0;
+  const context = createCacheContext({
+    config: { cache: { enabled: true, provider: "memory", memoryMaxEntries: 100 } }
+  });
+  const options = {
+    context,
+    type: "reranker",
+    keyParts: { query: "delay", source_ids: ["1", "2"] },
+    ttl: 60,
+    savedCall: "model",
+    operation: async () => {
+      calls += 1;
+      return [{ id: 1 }];
+    }
+  };
+  assert.deepEqual(await cachedOperation(options), [{ id: 1 }]);
+  assert.deepEqual(await cachedOperation(options), [{ id: 1 }]);
+  const metrics = finalizeCacheMetrics(context);
+  assert.equal(calls, 1);
+  assert.equal(metrics.cache_misses, 1);
+  assert.equal(metrics.cache_hits, 1);
+  assert.equal(metrics.saved_model_calls, 1);
+  assert.equal(metrics.cache_hit_rate, 50);
 });
 
 let failed = 0;

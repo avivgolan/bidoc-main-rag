@@ -981,6 +981,32 @@ label {
   color: var(--danger);
   font-weight: 700;
 }
+.cacheMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 8px;
+}
+.cacheMetrics[hidden] { display: none; }
+.cacheMetrics > div {
+  min-height: 62px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+.cacheMetrics span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.cacheMetrics strong {
+  color: var(--success-text);
+  font-size: 18px;
+  font-weight: 900;
+}
 
 .runHistoryItem .rhAiReport {
   display: inline-flex;
@@ -1589,7 +1615,55 @@ label {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 12px;
-  margin-top: 12px;
+}
+.diagnosticGroups {
+  display: grid;
+  gap: 18px;
+  margin-top: 14px;
+}
+.diagnosticGroup {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.diagnosticGroupHeader,
+.diagnosticMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.diagnosticGroupHeader {
+  margin-bottom: 10px;
+}
+.diagnosticGroupHeader h3 {
+  margin: 0 0 3px;
+  font-size: 15px;
+}
+.diagnosticGroupHeader p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.diagnosticGroupHeader > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.diagnosticSummary {
+  padding: 10px 12px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-weight: 800;
+}
+.diagnosticSummary.allOk {
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+.diagnosticSummary.hasErrors {
+  border-color: var(--error-border);
+  color: var(--error-text);
 }
 .diagnosticCard {
   display: grid;
@@ -1598,6 +1672,7 @@ label {
 }
 .diagnosticCard.ok { border-color: var(--success-border); }
 .diagnosticCard.error { border-color: var(--error-border); }
+.diagnosticCard.loading { border-color: var(--accent); }
 .diagnosticCard.idle { color: var(--text-muted); }
 .diagnosticCard small {
   color: var(--text-muted);
@@ -1608,6 +1683,13 @@ label {
   max-height: 180px;
   margin: 0;
   padding: 10px;
+}
+.diagnosticRunButton {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  font-size: 18px;
 }
 
 .result {
@@ -3444,6 +3526,21 @@ body:has(#timeline.active) .sidebar {
   font-size: 12px;
   color: var(--text-muted);
 }
+.qaDislikedBadge {
+  width: fit-content;
+  padding: 2px 7px;
+  border: 1px solid var(--error-border);
+  border-radius: var(--r-full);
+  background: var(--error-bg);
+  color: var(--error-text);
+  font-size: 11px;
+  font-weight: 800;
+}
+.qaHeaderActions select {
+  width: auto;
+  min-width: 190px;
+  min-height: 34px;
+}
 
 .qaNoLog {
   font-size: 11px;
@@ -3484,6 +3581,16 @@ body:has(#timeline.active) .sidebar {
   margin-top: 14px;
   border-top: 1px solid var(--line);
   padding-top: 14px;
+}
+.qaReportActions {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+.qaCopyReport {
+  min-height: 32px;
+  padding: 5px 11px;
+  font-size: 12px;
 }
 
 .qaReportHeader {

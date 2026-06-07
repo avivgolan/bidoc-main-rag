@@ -190,6 +190,12 @@
               <div class="liveRunList" id="liveRunList"></div>
               <pre class="fullLogView" id="fullLogView" hidden></pre>
             </section>
+            <section class="cacheMetrics" id="cacheMetrics" hidden>
+              <div><span>Hit Rate</span><strong id="cacheHitRate">0%</strong></div>
+              <div><span>Total Hits</span><strong id="cacheTotalHits">0</strong></div>
+              <div><span>Total Misses</span><strong id="cacheTotalMisses">0</strong></div>
+              <div><span>Estimated Cost Saved</span><strong id="cacheCostSaved">$0.0000</strong></div>
+            </section>
 
             <div class="workflowHint" id="workflowHint">
               שלח הודעה בצ׳אט כדי לראות את רכיבי המערכת, הקווים ביניהם והלוגים של ההרצה האחרונה.
@@ -665,6 +671,23 @@
               <input id="toolsSafetyPrecheckEnabled" type="checkbox" />
               להפעיל בדיקת בטיחות מוקדמת
             </label>
+            <label class="toggleLabel">
+              <input id="cacheEnabled" type="checkbox" />
+              להפעיל Cache
+            </label>
+            <label>Cache Provider
+              <select id="cacheProvider">
+                <option value="memory">Memory - פיתוח</option>
+                <option value="redis">Redis - Production</option>
+                <option value="none">ללא Cache</option>
+              </select>
+            </label>
+            <label class="wide">Redis URL
+              <input id="cacheRedisUrl" type="password" autocomplete="off" placeholder="redis://default:password@host:6379" />
+            </label>
+            <label>Memory Max Entries
+              <input id="cacheMemoryMaxEntries" type="number" min="100" max="1000000" step="100" />
+            </label>
           </div>
           <p class="hint">שולט בהפעלת כלים חיצוניים וסוכן ההתראות, בלי לשנות את כתובות ה-webhooks.</p>
         </details>
@@ -709,13 +732,12 @@
           <header class="panelHeader compact">
             <div>
               <h2>בדיקת חיבורים</h2>
-              <p class="hint">בודק בנפרד OpenRouter Chat, OpenRouter Embeddings, Supabase REST ו-Supabase Hybrid RPC.</p>
+              <p class="hint">בדיקה מלאה של שירותי הליבה, מקורות המידע, סוכני ה-AI וכלי N8N. ניתן לבדוק הכול או להריץ רכיב בודד.</p>
             </div>
-            <button id="runConnectionDiagnostics" type="button">בדוק חיבורים</button>
+            <button id="runConnectionDiagnostics" type="button">בדוק הכול</button>
           </header>
-          <div class="diagnosticsGrid" id="connectionDiagnostics">
-            <div class="diagnosticCard idle">ממתין לבדיקה.</div>
-          </div>
+          <div class="diagnosticSummary" id="diagnosticSummary">טרם הורצו בדיקות.</div>
+          <div class="diagnosticGroups" id="connectionDiagnostics"></div>
         </section>
 
         <section class="embeddedPanel">
@@ -932,10 +954,14 @@
       <section class="panel" id="qa">
         <header class="panelHeader">
           <div>
-            <h2>QA — ניתוח תשובות שנדחו</h2>
-            <p class="hint">הודעות שקיבלו דיסלייק. לחץ "הרץ QA" לניתוח ה-pipeline ולהפקת דוח שיפורים.</p>
+            <h2>QA — ניתוח שיחות</h2>
+            <p class="hint">שיחות אחרונות מהצ׳אט. לחץ "הרץ QA" לניתוח ה-pipeline ולהפקת דוח שיפורים.</p>
           </div>
           <div class="qaHeaderActions">
+            <select id="qaMessageFilter" aria-label="סינון שיחות QA">
+              <option value="all">כל השיחות האחרונות</option>
+              <option value="disliked">רק שיחות עם דיסלייק</option>
+            </select>
             <button id="trendQa" type="button">דוח מגמות</button>
             <button id="refreshQa" type="button">רענן</button>
           </div>

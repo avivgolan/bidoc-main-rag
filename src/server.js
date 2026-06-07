@@ -7,7 +7,7 @@ import { exportFullSettings, getConfig, initSettings, loadEnv, normalizeImported
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, graphSearch, hybridSearch, listDislikedMessages, listMessages, listProjectGraph, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
+import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, graphSearch, hybridSearch, listDislikedMessages, listMessages, listProjectGraph, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
@@ -136,7 +136,9 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/diagnostics/connections") {
-    const results = await runConnectionDiagnostics(config());
+    const body = await readJson(req).catch(() => ({}));
+    const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+    const results = await runConnectionDiagnostics(config(), { ids });
     return sendJson(res, 200, {
       ok: results.every((item) => item.ok),
       results
@@ -504,6 +506,31 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/qa/dislikes") {
     const messages = await listDislikedMessages({ config: config() }).catch(() => []);
     return sendJson(res, 200, { messages });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/qa/messages") {
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 30), 1), 50);
+    const [messages, reports] = await Promise.all([
+      listQaMessages({
+        config: config(),
+        limit,
+        dislikedOnly: url.searchParams.get("filter") === "disliked"
+      }),
+      listQaReports({ config: config(), limit: 200 })
+    ]);
+    const latestReportByMessage = new Map();
+    for (const report of reports || []) {
+      const key = String(report.message_id);
+      if (!latestReportByMessage.has(key) && report.report?.kind !== "ai_report") {
+        latestReportByMessage.set(key, report);
+      }
+    }
+    return sendJson(res, 200, {
+      messages: (messages || []).map((message) => ({
+        ...message,
+        qa_report: latestReportByMessage.get(String(message.id)) || null
+      }))
+    });
   }
 
   const qaRunMatch = url.pathname.match(/^\/api\/qa\/([^/]+)\/run$/);
@@ -1139,10 +1166,12 @@ function sendText(res, status, value) {
   res.end(value);
 }
 
-async function runConnectionDiagnostics(cfg) {
-  const results = [];
+async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
   const contentCfg = contentSupabaseConfig(cfg);
-  results.push(await diagnosticCheck("openrouter_chat", "OpenRouter Chat", async () => {
+  const checks = [];
+  const add = (id, label, group, fn) => checks.push({ id, label, group, fn });
+
+  add("openrouter_chat", "OpenRouter Chat", "core", async () => {
     if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
     const answer = await chatCompletion({
       apiKey: cfg.openRouterApiKey,
@@ -1155,9 +1184,9 @@ async function runConnectionDiagnostics(cfg) {
       ]
     });
     return { model: cfg.models.classifier, preview: String(answer || "").slice(0, 80) };
-  }));
+  });
 
-  results.push(await diagnosticCheck("openrouter_embeddings", "OpenRouter Embeddings", async () => {
+  add("openrouter_embeddings", "OpenRouter Embeddings", "core", async () => {
     if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
     const embedding = await createEmbedding({
       apiKey: cfg.openRouterApiKey,
@@ -1165,27 +1194,27 @@ async function runConnectionDiagnostics(cfg) {
       input: "connection test"
     });
     return { model: cfg.models.embedding, dimensions: embedding.length };
-  }));
+  });
 
-  results.push(await diagnosticCheck("app_supabase_rest", "App Supabase REST", async () => {
+  add("app_supabase_rest", "App Supabase REST", "core", async () => {
     if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
     const rows = await rawSupabaseFetch(cfg, "/rest/v1/chat_messages_gf?select=id&limit=1");
     return { table: "chat_messages_gf", rows: Array.isArray(rows) ? rows.length : 0 };
-  }));
+  });
 
-  results.push(await diagnosticCheck("content_supabase_index_table", "Content Supabase Index Table", async () => {
+  add("content_supabase_index_table", "Content Supabase Index Table", "data", async () => {
     if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
     const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/${contentCfg.indexTable}?select=id&limit=1`);
     return { table: contentCfg.indexTable, rows: Array.isArray(rows) ? rows.length : 0, keyRole: supabaseKeyRole(contentCfg.supabaseServiceRoleKey) };
-  }));
+  });
 
-  results.push(await diagnosticCheck("content_supabase_alerts_table", "Content Supabase Alerts Table", async () => {
+  add("content_supabase_alerts_table", "Content Supabase Alerts Table", "data", async () => {
     if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
     const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/${contentCfg.alertsTable}?select=id&limit=1`);
     return { table: contentCfg.alertsTable, rows: Array.isArray(rows) ? rows.length : 0, keyRole: supabaseKeyRole(contentCfg.supabaseServiceRoleKey) };
-  }));
+  });
 
-  results.push(await diagnosticCheck("content_supabase_hybrid_rpc", "Content Supabase Hybrid RPC", async () => {
+  add("content_supabase_hybrid_rpc", "Content Supabase Hybrid RPC", "data", async () => {
     if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
     if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing because RPC test needs a query embedding");
     const embedding = await createEmbedding({
@@ -1207,27 +1236,140 @@ async function runConnectionDiagnostics(cfg) {
       })
     });
     return { rpc: contentCfg.hybridRpcName, rows: Array.isArray(rows) ? rows.length : 0 };
-  }));
+  });
 
+  add("content_supabase_alerts_rpc", "Content Supabase Alerts RPC", "data", async () => {
+    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
+    if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing because RPC test needs a query embedding");
+    const embedding = await createEmbedding({ apiKey: cfg.openRouterApiKey, model: cfg.models.embedding, input: "connection test" });
+    const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/rpc/${contentCfg.alertsRpcName}`, {
+      method: "POST",
+      body: JSON.stringify({ query_embedding: embedding, match_count: 1 })
+    });
+    return { rpc: contentCfg.alertsRpcName, rows: Array.isArray(rows) ? rows.length : 0 };
+  });
+
+  add("app_graph_tables", "Project Graph Tables", "data", async () => {
+    if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
+    const [nodes, edges] = await Promise.all([
+      rawSupabaseFetch(cfg, "/rest/v1/graph_nodes?select=id&limit=1"),
+      rawSupabaseFetch(cfg, "/rest/v1/graph_edges?select=id&limit=1")
+    ]);
+    return { graph_nodes: Array.isArray(nodes) ? nodes.length : 0, graph_edges: Array.isArray(edges) ? edges.length : 0 };
+  });
+
+  add("app_graph_search_rpc", "Project Graph Search RPC", "data", async () => {
+    if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
+    const rows = await rawSupabaseFetch(cfg, "/rest/v1/rpc/graph_search", {
+      method: "POST",
+      body: JSON.stringify({ query_text: "connection test", source_refs: [], max_rows: 1 })
+    });
+    return { rpc: "graph_search", rows: Array.isArray(rows) ? rows.length : 0 };
+  });
+
+  add("knowledge_base", "Local Knowledge Base", "data", async () => {
+    const agents = listKnowledgeAgents();
+    const documents = await listKnowledgeDocuments();
+    return { agents: agents.length, documents: documents.length };
+  });
+
+  const agentModels = [
+    ["classifier", "Classifier Agent", cfg.models.classifier],
+    ["knowledge_planner", "Knowledge Planner Agent", cfg.models.knowledgePlanner],
+    ["main", "Main Agent", cfg.models.main],
+    ["lite", "Lite Agent", cfg.models.lite],
+    ["reranker", "Reranker Agent", cfg.models.reranker],
+    ["alert", "Alert Agent", cfg.models.alert || cfg.models.main],
+    ["qa", "QA / AI Report Agent", cfg.models.qa || cfg.models.main]
+  ];
+  for (const [id, label, model] of agentModels) {
+    add(`agent_${id}`, label, "agents", async () => {
+      if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+      if (!model) throw new Error(`${label} model is missing`);
+      const answer = await chatCompletion({
+        apiKey: cfg.openRouterApiKey,
+        model,
+        temperature: 0,
+        maxTokens: 8,
+        timeoutMs: 30_000,
+        messages: [
+          { role: "system", content: "Return only OK." },
+          { role: "user", content: "ping" }
+        ]
+      });
+      return { model, preview: String(answer || "").slice(0, 40) };
+    });
+  }
+
+  for (const toolName of TOOL_NAMES) {
+    add(`tool_${toolName}`, diagnosticToolLabel(toolName), "tools", async () => {
+      const result = await callN8nTool({
+        toolName,
+        query: "connection test",
+        sessionId: "diagnostic",
+        config: cfg
+      });
+      if (!result.ok) throw new Error(result.error || `${toolName} test failed`);
+      return { tool: toolName, configured: true, preview: summarizeDiagnosticToolResult(result) };
+    });
+  }
+
+  const selected = ids.length ? checks.filter((check) => ids.includes(check.id)) : checks;
+  return runDiagnosticChecks(selected, 4);
+}
+
+async function runDiagnosticChecks(checks, parallelLimit = 4) {
+  const results = new Array(checks.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < checks.length) {
+      const index = cursor++;
+      const check = checks[index];
+      results[index] = await diagnosticCheck(check.id, check.label, check.group, check.fn);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(parallelLimit, checks.length) }, worker));
   return results;
 }
 
-async function diagnosticCheck(id, label, fn) {
+async function diagnosticCheck(id, label, group, fn) {
   const startedAt = Date.now();
   try {
     const details = await fn();
-    return { id, label, ok: true, status: "ok", ms: Date.now() - startedAt, details };
+    return { id, label, group, ok: true, status: "ok", ms: Date.now() - startedAt, details };
   } catch (error) {
     const errorText = diagnosticErrorText(error);
     return {
       id,
       label,
+      group,
       ok: false,
       status: classifyDiagnosticError(errorText),
       ms: Date.now() - startedAt,
       error: errorText
     };
   }
+}
+
+function diagnosticToolLabel(toolName) {
+  return ({
+    alert: "N8N Alerts",
+    meetings: "N8N Meetings",
+    emails: "N8N Emails",
+    whatsapp_messages: "N8N WhatsApp",
+    financial_transactions: "N8N Financial",
+    consultants_reports: "N8N Consultants",
+    exceptions_report: "N8N Exceptions",
+    quality_control: "N8N Quality",
+    safety_report: "N8N Safety",
+    submittals: "N8N Submittals"
+  })[toolName] || `N8N ${toolName}`;
+}
+
+function summarizeDiagnosticToolResult(result) {
+  if (Array.isArray(result?.data)) return `${result.data.length} rows`;
+  if (result?.answer) return String(result.answer).slice(0, 80);
+  return result?.data ? "Response received" : "OK";
 }
 
 async function rawSupabaseFetch(cfg, path, options = {}) {

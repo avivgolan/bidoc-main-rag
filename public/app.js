@@ -29,6 +29,63 @@ const tools = [
   "hybrid_search",
   ...n8nTools
 ];
+const diagnosticGroups = [
+  {
+    id: "core",
+    label: "שירותי ליבה",
+    description: "OpenRouter והחיבור הראשי של האפליקציה",
+    checks: [
+      ["openrouter_chat", "OpenRouter Chat"],
+      ["openrouter_embeddings", "OpenRouter Embeddings"],
+      ["app_supabase_rest", "App Supabase REST"]
+    ]
+  },
+  {
+    id: "data",
+    label: "מקורות מידע",
+    description: "Content Supabase, גרף הפרויקט ומאגר הידע",
+    checks: [
+      ["content_supabase_index_table", "Content Supabase Index Table"],
+      ["content_supabase_alerts_table", "Content Supabase Alerts Table"],
+      ["content_supabase_hybrid_rpc", "Content Supabase Hybrid RPC"],
+      ["content_supabase_alerts_rpc", "Content Supabase Alerts RPC"],
+      ["app_graph_tables", "Project Graph Tables"],
+      ["app_graph_search_rpc", "Project Graph Search RPC"],
+      ["knowledge_base", "Local Knowledge Base"]
+    ]
+  },
+  {
+    id: "agents",
+    label: "סוכני AI",
+    description: "בדיקת המודל המוגדר לכל סוכן",
+    checks: [
+      ["agent_classifier", "Classifier Agent"],
+      ["agent_knowledge_planner", "Knowledge Planner Agent"],
+      ["agent_main", "Main Agent"],
+      ["agent_lite", "Lite Agent"],
+      ["agent_reranker", "Reranker Agent"],
+      ["agent_alert", "Alert Agent"],
+      ["agent_qa", "QA / AI Report Agent"]
+    ]
+  },
+  {
+    id: "tools",
+    label: "כלי N8N",
+    description: "Webhooks חיצוניים שמופעלים לפי סוג השאלה",
+    checks: [
+      ["tool_alert", "N8N Alerts"],
+      ["tool_meetings", "N8N Meetings"],
+      ["tool_emails", "N8N Emails"],
+      ["tool_whatsapp_messages", "N8N WhatsApp"],
+      ["tool_financial_transactions", "N8N Financial"],
+      ["tool_consultants_reports", "N8N Consultants"],
+      ["tool_exceptions_report", "N8N Exceptions"],
+      ["tool_quality_control", "N8N Quality"],
+      ["tool_safety_report", "N8N Safety"],
+      ["tool_submittals", "N8N Submittals"]
+    ]
+  }
+];
 const chatPromptFields = {
   classifier: "chatPrompt_classifier",
   knowledge_planner: "chatPrompt_knowledge_planner",
@@ -161,6 +218,10 @@ async function init() {
   await loadOpenRouterModels();
   await loadKnowledgeDocuments();
   await loadHistory();
+  const initialLoader = TAB_LOADERS[initialTab];
+  if (initialLoader && !["settings", "knowledge", "history"].includes(initialTab)) {
+    await initialLoader();
+  }
   requestAnimationFrame(() => renderWorkflow(state.lastWorkflow));
 }
 
@@ -1072,6 +1133,7 @@ function renderWorkflow(workflow) {
 
   const view = buildWorkflowView(workflow);
   const hasRun = Boolean(workflow?.nodes?.length);
+  renderCacheMetrics(workflow?.cacheMetrics || null);
   $("workflowHint").style.display = hasRun ? "none" : "block";
   $("workflowBoard").classList.toggle("hasWorkflow", hasRun);
 
@@ -1099,6 +1161,17 @@ function renderWorkflow(workflow) {
   if (view.nodes[0]) renderWorkflowInspector(view.nodes[0]);
 
   pulseErrorNodes(_cy);
+}
+
+function renderCacheMetrics(metrics) {
+  const panel = $("cacheMetrics");
+  if (!panel) return;
+  panel.hidden = !metrics;
+  if (!metrics) return;
+  $("cacheHitRate").textContent = `${Number(metrics.cache_hit_rate || 0).toFixed(1)}%`;
+  $("cacheTotalHits").textContent = String(metrics.cache_hits || 0);
+  $("cacheTotalMisses").textContent = String(metrics.cache_misses || 0);
+  $("cacheCostSaved").textContent = `$${Number(metrics.estimated_cost_saved || 0).toFixed(4)}`;
 }
 
 function pulseErrorNodes(cy) {
@@ -1563,6 +1636,15 @@ function appendDebug(messageNode, result) {
 }
 
 function wireSettings() {
+  $("exportSettings")?.addEventListener("click", exportSettingsFile);
+  $("importSettings")?.addEventListener("click", () => {
+    const input = $("settingsImportFile");
+    if (!input) return;
+    input.value = "";
+    input.click();
+  });
+  $("settingsImportFile")?.addEventListener("change", importSettingsFile);
+
   $("saveSettings").addEventListener("click", async () => {
     const body = {
       models: {
@@ -1592,6 +1674,12 @@ function wireSettings() {
         searchLimit: Number($("graphSearchLimit")?.value || 30),
         contextLimit: Number($("graphContextLimit")?.value || 12),
         expandedForListQuestions: Boolean($("graphExpandedForListQuestions")?.checked)
+      },
+      cache: {
+        enabled: Boolean($("cacheEnabled")?.checked),
+        provider: $("cacheProvider")?.value || "memory",
+        redisUrl: $("cacheRedisUrl")?.value || "",
+        memoryMaxEntries: Number($("cacheMemoryMaxEntries")?.value || 10000)
       },
       knowledge: {
         triggerKeywords: parseMultilineList($("knowledgeTriggerKeywords")?.value || ""),
@@ -1784,43 +1872,130 @@ function wireTools() {
   });
 
   $("runConnectionDiagnostics")?.addEventListener("click", runConnectionDiagnostics);
+  $("connectionDiagnostics")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-diagnostic-id]");
+    if (button) runConnectionDiagnostics([button.dataset.diagnosticId]);
+  });
+  renderConnectionDiagnostics([]);
 }
 
-async function runConnectionDiagnostics() {
+async function runConnectionDiagnostics(ids = []) {
   const button = $("runConnectionDiagnostics");
   const container = $("connectionDiagnostics");
-  button.disabled = true;
-  container.innerHTML = '<div class="diagnosticCard idle">מריץ בדיקות חיבור...</div>';
+  const selectedIds = Array.isArray(ids) ? ids : [];
+  if (!selectedIds.length) button.disabled = true;
+  setDiagnosticLoading(selectedIds);
   try {
-    const result = await api("/api/diagnostics/connections", { method: "POST", body: {} });
-    renderConnectionDiagnostics(result.results || []);
+    const result = await api("/api/diagnostics/connections", { method: "POST", body: { ids: selectedIds } });
+    renderConnectionDiagnostics(result.results || [], { merge: Boolean(selectedIds.length) });
   } catch (error) {
-    container.innerHTML = `<div class="diagnosticCard error"><strong>בדיקת החיבורים נכשלה</strong><small>${escapeHtml(error.message)}</small></div>`;
+    if (!selectedIds.length) {
+      container.innerHTML = `<div class="diagnosticCard error"><strong>בדיקת החיבורים נכשלה</strong><small>${escapeHtml(error.message)}</small></div>`;
+    }
   } finally {
     button.disabled = false;
   }
 }
 
-function renderConnectionDiagnostics(results) {
+function renderConnectionDiagnostics(results, { merge = false } = {}) {
   const container = $("connectionDiagnostics");
-  if (!results.length) {
-    container.innerHTML = '<div class="diagnosticCard error">לא התקבלו תוצאות בדיקה.</div>';
-    return;
-  }
+  const previous = merge ? new Map(
+    [...container.querySelectorAll("[data-diagnostic-card][data-ok]")].map((card) => [
+      card.dataset.diagnosticCard,
+      {
+        id: card.dataset.diagnosticCard,
+        label: card.dataset.label,
+        group: card.dataset.group,
+        ok: card.dataset.ok === "true",
+        status: card.dataset.status,
+        ms: Number(card.dataset.ms || 0),
+        details: card.dataset.details ? JSON.parse(card.dataset.details) : null,
+        error: card.dataset.error || ""
+      }
+    ])
+  ) : new Map();
+  for (const result of results) previous.set(result.id, result);
+  const resultMap = previous;
   container.innerHTML = "";
-  for (const item of results) {
-    const card = document.createElement("article");
-    card.className = `diagnosticCard ${item.ok ? "ok" : "error"}`;
-    card.innerHTML = `
+
+  for (const group of diagnosticGroups) {
+    const section = document.createElement("section");
+    section.className = "diagnosticGroup";
+    section.innerHTML = `
+      <header class="diagnosticGroupHeader">
+        <div><h3>${escapeHtml(group.label)}</h3><p>${escapeHtml(group.description)}</p></div>
+        <span>${group.checks.length} רכיבים</span>
+      </header>
+      <div class="diagnosticsGrid"></div>
+    `;
+    const grid = section.querySelector(".diagnosticsGrid");
+    for (const [id, label] of group.checks) {
+      grid.append(buildDiagnosticCard(resultMap.get(id) || { id, label, group: group.id, pending: true }));
+    }
+    container.append(section);
+  }
+  updateDiagnosticSummary([...resultMap.values()]);
+}
+
+function buildDiagnosticCard(item) {
+  const card = document.createElement("article");
+  card.className = `diagnosticCard ${item.loading ? "loading" : item.pending ? "idle" : item.ok ? "ok" : "error"}`;
+  card.dataset.diagnosticCard = item.id;
+  card.dataset.label = item.label;
+  card.dataset.group = item.group || "";
+  if (!item.pending && !item.loading) {
+    card.dataset.ok = String(Boolean(item.ok));
+    card.dataset.status = item.status || "";
+    card.dataset.ms = String(item.ms || 0);
+    card.dataset.details = JSON.stringify(item.details || null);
+    card.dataset.error = item.error || "";
+  }
+  const status = item.loading ? "בודק..." : item.pending ? "טרם נבדק" : item.ok ? "תקין" : diagnosticStatusLabel(item.status);
+  const output = item.loading
+    ? "מתבצעת בדיקת חיבור..."
+    : item.pending
+      ? "לחץ על כפתור הבדיקה כדי לבדוק רכיב זה."
+      : JSON.stringify(item.ok ? item.details : { status: item.status, error: item.error }, null, 2);
+  card.innerHTML = `
       <div class="diagnosticTop">
         <strong>${escapeHtml(item.label)}</strong>
-        <span>${item.ok ? "תקין" : diagnosticStatusLabel(item.status)}</span>
+        <span>${escapeHtml(status)}</span>
       </div>
-      <small>${item.ms ?? 0}ms</small>
-      <pre>${escapeHtml(JSON.stringify(item.ok ? item.details : { status: item.status, error: item.error }, null, 2))}</pre>
-    `;
-    container.append(card);
+      <div class="diagnosticMeta">
+        <small>${item.pending || item.loading ? "" : `${item.ms ?? 0}ms`}</small>
+        <button class="iconButton diagnosticRunButton" type="button" data-diagnostic-id="${escapeHtml(item.id)}" title="בדוק רכיב" aria-label="בדוק ${escapeHtml(item.label)}">↻</button>
+      </div>
+      <pre>${escapeHtml(output)}</pre>
+  `;
+  return card;
+}
+
+function setDiagnosticLoading(ids) {
+  const selected = ids.length
+    ? ids
+    : diagnosticGroups.flatMap((group) => group.checks.map(([id]) => id));
+  for (const id of selected) {
+    const card = document.querySelector(`[data-diagnostic-card="${CSS.escape(id)}"]`);
+    if (!card) continue;
+    card.className = "diagnosticCard loading";
+    card.querySelector(".diagnosticTop span").textContent = "בודק...";
+    card.querySelector("pre").textContent = "מתבצעת בדיקת חיבור...";
+    card.querySelector("button").disabled = true;
   }
+}
+
+function updateDiagnosticSummary(results) {
+  const summary = $("diagnosticSummary");
+  const completed = results.filter((item) => !item.pending && !item.loading);
+  if (!completed.length) {
+    summary.textContent = "טרם הורצו בדיקות.";
+    summary.className = "diagnosticSummary";
+    return;
+  }
+  const ok = completed.filter((item) => item.ok).length;
+  const failed = completed.length - ok;
+  summary.textContent = `${ok} תקינים · ${failed} דורשים טיפול · ${completed.length} נבדקו`;
+  summary.className = `diagnosticSummary ${failed ? "hasErrors" : "allOk"}`;
 }
 
 function diagnosticStatusLabel(status) {
@@ -1941,6 +2116,13 @@ function applyAdvancedAiSettingsToForm() {
   setCheckboxValue("toolsEnabled", state.settings?.toolsRuntime?.enabled !== false);
   setCheckboxValue("toolsAlertAgentEnabled", state.settings?.toolsRuntime?.alertAgentEnabled !== false);
   setCheckboxValue("toolsSafetyPrecheckEnabled", state.settings?.toolsRuntime?.safetyPrecheckEnabled !== false);
+  setCheckboxValue("cacheEnabled", state.settings?.cache?.enabled !== false);
+  setInputValue("cacheProvider", state.settings?.cache?.provider || "memory");
+  setInputValue("cacheMemoryMaxEntries", state.settings?.cache?.memoryMaxEntries || 10000);
+  if ($("cacheRedisUrl")) {
+    $("cacheRedisUrl").value = "";
+    $("cacheRedisUrl").placeholder = state.settings?.cache?.redisUrl || "redis://default:password@host:6379";
+  }
 }
 
 function readAiSettingsFromForm() {
@@ -3349,27 +3531,26 @@ function saveTimelineLinkFromEvents({ sourceEvent, targetEvent, relationType, ap
       note
     }
   });
-
-  $("exportSettings")?.addEventListener("click", exportSettingsFile);
-  $("importSettings")?.addEventListener("click", () => $("settingsImportFile")?.click());
-  $("settingsImportFile")?.addEventListener("change", importSettingsFile);
 }
 
 async function exportSettingsFile() {
   const button = $("exportSettings");
+  if (!button) return;
   button.disabled = true;
   try {
     const data = await api("/api/settings/export");
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const json = `${JSON.stringify(data, null, 2)}\n`;
+    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     link.href = url;
     link.download = `bidoc-settings-${stamp}.json`;
+    link.style.display = "none";
     document.body.append(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast("קובץ ההגדרות ירד למחשב");
   } catch (error) {
     showToast(`שגיאה בהורדת קובץ הגדרות: ${error.message}`, "error");
@@ -3381,20 +3562,31 @@ async function exportSettingsFile() {
 async function importSettingsFile(event) {
   const input = event.currentTarget;
   const file = input.files?.[0];
-  input.value = "";
   if (!file) return;
   const button = $("importSettings");
+  if (!button) return;
   button.disabled = true;
   try {
     const text = await file.text();
-    const body = JSON.parse(text);
+    if (!text.trim()) throw new Error("הקובץ ריק");
+    let body;
+    try {
+      body = JSON.parse(text.replace(/^\uFEFF/, ""));
+    } catch {
+      throw new Error("הקובץ אינו קובץ JSON תקין");
+    }
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new Error("קובץ ההגדרות חייב להכיל אובייקט JSON");
+    }
     const result = await api("/api/settings/import", { method: "POST", body });
     state.settings = result.settings;
     applySettingsToForm();
+    renderAgents();
     showToast("קובץ ההגדרות נטען ונשמר");
   } catch (error) {
     showToast(`שגיאה בטעינת קובץ הגדרות: ${error.message}`, "error");
   } finally {
+    input.value = "";
     button.disabled = false;
   }
 }
@@ -3834,24 +4026,35 @@ function wireTimeline() {
 function wireQa() {
   $("refreshQa")?.addEventListener("click", loadQaList);
   $("trendQa")?.addEventListener("click", runTrendAnalysis);
+  $("qaMessageFilter")?.addEventListener("change", loadQaList);
 }
+
+let qaLoadRequestId = 0;
 
 async function loadQaList() {
   const list = $("qaList");
+  const refreshButton = $("refreshQa");
+  const requestId = ++qaLoadRequestId;
   list.textContent = "טוען...";
+  if (refreshButton) refreshButton.disabled = true;
   let messages;
   try {
-    const result = await api("/api/qa/dislikes");
+    const filter = $("qaMessageFilter")?.value || "all";
+    const result = await api(`/api/qa/messages?filter=${encodeURIComponent(filter)}&limit=30`, { timeoutMs: 20_000 });
+    if (requestId !== qaLoadRequestId) return;
     messages = result.messages || [];
   } catch (err) {
+    if (requestId !== qaLoadRequestId) return;
     list.textContent = `שגיאה: ${escapeHtml(err.message)}`;
     return;
+  } finally {
+    if (requestId === qaLoadRequestId && refreshButton) refreshButton.disabled = false;
   }
 
   list.innerHTML = "";
 
   if (!messages.length) {
-    list.innerHTML = '<p class="hint" style="padding:20px">אין הודעות שנדחו עדיין.</p>';
+    list.innerHTML = '<p class="hint" style="padding:20px">לא נמצאו שיחות מתאימות לסינון.</p>';
     return;
   }
 
@@ -3866,6 +4069,7 @@ async function loadQaList() {
       <div class="qaCardHeader">
         <div class="qaCardMeta">
           <span class="qaCardDate">${escapeHtml(date)}</span>
+          ${msg.annotation === "X" ? '<span class="qaDislikedBadge">דיסלייק</span>' : ""}
         </div>
         <button class="qaRunBtn" data-id="${safeId}">הרץ QA</button>
       </div>
@@ -3877,17 +4081,7 @@ async function loadQaList() {
 
     card.querySelector(".qaRunBtn").addEventListener("click", () => runQa(msg.id, card));
     list.append(card);
-
-    loadExistingQaReport(msg.id, card);
-  }
-}
-
-async function loadExistingQaReport(messageId, card) {
-  try {
-    const result = await api(`/api/qa/${encodeURIComponent(messageId)}/report`);
-    if (result.report) renderQaReport(result.report, messageId, card);
-  } catch (_) {
-    // 404 = no report yet
+    if (msg.qa_report) renderQaReport(msg.qa_report, msg.id, card);
   }
 }
 
@@ -3918,7 +4112,24 @@ async function runQa(messageId, card) {
 function renderQaReport(report, messageId, card) {
   const reportEl = card.querySelector(`#qaReport_${messageId}`);
   if (!report || !reportEl) return;
-  reportEl.innerHTML = qaReportHtml(report.report || report);
+  const normalizedReport = report.report || report;
+  reportEl.innerHTML = qaReportHtml(normalizedReport);
+  const copyButton = reportEl.querySelector(".qaCopyReport");
+  copyButton?.addEventListener("click", async () => {
+    copyButton.disabled = true;
+    try {
+      await copyTextToClipboard(formatQaReportText(normalizedReport));
+      copyButton.textContent = "הועתק";
+      showToast("דוח ה-QA הועתק");
+      window.setTimeout(() => {
+        copyButton.textContent = "העתק דוח";
+        copyButton.disabled = false;
+      }, 1400);
+    } catch (error) {
+      copyButton.disabled = false;
+      showToast(`שגיאה בהעתקת הדוח: ${error.message}`, "error");
+    }
+  });
 }
 
 function qaReportHtml(report) {
@@ -3940,6 +4151,9 @@ function qaReportHtml(report) {
 
   return `
     <div class="qaReportBox">
+      <div class="qaReportActions">
+        <button class="qaCopyReport" type="button" title="העתק את הדוח כטקסט">העתק דוח</button>
+      </div>
       <div class="qaReportHeader">
         <span class="qaOverallSeverity ${sevClass[report.overall_severity] || ""}">חומרה: ${escapeHtml(sevLabel[report.overall_severity] || report.overall_severity || "")}</span>
         <span class="qaAnswerQuality">איכות: ${escapeHtml(report.answer_quality || "")}</span>
@@ -3951,6 +4165,51 @@ function qaReportHtml(report) {
       ${recs ? `<div class="qaSection"><strong>המלצות:</strong><ul class="qaRecs">${recs}</ul></div>` : ""}
     </div>
   `;
+}
+
+function formatQaReportText(report = {}) {
+  const severityLabels = { high: "גבוהה", medium: "בינונית", low: "נמוכה" };
+  const lines = [
+    "דוח QA",
+    "",
+    `חומרה: ${severityLabels[report.overall_severity] || report.overall_severity || "לא צוין"}`,
+    `איכות תשובה: ${report.answer_quality || "לא צוינה"}`,
+    `רמת ביטחון: ${report.confidence || "לא צוינה"}`,
+    "",
+    "סיכום:",
+    report.summary || "אין סיכום."
+  ];
+  if (report.root_cause_steps?.length) {
+    lines.push("", "שלבים שנכשלו:", ...report.root_cause_steps.map((step) => `- ${step}`));
+  }
+  if (report.step_issues?.length) {
+    lines.push("", "ממצאים לפי שלב:");
+    for (const issue of report.step_issues) {
+      const severity = severityLabels[issue.severity] || issue.severity || "לא צוין";
+      lines.push(`- ${issue.label || issue.step || "שלב"} [${severity}]: ${issue.issue || ""}`);
+    }
+  }
+  if (report.recommendations?.length) {
+    lines.push("", "המלצות:", ...report.recommendations.map((recommendation) => `- ${recommendation}`));
+  }
+  return lines.join("\n").trim();
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) throw new Error("הדפדפן חסם את ההעתקה");
 }
 
 async function runTrendAnalysis() {

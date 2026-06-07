@@ -30,12 +30,15 @@ tags:
 - `.env` and `.env.local` are resolved from the repository root based on `src/config.js`, not from the process working directory.
 - Settings UI displays masked secrets only as placeholders; password fields stay empty so masked values are not submitted as real keys.
 - Settings UI can export/import a local JSON settings file; export includes full unmasked API keys and connection fields, so the file must be handled as a secret.
+- Settings export/import controls are wired during Settings initialization; downloads defer object-URL cleanup and imports validate JSON before saving and refreshing the form.
 - Settings UI has a dedicated Chat section that owns chat-affecting models, prompts, hybrid search tuning, knowledge vocabulary, timezone, and Content Supabase settings.
 - Settings UI model fields are OpenRouter-backed dropdowns that show context tokens and input/output pricing when available.
 - Settings UI exposes balanced advanced AI controls for model temperature/max tokens/timeouts, RAG context budget, graph context, Knowledge Base limits, and tool runtime toggles.
 - The Agents page is read-only monitoring/status UI; prompt and model edits are saved through `/api/settings`, and `/api/agents` rejects writes.
 - Runtime config ignores masked secret values such as `sk-o...abcd` or `********` and falls back to environment variables.
 - Supabase requests use `apikey` for `sb_secret_...` keys and add `Authorization: Bearer ...` only for legacy JWT keys that start with `eyJ`.
+- `start-bidoc.bat` starts the local Node.js server, waits for port 4000 to respond, and opens the application in the default browser.
+- The Tools diagnostics dashboard groups core services, data sources, AI agents, and N8N tools, with both full-suite and per-component checks.
 
 ## Recent Changes
 
@@ -63,6 +66,9 @@ tags:
 - 2026-06-04 -- Improved advanced AI settings UX by keeping model controls collapsed by default and adding common OpenRouter sampling controls (`top_p`, penalties, seed).
 - 2026-06-04 -- Added inline Hebrew info buttons for advanced AI, RAG, graph, knowledge, and tool runtime settings.
 - 2026-06-04 -- Added Workflow "AI Report" runs that invoke the QA agent on a selected run, save the result in QA reports, and attach it to run history workflow logs.
+- 2026-06-07 -- Added a Windows launcher that starts the local server and opens the application after it is ready.
+- 2026-06-07 -- Expanded connection diagnostics to cover graph/alert RPCs, Knowledge Base, every configured AI agent, and all N8N tools with individual rerun controls.
+- 2026-06-07 -- Fixed Settings JSON export/import buttons that were unreachable after a timeline helper return, and verified a full export/import round trip.
 
 ## Gotchas
 

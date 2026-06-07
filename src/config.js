@@ -34,6 +34,13 @@ const DEFAULT_TOOL_RUNTIME_SETTINGS = {
   alertAgentEnabled: true,
   safetyPrecheckEnabled: true
 };
+const DEFAULT_CACHE_SETTINGS = {
+  enabled: true,
+  provider: "memory",
+  namespace: "bidoc:cache:",
+  memoryMaxEntries: 10_000,
+  timeoutMs: 5_000
+};
 
 // ---------------------------------------------------------------------------
 // Supabase persistence for settings
@@ -298,6 +305,9 @@ export function getConfig() {
     ai: normalizeAiSettings(settings.ai),
     rag: normalizeRagSettings(settings.rag),
     graph: normalizeGraphSettings(settings.graph),
+    cache: normalizeCacheSettings(settings.cache, {
+      redisUrl: resolveSecret(settings.cache?.redisUrl, process.env.REDIS_URL || process.env.UPSTASH_REDIS_URL)
+    }),
     knowledge: {
       triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS),
       agentLimit: clampNumber(settings.knowledge?.agentLimit, 1, 5, 2),
@@ -324,6 +334,10 @@ export function publicSettings(config = getConfig()) {
     ai: config.ai,
     rag: config.rag,
     graph: config.graph,
+    cache: {
+      ...config.cache,
+      redisUrl: maskSecret(config.cache.redisUrl)
+    },
     knowledge: config.knowledge,
     timelineLinks: config.timelineLinks,
     contentSource: {
@@ -423,6 +437,19 @@ function normalizeGraphSettings(value = {}) {
   };
 }
 
+function normalizeCacheSettings(value = {}, overrides = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const provider = String(raw.provider || process.env.CACHE_PROVIDER || DEFAULT_CACHE_SETTINGS.provider).toLowerCase();
+  return {
+    enabled: raw.enabled !== false && process.env.CACHE_ENABLED !== "false",
+    provider: ["memory", "redis", "none"].includes(provider) ? provider : "memory",
+    redisUrl: resolveSecret(overrides.redisUrl || raw.redisUrl, process.env.REDIS_URL || process.env.UPSTASH_REDIS_URL),
+    namespace: String(raw.namespace || process.env.CACHE_NAMESPACE || DEFAULT_CACHE_SETTINGS.namespace),
+    memoryMaxEntries: clampNumber(raw.memoryMaxEntries || process.env.CACHE_MEMORY_MAX_ENTRIES, 100, 1_000_000, DEFAULT_CACHE_SETTINGS.memoryMaxEntries),
+    timeoutMs: clampNumber(raw.timeoutMs || process.env.CACHE_TIMEOUT_MS, 500, 30_000, DEFAULT_CACHE_SETTINGS.timeoutMs)
+  };
+}
+
 function normalizeToolRuntimeSettings(value = {}) {
   const raw = value && typeof value === "object" ? value : {};
   return {
@@ -461,6 +488,7 @@ export function exportFullSettings(config = getConfig()) {
       ai: config.ai,
       rag: config.rag,
       graph: config.graph,
+      cache: config.cache,
       knowledge: config.knowledge,
       timelineLinks: config.timelineLinks,
       contentSource: {
@@ -497,6 +525,7 @@ export function normalizeImportedSettingsFile(value = {}) {
     ai: raw.ai || {},
     rag: raw.rag || {},
     graph: raw.graph || {},
+    cache: raw.cache || {},
     knowledge: raw.knowledge || {},
     timelineLinks: raw.timelineLinks || {},
     contentSource: raw.contentSource || {},
@@ -582,6 +611,9 @@ export async function writeLocalSettings(settings) {
     ai: normalizeAiSettings(settings.ai || existing.ai),
     rag: normalizeRagSettings(settings.rag || existing.rag),
     graph: normalizeGraphSettings(settings.graph || existing.graph),
+    cache: normalizeCacheSettings(settings.cache || existing.cache, {
+      redisUrl: mergeSecret(existing.cache?.redisUrl, settings.cache?.redisUrl)
+    }),
     contentSource: {
       supabaseUrl: incomingContentSource.supabaseUrl || existingContentSource.supabaseUrl || "",
       supabaseServiceRoleKey: mergeSecret(existingContentSource.supabaseServiceRoleKey, incomingContentSource.supabaseServiceRoleKey),

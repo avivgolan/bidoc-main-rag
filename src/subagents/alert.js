@@ -23,12 +23,13 @@ const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 ## Fallback
 אם לא נמצאו נתונים: "לא נמצאו התראות רלוונטיות."`;
 
-async function searchAlertsEmbeddings(config, query, table, topK = 20) {
+async function searchAlertsEmbeddings(config, query, table, topK = 20, cacheContext = null) {
   const contentConfig = contentSupabaseConfig(config);
   const embedding = await createEmbedding({
     apiKey: config.openRouterApiKey,
     model: config.models.embedding,
-    input: query
+    input: query,
+    cacheContext
   });
 
   const rpcName = contentConfig.alertsRpcName || `match_${table}`;
@@ -44,7 +45,7 @@ async function searchAlertsEmbeddings(config, query, table, topK = 20) {
   return Array.isArray(data) ? data : [];
 }
 
-export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, dateTo = null }) {
+export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, dateTo = null, cacheContext = null }) {
   const config = getConfig();
   const saved = readLocalSettings().subagents?.alert || {};
   const contentConfig = contentSupabaseConfig(config);
@@ -60,7 +61,7 @@ export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, d
   const normalizedDateTo = normalizeDateBoundary(dateTo);
   const effectiveDateFilter = dateFilter || buildAlertDateFilter(normalizedDateFrom, normalizedDateTo);
   const searchQuery = effectiveDateFilter ? `${query} ${effectiveDateFilter}` : query;
-  const rawResults = await searchAlertsEmbeddings(config, searchQuery, table);
+  const rawResults = await searchAlertsEmbeddings(config, searchQuery, table, 20, cacheContext);
   const results = filterAlertsByDateRange(rawResults, normalizedDateFrom, normalizedDateTo);
 
   const today = new Date().toISOString().slice(0, 10);
