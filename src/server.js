@@ -209,12 +209,13 @@ async function handleApi(req, res, url) {
   if (knowledgeDocumentMatch) {
     const filename = decodeURIComponent(knowledgeDocumentMatch[1]);
     const agentId = url.searchParams.get("agentId") || undefined;
+    const source = url.searchParams.get("source") || undefined;
     if (req.method === "GET") {
-      const document = await readKnowledgeDocument(filename, { agentId });
+      const document = await readKnowledgeDocument(filename, { agentId, source });
       return sendJson(res, 200, { document });
     }
     if (req.method === "DELETE") {
-      const deleted = await deleteKnowledgeDocument(filename, { agentId });
+      const deleted = await deleteKnowledgeDocument(filename, { agentId, source });
       return sendJson(res, 200, deleted);
     }
   }

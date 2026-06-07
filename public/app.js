@@ -877,12 +877,15 @@ async function loadKnowledgeDocuments() {
   }
   for (const item of result.documents) {
     const button = document.createElement("button");
-    button.className = "knowledgeItem";
+    button.className = `knowledgeItem${item.readOnly ? " readOnly" : ""}`;
+    const sourceLabel = item.source === "agent" ? "Built-in agent" : "Uploaded";
+    const readOnlyLabel = item.readOnly ? "read-only" : "editable";
     button.innerHTML = `
       <strong>${escapeHtml(item.filename)}</strong>
       <span>${Number(item.size || 0).toLocaleString()} bytes · ${escapeHtml(new Date(item.updatedAt).toLocaleString("he-IL"))}</span>
+      <small>${escapeHtml(sourceLabel)} · ${escapeHtml(readOnlyLabel)}</small>
     `;
-    button.addEventListener("click", () => openKnowledgeDocument(item.filename, item.agentId));
+    button.addEventListener("click", () => openKnowledgeDocument(item.filename, item.agentId, item.source));
     list.append(button);
   }
 }
@@ -923,10 +926,12 @@ function renderKnowledgeAgents() {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `knowledgeAgentCard ${agent.id === state.selectedKnowledgeAgent ? "active" : ""}`;
+    const tagText = (agent.tags || []).join(", ");
+    button.title = [agent.name, agent.description || "", tagText].filter(Boolean).join("\n");
     button.innerHTML = `
       <strong>${escapeHtml(agent.name)}</strong>
       <span>${escapeHtml(agent.description || "")}</span>
-      <small>${escapeHtml((agent.tags || []).slice(0, 6).join(", "))}</small>
+      <small>${escapeHtml(tagText)}</small>
     `;
     button.addEventListener("click", () => {
       state.selectedKnowledgeAgent = agent.id;
@@ -961,21 +966,31 @@ async function uploadKnowledgeDocument() {
   }
 }
 
-async function openKnowledgeDocument(filename, agentId = state.selectedKnowledgeAgent) {
-  const result = await api(`/api/knowledge/documents/${encodeURIComponent(filename)}?agentId=${encodeURIComponent(agentId || "schedule")}`);
-  state.selectedKnowledgeDocument = filename;
+async function openKnowledgeDocument(filename, agentId = state.selectedKnowledgeAgent, source = "") {
+  const sourceParam = source ? `&source=${encodeURIComponent(source)}` : "";
+  const result = await api(`/api/knowledge/documents/${encodeURIComponent(filename)}?agentId=${encodeURIComponent(agentId || "schedule")}${sourceParam}`);
+  const document = result.document || {};
+  state.selectedKnowledgeDocument = {
+    filename: document.filename || filename,
+    agentId: document.agentId || agentId || "schedule",
+    source: document.source || source || "upload",
+    readOnly: Boolean(document.readOnly)
+  };
   state.selectedKnowledgeAgent = result.document.agentId || agentId || "schedule";
   $("knowledgePreviewTitle").textContent = result.document.filename;
   $("knowledgePreview").textContent = result.document.content || "";
-  $("deleteKnowledge").disabled = false;
+  $("deleteKnowledge").disabled = Boolean(result.document.readOnly);
 }
 
 async function deleteSelectedKnowledgeDocument() {
   if (!state.selectedKnowledgeDocument) return;
-  const filename = state.selectedKnowledgeDocument;
+  if (state.selectedKnowledgeDocument.readOnly) return;
+  const filename = state.selectedKnowledgeDocument.filename;
+  const agentId = state.selectedKnowledgeDocument.agentId || state.selectedKnowledgeAgent || "schedule";
+  const source = state.selectedKnowledgeDocument.source || "upload";
   $("deleteKnowledge").disabled = true;
   try {
-    await api(`/api/knowledge/documents/${encodeURIComponent(filename)}?agentId=${encodeURIComponent(state.selectedKnowledgeAgent || "schedule")}`, { method: "DELETE" });
+    await api(`/api/knowledge/documents/${encodeURIComponent(filename)}?agentId=${encodeURIComponent(agentId)}&source=${encodeURIComponent(source)}`, { method: "DELETE" });
     state.selectedKnowledgeDocument = null;
     $("knowledgePreviewTitle").textContent = "תצוגת מסמך";
     $("knowledgePreview").textContent = "בחר מסמך מהרשימה.";

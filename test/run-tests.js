@@ -3,7 +3,7 @@ import { sanitizeMessage } from "../src/sanitize.js";
 import { normalizeClassification } from "../src/classifier.js";
 import { heuristicClassification } from "../src/heuristics.js";
 import { buildToolOrder } from "../src/tools.js";
-import { deleteKnowledgeDocument, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
+import { deleteKnowledgeDocument, listKnowledgeAgents, parseKnowledgeAgentMarkdown, readKnowledgeDocument, routeKnowledgeAgents, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
 import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality.js";
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
@@ -201,10 +201,71 @@ test("knowledge search returns relevant local chunks", async () => {
     filename: "test-safety-method.md",
     content: "עצירת עבודה נדרשת כאשר יש סיכון בטיחותי מיידי.\n\nקריטריונים: חומרת הסיכון, הסתברות, ויכולת בקרה."
   });
-  const result = await searchKnowledgeBase({ query: "איך מחליטים על עצירת עבודה בגלל בטיחות?", tags: ["בטיחות"], topK: 3 });
+  const result = await searchKnowledgeBase({ query: "איך מחליטים על עצירת עבודה בגלל בטיחות?", tags: ["בטיחות"], topK: 12 });
   assert.ok(result.matches.length >= 1);
-  assert.equal(result.matches[0].filename, "test-safety-method.md");
+  assert.ok(result.matches.some((match) => match.source === "upload" && match.filename === "test-safety-method.md"));
   await deleteKnowledgeDocument("test-safety-method.md");
+});
+
+test("knowledge agents load from markdown frontmatter", () => {
+  const agents = listKnowledgeAgents();
+  assert.deepEqual(agents.map((agent) => agent.id), ["schedule", "safety_quality", "commercial"]);
+  assert.ok(agents.every((agent) => agent.source === "agent"));
+  assert.ok(agents.every((agent) => agent.readOnly === true));
+  assert.ok(agents.find((agent) => agent.id === "schedule").keywords.includes("delayed supplier"));
+});
+
+test("knowledge routing uses markdown keywords", () => {
+  const routed = routeKnowledgeAgents({ message: "Who was the delayed supplier and what schedule blocker did they cause?", limit: 2 });
+  assert.equal(routed[0].id, "schedule");
+  assert.ok(routed[0].score > 0);
+});
+
+test("knowledge search returns built-in markdown chunks without uploads", async () => {
+  const result = await searchKnowledgeBase({
+    query: "variation order entitlement matrix",
+    agentId: "commercial",
+    topK: 3
+  });
+  assert.ok(result.matches.some((match) => match.source === "agent" && match.filename === "commercial.md"));
+  assert.ok(result.sources.agent.documents >= 1);
+  assert.ok(result.sources.agent.matches >= 1);
+});
+
+test("knowledge search combines built-in and uploaded documents", async () => {
+  await saveKnowledgeDocument({
+    agentId: "commercial",
+    filename: "test-retention-note.md",
+    content: "Retention release should be checked against payment approval, contract responsibility, and unresolved claims."
+  });
+  const result = await searchKnowledgeBase({ query: "retention release payment approval", agentId: "commercial", topK: 6 });
+  assert.ok(result.matches.some((match) => match.source === "agent" && match.filename === "commercial.md"));
+  assert.ok(result.matches.some((match) => match.source === "upload" && match.filename === "test-retention-note.md"));
+  assert.ok(result.sources.agent.matches >= 1);
+  assert.ok(result.sources.upload.matches >= 1);
+  await deleteKnowledgeDocument("test-retention-note.md", { agentId: "commercial", source: "upload" });
+});
+
+test("built-in knowledge agent markdown is read-only", async () => {
+  const document = await readKnowledgeDocument("schedule.md", { agentId: "schedule", source: "agent" });
+  assert.equal(document.source, "agent");
+  assert.equal(document.readOnly, true);
+  assert.match(document.content, /Schedule Knowledge/);
+  await assert.rejects(
+    () => deleteKnowledgeDocument("schedule.md", { agentId: "schedule", source: "agent" }),
+    /read-only/i
+  );
+});
+
+test("knowledge agent markdown requires frontmatter", () => {
+  assert.throws(
+    () => parseKnowledgeAgentMarkdown("# Missing metadata", "broken.md"),
+    /frontmatter/i
+  );
+  assert.throws(
+    () => parseKnowledgeAgentMarkdown("---\nname: Broken Agent\n---\n# Body", "broken.md"),
+    /required frontmatter field "id"/
+  );
 });
 
 test("knowledge documents reject unsupported file types", () => {
