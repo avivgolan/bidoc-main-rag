@@ -467,6 +467,14 @@ test("chat UI preserves successful answers when workflow rendering fails", () =>
   assert.match(appSource, /item\?\.step === "client" \|\| item\?\.step === "complete" \|\| item\?\.step === "error"/);
 });
 
+test("settings import uses a native file label that works before JavaScript wiring", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(htmlSource, /<label id="importSettings"[^>]+for="settingsImportFile"/);
+  assert.match(htmlSource, /<input id="settingsImportFile" type="file"/);
+  assert.match(appSource, /\$\("settingsImportFile"\)\?\.addEventListener\("change", importSettingsFile\)/);
+});
+
 test("chat UI renders document URLs as safe labeled links", () => {
   const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
   const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");

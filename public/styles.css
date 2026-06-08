@@ -72,8 +72,9 @@ body {
   background: var(--paper);
 }
 button, input, textarea, select { font: inherit; }
-button, select, .historyItem, .knowledgeItem, .workflowNode { cursor: pointer; }
+button, select, .buttonControl, .historyItem, .knowledgeItem, .workflowNode { cursor: pointer; }
 button:focus-visible,
+.buttonControl:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
@@ -341,6 +342,34 @@ button:disabled {
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
+}
+
+.buttonControl {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 8px 15px;
+  color: #fff;
+  background: var(--brand-600);
+  font-size: 13.5px;
+  font-weight: 750;
+  line-height: 1.25;
+  white-space: nowrap;
+  transition: transform var(--t), background var(--t), box-shadow var(--t), opacity var(--t);
+}
+
+.buttonControl:hover {
+  background: var(--brand-700);
+  box-shadow: 0 8px 16px rgb(15 112 95 / 0.18);
+  transform: translateY(-1px);
+}
+
+.buttonControl[aria-disabled="true"] {
+  opacity: 0.48;
+  pointer-events: none;
 }
 
 input,

@@ -1664,11 +1664,10 @@ function appendDebug(messageNode, result) {
 
 function wireSettings() {
   $("exportSettings")?.addEventListener("click", exportSettingsFile);
-  $("importSettings")?.addEventListener("click", () => {
-    const input = $("settingsImportFile");
-    if (!input) return;
-    input.value = "";
-    input.click();
+  $("importSettings")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    $("settingsImportFile")?.click();
   });
   $("settingsImportFile")?.addEventListener("change", importSettingsFile);
 
@@ -3649,7 +3648,7 @@ async function importSettingsFile(event) {
   if (!file) return;
   const button = $("importSettings");
   if (!button) return;
-  button.disabled = true;
+  button.setAttribute("aria-disabled", "true");
   try {
     const text = await file.text();
     if (!text.trim()) throw new Error("הקובץ ריק");
@@ -3671,7 +3670,7 @@ async function importSettingsFile(event) {
     showToast(`שגיאה בטעינת קובץ הגדרות: ${error.message}`, "error");
   } finally {
     input.value = "";
-    button.disabled = false;
+    button.removeAttribute("aria-disabled");
   }
 }
 
