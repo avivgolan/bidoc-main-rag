@@ -111,6 +111,7 @@ const state = {
   runEvents: [],
   fullLogVisible: false,
   chatProgress: null,
+  settingsDirty: false,
   projectGraph: { nodes: [], edges: [], stats: null }
 };
 
@@ -260,7 +261,7 @@ function startNewSession(options = {}) {
 }
 
 const TAB_LOADERS = {
-  settings:   () => loadSettings(),
+  settings:   () => state.settingsDirty ? Promise.resolve() : loadSettings(),
   agents:     () => loadAgentsTabData(),
   subagents:  () => loadSubAgents(),
   knowledge:  () => loadKnowledgeDocuments(),
@@ -1670,79 +1671,23 @@ function wireSettings() {
     $("settingsImportFile")?.click();
   });
   $("settingsImportFile")?.addEventListener("change", importSettingsFile);
+  $("settings")?.addEventListener("input", markSettingsDraftChanged);
+  $("settings")?.addEventListener("change", (event) => {
+    if (event.target?.id !== "settingsImportFile") markSettingsDraftChanged();
+  });
 
   $("saveSettings").addEventListener("click", async () => {
-    const body = {
-      models: {
-        classifier: $("modelClassifier").value,
-        knowledgePlanner: $("modelKnowledgePlanner").value,
-        main: $("modelMain").value,
-        lite: $("modelLite").value,
-        embedding: $("modelEmbedding").value,
-        reranker: $("modelReranker").value,
-        qa: $("modelQa")?.value || $("modelMain").value
-      },
-      retrieval: {
-        rpcName: $("hybridRpcName").value,
-        candidates: Number($("hybridCandidates").value || 40),
-        rerankTopK: Number($("rerankTopK").value || 10),
-        vectorWeight: Number($("vectorWeight").value || 0.65),
-        keywordWeight: Number($("keywordWeight").value || 0.35)
-      },
-      ai: readAiSettingsFromForm(),
-      rag: {
-        contextRecordsLimit: Number($("ragContextRecordsLimit")?.value || 12),
-        chunkTextLimit: Number($("ragChunkTextLimit")?.value || 1800),
-        plannerExtraQueriesLimit: Number($("ragPlannerExtraQueriesLimit")?.value || 2)
-      },
-      graph: {
-        enabled: Boolean($("graphEnabled")?.checked),
-        searchLimit: Number($("graphSearchLimit")?.value || 30),
-        contextLimit: Number($("graphContextLimit")?.value || 12),
-        expandedForListQuestions: Boolean($("graphExpandedForListQuestions")?.checked)
-      },
-      cache: {
-        enabled: Boolean($("cacheEnabled")?.checked),
-        provider: $("cacheProvider")?.value || "memory",
-        redisUrl: $("cacheRedisUrl")?.value || "",
-        memoryMaxEntries: Number($("cacheMemoryMaxEntries")?.value || 10000)
-      },
-      knowledge: {
-        triggerKeywords: parseMultilineList($("knowledgeTriggerKeywords")?.value || ""),
-        agentLimit: Number($("knowledgeAgentLimit")?.value || 2),
-        topK: Number($("knowledgeTopKSetting")?.value || 4),
-        chunkSize: Number($("knowledgeChunkSize")?.value || 1800)
-      },
-      prompts: readChatPromptFieldsFromSettingsForm(),
-      contentSource: {
-        supabaseUrl: $("contentSupabaseUrl")?.value || "",
-        supabaseServiceRoleKey: $("contentSupabaseServiceRoleKey")?.value || "",
-        hybridRpcName: $("contentHybridRpcName")?.value || $("hybridRpcName").value,
-        indexTable: $("contentIndexTable")?.value || "",
-        alertsTable: $("contentAlertsTable")?.value || "",
-        alertsRpcName: $("contentAlertsRpcName")?.value || ""
-      },
-      secrets: {
-        openRouterApiKey: $("openRouterApiKey").value,
-        supabaseUrl: $("supabaseUrl").value,
-        supabaseServiceRoleKey: $("supabaseServiceRoleKey").value
-      },
-      n8nBaseUrl: $("n8nBaseUrl").value,
-      timezone: $("timezone").value,
-      toolsRuntime: {
-        enabled: Boolean($("toolsEnabled")?.checked),
-        parallelLimit: Number($("toolsParallelLimit")?.value || 6),
-        alertAgentEnabled: Boolean($("toolsAlertAgentEnabled")?.checked),
-        safetyPrecheckEnabled: Boolean($("toolsSafetyPrecheckEnabled")?.checked)
-      },
-      tools: Object.fromEntries(n8nTools.map((tool) => [tool, $(`tool_${tool}`).value]))
-    };
+    const body = readSettingsForm();
     $("saveSettings").disabled = true;
+    setSettingsSaveState("שומר את כל ההגדרות ב-Supabase...", "saving");
     try {
-      await api("/api/settings", { method: "PUT", body });
-      await loadSettings();
+      const result = await api("/api/settings", { method: "PUT", body });
+      applySettingsResponse(result.settings);
+      state.settingsDirty = false;
+      setSettingsSaveState("כל ההגדרות נשמרו ב-Supabase.", "saved");
       showToast("ההגדרות נשמרו בהצלחה");
     } catch (error) {
+      setSettingsSaveState("השמירה נכשלה. השינויים עדיין נמצאים בטופס ולא נמחקו.", "error");
       showToast(`שגיאה בשמירה: ${error.message}`, "error");
     } finally {
       $("saveSettings").disabled = false;
@@ -1753,8 +1698,9 @@ function wireSettings() {
     $("reloadSettings").disabled = true;
     try {
       const result = await api("/api/settings/reload", { method: "POST", body: {} });
-      state.settings = result.settings;
-      applySettingsToForm();
+      applySettingsResponse(result.settings);
+      state.settingsDirty = false;
+      setSettingsSaveState("ההגדרות המוצגות נטענו מחדש מ-Supabase.", "saved");
       showToast("ההגדרות נטענו מחדש מ-Supabase");
     } catch (error) {
       showToast(`שגיאה ברענון: ${error.message}`, "error");
@@ -1762,6 +1708,78 @@ function wireSettings() {
       $("reloadSettings").disabled = false;
     }
   });
+}
+
+function readSettingsForm() {
+  return {
+    models: {
+      classifier: $("modelClassifier").value,
+      knowledgePlanner: $("modelKnowledgePlanner").value,
+      main: $("modelMain").value,
+      lite: $("modelLite").value,
+      embedding: $("modelEmbedding").value,
+      reranker: $("modelReranker").value,
+      qa: $("modelQa")?.value || $("modelMain").value
+    },
+    retrieval: {
+      rpcName: $("hybridRpcName").value,
+      candidates: Number($("hybridCandidates").value || 40),
+      rerankTopK: Number($("rerankTopK").value || 10),
+      vectorWeight: Number($("vectorWeight").value || 0),
+      keywordWeight: Number($("keywordWeight").value || 0)
+    },
+    ai: readAiSettingsFromForm(),
+    rag: {
+      contextRecordsLimit: Number($("ragContextRecordsLimit")?.value || 12),
+      chunkTextLimit: Number($("ragChunkTextLimit")?.value || 1800),
+      plannerExtraQueriesLimit: Number($("ragPlannerExtraQueriesLimit")?.value || 0)
+    },
+    graph: {
+      enabled: Boolean($("graphEnabled")?.checked),
+      searchLimit: Number($("graphSearchLimit")?.value || 30),
+      contextLimit: Number($("graphContextLimit")?.value || 12),
+      expandedForListQuestions: Boolean($("graphExpandedForListQuestions")?.checked)
+    },
+    cache: {
+      enabled: Boolean($("cacheEnabled")?.checked),
+      provider: $("cacheProvider")?.value || "memory",
+      redisUrl: $("cacheRedisUrl")?.value || "",
+      namespace: state.settings?.cache?.namespace || "bidoc:cache:",
+      memoryMaxEntries: Number($("cacheMemoryMaxEntries")?.value || 10000),
+      timeoutMs: Number(state.settings?.cache?.timeoutMs || 5000)
+    },
+    knowledge: {
+      triggerKeywords: parseMultilineList($("knowledgeTriggerKeywords")?.value || ""),
+      agentLimit: Number($("knowledgeAgentLimit")?.value || 2),
+      topK: Number($("knowledgeTopKSetting")?.value || 4),
+      chunkSize: Number($("knowledgeChunkSize")?.value || 1800)
+    },
+    prompts: readChatPromptFieldsFromSettingsForm(),
+    contentSource: {
+      supabaseUrl: $("contentSupabaseUrl")?.value || "",
+      supabaseServiceRoleKey: $("contentSupabaseServiceRoleKey")?.value || "",
+      hybridRpcName: $("contentHybridRpcName")?.value || $("hybridRpcName").value,
+      indexTable: $("contentIndexTable")?.value || "",
+      alertsTable: $("contentAlertsTable")?.value || "",
+      alertsRpcName: $("contentAlertsRpcName")?.value || ""
+    },
+    secrets: {
+      openRouterApiKey: $("openRouterApiKey").value,
+      supabaseUrl: $("supabaseUrl").value,
+      supabaseServiceRoleKey: $("supabaseServiceRoleKey").value
+    },
+    n8nBaseUrl: $("n8nBaseUrl").value,
+    timezone: $("timezone").value,
+    toolsRuntime: {
+      enabled: Boolean($("toolsEnabled")?.checked),
+      parallelLimit: Number($("toolsParallelLimit")?.value || 6),
+      alertAgentEnabled: Boolean($("toolsAlertAgentEnabled")?.checked),
+      safetyPrecheckEnabled: Boolean($("toolsSafetyPrecheckEnabled")?.checked)
+    },
+    tools: Object.fromEntries(n8nTools.map((tool) => [tool, $(`tool_${tool}`).value])),
+    timelineLinks: state.settings?.timelineLinks || {},
+    subagents: state.settings?.subagents || {}
+  };
 }
 
 function wireLinkAgent() {
@@ -2037,14 +2055,17 @@ function diagnosticStatusLabel(status) {
 }
 
 async function loadSettings() {
-  state.settings = await api("/api/settings");
-  let agents = state.settings.agents;
+  const settings = await api("/api/settings");
+  applySettingsResponse(settings);
+  state.settingsDirty = false;
+  setSettingsSaveState("ההגדרות המוצגות נטענו מ-Supabase.", "saved");
+}
+
+function applySettingsResponse(settings) {
+  state.settings = settings;
+  let agents = settings?.agents;
   if (!Array.isArray(agents) || !agents.length) {
-    try {
-      agents = (await api("/api/agents")).agents || [];
-    } catch {
-      agents = [];
-    }
+    agents = [];
   }
   state.agents = agents;
   resetAgentRuntime();
@@ -2112,8 +2133,20 @@ function applyChatPromptFieldsToSettingsForm() {
   for (const [agentId, fieldId] of Object.entries(chatPromptFields)) {
     const field = $(fieldId);
     if (!field) continue;
-    field.value = byId[agentId]?.prompt || state.settings?.prompts?.[agentId] || "";
+    field.value = state.settings?.prompts?.[agentId] || byId[agentId]?.prompt || "";
   }
+}
+
+function markSettingsDraftChanged() {
+  state.settingsDirty = true;
+  setSettingsSaveState("יש שינויים בטופס שטרם נשמרו ב-Supabase.", "dirty");
+}
+
+function setSettingsSaveState(message, status = "saved") {
+  const node = $("settingsSaveState");
+  if (!node) return;
+  node.textContent = message;
+  node.dataset.state = status;
 }
 
 function applyAdvancedAiSettingsToForm() {
@@ -3662,16 +3695,27 @@ async function importSettingsFile(event) {
       throw new Error("קובץ ההגדרות חייב להכיל אובייקט JSON");
     }
     const result = await api("/api/settings/import", { method: "POST", body });
-    state.settings = result.settings;
-    applySettingsToForm();
-    renderAgents();
-    showToast("קובץ ההגדרות נטען ונשמר ב-Supabase");
+    applySettingsResponse(result.settings);
+    applyImportedSecretValues(result.draft);
+    state.settingsDirty = true;
+    setSettingsSaveState("הקובץ נטען לטופס. השינויים טרם נשמרו ב-Supabase.", "dirty");
+    showToast("הקובץ נטען לטופס. לחץ שמור כדי לעדכן את Supabase");
   } catch (error) {
     showToast(`שגיאה בטעינת קובץ הגדרות: ${error.message}`, "error");
   } finally {
     input.value = "";
     button.removeAttribute("aria-disabled");
   }
+}
+
+function applyImportedSecretValues(draft = {}) {
+  if ($("openRouterApiKey")) $("openRouterApiKey").value = draft.secrets?.openRouterApiKey || "";
+  if ($("supabaseUrl")) $("supabaseUrl").value = draft.secrets?.supabaseUrl || "";
+  if ($("supabaseServiceRoleKey")) $("supabaseServiceRoleKey").value = draft.secrets?.supabaseServiceRoleKey || "";
+  if ($("contentSupabaseServiceRoleKey")) {
+    $("contentSupabaseServiceRoleKey").value = draft.contentSource?.supabaseServiceRoleKey || "";
+  }
+  if ($("cacheRedisUrl")) $("cacheRedisUrl").value = draft.cache?.redisUrl || "";
 }
 
 function timelineRelationLabels() {

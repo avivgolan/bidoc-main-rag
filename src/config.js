@@ -279,8 +279,10 @@ export const TOOL_NAMES = [
   "submittals"
 ];
 
-export function getConfig() {
-  const settings = readLocalSettings();
+export function getConfig(settingsOverride = null) {
+  const settings = settingsOverride && typeof settingsOverride === "object"
+    ? settingsOverride
+    : readLocalSettings();
   const toolSettings = settings.tools || {};
   const secrets = settings.secrets || {};
   const appSupabaseUrl = trimSlash(secrets.supabaseUrl || process.env.SUPABASE_URL || "");
@@ -313,10 +315,10 @@ export function getConfig() {
     },
     retrieval: {
       rpcName: contentSource.hybridRpcName,
-      candidates: Number(settings.retrieval?.candidates || process.env.HYBRID_CANDIDATES || 40),
-      rerankTopK: Number(settings.retrieval?.rerankTopK || process.env.RERANK_TOP_K || 10),
-      vectorWeight: Number(settings.retrieval?.vectorWeight || process.env.HYBRID_VECTOR_WEIGHT || 0.65),
-      keywordWeight: Number(settings.retrieval?.keywordWeight || process.env.HYBRID_KEYWORD_WEIGHT || 0.35)
+      candidates: Number(settings.retrieval?.candidates ?? process.env.HYBRID_CANDIDATES ?? 40),
+      rerankTopK: Number(settings.retrieval?.rerankTopK ?? process.env.RERANK_TOP_K ?? 10),
+      vectorWeight: Number(settings.retrieval?.vectorWeight ?? process.env.HYBRID_VECTOR_WEIGHT ?? 0.65),
+      keywordWeight: Number(settings.retrieval?.keywordWeight ?? process.env.HYBRID_KEYWORD_WEIGHT ?? 0.35)
     },
     ai: normalizeAiSettings(settings.ai),
     rag: normalizeRagSettings(settings.rag),
@@ -342,10 +344,13 @@ export function getConfig() {
   };
 }
 
-export function publicSettings(config = getConfig()) {
-  const settings = readLocalSettings();
+export function publicSettings(config = getConfig(), settingsOverride = null) {
+  const settings = settingsOverride && typeof settingsOverride === "object"
+    ? settingsOverride
+    : readLocalSettings();
   return {
     models: config.models,
+    prompts: config.prompts,
     retrieval: config.retrieval,
     ai: config.ai,
     rag: config.rag,
@@ -554,6 +559,14 @@ export function normalizeImportedSettingsFile(value = {}) {
   };
 }
 
+export function previewImportedSettingsFile(value = {}) {
+  const draft = normalizeImportedSettingsFile(value);
+  return {
+    draft,
+    settings: publicSettings(getConfig(draft), draft)
+  };
+}
+
 export function normalizeContentSourceSettings(value = {}, fallback = {}) {
   const raw = value && typeof value === "object" ? value : {};
   const fallbackUrl = fallback.fallbackSupabaseUrl || "";
@@ -614,15 +627,15 @@ export async function writeLocalSettings(settings) {
   }
 
   const safe = {
-    models: settings.models || {},
+    models: settings.models || existing.models || {},
     prompts: resolvedPrompts,
     [PROMPTS_MIGRATION_FLAG]: true, // mark this record as migrated
     retrieval: {
       rpcName: settings.retrieval?.rpcName || settings.contentSource?.hybridRpcName || existing.retrieval?.rpcName || existing.contentSource?.hybridRpcName || DEFAULT_HYBRID_RPC_NAME,
-      candidates: Number(settings.retrieval?.candidates || existing.retrieval?.candidates || 40),
-      rerankTopK: Number(settings.retrieval?.rerankTopK || existing.retrieval?.rerankTopK || 10),
-      vectorWeight: Number(settings.retrieval?.vectorWeight || existing.retrieval?.vectorWeight || 0.65),
-      keywordWeight: Number(settings.retrieval?.keywordWeight || existing.retrieval?.keywordWeight || 0.35)
+      candidates: Number(settings.retrieval?.candidates ?? existing.retrieval?.candidates ?? 40),
+      rerankTopK: Number(settings.retrieval?.rerankTopK ?? existing.retrieval?.rerankTopK ?? 10),
+      vectorWeight: Number(settings.retrieval?.vectorWeight ?? existing.retrieval?.vectorWeight ?? 0.65),
+      keywordWeight: Number(settings.retrieval?.keywordWeight ?? existing.retrieval?.keywordWeight ?? 0.35)
     },
     ai: normalizeAiSettings(settings.ai || existing.ai),
     rag: normalizeRagSettings(settings.rag || existing.rag),

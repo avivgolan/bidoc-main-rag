@@ -372,6 +372,33 @@ button:disabled {
   pointer-events: none;
 }
 
+.settingsSaveState {
+  margin: 10px 0 18px;
+  padding: 9px 12px;
+  border-inline-start: 3px solid var(--brand-500);
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.settingsSaveState[data-state="dirty"] {
+  border-inline-start-color: var(--amber);
+  color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
+.settingsSaveState[data-state="saving"] {
+  border-inline-start-color: var(--cobalt);
+  color: #8bb3f4;
+  background: var(--cobalt-soft);
+}
+
+.settingsSaveState[data-state="error"] {
+  border-inline-start-color: var(--danger);
+  color: var(--error-text);
+  background: var(--error-bg);
+}
+
 input,
 textarea,
 select {

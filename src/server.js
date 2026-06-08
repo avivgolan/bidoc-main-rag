@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { exportFullSettings, getConfig, initSettings, loadEnv, normalizeImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
@@ -163,6 +163,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/settings") {
+    await reloadSettingsFromDb();
     return sendJson(res, 200, publicSettings(config()));
   }
 
@@ -177,9 +178,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/settings/import") {
     const body = await readJson(req);
-    const imported = normalizeImportedSettingsFile(body);
-    const saved = await writeLocalSettings(imported);
-    return sendJson(res, 200, { saved, settings: publicSettings(config()) });
+    return sendJson(res, 200, previewImportedSettingsFile(body));
   }
 
   if (req.method === "POST" && url.pathname === "/api/system/restart") {
@@ -248,6 +247,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "PUT" && url.pathname === "/api/settings") {
     const body = await readJson(req);
+    await reloadSettingsFromDb();
     const saved = await writeLocalSettings(body);
     return sendJson(res, 200, { saved, settings: publicSettings(config()) });
   }

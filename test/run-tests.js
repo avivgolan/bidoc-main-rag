@@ -9,7 +9,7 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
-import { exportFullSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
+import { exportFullSettings, getConfig, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, previewImportedSettingsFile, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, projectGraphResponse, saveMessage } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
@@ -450,6 +450,29 @@ test("settings import preserves advanced AI controls", () => {
   assert.equal(wrapped.toolsRuntime.parallelLimit, 2);
 });
 
+test("settings import preview does not mutate persisted runtime settings", () => {
+  const before = structuredClone(readLocalSettings());
+  const preview = previewImportedSettingsFile({
+    settings: {
+      models: { main: "openai/imported-model" },
+      prompts: { main: "Imported prompt" },
+      secrets: { openRouterApiKey: "sk-imported" }
+    }
+  });
+  assert.equal(preview.draft.models.main, "openai/imported-model");
+  assert.equal(preview.settings.models.main, "openai/imported-model");
+  assert.equal(preview.settings.prompts.main, "Imported prompt");
+  assert.deepEqual(readLocalSettings(), before);
+});
+
+test("settings config preserves explicit zero retrieval weights", () => {
+  const config = getConfig({
+    retrieval: { candidates: 20, rerankTopK: 5, vectorWeight: 0, keywordWeight: 0 }
+  });
+  assert.equal(config.retrieval.vectorWeight, 0);
+  assert.equal(config.retrieval.keywordWeight, 0);
+});
+
 test("QA prompts require Hebrew reports and evidence-based optional tool diagnosis", () => {
   for (const prompt of [QA_SYSTEM_PROMPT, defaultPrompts().qa]) {
     assert.match(prompt, /human-readable JSON value in Hebrew/);
@@ -473,6 +496,26 @@ test("settings import uses a native file label that works before JavaScript wiri
   assert.match(htmlSource, /<label id="importSettings"[^>]+for="settingsImportFile"/);
   assert.match(htmlSource, /<input id="settingsImportFile" type="file"/);
   assert.match(appSource, /\$\("settingsImportFile"\)\?\.addEventListener\("change", importSettingsFile\)/);
+});
+
+test("settings flow loads from Supabase, imports as draft, and saves without stale reload", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  const saveHandler = appSource.slice(
+    appSource.indexOf('$("saveSettings").addEventListener'),
+    appSource.indexOf('$("reloadSettings")?.addEventListener')
+  );
+  const importHandler = appSource.slice(
+    appSource.indexOf("async function importSettingsFile"),
+    appSource.indexOf("function applyImportedSecretValues")
+  );
+  assert.match(serverSource, /GET" && url\.pathname === "\/api\/settings"[\s\S]*await reloadSettingsFromDb\(\)/);
+  assert.match(serverSource, /POST" && url\.pathname === "\/api\/settings\/import"[\s\S]*previewImportedSettingsFile\(body\)/);
+  assert.match(importHandler, /applySettingsResponse\(result\.settings\)/);
+  assert.match(importHandler, /השינויים טרם נשמרו ב-Supabase/);
+  assert.match(saveHandler, /applySettingsResponse\(result\.settings\)/);
+  assert.doesNotMatch(saveHandler, /await loadSettings\(\)/);
+  assert.match(appSource, /settings:\s+\(\) => state\.settingsDirty \? Promise\.resolve\(\) : loadSettings\(\)/);
 });
 
 test("chat UI renders document URLs as safe labeled links", () => {
