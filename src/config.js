@@ -121,11 +121,24 @@ const DEFAULT_TIMELINE_LINK_AGENT = {
   ]
 };
 
-async function sbFetch(path, options = {}, operation = "read") {
-  const url = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+async function sbFetch(path, options = {}, operation = "read", connection = {}) {
+  const cachedSecrets = _settingsCache.secrets || {};
+  const url = (
+    process.env.SUPABASE_URL ||
+    connection.supabaseUrl ||
+    cachedSecrets.supabaseUrl ||
+    ""
+  ).replace(/\/+$/, "");
+  const key = resolveSecret(
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    connection.supabaseServiceRoleKey ||
+    cachedSecrets.supabaseServiceRoleKey ||
+    ""
+  );
   if (!url || !key) {
-    markSettingsDbStatus(operation, false, "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing in env");
+    const message = "App Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server so settings are shared across browsers and server instances.";
+    markSettingsDbStatus(operation, false, message);
+    if (connection.required) throw new Error(message);
     return null;
   }
   try {
@@ -142,13 +155,16 @@ async function sbFetch(path, options = {}, operation = "read") {
     const text = await response.text();
     const data = text ? JSON.parse(text) : null;
     if (!response.ok) {
-      markSettingsDbStatus(operation, false, data?.message || `Supabase settings request failed: ${response.status}`);
+      const message = data?.message || `Supabase settings request failed: ${response.status}`;
+      markSettingsDbStatus(operation, false, message);
+      if (connection.required) throw new Error(message);
       return null;
     }
     markSettingsDbStatus(operation, true, "");
     return data;
   } catch (error) {
     markSettingsDbStatus(operation, false, error.message);
+    if (connection.required) throw error;
     return null;
   }
 }
@@ -642,14 +658,18 @@ export async function writeLocalSettings(settings) {
     timezone: settings.timezone || existing.timezone || "UTC+0",
     subagents: settings.subagents || existing.subagents || {}
   };
-  _settingsCache = safe;
-  _settingsCachedAt = Date.now();
   await sbFetch("/rest/v1/agent_settings", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({ id: "default", data: safe, updated_at: new Date().toISOString() })
-  }, "write");
-  _settingsLoadedFromDb = _settingsDbStatus.write.ok || _settingsLoadedFromDb;
+  }, "write", {
+    required: true,
+    supabaseUrl: safe.secrets.supabaseUrl,
+    supabaseServiceRoleKey: safe.secrets.supabaseServiceRoleKey
+  });
+  _settingsCache = safe;
+  _settingsCachedAt = Date.now();
+  _settingsLoadedFromDb = true;
   return safe;
 }
 

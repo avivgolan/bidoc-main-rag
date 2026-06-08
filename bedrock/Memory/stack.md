@@ -31,6 +31,8 @@ tags:
 - Settings UI displays masked secrets only as placeholders; password fields stay empty so masked values are not submitted as real keys.
 - Settings UI can export/import a local JSON settings file; export includes full unmasked API keys and connection fields, so the file must be handled as a secret.
 - Settings export/import controls are wired during Settings initialization; downloads defer object-URL cleanup and imports validate JSON before saving and refreshing the form.
+- Settings saves and imports now report success only after the shared App Supabase write succeeds; failed persistence leaves the prior runtime cache unchanged.
+- Imported App Supabase credentials can bootstrap a write on a running server, while stateless deployments still require `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the server environment for fresh instances and cross-browser consistency.
 - Settings UI has a dedicated Chat section that owns chat-affecting models, prompts, hybrid search tuning, knowledge vocabulary, timezone, and Content Supabase settings.
 - Settings UI model fields are OpenRouter-backed dropdowns that show context tokens and input/output pricing when available.
 - Settings UI exposes balanced advanced AI controls for model temperature/max tokens/timeouts, RAG context budget, graph context, Knowledge Base limits, and tool runtime toggles.
@@ -69,6 +71,7 @@ tags:
 - 2026-06-07 -- Added a Windows launcher that starts the local server and opens the application after it is ready.
 - 2026-06-07 -- Expanded connection diagnostics to cover graph/alert RPCs, Knowledge Base, every configured AI agent, and all N8N tools with individual rerun controls.
 - 2026-06-07 -- Fixed Settings JSON export/import buttons that were unreachable after a timeline helper return, and verified a full export/import round trip.
+- 2026-06-08 -- Made settings import/save fail clearly when App Supabase persistence fails, prevented false-success cache updates, and documented deployment environment requirements for shared settings.
 
 ## Gotchas
 

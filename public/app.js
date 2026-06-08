@@ -3582,7 +3582,7 @@ async function importSettingsFile(event) {
     state.settings = result.settings;
     applySettingsToForm();
     renderAgents();
-    showToast("קובץ ההגדרות נטען ונשמר");
+    showToast("קובץ ההגדרות נטען ונשמר ב-Supabase");
   } catch (error) {
     showToast(`שגיאה בטעינת קובץ הגדרות: ${error.message}`, "error");
   } finally {

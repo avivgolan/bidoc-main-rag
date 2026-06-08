@@ -8,7 +8,7 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
-import { exportFullSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, resolveSecret, supabaseHeaders, supabaseKeyRole } from "../src/config.js";
+import { exportFullSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, projectGraphResponse, saveMessage } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
@@ -445,6 +445,58 @@ test("settings import preserves advanced AI controls", () => {
   assert.equal(wrapped.graph.enabled, false);
   assert.equal(wrapped.knowledge.chunkSize, 1400);
   assert.equal(wrapped.toolsRuntime.parallelLimit, 2);
+});
+
+test("settings save fails without shared App Supabase persistence", async () => {
+  const savedUrl = process.env.SUPABASE_URL;
+  const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const before = structuredClone(readLocalSettings());
+  delete process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  try {
+    await assert.rejects(
+      writeLocalSettings({ models: { main: "openai/gpt-4o-mini" } }),
+      /Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY/
+    );
+    assert.deepEqual(readLocalSettings(), before);
+  } finally {
+    if (savedUrl == null) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = savedUrl;
+    if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
+  }
+});
+
+test("settings import credentials can bootstrap a Supabase write", async () => {
+  const savedUrl = process.env.SUPABASE_URL;
+  const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const savedFetch = global.fetch;
+  let request;
+  delete process.env.SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  global.fetch = async (url, options) => {
+    request = { url, options };
+    return { ok: true, status: 201, text: async () => "" };
+  };
+  try {
+    const saved = await writeLocalSettings({
+      models: { main: "openai/gpt-4o-mini" },
+      secrets: {
+        supabaseUrl: "https://shared.supabase.co/",
+        supabaseServiceRoleKey: "sb_secret_shared"
+      }
+    });
+    assert.equal(request.url, "https://shared.supabase.co/rest/v1/agent_settings");
+    assert.equal(request.options.headers.apikey, "sb_secret_shared");
+    assert.equal(JSON.parse(request.options.body).data.models.main, "openai/gpt-4o-mini");
+    assert.equal(saved.secrets.supabaseUrl, "https://shared.supabase.co/");
+  } finally {
+    global.fetch = savedFetch;
+    if (savedUrl == null) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = savedUrl;
+    if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
+  }
 });
 
 test("chatCompletion forwards advanced model settings to OpenRouter", async () => {
