@@ -399,6 +399,25 @@ button:disabled {
   background: var(--error-bg);
 }
 
+.retrievalSettingsCard {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-inline-start: 3px solid var(--cobalt);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+
+.retrievalSettingsCard > header {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.retrievalPipelineGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 input,
 textarea,
 select {
@@ -2137,6 +2156,7 @@ label {
   .grid,
   .chatAgentSettingsGrid,
   .advancedSettings .compactSettingsGrid,
+  .retrievalPipelineGrid,
   .composer,
   .knowledgeLayout {
     grid-template-columns: 1fr;

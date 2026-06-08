@@ -315,10 +315,12 @@ export function getConfig(settingsOverride = null) {
     },
     retrieval: {
       rpcName: contentSource.hybridRpcName,
-      candidates: Number(settings.retrieval?.candidates ?? process.env.HYBRID_CANDIDATES ?? 40),
-      rerankTopK: Number(settings.retrieval?.rerankTopK ?? process.env.RERANK_TOP_K ?? 10),
-      vectorWeight: Number(settings.retrieval?.vectorWeight ?? process.env.HYBRID_VECTOR_WEIGHT ?? 0.65),
-      keywordWeight: Number(settings.retrieval?.keywordWeight ?? process.env.HYBRID_KEYWORD_WEIGHT ?? 0.35)
+      candidates: clampNumber(settings.retrieval?.candidates ?? process.env.HYBRID_CANDIDATES, 1, 200, 40),
+      plannerCandidates: clampNumber(settings.retrieval?.plannerCandidates ?? process.env.PLANNER_RAG_CANDIDATES, 1, 100, 20),
+      alertCandidates: clampNumber(settings.retrieval?.alertCandidates ?? process.env.ALERT_CANDIDATES, 1, 100, 20),
+      rerankTopK: clampNumber(settings.retrieval?.rerankTopK ?? process.env.RERANK_TOP_K, 1, 100, 10),
+      vectorWeight: clampNumber(settings.retrieval?.vectorWeight ?? process.env.HYBRID_VECTOR_WEIGHT, 0, 1, 0.65),
+      keywordWeight: clampNumber(settings.retrieval?.keywordWeight ?? process.env.HYBRID_KEYWORD_WEIGHT, 0, 1, 0.35)
     },
     ai: normalizeAiSettings(settings.ai),
     rag: normalizeRagSettings(settings.rag),
@@ -632,10 +634,12 @@ export async function writeLocalSettings(settings) {
     [PROMPTS_MIGRATION_FLAG]: true, // mark this record as migrated
     retrieval: {
       rpcName: settings.retrieval?.rpcName || settings.contentSource?.hybridRpcName || existing.retrieval?.rpcName || existing.contentSource?.hybridRpcName || DEFAULT_HYBRID_RPC_NAME,
-      candidates: Number(settings.retrieval?.candidates ?? existing.retrieval?.candidates ?? 40),
-      rerankTopK: Number(settings.retrieval?.rerankTopK ?? existing.retrieval?.rerankTopK ?? 10),
-      vectorWeight: Number(settings.retrieval?.vectorWeight ?? existing.retrieval?.vectorWeight ?? 0.65),
-      keywordWeight: Number(settings.retrieval?.keywordWeight ?? existing.retrieval?.keywordWeight ?? 0.35)
+      candidates: clampNumber(settings.retrieval?.candidates ?? existing.retrieval?.candidates, 1, 200, 40),
+      plannerCandidates: clampNumber(settings.retrieval?.plannerCandidates ?? existing.retrieval?.plannerCandidates, 1, 100, 20),
+      alertCandidates: clampNumber(settings.retrieval?.alertCandidates ?? existing.retrieval?.alertCandidates, 1, 100, 20),
+      rerankTopK: clampNumber(settings.retrieval?.rerankTopK ?? existing.retrieval?.rerankTopK, 1, 100, 10),
+      vectorWeight: clampNumber(settings.retrieval?.vectorWeight ?? existing.retrieval?.vectorWeight, 0, 1, 0.65),
+      keywordWeight: clampNumber(settings.retrieval?.keywordWeight ?? existing.retrieval?.keywordWeight, 0, 1, 0.35)
     },
     ai: normalizeAiSettings(settings.ai || existing.ai),
     rag: normalizeRagSettings(settings.rag || existing.rag),

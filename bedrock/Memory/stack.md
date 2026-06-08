@@ -38,6 +38,7 @@ tags:
 - Settings UI has a dedicated Chat section that owns chat-affecting models, prompts, hybrid search tuning, knowledge vocabulary, timezone, and Content Supabase settings.
 - Settings UI model fields are OpenRouter-backed dropdowns that show context tokens and input/output pricing when available.
 - Settings UI exposes balanced advanced AI controls for model temperature/max tokens/timeouts, RAG context budget, graph context, Knowledge Base limits, and tool runtime toggles.
+- Settings groups the embedding model with a visible retrieval funnel: Hybrid rows per query, Planner rows per query, Alert rows, Reranker results, and final Main context records. Planner and Alert row limits are persisted and used by their actual retrieval calls.
 - The Agents page is read-only monitoring/status UI; prompt and model edits are saved through `/api/settings`, and `/api/agents` rejects writes.
 - Runtime config ignores masked secret values such as `sk-o...abcd` or `********` and falls back to environment variables.
 - Supabase requests use `apikey` for `sb_secret_...` keys and add `Authorization: Bearer ...` only for legacy JWT keys that start with `eyJ`.
@@ -77,6 +78,7 @@ tags:
 - 2026-06-08 -- Made settings import/save fail clearly when App Supabase persistence fails, prevented false-success cache updates, and documented deployment environment requirements for shared settings.
 - 2026-06-08 -- Improved QA report diagnosis so Hebrew runs produce Hebrew reports, optional skipped n8n tools are not blamed automatically, and retrieval failures are separated from answer-generation failures.
 - 2026-06-08 -- Reworked Settings persistence so initial loads are fresh from Supabase, imports remain unsaved drafts, saves preserve hidden settings and secrets, and serverless stale-cache responses cannot reset the form.
+- 2026-06-08 -- Added bounded, configurable retrieval row limits beside the Embedding model for primary Hybrid Search, Knowledge Planner queries, Alert retrieval, reranking, and Main Agent context.
 
 ## Gotchas
 

@@ -61,7 +61,13 @@ export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, d
   const normalizedDateTo = normalizeDateBoundary(dateTo);
   const effectiveDateFilter = dateFilter || buildAlertDateFilter(normalizedDateFrom, normalizedDateTo);
   const searchQuery = effectiveDateFilter ? `${query} ${effectiveDateFilter}` : query;
-  const rawResults = await searchAlertsEmbeddings(config, searchQuery, table, 20, cacheContext);
+  const rawResults = await searchAlertsEmbeddings(
+    config,
+    searchQuery,
+    table,
+    config.retrieval?.alertCandidates || 20,
+    cacheContext
+  );
   const results = filterAlertsByDateRange(rawResults, normalizedDateFrom, normalizedDateTo);
 
   const today = new Date().toISOString().slice(0, 10);

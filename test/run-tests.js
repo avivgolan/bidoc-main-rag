@@ -467,10 +467,34 @@ test("settings import preview does not mutate persisted runtime settings", () =>
 
 test("settings config preserves explicit zero retrieval weights", () => {
   const config = getConfig({
-    retrieval: { candidates: 20, rerankTopK: 5, vectorWeight: 0, keywordWeight: 0 }
+    retrieval: {
+      candidates: 20,
+      plannerCandidates: 9,
+      alertCandidates: 14,
+      rerankTopK: 5,
+      vectorWeight: 0,
+      keywordWeight: 0
+    }
   });
   assert.equal(config.retrieval.vectorWeight, 0);
   assert.equal(config.retrieval.keywordWeight, 0);
+  assert.equal(config.retrieval.plannerCandidates, 9);
+  assert.equal(config.retrieval.alertCandidates, 14);
+});
+
+test("retrieval row limits are bounded for safe runtime use", () => {
+  const config = getConfig({
+    retrieval: {
+      candidates: 9999,
+      plannerCandidates: 0,
+      alertCandidates: 500,
+      rerankTopK: 999
+    }
+  });
+  assert.equal(config.retrieval.candidates, 200);
+  assert.equal(config.retrieval.plannerCandidates, 1);
+  assert.equal(config.retrieval.alertCandidates, 100);
+  assert.equal(config.retrieval.rerankTopK, 100);
 });
 
 test("QA prompts require Hebrew reports and evidence-based optional tool diagnosis", () => {
@@ -516,6 +540,20 @@ test("settings flow loads from Supabase, imports as draft, and saves without sta
   assert.match(saveHandler, /applySettingsResponse\(result\.settings\)/);
   assert.doesNotMatch(saveHandler, /await loadSettings\(\)/);
   assert.match(appSource, /settings:\s+\(\) => state\.settingsDirty \? Promise\.resolve\(\) : loadSettings\(\)/);
+});
+
+test("embedding settings expose the complete retrieval row funnel", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const alertSource = fs.readFileSync(new URL("../src/subagents/alert.js", import.meta.url), "utf8");
+  const agentSource = fs.readFileSync(new URL("../src/agent.js", import.meta.url), "utf8");
+  for (const id of ["hybridCandidates", "plannerCandidates", "alertCandidates", "rerankTopK", "ragContextRecordsLimit"]) {
+    assert.match(htmlSource, new RegExp(`id="${id}"`));
+  }
+  assert.match(appSource, /plannerCandidates: Number\(\$\("plannerCandidates"\)/);
+  assert.match(appSource, /alertCandidates: Number\(\$\("alertCandidates"\)/);
+  assert.match(agentSource, /topK: config\.retrieval\.plannerCandidates/);
+  assert.match(alertSource, /config\.retrieval\?\.alertCandidates \|\| 20/);
 });
 
 test("chat UI renders document URLs as safe labeled links", () => {

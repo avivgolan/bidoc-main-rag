@@ -525,11 +525,35 @@
           </article>
         </div>
 
-        <div class="grid compactSettingsGrid">
-          <label>Embedding
-            <select id="modelEmbedding"></select>
-          </label>
-        </div>
+        <article class="retrievalSettingsCard">
+          <header>
+            <div class="agentCardInfo">
+              <strong>Embedding & Retrieval</strong>
+              <span>שליטה בכמות המידע שעוברת בכל שלב של החיפוש</span>
+            </div>
+          </header>
+          <div class="grid compactSettingsGrid retrievalPipelineGrid">
+            <label class="wide">Embedding Model
+              <select id="modelEmbedding"></select>
+            </label>
+            <label>Hybrid Rows Per Query
+              <input id="hybridCandidates" type="number" min="1" max="200" />
+            </label>
+            <label>Planner Rows Per Query
+              <input id="plannerCandidates" type="number" min="1" max="100" />
+            </label>
+            <label>Alert Rows
+              <input id="alertCandidates" type="number" min="1" max="100" />
+            </label>
+            <label>Reranker Results
+              <input id="rerankTopK" type="number" min="1" max="100" />
+            </label>
+            <label>Main Context Records
+              <input id="ragContextRecordsLimit" type="number" min="1" max="50" />
+            </label>
+          </div>
+          <p class="hint">השורות מצטמצמות לאורך המשפך: אחזור ראשוני, הרחבות Planner/Alerts, דירוג מחדש, ולבסוף הרשומות שנכנסות לתשובת הסוכן הראשי.</p>
+        </article>
 
         <h3>אזור זמן</h3>
         <div class="grid">
@@ -579,12 +603,6 @@
           <label class="wide">Hybrid RPC Name
             <input id="hybridRpcName" />
           </label>
-          <label>Candidates
-            <input id="hybridCandidates" type="number" min="1" max="100" />
-          </label>
-          <label>Rerank Top K
-            <input id="rerankTopK" type="number" min="1" max="50" />
-          </label>
           <label>Vector Weight
             <input id="vectorWeight" type="number" min="0" max="1" step="0.05" />
           </label>
@@ -596,9 +614,6 @@
         <details class="advancedSettings">
           <summary>RAG Context Budget</summary>
           <div class="grid compactSettingsGrid">
-            <label>Context Records Limit
-              <input id="ragContextRecordsLimit" type="number" min="1" max="50" />
-            </label>
             <label>Chunk Text Limit
               <input id="ragChunkTextLimit" type="number" min="300" max="6000" step="100" />
             </label>

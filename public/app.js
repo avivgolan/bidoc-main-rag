@@ -1724,6 +1724,8 @@ function readSettingsForm() {
     retrieval: {
       rpcName: $("hybridRpcName").value,
       candidates: Number($("hybridCandidates").value || 40),
+      plannerCandidates: Number($("plannerCandidates")?.value || 20),
+      alertCandidates: Number($("alertCandidates")?.value || 20),
       rerankTopK: Number($("rerankTopK").value || 10),
       vectorWeight: Number($("vectorWeight").value || 0),
       keywordWeight: Number($("keywordWeight").value || 0)
@@ -2079,6 +2081,8 @@ function applySettingsToForm() {
   applyChatPromptFieldsToSettingsForm();
   $("hybridRpcName").value = state.settings.retrieval.rpcName;
   $("hybridCandidates").value = state.settings.retrieval.candidates;
+  setInputValue("plannerCandidates", state.settings.retrieval.plannerCandidates ?? 20);
+  setInputValue("alertCandidates", state.settings.retrieval.alertCandidates ?? 20);
   $("rerankTopK").value = state.settings.retrieval.rerankTopK;
   $("vectorWeight").value = state.settings.retrieval.vectorWeight;
   $("keywordWeight").value = state.settings.retrieval.keywordWeight;
@@ -2225,7 +2229,7 @@ function advancedNumberLabel(text, id, attrs = {}) {
 }
 
 function enhanceParameterInfoControls() {
-  document.querySelectorAll(".advancedSettings .compactSettingsGrid label").forEach((label) => {
+  document.querySelectorAll(".advancedSettings .compactSettingsGrid label, .retrievalSettingsCard .compactSettingsGrid label").forEach((label) => {
     if (label.dataset.infoEnhanced === "true") return;
     const control = label.querySelector("input, select, textarea");
     if (!control?.id) return;
@@ -2302,6 +2306,10 @@ function parameterExplanation(id, title) {
   if (id.includes("_presencePenalty")) return "מעודד את המודל לפתוח נושאים חדשים במקום להישאר רק על אותם ביטויים. בפרויקט מקצועי לרוב משאירים קרוב ל-0.";
   if (id.includes("_seed")) return "מספר קבוע שמנסה להפוך תשובות לחזרתיות יותר באותם תנאים. לא כל מודל מבטיח דטרמיניזם מלא.";
   const explanations = {
+    hybridCandidates: "כמה שורות כל חיפוש היברידי ראשי יבקש מ-Supabase. ערך גבוה מגדיל כיסוי, אך מוסיף זמן, עומס ועלות דירוג.",
+    plannerCandidates: "כמה שורות תוחזרנה מכל שאילתת חיפוש נוספת שה-Knowledge Planner יוצר. הכמות הכוללת יכולה להיות מספר השאילתות כפול ערך זה.",
+    alertCandidates: "כמה התראות סוכן Alerts יבקש מפונקציית החיפוש לפני סינון תאריכים וסיכום התוצאה.",
+    rerankTopK: "כמה מהשורות שנמצאו יישארו לאחר דירוג הרלוונטיות. רק התוצאות המדורגות ביותר ממשיכות לשלבים הבאים.",
     ragContextRecordsLimit: "כמה מקורות אחרי החיפוש והדירוג ייכנסו בפועל לסוכן הראשי. יותר מקורות נותנים כיסוי רחב יותר אבל עלולים להעמיס.",
     ragChunkTextLimit: "כמה תווים מכל מקור ייכנסו לפרומפט. ערך גבוה נותן יותר הקשר מכל מקור, אבל מגדיל עלות וזמן.",
     ragPlannerExtraQueriesLimit: "כמה שאילתות נוספות Knowledge Planner רשאי להריץ מעבר לשאלה המקורית.",

@@ -226,7 +226,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
             dateFrom: classification.date_from,
             dateTo: classification.date_to,
             hashtags: classification.hashtags || [],
-            topK: Math.min(config.retrieval.candidates, 20),
+            topK: config.retrieval.plannerCandidates,
             runId, context: "knowledge_plan", cacheContext
           });
           const plannedRows = normalizeRows(plannedSearch.results);
