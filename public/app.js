@@ -447,13 +447,24 @@ function wireChat() {
         timeoutMs: 120000
       });
       clearChatProgress(pending);
-      pending.textContent = result.answer || "לא התקבלה תשובה.";
+      renderMessageContent(pending, result.answer || "לא התקבלה תשובה.", "assistant");
+      if (state.chatProgress?.node === pending) state.chatProgress = null;
       if (result.messageId) attachAnnotation(pending, result.messageId);
       appendDebug(pending, result);
       state.lastWorkflow = result.workflowLog || null;
       state.currentWorkflowMessageId = result.messageId || null;
-      renderWorkflow(state.lastWorkflow);
-      loadRunHistory();
+      try {
+        renderWorkflow(state.lastWorkflow);
+        loadRunHistory();
+      } catch (renderError) {
+        console.error("Chat response rendered, but workflow UI refresh failed", renderError);
+        appendLiveRunEvent({
+          step: "client",
+          message: "Workflow UI refresh failed",
+          data: { error: renderError.message },
+          time: new Date().toISOString()
+        });
+      }
     } catch (error) {
       clearChatProgress(pending);
       if (state.chatProgress?.node === pending) state.chatProgress = null;
@@ -512,6 +523,7 @@ function appendLiveRunEvent(item) {
 function updateChatProgress(item) {
   const progress = state.chatProgress;
   if (!progress?.node?.isConnected) return;
+  if (item?.step === "client" || item?.step === "complete" || item?.step === "error") return;
   const text = progressTextForRunEvent(item);
   if (!text) return;
   progress.node.textContent = text;
@@ -613,7 +625,9 @@ function wireAgents() {
 
 function resetAgentRuntime() {
   state.agentRuntime = Object.fromEntries(
-    state.agents.map((agent) => [agent.id, { status: "idle", lastMessage: "ממתין", input: null, output: null }])
+    (state.agents || [])
+      .filter((agent) => agent && agent.id)
+      .map((agent) => [agent.id, { status: "idle", lastMessage: "ממתין", input: null, output: null }])
   );
 }
 
@@ -666,11 +680,12 @@ function renderAgents() {
   const grid = $("agentGrid");
   if (!grid) return;
   grid.innerHTML = "";
-  if (!state.agents.length) {
+  const agents = (state.agents || []).filter((agent) => agent && agent.id);
+  if (!agents.length) {
     grid.textContent = "טוען סוכנים...";
     return;
   }
-  for (const agent of state.agents) {
+  for (const agent of agents) {
     const runtime = state.agentRuntime[agent.id] || { status: "idle", lastMessage: "ממתין" };
     const card = document.createElement("article");
     card.className = `agentCard ${runtime.status}`;
@@ -725,7 +740,7 @@ async function loadOpenRouterModels() {
 }
 
 function modelOptions(selectedModel) {
-  const models = [...state.openRouterModels];
+  const models = (state.openRouterModels || []).filter((model) => model && model.id);
   if (selectedModel && !models.some((model) => model.id === selectedModel)) {
     models.unshift({ id: selectedModel, name: selectedModel, contextLength: null, pricing: null });
   }
@@ -745,7 +760,7 @@ function fillModelSelect(select, selectedModel) {
 }
 
 function modelOptionsWithPricing(selectedModel) {
-  const models = [...state.openRouterModels];
+  const models = (state.openRouterModels || []).filter((model) => model && model.id);
   if (selectedModel && !models.some((model) => model.id === selectedModel)) {
     models.unshift({ id: selectedModel, name: selectedModel, contextLength: null, pricing: null });
   }
@@ -1147,12 +1162,24 @@ function renderWorkflow(workflow) {
     data: { id: `${edge.from}_${edge.to}`, source: edge.from, target: edge.to, active: edge.active ? true : false }
   })));
 
-  _cy = cytoscape({
+  const graphOptions = {
     container: $("workflowCy"),
     elements,
-    style: cytoscapeStyle(),
-    layout: { name: "dagre", rankDir: "LR", nodeSep: 50, rankSep: 90, padding: 48, animate: false }
-  });
+    style: cytoscapeStyle()
+  };
+  try {
+    _cy = cytoscape({
+      ...graphOptions,
+      layout: { name: "dagre", rankDir: "LR", nodeSep: 50, rankSep: 90, padding: 48, animate: false }
+    });
+  } catch (error) {
+    console.warn("Dagre workflow layout is unavailable; using the built-in breadthfirst layout.", error);
+    _cy?.destroy();
+    _cy = cytoscape({
+      ...graphOptions,
+      layout: { name: "breadthfirst", directed: true, circle: false, spacingFactor: 1.2, padding: 48, animate: false }
+    });
+  }
 
   _cy.on("tap", "node", (evt) => {
     renderWorkflowInspector(evt.target.data("nodeData"));
@@ -2503,10 +2530,67 @@ async function loadSessionMessages(sessionId) {
 function addMessage(text, role) {
   const node = document.createElement("div");
   node.className = `message ${role}`;
-  node.textContent = text;
+  renderMessageContent(node, text, role);
   $("messages").append(node);
   node.scrollIntoView({ block: "end" });
   return node;
+}
+
+function renderMessageContent(node, text, role) {
+  node.textContent = "";
+  if (role !== "assistant") {
+    node.textContent = String(text || "");
+    return;
+  }
+
+  const value = String(text || "");
+  const linkPattern = /\[([^\]\r\n]+)\]\((https?:\/\/(?:[^()\r\n]|\([^()\r\n]*\))+?)\)|(https?:\/\/[^\s<>"']+)/g;
+  let cursor = 0;
+  for (const match of value.matchAll(linkPattern)) {
+    const start = match.index ?? 0;
+    node.append(document.createTextNode(value.slice(cursor, start)));
+
+    const rawUrl = match[2] || match[3] || "";
+    const { url, suffix } = cleanChatUrl(rawUrl);
+    if (url) {
+      const link = document.createElement("a");
+      link.className = "chatDocumentLink";
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "למסמך לחץ כאן";
+      node.append(link);
+      if (suffix) node.append(document.createTextNode(suffix));
+    } else {
+      node.append(document.createTextNode(match[0]));
+    }
+    cursor = start + match[0].length;
+  }
+  node.append(document.createTextNode(value.slice(cursor)));
+}
+
+function cleanChatUrl(rawUrl) {
+  let url = String(rawUrl || "").trim();
+  let suffix = "";
+  while (/[.,;:!?]$/.test(url)) {
+    suffix = url.slice(-1) + suffix;
+    url = url.slice(0, -1);
+  }
+  if (url.endsWith(")") && countCharacters(url, "(") < countCharacters(url, ")")) {
+    suffix = ")" + suffix;
+    url = url.slice(0, -1);
+  }
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) return { url: "", suffix: "" };
+    return { url: parsed.href, suffix };
+  } catch {
+    return { url: "", suffix: "" };
+  }
+}
+
+function countCharacters(value, character) {
+  return [...String(value || "")].filter((item) => item === character).length;
 }
 
 function attachAnnotation(node, messageId, current = null) {

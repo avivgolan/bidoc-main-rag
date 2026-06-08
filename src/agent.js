@@ -676,7 +676,15 @@ SOURCE QUALITY AND CONFLICTS:
 INVESTIGATION MODE:
 - If investigation_plan is supplied, include "**מה בדקתי:**" with the checks performed/suggested.
 - Then answer with findings, uncertainty, and missing evidence.
-- Do not invent root causes or responsibility without project evidence.`;
+- Do not invent root causes or responsibility without project evidence.
+
+INLINE SOURCE CONTRACT:
+- Put the relevant source link immediately after every factual bullet or finding, using Markdown exactly like: [למסמך לחץ כאן](https://...).
+- Match each claim to the URL from the same retrieval record or tool result. Do not attach an unrelated URL merely because it appears in the general sources list.
+- When one bullet is supported by multiple records, place the relevant links together at the end of that bullet.
+- If a claim has no directly matching URL, write "(ללא קישור ישיר במקור)" instead of borrowing another source.
+- Do NOT create a separate "**מקורות:**" section or a consolidated list of links at the bottom.
+- Do NOT print raw URLs.`;
 }
 
 function skippedKnowledgePlan(reason, caution = reason) {
@@ -1001,7 +1009,13 @@ function rowKey(row) {
 
 function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
   const found = successful.length
-    ? successful.map((call) => `- ${call.toolName}: ${summarizeData(call.data)}`).join("\n")
+    ? successful.map((call) => {
+      const callSources = uniqueByUrl(call.sources || []);
+      const links = callSources.length
+        ? ` ${callSources.map((source) => `[למסמך לחץ כאן](${source.url})`).join(" ")}`
+        : " (ללא קישור ישיר במקור)";
+      return `- ${call.toolName}: ${summarizeData(call.data)}${links}`;
+    }).join("\n")
     : "- לא הצלחתי לאחזר מידע מהפרויקט כרגע.";
 
   // Build a human-readable reason for why we're in fallback mode
@@ -1019,8 +1033,10 @@ function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
   const missing = failedText.length || skippedText.length
     ? [...failedText, ...skippedText].join("\n")
     : "- אין.";
-  const sourceText = sources.length ? sources.map((source) => `- ${source.url}`).join("\n") : "- לא הוחזרו קישורים.";
-  return `**תשובה:**\n${found}${reasonNote}\n\n**פרטים לפי מקור:**\n${found}\n\n**מה לא נמצא:**\n${missing}\n\n**מקורות:**\n${sourceText}`;
+  const noSourceNote = !successful.length && sources.length
+    ? `\n${sources.map((source) => `[למסמך לחץ כאן](${source.url})`).join(" ")}`
+    : "";
+  return `**תשובה:**\n${found}${noSourceNote}${reasonNote}\n\n**פרטים לפי מקור:**\n${found}${noSourceNote}\n\n**מה לא נמצא:**\n${missing}`;
 }
 
 function liteFallback(message) {
@@ -1053,7 +1069,9 @@ function formatRetrievalContext(results, limit = 12, chunkTextLimit = 1800) {
         JSON.stringify(row);
       const metadata = row.metadata ? `\nmetadata: ${JSON.stringify(row.metadata)}` : "";
       const score = row.similarity || row.score || row.distance || row.match_score || "";
-      return `[${index + 1}] score: ${score}\n${String(text).slice(0, Number(chunkTextLimit || 1800))}${metadata}`;
+      const sourceUrl = row.source_url || row.url || row.link || row.data_link || row.metadata?.source_url || row.metadata?.url || "";
+      const source = sourceUrl ? `\nsource_url: ${sourceUrl}` : "\nsource_url: unavailable";
+      return `[${index + 1}] score: ${score}\n${String(text).slice(0, Number(chunkTextLimit || 1800))}${metadata}${source}`;
     })
     .join("\n\n---\n\n");
 }

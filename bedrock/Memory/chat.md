@@ -26,6 +26,11 @@ tags:
 - QA list loading uses one compact request for messages and existing reports, excluding large workflow logs from the list payload and guarding against overlapping refresh requests.
 - The chat pipeline uses `src/cache.js` for provider-independent embedding, hybrid search, graph search, reranker, and final-answer caches. Development defaults to bounded memory; production can use Redis without changing pipeline code.
 - Workflow logs persist cache hits, misses, hit rate, saved call counts, and estimated cost savings for each run.
+- A successful chat answer is preserved even if the Workflow visualization fails to render; UI refresh errors are logged separately instead of replacing the answer.
+- Chat progress state is cleared as soon as the API answer arrives, and local client/terminal run events cannot overwrite the completed answer with a progress message.
+- Assistant messages render Markdown and bare HTTP(S) document URLs as the fixed Hebrew link label `למסמך לחץ כאן`, styled blue and underlined and opened in a new tab; full URLs are hidden from chat text.
+- Main RAG answers attach each source link directly to the factual bullet it supports and prohibit a consolidated sources footer; retrieval context includes each record's own `source_url` to enable correct claim-to-source matching.
+- Workflow rendering falls back from the optional CDN-provided Dagre layout to Cytoscape's built-in breadth-first layout when Dagre is unavailable.
 
 ## Recent Changes
 
@@ -37,6 +42,10 @@ tags:
 - 2026-06-07 -- Changed the QA inbox from disliked-only messages to recent completed chat runs, with an optional disliked-only filter.
 - 2026-06-07 -- Reduced QA page loading from a large message payload plus per-card report requests to one compact endpoint response with a client timeout.
 - 2026-06-07 -- Added multi-layer chat caching with memory and Redis providers, TTL-based keys, request coalescing, fail-open behavior, and Workflow cache metrics.
+- 2026-06-08 -- Prevented Workflow rendering errors from replacing successful chat answers and added a built-in layout fallback when the optional Dagre plugin is unavailable.
+- 2026-06-08 -- Fixed a completion race where a post-answer Workflow UI error changed the completed chat bubble back to `ממשיך לבדוק...`.
+- 2026-06-08 -- Replaced full document URLs in new and historical assistant messages with safe blue underlined `למסמך לחץ כאן` links.
+- 2026-06-08 -- Changed grounded answer citations from a bottom source list to inline per-finding links, including multi-source bullets and source-aware fallback answers.
 
 ## Related
 

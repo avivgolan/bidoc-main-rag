@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { sanitizeMessage } from "../src/sanitize.js";
 import { normalizeClassification } from "../src/classifier.js";
 import { heuristicClassification } from "../src/heuristics.js";
@@ -15,6 +16,8 @@ import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimeline
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "../src/projectGraph.js";
 import { chatCompletion } from "../src/openrouter.js";
 import { cachedOperation, cacheKey, createCacheContext, finalizeCacheMetrics, MemoryCacheProvider } from "../src/cache.js";
+import { QA_SYSTEM_PROMPT } from "../src/qaAgent.js";
+import { defaultPrompts } from "../src/prompts.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -445,6 +448,45 @@ test("settings import preserves advanced AI controls", () => {
   assert.equal(wrapped.graph.enabled, false);
   assert.equal(wrapped.knowledge.chunkSize, 1400);
   assert.equal(wrapped.toolsRuntime.parallelLimit, 2);
+});
+
+test("QA prompts require Hebrew reports and evidence-based optional tool diagnosis", () => {
+  for (const prompt of [QA_SYSTEM_PROMPT, defaultPrompts().qa]) {
+    assert.match(prompt, /human-readable JSON value in Hebrew/);
+    assert.match(prompt, /skipped optional n8n tool is not automatically a failure/);
+    assert.match(prompt, /Separate retrieval failure from answer behavior/);
+  }
+});
+
+test("chat UI preserves successful answers when workflow rendering fails", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /Chat response rendered, but workflow UI refresh failed/);
+  assert.match(appSource, /Dagre workflow layout is unavailable/);
+  assert.match(appSource, /layout: \{ name: "breadthfirst"/);
+  assert.match(appSource, /if \(state\.chatProgress\?\.node === pending\) state\.chatProgress = null;/);
+  assert.match(appSource, /item\?\.step === "client" \|\| item\?\.step === "complete" \|\| item\?\.step === "error"/);
+});
+
+test("chat UI renders document URLs as safe labeled links", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(appSource, /link\.textContent = "למסמך לחץ כאן"/);
+  assert.match(appSource, /link\.target = "_blank"/);
+  assert.match(appSource, /link\.rel = "noopener noreferrer"/);
+  assert.match(appSource, /\["http:", "https:"\]\.includes/);
+  assert.match(cssSource, /\.message \.chatDocumentLink/);
+  assert.match(cssSource, /text-decoration: underline/);
+});
+
+test("main agent requires inline source links instead of a consolidated footer", () => {
+  const agentSource = fs.readFileSync(new URL("../src/agent.js", import.meta.url), "utf8");
+  const mainPrompt = defaultPrompts().main;
+  assert.match(agentSource, /INLINE SOURCE CONTRACT/);
+  assert.match(agentSource, /Do NOT create a separate "\*\*מקורות:\*\*" section/);
+  assert.match(agentSource, /source_url: unavailable/);
+  assert.match(agentSource, /uniqueByUrl\(call\.sources \|\| \[\]\)/);
+  assert.match(mainPrompt, /End each factual bullet with its directly matching Markdown source link/);
+  assert.match(mainPrompt, /Do not create a separate sources section at the bottom/);
 });
 
 test("settings save fails without shared App Supabase persistence", async () => {

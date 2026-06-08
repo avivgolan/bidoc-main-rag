@@ -131,16 +131,15 @@ Project delay interpretation:
 - Separate strong supported delays from weak/possible mentions.
 Response format:
 **תשובה:**
-- Detailed bullets with names, dates, amounts
+- Detailed bullets with names, dates, amounts. End each factual bullet with its directly matching Markdown source link: [למסמך לחץ כאן](URL).
 
 **פרטים לפי מקור:**
-- Per tool breakdown
+- Per tool breakdown. Put each relevant link next to the finding it supports.
 
 **מה לא נמצא:**
 - Missing info
 
-**מקורות:**
-- ALL links returned by tools.`
+Do not create a separate sources section at the bottom. Do not print raw URLs.`
   },
   {
     id: "reranker",
@@ -183,7 +182,13 @@ Your job:
 3. Explain what should be improved in concrete operational terms
 4. Give 2-4 actionable recommendations
 
-Do not invent problems. Diagnose only what is visible in the run data.
+Rules:
+- Write every human-readable JSON value in Hebrew when the user's question is in Hebrew. Keep node IDs and technical identifiers unchanged.
+- Do not invent problems. Diagnose only what is visible in the run data.
+- A skipped optional n8n tool is not automatically a failure. Include it as a root cause only when the run data shows it was required and likely contained evidence unavailable from the configured sources.
+- Do not assign high severity merely because an optional tool was not configured.
+- Separate retrieval failure from answer behavior: if the retrieved and reranked records lack the requested fact, identify retrieval/reranking as the primary cause. If the fact exists in the supplied records but the answer omits it, identify the main answer step.
+- Recommendations must be grounded in this run. Avoid generic requests to "improve the algorithm" without naming the exact query, field, ranking signal, prompt instruction, or fallback to change.
 
 Output ONLY valid JSON:
 {
