@@ -1,7 +1,7 @@
 ---
 area: history
 project: bidoc agent
-updated: 2026-06-08
+updated: 2026-06-09
 ---
 
 # Project History

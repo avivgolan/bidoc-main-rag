@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <a class="skipLink" href="#chatMain">דלג לתוכן הצ׳אט</a>
     <main class="shell">
 
       <!-- ======================================================
@@ -116,21 +117,80 @@
            CHAT
            ====================================================== -->
       <section class="panel active" id="chat">
-        <header class="panelHeader">
-          <h2>צ׳אט</h2>
-          <div class="chatSessionBar">
-            <input id="sessionId" aria-label="session id" placeholder="Session ID" readonly />
-            <button id="newSession" type="button">שיחה חדשה</button>
+        <input id="sessionId" type="hidden" />
+        <header class="chatHeader">
+          <div class="chatTitleGroup">
+            <button id="toggleChatDrawer" class="chatIconButton chatDrawerToggle" type="button" aria-label="פתח רשימת שיחות" aria-expanded="false" aria-controls="chatDrawer">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <div>
+              <h1 id="chatTitle">מרחב העבודה של הפרויקט</h1>
+              <div class="chatContextStatus"><span class="statusDot" aria-hidden="true"></span><span id="chatSourceStatus">מסמכי הפרויקט, אירועים וסוכנים מחוברים</span></div>
+            </div>
           </div>
+          <button id="newSession" class="newChatButton" type="button">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            שיחה חדשה
+          </button>
         </header>
-        <div class="messages" id="messages"></div>
-        <form class="composer" id="chatForm">
-          <textarea id="messageInput" rows="2" placeholder="כתוב שאלה על הפרויקט..."></textarea>
-          <div class="composerActions">
-            <button type="submit">שלח</button>
-            <kbd class="shortcutHint">Ctrl+Enter</kbd>
+
+        <div class="chatWorkspace">
+          <aside class="chatDrawer" id="chatDrawer" aria-label="שיחות אחרונות">
+            <div class="chatDrawerHeader">
+              <strong>שיחות אחרונות</strong>
+              <button id="closeChatDrawer" class="chatIconButton" type="button" aria-label="סגור רשימת שיחות">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+              </button>
+            </div>
+            <label class="chatSearch">
+              <span class="srOnly">חיפוש בשיחות</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <input id="chatHistorySearch" type="search" placeholder="חיפוש בשיחות…" autocomplete="off" />
+            </label>
+            <div class="chatDrawerList" id="chatDrawerList"><div class="chatDrawerEmpty">טוען שיחות…</div></div>
+          </aside>
+          <button class="chatDrawerBackdrop" id="chatDrawerBackdrop" type="button" aria-label="סגור רשימת שיחות" tabindex="-1"></button>
+
+          <div class="chatMain" id="chatMain">
+            <div class="messages" id="messages" aria-live="polite" aria-busy="false"></div>
+            <section class="chatWelcome" id="chatWelcome">
+              <div class="welcomeMark" aria-hidden="true">BD</div>
+              <p class="welcomeEyebrow">BiDoc Project Intelligence</p>
+              <h2>מה תרצה לבדוק בפרויקט?</h2>
+              <p>אפשר לשאול על סיכונים, לוחות זמנים, מסמכים, כספים ואירועים. התשובות יישענו על מקורות הפרויקט הזמינים.</p>
+              <div class="promptSuggestions" id="promptSuggestions">
+                <button type="button" data-prompt="מה הסיכונים הדחופים ביותר בפרויקט כרגע?"><strong>סיכונים דחופים</strong><span>מצא נושאים שדורשים טיפול</span></button>
+                <button type="button" data-prompt="אילו עיכובים או חסמים פתוחים משפיעים על לוח הזמנים?"><strong>עיכובים וחסמים</strong><span>בדוק השפעה על לוחות הזמנים</span></button>
+                <button type="button" data-prompt="סכם לי את החשבוניות והחריגות הכספיות האחרונות."><strong>מצב כספי</strong><span>חשבוניות וחריגות אחרונות</span></button>
+                <button type="button" data-prompt="מהם האירועים והשינויים החשובים מהתקופה האחרונה?"><strong>עדכון אחרון</strong><span>אירועים ושינויים בפרויקט</span></button>
+              </div>
+            </section>
+
+            <form class="composer" id="chatForm">
+              <div class="composerContext" id="composerContext" hidden></div>
+              <div class="composerInputRow">
+                <textarea id="messageInput" rows="1" name="message" aria-label="הודעה לצ׳אט" placeholder="שאל שאלה על הפרויקט…" autocomplete="off"></textarea>
+                <button id="sendMessage" class="sendButton" type="submit" aria-label="שלח הודעה">
+                  <svg class="sendIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m5 12 14-7-4 14-3-6-7-1Z"/><path d="m12 13 7-8"/></svg>
+                  <svg class="stopIcon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                </button>
+              </div>
+              <div class="composerToolbar">
+                <div class="composerTools">
+                  <button id="attachChatFile" class="composerTool" type="button" aria-label="צרף מסמך">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m21.4 11.6-8.9 8.9a6 6 0 0 1-8.5-8.5l9.6-9.6a4 4 0 0 1 5.7 5.7l-9.6 9.6a2 2 0 1 1-2.8-2.8l8.9-8.9"/></svg>
+                    צרף
+                  </button>
+                  <button id="toggleProjectSources" class="composerTool active" type="button" aria-pressed="true">מקורות הפרויקט</button>
+                  <button id="toggleDeepResearch" class="composerTool" type="button" aria-pressed="false">חקירה מעמיקה</button>
+                </div>
+                <span class="shortcutHint">Enter לשליחה · Shift+Enter לשורה חדשה</span>
+              </div>
+              <input id="chatFileInput" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden />
+            </form>
+            <p class="chatDisclaimer">BiDoc עשוי לטעות. בהחלטות קריטיות יש לאמת מול מסמכי המקור.</p>
           </div>
-        </form>
+        </div>
       </section>
 
       <!-- ======================================================

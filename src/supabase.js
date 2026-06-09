@@ -101,7 +101,7 @@ export async function annotateMessage({ config, messageId, annotation }) {
 
 export async function listSessions({ config, limit = 30 }) {
   if (!isConfigured(config)) return [];
-  const query = `/rest/v1/${MESSAGES_TABLE}?select=session_id,status,created_at,user_message,ai_response&order=created_at.desc&limit=${limit}`;
+  const query = `/rest/v1/${MESSAGES_TABLE}?select=session_id,status,created_at,user_message&order=created_at.desc&limit=${limit}`;
   const rows = await supabaseFetch(config, query);
   const seen = new Map();
   for (const row of rows || []) {

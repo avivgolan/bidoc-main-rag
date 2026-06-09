@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: chat
-last_updated: 2026-06-04
+last_updated: 2026-06-09
 tags:
   - chat
   - rag
@@ -19,7 +19,12 @@ tags:
 - Tool ordering comes from `buildToolOrder` in `src/tools.js`; high urgency forces `safety_report` then `alert`.
 - Main RAG calls project tools through `callProjectTool` in `src/agent.js`.
 - Workflow logs include a dedicated `alert_agent` node when the Alert subagent is called.
-- The chat pending assistant bubble is updated from live run events instead of showing a static `חושב...` message.
+- The chat page is a project workspace with a welcome state, suggested prompts, searchable recent-conversation drawer, hidden technical session ID, and a responsive floating composer.
+- The chat pending response is a stable progress card updated from live run events, with an optional human-readable step timeline and client-side stop control.
+- Assistant responses render safe Markdown including headings, lists, quotes, code, tables, and links; structured source cards are rendered separately from inline citations.
+- Completed responses expose copy, regenerate, like, and dislike actions; user messages can be returned to the composer for editing.
+- The composer supports Enter-to-send, Shift+Enter for a newline, local draft persistence, auto-resize, project-source routing, user-requested deep research, and up to three plain-text/Markdown/CSV/JSON context attachments.
+- `/api/chat` remains backward compatible while returning `status`, structured `sources`, `followUps`, and completed progress stages.
 - Chat API calls from the browser use a two-minute timeout so a stalled request releases the send button and shows a clear error.
 - `docs/chat-system-flow.md` documents the chat system flow with a Mermaid diagram covering UI, pipeline agents, OpenRouter models, App Supabase, Content Supabase, graph search, N8N tools, Workflow UI, and AI Report.
 - The QA page lists recent completed chat runs by default and can filter to disliked responses; each card runs QA against that message's own workflow log.
@@ -28,7 +33,7 @@ tags:
 - Workflow logs persist cache hits, misses, hit rate, saved call counts, and estimated cost savings for each run.
 - A successful chat answer is preserved even if the Workflow visualization fails to render; UI refresh errors are logged separately instead of replacing the answer.
 - Chat progress state is cleared as soon as the API answer arrives, and local client/terminal run events cannot overwrite the completed answer with a progress message.
-- Assistant messages render Markdown and bare HTTP(S) document URLs as the fixed Hebrew link label `למסמך לחץ כאן`, styled blue and underlined and opened in a new tab; full URLs are hidden from chat text.
+- Assistant links accept HTTP(S) only, open with `noopener noreferrer`, and hide raw URLs behind safe labels or structured source cards.
 - Main RAG answers attach each source link directly to the factual bullet it supports and prohibit a consolidated sources footer; retrieval context includes each record's own `source_url` to enable correct claim-to-source matching.
 - Workflow rendering falls back from the optional CDN-provided Dagre layout to Cytoscape's built-in breadth-first layout when Dagre is unavailable.
 
@@ -46,6 +51,8 @@ tags:
 - 2026-06-08 -- Fixed a completion race where a post-answer Workflow UI error changed the completed chat bubble back to `ממשיך לבדוק...`.
 - 2026-06-08 -- Replaced full document URLs in new and historical assistant messages with safe blue underlined `למסמך לחץ כאן` links.
 - 2026-06-08 -- Changed grounded answer citations from a bottom source list to inline per-finding links, including multi-source bullets and source-aware fallback answers.
+- 2026-06-09 -- Rebuilt the chat page as a responsive AI project workspace with welcome prompts, conversation drawer, richer Markdown, source cards, response actions, stop/retry states, accessible progress, local drafts, source routing, and deep-research routing.
+- 2026-06-09 -- Decoupled recent-conversation loading from settings/model startup and reduced the sessions payload to compact metadata so the chat drawer populates immediately.
 
 ## Related
 

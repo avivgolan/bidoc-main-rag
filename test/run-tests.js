@@ -556,15 +556,36 @@ test("embedding settings expose the complete retrieval row funnel", () => {
   assert.match(alertSource, /config\.retrieval\?\.alertCandidates \|\| 20/);
 });
 
-test("chat UI renders document URLs as safe labeled links", () => {
+test("chat UI renders document URLs as safe links and source cards", () => {
   const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
   const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
-  assert.match(appSource, /link\.textContent = "למסמך לחץ כאן"/);
-  assert.match(appSource, /link\.target = "_blank"/);
-  assert.match(appSource, /link\.rel = "noopener noreferrer"/);
+  assert.match(appSource, /className = "sourceCard"/);
+  assert.match(appSource, /target = "_blank"/);
+  assert.match(appSource, /rel = "noopener noreferrer"/);
   assert.match(appSource, /\["http:", "https:"\]\.includes/);
-  assert.match(cssSource, /\.message \.chatDocumentLink/);
+  assert.match(cssSource, /\.sourceCard/);
   assert.match(cssSource, /text-decoration: underline/);
+});
+
+test("chat workspace exposes modern composer, progress, history, and accessibility controls", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  for (const id of ["chatWelcome", "chatDrawer", "chatHistorySearch", "sendMessage", "toggleProjectSources", "toggleDeepResearch"]) {
+    assert.match(htmlSource, new RegExp(`id="${id}"`));
+  }
+  assert.match(htmlSource, /aria-live="polite"/);
+  assert.match(appSource, /addProgressMessage/);
+  assert.match(appSource, /localStorage\.setItem\("bidocChatDraft"/);
+  assert.match(cssSource, /prefers-reduced-motion/);
+});
+
+test("recent chat drawer loads independently and session listing stays compact", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const supabaseSource = fs.readFileSync(new URL("../src/supabase.js", import.meta.url), "utf8");
+  assert.match(appSource, /wireQa\(\);\s+\$\("refreshHistory"\).*;\s+refreshChatSessions\(\);/s);
+  assert.match(supabaseSource, /select=session_id,status,created_at,user_message&/);
+  assert.doesNotMatch(supabaseSource, /select=session_id,status,created_at,user_message,ai_response&/);
 });
 
 test("main agent requires inline source links instead of a consolidated footer", () => {

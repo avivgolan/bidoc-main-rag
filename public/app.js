@@ -111,6 +111,11 @@ const state = {
   runEvents: [],
   fullLogVisible: false,
   chatProgress: null,
+  chatRequest: null,
+  chatSessions: [],
+  chatAttachments: [],
+  chatSourcesEnabled: true,
+  deepResearchEnabled: false,
   settingsDirty: false,
   projectGraph: { nodes: [], edges: [], stats: null }
 };
@@ -206,6 +211,7 @@ async function init() {
   wireLinkAgent();
   wireQa();
   $("refreshHistory").addEventListener("click", loadHistory);
+  refreshChatSessions();
 
   // Restore tab from URL hash, then load initial data
   const initialTab = location.hash.slice(1) || "chat";
@@ -244,6 +250,10 @@ function startNewSession(options = {}) {
   }
   setCurrentSession(createSessionId());
   $("messages").innerHTML = "";
+  $("messages").setAttribute("aria-busy", "false");
+  $("chatWelcome")?.removeAttribute("hidden");
+  if ($("chatTitle")) $("chatTitle").textContent = "מרחב העבודה של הפרויקט";
+  setChatRunning(false);
   state.lastWorkflow = null;
   state.runEvents = [];
   state.fullLogVisible = false;
@@ -417,43 +427,125 @@ function wireChat() {
     startNewSession();
     activateTab("chat");
     $("messageInput").focus();
+    closeChatDrawer();
   });
 
-  // Ctrl+Enter (or Cmd+Enter on Mac) submits the form
+  $("toggleChatDrawer")?.addEventListener("click", () => {
+    const open = !$("chat").classList.contains("drawerOpen");
+    $("chat").classList.toggle("drawerOpen", open);
+    $("toggleChatDrawer").setAttribute("aria-expanded", String(open));
+  });
+  $("closeChatDrawer")?.addEventListener("click", closeChatDrawer);
+  $("chatDrawerBackdrop")?.addEventListener("click", closeChatDrawer);
+  $("chatHistorySearch")?.addEventListener("input", renderChatDrawer);
+
+  document.querySelectorAll("[data-prompt]").forEach((button) => {
+    button.addEventListener("click", () => {
+      $("messageInput").value = button.dataset.prompt || "";
+      resizeChatInput();
+      $("messageInput").focus();
+    });
+  });
+
+  const savedDraft = localStorage.getItem("bidocChatDraft");
+  if (savedDraft) $("messageInput").value = savedDraft;
+  resizeChatInput();
+  $("messageInput").addEventListener("input", () => {
+    localStorage.setItem("bidocChatDraft", $("messageInput").value);
+    resizeChatInput();
+  });
   $("messageInput").addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       $("chatForm").requestSubmit($("chatForm").querySelector("button[type=submit]"));
     }
   });
 
+  $("attachChatFile")?.addEventListener("click", () => $("chatFileInput")?.click());
+  $("chatFileInput")?.addEventListener("change", async () => {
+    const file = $("chatFileInput").files?.[0];
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      showToast("הקובץ גדול מדי. ניתן לצרף קובץ טקסט עד 1 MB.", "error");
+      $("chatFileInput").value = "";
+      return;
+    }
+    try {
+      state.chatAttachments = [{ name: file.name, size: file.size, content: await file.text() }];
+      renderComposerContext();
+      showToast("הקובץ יצורף כהקשר לשאלה הבאה");
+    } catch {
+      showToast("לא ניתן היה לקרוא את הקובץ", "error");
+    }
+    $("chatFileInput").value = "";
+  });
+  $("toggleProjectSources")?.addEventListener("click", () => {
+    state.chatSourcesEnabled = !state.chatSourcesEnabled;
+    toggleComposerTool($("toggleProjectSources"), state.chatSourcesEnabled);
+    renderComposerContext();
+  });
+  $("toggleDeepResearch")?.addEventListener("click", () => {
+    state.deepResearchEnabled = !state.deepResearchEnabled;
+    toggleComposerTool($("toggleDeepResearch"), state.deepResearchEnabled);
+    renderComposerContext();
+  });
+
   $("chatForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (state.chatRequest) {
+      state.chatRequest.abort();
+      state.eventSource?.close();
+      return;
+    }
     const message = $("messageInput").value.trim();
     if (!message) return;
     if (!$("sessionId").value) setCurrentSession(createSessionId());
     const runId = `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     $("messageInput").value = "";
-    addMessage(message, "user");
-    const pending = addMessage("מבין את הבקשה...", "assistant");
-    pending.classList.add("progress");
-    state.chatProgress = { runId, node: pending, lastText: pending.textContent };
+    localStorage.removeItem("bidocChatDraft");
+    resizeChatInput();
+    $("chatWelcome")?.setAttribute("hidden", "");
+    const userNode = addMessage(message, "user", { editable: true });
+    const pending = addProgressMessage();
+    state.chatProgress = { runId, node: pending, lastText: "מבין את הבקשה…" };
+    const requestController = new AbortController();
+    state.chatRequest = requestController;
+    setChatRunning(true);
     startLiveRun(runId);
-    const button = event.submitter;
-    button.disabled = true;
     try {
       const result = await api("/api/chat", {
         method: "POST",
-        body: { message, sessionId: $("sessionId").value, runId },
-        timeoutMs: 120000
+        body: {
+          message,
+          sessionId: $("sessionId").value,
+          runId,
+          sourcesEnabled: state.chatSourcesEnabled,
+          deepResearch: state.deepResearchEnabled,
+          attachments: state.chatAttachments.map(({ name, content }) => ({ name, content }))
+        },
+        timeoutMs: 120000,
+        signal: requestController.signal
       });
       clearChatProgress(pending);
+      pending.className = "message assistant";
       renderMessageContent(pending, result.answer || "לא התקבלה תשובה.", "assistant");
       if (state.chatProgress?.node === pending) state.chatProgress = null;
-      if (result.messageId) attachAnnotation(pending, result.messageId);
+      attachAssistantActions(pending, {
+        messageId: result.messageId,
+        answer: result.answer || "",
+        question: message,
+        sources: result.sources || [],
+        annotation: null
+      });
+      renderSources(pending, result.sources || []);
+      renderFollowUps(pending, result.followUps || defaultFollowUps(result));
       appendDebug(pending, result);
       state.lastWorkflow = result.workflowLog || null;
       state.currentWorkflowMessageId = result.messageId || null;
+      if ($("chatTitle")) $("chatTitle").textContent = conversationTitle(message);
+      state.chatAttachments = [];
+      renderComposerContext();
+      await refreshChatSessions();
       try {
         renderWorkflow(state.lastWorkflow);
         loadRunHistory();
@@ -469,13 +561,72 @@ function wireChat() {
     } catch (error) {
       clearChatProgress(pending);
       if (state.chatProgress?.node === pending) state.chatProgress = null;
-      pending.textContent = `שגיאה: ${error.message}`;
+      if (error.name === "AbortError" || /בוטלה/.test(error.message)) {
+        renderCancelledMessage(pending);
+      } else {
+        renderChatError(pending, error, message, userNode);
+      }
       appendLiveRunEvent({ step: "client", message: "Request failed", data: { error: error.message }, time: new Date().toISOString() });
     } finally {
       if (state.chatProgress?.node === pending) state.chatProgress = null;
-      button.disabled = false;
+      if (state.chatRequest === requestController) {
+        state.chatRequest = null;
+        setChatRunning(false);
+      }
+      $("messageInput").focus();
     }
   });
+}
+
+function closeChatDrawer() {
+  $("chat")?.classList.remove("drawerOpen");
+  $("toggleChatDrawer")?.setAttribute("aria-expanded", "false");
+}
+
+function toggleComposerTool(button, active) {
+  button?.classList.toggle("active", active);
+  button?.setAttribute("aria-pressed", String(active));
+}
+
+function resizeChatInput() {
+  const input = $("messageInput");
+  if (!input) return;
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+}
+
+function setChatRunning(running) {
+  $("chatForm")?.classList.toggle("running", running);
+  $("messages")?.setAttribute("aria-busy", String(running));
+  if ($("sendMessage")) $("sendMessage").setAttribute("aria-label", running ? "עצור יצירה" : "שלח הודעה");
+}
+
+function renderComposerContext() {
+  const container = $("composerContext");
+  if (!container) return;
+  container.innerHTML = "";
+  const chips = [];
+  if (state.chatSourcesEnabled) chips.push({ label: "מקורות הפרויקט", removable: false });
+  if (state.deepResearchEnabled) chips.push({ label: "חקירה מעמיקה", removable: false });
+  for (const file of state.chatAttachments) chips.push({ label: file.name, removable: true });
+  for (const chip of chips) {
+    const node = document.createElement("span");
+    node.className = "contextChip";
+    node.append(document.createTextNode(chip.label));
+    if (chip.removable) {
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", `הסר ${chip.label}`);
+      remove.textContent = "×";
+      remove.addEventListener("click", () => {
+        state.chatAttachments = state.chatAttachments.filter((item) => item.name !== chip.label);
+        renderComposerContext();
+      });
+      node.append(remove);
+    }
+    container.append(node);
+  }
+  container.hidden = !chips.length;
 }
 
 function startLiveRun(runId) {
@@ -527,13 +678,42 @@ function updateChatProgress(item) {
   if (item?.step === "client" || item?.step === "complete" || item?.step === "error") return;
   const text = progressTextForRunEvent(item);
   if (!text) return;
-  progress.node.textContent = text;
+  const label = progress.node.querySelector(".progressLabel");
+  if (label) label.textContent = text;
+  const timeline = progress.node.querySelector(".progressTimeline");
+  if (timeline && ![...timeline.children].some((node) => node.textContent === text)) {
+    const step = document.createElement("div");
+    step.className = "progressStep";
+    step.textContent = text;
+    timeline.append(step);
+  }
   progress.lastText = text;
   progress.node.scrollIntoView({ block: "end" });
 }
 
 function clearChatProgress(node) {
-  node?.classList.remove("progress");
+  node?.classList.remove("progress", "progressCard");
+}
+
+function addProgressMessage() {
+  const node = document.createElement("div");
+  node.className = "message assistant progress progressCard";
+  node.innerHTML = `
+    <div class="progressHeader">
+      <span class="progressSpinner" aria-hidden="true"></span>
+      <span class="progressLabel">מבין את הבקשה…</span>
+      <button class="progressDetailsButton" type="button" aria-expanded="false">הצג פרטים</button>
+    </div>
+    <div class="progressTimeline"><div class="progressStep">הבקשה התקבלה</div></div>
+  `;
+  node.querySelector(".progressDetailsButton").addEventListener("click", (event) => {
+    const open = node.classList.toggle("detailsOpen");
+    event.currentTarget.setAttribute("aria-expanded", String(open));
+    event.currentTarget.textContent = open ? "הסתר פרטים" : "הצג פרטים";
+  });
+  $("messages").append(node);
+  node.scrollIntoView({ block: "end" });
+  return node;
 }
 
 function progressTextForRunEvent(item) {
@@ -2404,6 +2584,8 @@ function parseMultilineList(value) {
 
 async function loadHistory() {
   const result = await api("/api/sessions");
+  state.chatSessions = result.sessions || [];
+  renderChatDrawer();
   $("historyList").innerHTML = "";
   if (!result.sessions.length) {
     $("historyList").textContent = "אין היסטוריה להצגה או ש-Supabase עדיין לא מוגדר.";
@@ -2558,19 +2740,28 @@ function timeAgo(date) {
 async function loadSessionMessages(sessionId) {
   const result = await api(`/api/sessions/${encodeURIComponent(sessionId)}/messages`);
   $("messages").innerHTML = "";
+  $("chatWelcome")?.setAttribute("hidden", "");
   for (const row of result.messages) {
-    if (row.user_message) addMessage(row.user_message, "user");
+    if (row.user_message) addMessage(row.user_message, "user", { editable: true });
     if (row.ai_response) {
       const node = addMessage(row.ai_response, "assistant");
-      if (row.id) attachAnnotation(node, row.id, row.annotation || null);
+      attachAssistantActions(node, {
+        messageId: row.id,
+        answer: row.ai_response,
+        question: row.user_message || "",
+        sources: [],
+        annotation: row.annotation || null
+      });
     }
   }
+  if (!result.messages.length) $("chatWelcome")?.removeAttribute("hidden");
 }
 
-function addMessage(text, role) {
+function addMessage(text, role, options = {}) {
   const node = document.createElement("div");
   node.className = `message ${role}`;
   renderMessageContent(node, text, role);
+  if (role === "user" && options.editable) attachUserActions(node, text);
   $("messages").append(node);
   node.scrollIntoView({ block: "end" });
   return node;
@@ -2579,34 +2770,89 @@ function addMessage(text, role) {
 function renderMessageContent(node, text, role) {
   node.textContent = "";
   if (role !== "assistant") {
-    node.textContent = String(text || "");
+    const body = document.createElement("div");
+    body.className = "messageBody";
+    body.textContent = String(text || "");
+    node.append(body);
     return;
   }
+  const body = document.createElement("div");
+  body.className = "messageBody";
+  body.innerHTML = renderChatMarkdown(String(text || ""));
+  node.append(body);
+}
 
-  const value = String(text || "");
-  const linkPattern = /\[([^\]\r\n]+)\]\((https?:\/\/(?:[^()\r\n]|\([^()\r\n]*\))+?)\)|(https?:\/\/[^\s<>"']+)/g;
-  let cursor = 0;
-  for (const match of value.matchAll(linkPattern)) {
-    const start = match.index ?? 0;
-    node.append(document.createTextNode(value.slice(cursor, start)));
-
-    const rawUrl = match[2] || match[3] || "";
+function renderChatMarkdown(value) {
+  const codeBlocks = [];
+  let text = String(value || "").replace(/```([\w-]*)\n?([\s\S]*?)```/g, (_, language, code) => {
+    const token = `@@CODE_BLOCK_${codeBlocks.length}@@`;
+    codeBlocks.push(`<pre><code data-language="${escapeHtml(language || "text")}">${escapeHtml(code.trim())}</code></pre>`);
+    return token;
+  });
+  text = escapeHtml(text);
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, label, url) => {
+    const cleaned = cleanChatUrl(url).url;
+    return cleaned ? `<a href="${escapeHtml(cleaned)}" target="_blank" rel="noopener noreferrer">${label}</a>` : label;
+  });
+  text = text.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, (_, prefix, rawUrl) => {
     const { url, suffix } = cleanChatUrl(rawUrl);
-    if (url) {
-      const link = document.createElement("a");
-      link.className = "chatDocumentLink";
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.textContent = "למסמך לחץ כאן";
-      node.append(link);
-      if (suffix) node.append(document.createTextNode(suffix));
-    } else {
-      node.append(document.createTextNode(match[0]));
+    return url ? `${prefix}<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">פתיחת מקור</a>${escapeHtml(suffix)}` : `${prefix}${rawUrl}`;
+  });
+  text = text
+    .replace(/^### (.+)$/gm, "<h4>$1</h4>")
+    .replace(/^## (.+)$/gm, "<h3>$1</h3>")
+    .replace(/^# (.+)$/gm, "<h2>$1</h2>")
+    .replace(/^> (.+)$/gm, "<blockquote>$1</blockquote>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  const lines = text.split("\n");
+  const output = [];
+  let listType = "";
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    const tableSeparator = lines[lineIndex + 1];
+    if (line.includes("|") && /^\s*\|?[\s:-]+(?:\|[\s:-]+)+\|?\s*$/.test(tableSeparator || "")) {
+      if (listType) {
+        output.push(`</${listType}>`);
+        listType = "";
+      }
+      const headers = markdownTableCells(line);
+      const rows = [];
+      lineIndex += 2;
+      while (lineIndex < lines.length && lines[lineIndex].includes("|") && lines[lineIndex].trim()) {
+        rows.push(markdownTableCells(lines[lineIndex]));
+        lineIndex += 1;
+      }
+      lineIndex -= 1;
+      output.push(`<div class="messageTableWrap"><table><thead><tr>${headers.map((cell) => `<th>${cell}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
+      continue;
     }
-    cursor = start + match[0].length;
+    const bullet = line.match(/^\s*[-*]\s+(.+)/);
+    const numbered = line.match(/^\s*\d+\.\s+(.+)/);
+    const nextType = bullet ? "ul" : numbered ? "ol" : "";
+    if (nextType) {
+      if (listType !== nextType) {
+        if (listType) output.push(`</${listType}>`);
+        output.push(`<${nextType}>`);
+        listType = nextType;
+      }
+      output.push(`<li>${bullet?.[1] || numbered?.[1]}</li>`);
+      continue;
+    }
+    if (listType) {
+      output.push(`</${listType}>`);
+      listType = "";
+    }
+    if (!line.trim()) continue;
+    if (/^@@CODE_BLOCK_\d+@@$/.test(line) || /^<(h[2-4]|blockquote|pre)/.test(line)) output.push(line);
+    else output.push(`<p>${line}</p>`);
   }
-  node.append(document.createTextNode(value.slice(cursor)));
+  if (listType) output.push(`</${listType}>`);
+  return output.join("").replace(/@@CODE_BLOCK_(\d+)@@/g, (_, index) => codeBlocks[Number(index)] || "");
+}
+
+function markdownTableCells(line) {
+  return String(line).trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
 }
 
 function cleanChatUrl(rawUrl) {
@@ -2631,6 +2877,143 @@ function cleanChatUrl(rawUrl) {
 
 function countCharacters(value, character) {
   return [...String(value || "")].filter((item) => item === character).length;
+}
+
+function iconButton(label, svg) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "messageAction";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.innerHTML = svg;
+  return button;
+}
+
+function attachUserActions(node, text) {
+  const actions = document.createElement("div");
+  actions.className = "messageActions";
+  const edit = iconButton("ערוך הודעה", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>');
+  edit.addEventListener("click", () => {
+    $("messageInput").value = text;
+    localStorage.setItem("bidocChatDraft", text);
+    resizeChatInput();
+    $("messageInput").focus();
+  });
+  actions.append(edit);
+  node.append(actions);
+}
+
+function attachAssistantActions(node, { messageId, answer, question, annotation = null }) {
+  const actions = document.createElement("div");
+  actions.className = "messageActions";
+  const copy = iconButton("העתק תשובה", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h4"/></svg>');
+  copy.addEventListener("click", async () => {
+    await copyTextToClipboard(answer);
+    showToast("התשובה הועתקה");
+  });
+  const retry = iconButton("צור תשובה מחדש", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>');
+  retry.addEventListener("click", () => {
+    $("messageInput").value = question;
+    resizeChatInput();
+    $("chatForm").requestSubmit($("sendMessage"));
+  });
+  actions.append(copy, retry);
+
+  if (messageId) {
+    const like = iconButton("תשובה מועילה", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3M14 9V5a3 3 0 0 0-3-3l-4 9v11h11a2 2 0 0 0 2-2l1-8a2 2 0 0 0-2-3Z"/></svg>');
+    const dislike = iconButton("תשובה לא מועילה", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3M10 15v4a3 3 0 0 0 3 3l4-9V2H6a2 2 0 0 0-2 2l-1 8a2 2 0 0 0 2 3Z"/></svg>');
+    like.classList.toggle("active-like", annotation === "V");
+    dislike.classList.toggle("active-dislike", annotation === "X");
+    const vote = async (value) => {
+      const activeClass = value === "V" ? "active-like" : "active-dislike";
+      const next = (value === "V" ? like : dislike).classList.contains(activeClass) ? null : value;
+      like.classList.toggle("active-like", next === "V");
+      dislike.classList.toggle("active-dislike", next === "X");
+      await api(`/api/messages/${encodeURIComponent(messageId)}/annotate`, { method: "POST", body: { annotation: next } }).catch(() => {
+        showToast("לא ניתן היה לשמור את המשוב", "error");
+      });
+    };
+    like.addEventListener("click", () => vote("V"));
+    dislike.addEventListener("click", () => vote("X"));
+    actions.append(like, dislike);
+  }
+  node.append(actions);
+}
+
+function normalizeSource(source, index) {
+  const url = cleanChatUrl(typeof source === "string" ? source : source?.url || "").url;
+  if (!url) return null;
+  let hostname = "";
+  try { hostname = new URL(url).hostname.replace(/^www\./, ""); } catch {}
+  return {
+    url,
+    title: source?.title || source?.label || source?.name || `מקור ${index + 1}`,
+    type: source?.type || hostname || "מסמך"
+  };
+}
+
+function renderSources(node, sources) {
+  const normalized = (sources || []).map(normalizeSource).filter(Boolean);
+  if (!normalized.length) return;
+  const container = document.createElement("div");
+  container.className = "sourceCards";
+  container.setAttribute("aria-label", "מקורות לתשובה");
+  normalized.slice(0, 6).forEach((source) => {
+    const link = document.createElement("a");
+    link.className = "sourceCard";
+    link.href = source.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.innerHTML = `<span>${escapeHtml(source.title)}</span><small>${escapeHtml(source.type)}</small>`;
+    container.append(link);
+  });
+  node.append(container);
+}
+
+function defaultFollowUps(result) {
+  if (result?.type === "CHAT") return [];
+  return ["הצג רק נושאים שדורשים פעולה", "מה המקורות המרכזיים למסקנה?", "סכם את זה לעדכון הנהלה"];
+}
+
+function renderFollowUps(node, followUps) {
+  if (!Array.isArray(followUps) || !followUps.length) return;
+  const container = document.createElement("div");
+  container.className = "sourceCards followUps";
+  followUps.slice(0, 3).forEach((text) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "sourceCard";
+    button.textContent = String(text);
+    button.addEventListener("click", () => {
+      $("messageInput").value = String(text);
+      resizeChatInput();
+      $("messageInput").focus();
+    });
+    container.append(button);
+  });
+  node.append(container);
+}
+
+function renderCancelledMessage(node) {
+  node.className = "message assistant";
+  renderMessageContent(node, "היצירה נעצרה. התהליך בשרת עשוי להסתיים ברקע.", "assistant");
+}
+
+function renderChatError(node, error, message) {
+  node.className = "message assistant errorMessage";
+  node.innerHTML = `<div class="messageBody"><strong>לא הצלחתי להשלים את הבדיקה.</strong><p>${escapeHtml(error.message)}</p></div>`;
+  const actions = document.createElement("div");
+  actions.className = "messageErrorActions";
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "נסה שוב";
+  retry.addEventListener("click", () => {
+    $("messageInput").value = message;
+    resizeChatInput();
+    $("chatForm").requestSubmit($("sendMessage"));
+  });
+  actions.append(retry);
+  node.append(actions);
 }
 
 function attachAnnotation(node, messageId, current = null) {
@@ -3716,6 +4099,60 @@ async function importSettingsFile(event) {
   }
 }
 
+async function refreshChatSessions() {
+  const list = $("chatDrawerList");
+  if (list && !state.chatSessions.length) {
+    list.innerHTML = '<div class="chatDrawerEmpty">טוען שיחות…</div>';
+  }
+  try {
+    const result = await api("/api/sessions");
+    state.chatSessions = result.sessions || [];
+    renderChatDrawer();
+  } catch (error) {
+    if (list) {
+      list.innerHTML = `<div class="chatDrawerEmpty">לא ניתן לטעון את השיחות כרגע.<br>${escapeHtml(error.message)}</div>`;
+    }
+  }
+}
+
+function renderChatDrawer() {
+  const list = $("chatDrawerList");
+  if (!list) return;
+  const query = String($("chatHistorySearch")?.value || "").trim().toLocaleLowerCase("he");
+  const sessions = state.chatSessions.filter((session) =>
+    !query || String(session.user_message || "").toLocaleLowerCase("he").includes(query)
+  );
+  list.innerHTML = "";
+  if (!sessions.length) {
+    list.innerHTML = `<div class="chatDrawerEmpty">${query ? "לא נמצאו שיחות מתאימות" : "אין שיחות שמורות עדיין"}</div>`;
+    return;
+  }
+  for (const session of sessions) {
+    const sessionId = session.sessionId || session.session_id;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `chatDrawerItem${sessionId === $("sessionId").value ? " active" : ""}`;
+    const title = conversationTitle(session.user_message || "שיחה ללא כותרת");
+    const date = session.created_at
+      ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(session.created_at))
+      : "";
+    button.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(date)}</span>`;
+    button.addEventListener("click", async () => {
+      setCurrentSession(sessionId);
+      await loadSessionMessages(sessionId);
+      if ($("chatTitle")) $("chatTitle").textContent = title;
+      renderChatDrawer();
+      closeChatDrawer();
+    });
+    list.append(button);
+  }
+}
+
+function conversationTitle(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > 52 ? `${text.slice(0, 49)}…` : text || "שיחה חדשה";
+}
+
 function applyImportedSecretValues(draft = {}) {
   if ($("openRouterApiKey")) $("openRouterApiKey").value = draft.secrets?.openRouterApiKey || "";
   if ($("supabaseUrl")) $("supabaseUrl").value = draft.secrets?.supabaseUrl || "";
@@ -4424,7 +4861,7 @@ function renderTrendReport(trend) {
 }
 
 async function api(path, options = {}) {
-  const controller = options.timeoutMs ? new AbortController() : null;
+  const controller = options.timeoutMs && !options.signal ? new AbortController() : null;
   const timeoutId = controller
     ? setTimeout(() => controller.abort(), options.timeoutMs)
     : null;
@@ -4433,14 +4870,18 @@ async function api(path, options = {}) {
       method: options.method || "GET",
       headers: { "Content-Type": "application/json" },
       body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: controller?.signal
+      signal: options.signal || controller?.signal
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Request failed");
     return data;
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error("הבקשה נתקעה יותר מדי זמן. נסה שוב או בדוק את חיבורי השירותים.");
+      const abortError = new Error(options.signal?.aborted
+        ? "הבקשה בוטלה."
+        : "הבקשה נתקעה יותר מדי זמן. נסה שוב או בדוק את חיבורי השירותים.");
+      abortError.name = "AbortError";
+      throw abortError;
     }
     throw error;
   } finally {

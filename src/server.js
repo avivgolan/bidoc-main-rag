@@ -78,7 +78,15 @@ async function handleApi(req, res, url) {
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     createRun(runId);
     try {
-      const output = await runChatPipeline({ message: body.message, sessionId, config: config(), runId });
+      const output = await runChatPipeline({
+        message: body.message,
+        sessionId,
+        config: config(),
+        runId,
+        sourcesEnabled: body.sourcesEnabled !== false,
+        deepResearch: body.deepResearch === true,
+        attachments: normalizeChatAttachments(body.attachments)
+      });
       return sendJson(res, 200, { ...output, runId });
     } catch (error) {
       failRun(runId, error);
@@ -621,6 +629,14 @@ async function handleApi(req, res, url) {
   }
 
   sendJson(res, 404, { error: "Not found" });
+}
+
+function normalizeChatAttachments(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 3).map((item) => ({
+    name: String(item?.name || "attachment").slice(0, 160),
+    content: String(item?.content || "").slice(0, 1_000_000)
+  })).filter((item) => item.content.trim());
 }
 
 function serveStatic(res, pathname) {

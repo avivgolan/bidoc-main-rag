@@ -15,10 +15,16 @@ import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./
 import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, hashValue } from "./cache.js";
 
-export async function runChatPipeline({ message, sessionId, config, runId }) {
+export async function runChatPipeline({ message, sessionId, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [] }) {
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
-  emitRunEvent(runId, "chat_input", "Received user message", { sessionId, preview: message.slice(0, 300) });
-  const sanitized = sanitizeMessage(message);
+  const attachmentContext = attachments.map((item) => `ATTACHMENT: ${item.name}\n${item.content}`).join("\n\n");
+  const effectiveMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+  emitRunEvent(runId, "chat_input", "Received user message", {
+    sessionId,
+    preview: message.slice(0, 300),
+    attachments: attachments.map((item) => item.name)
+  });
+  const sanitized = sanitizeMessage(effectiveMessage);
   emitRunEvent(runId, "sanitize", "Message sanitized", { changed: sanitized !== message, length: sanitized.length });
   const saved = await saveMessage({ config, userMessage: message, sanitizedMessage: sanitized, sessionId });
   emitRunEvent(runId, "save_message", "Message saved", { id: saved.id, status: saved.status });
@@ -54,6 +60,20 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
     });
   }
   classification = enforceInvestigationMode(classification, sanitized);
+  if (!sourcesEnabled && !deepResearch) {
+    classification = { ...classification, type: "CHAT", professional: false, investigation: false };
+    emitRunEvent(runId, "switch", "Project sources disabled by user", {});
+  }
+  if (deepResearch) {
+    classification = {
+      ...classification,
+      type: "RAG",
+      complexity: "COMPLEX",
+      investigation: true,
+      investigation_reason: classification.investigation_reason || "user_requested"
+    };
+    emitRunEvent(runId, "investigation", "Deep research requested by user", {});
+  }
 
   let memory = await recentMemory({ config, sessionId }).catch((error) => {
     trace.push({ step: "memory", ok: false, error: error.message });
@@ -105,10 +125,18 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
 
   const output = {
     messageId: saved.id,
+    status: "complete",
     type: classification.type,
     classification,
     answer: result.answer,
-    sources: result.sources,
+    sources: normalizeChatSources(result.sources),
+    followUps: buildChatFollowUps({ classification, result }),
+    progress: {
+      completed: true,
+      stages: (workflowLog.nodes || [])
+        .filter((node) => node.status === "done")
+        .map((node) => ({ id: node.id, label: node.label, status: node.status }))
+    },
     toolCalls: result.toolCalls,
     knowledgePlan: result.knowledgePlan || null,
     investigationPlan: result.investigationPlan || null,
@@ -120,6 +148,35 @@ export async function runChatPipeline({ message, sessionId, config, runId }) {
   };
   completeRun(runId, { messageId: saved.id, type: classification.type });
   return output;
+}
+
+function normalizeChatSources(sources = []) {
+  return uniqueByUrl(sources).map((source, index) => {
+    let hostname = "";
+    try {
+      hostname = new URL(source.url).hostname.replace(/^www\./, "");
+    } catch {
+      hostname = "";
+    }
+    return {
+      id: source.id || `source_${index + 1}`,
+      title: source.title || source.label || source.name || `מקור ${index + 1}`,
+      url: source.url,
+      type: source.type || hostname || "document"
+    };
+  });
+}
+
+function buildChatFollowUps({ classification, result }) {
+  if (classification?.type === "CHAT") return [];
+  const followUps = [
+    "הצג רק נושאים שדורשים פעולה מיידית",
+    "אילו מסמכים תומכים במסקנות האלה?"
+  ];
+  if (result?.conflicts?.length) followUps.push("הסבר את הסתירות בין המקורות");
+  else if (classification?.urgency === "HIGH") followUps.push("מי צריך לטפל בכל נושא ועד מתי?");
+  else followUps.push("סכם את התשובה לעדכון הנהלה קצר");
+  return followUps;
 }
 
 async function runLiteAgent({ message, memory, memorySummary, config, trace, runId }) {
