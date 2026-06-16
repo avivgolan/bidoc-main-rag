@@ -5,6 +5,7 @@
 
 # Local secrets / settings (contains API keys)
 data/settings.json
+bidoc-settings-max-quality.json
 
 # macOS
 .DS_Store
