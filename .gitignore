@@ -14,6 +14,11 @@ node_modules/
 
 # bedrock: noisy auto-generated content excluded from git
 # Curated knowledge (Memory/, History/, Evidence/imports/, Dashboards/) IS tracked.
+# Playwright artifacts (generated on test run — do not commit)
+test-results/
+playwright-report/
+test/ui/.auth/
+
 bedrock/Evidence/raw/
 bedrock/Evidence/captures/
 bedrock/Outputs/site/

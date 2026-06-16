@@ -320,7 +320,9 @@ export function getConfig(settingsOverride = null) {
       alertCandidates: clampNumber(settings.retrieval?.alertCandidates ?? process.env.ALERT_CANDIDATES, 1, 100, 20),
       rerankTopK: clampNumber(settings.retrieval?.rerankTopK ?? process.env.RERANK_TOP_K, 1, 100, 10),
       vectorWeight: clampNumber(settings.retrieval?.vectorWeight ?? process.env.HYBRID_VECTOR_WEIGHT, 0, 1, 0.65),
-      keywordWeight: clampNumber(settings.retrieval?.keywordWeight ?? process.env.HYBRID_KEYWORD_WEIGHT, 0, 1, 0.35)
+      keywordWeight: clampNumber(settings.retrieval?.keywordWeight ?? process.env.HYBRID_KEYWORD_WEIGHT, 0, 1, 0.35),
+      timelineLimit: clampNumber(settings.retrieval?.timelineLimit, 1, 5000, 1000),
+      timelineDaysBack: clampNumber(settings.retrieval?.timelineDaysBack, 1, 3650, 1825)
     },
     ai: normalizeAiSettings(settings.ai),
     rag: normalizeRagSettings(settings.rag),
@@ -639,7 +641,9 @@ export async function writeLocalSettings(settings) {
       alertCandidates: clampNumber(settings.retrieval?.alertCandidates ?? existing.retrieval?.alertCandidates, 1, 100, 20),
       rerankTopK: clampNumber(settings.retrieval?.rerankTopK ?? existing.retrieval?.rerankTopK, 1, 100, 10),
       vectorWeight: clampNumber(settings.retrieval?.vectorWeight ?? existing.retrieval?.vectorWeight, 0, 1, 0.65),
-      keywordWeight: clampNumber(settings.retrieval?.keywordWeight ?? existing.retrieval?.keywordWeight, 0, 1, 0.35)
+      keywordWeight: clampNumber(settings.retrieval?.keywordWeight ?? existing.retrieval?.keywordWeight, 0, 1, 0.35),
+      timelineLimit: clampNumber(settings.retrieval?.timelineLimit ?? existing.retrieval?.timelineLimit, 1, 5000, 1000),
+      timelineDaysBack: clampNumber(settings.retrieval?.timelineDaysBack ?? existing.retrieval?.timelineDaysBack, 1, 3650, 1825)
     },
     ai: normalizeAiSettings(settings.ai || existing.ai),
     rag: normalizeRagSettings(settings.rag || existing.rag),

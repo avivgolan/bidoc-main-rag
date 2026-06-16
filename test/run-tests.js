@@ -10,7 +10,7 @@ import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../s
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { exportFullSettings, getConfig, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, previewImportedSettingsFile, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
-import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, projectGraphResponse, saveMessage } from "../src/supabase.js";
+import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "../src/projectGraph.js";
@@ -18,6 +18,9 @@ import { chatCompletion } from "../src/openrouter.js";
 import { cachedOperation, cacheKey, createCacheContext, finalizeCacheMetrics, MemoryCacheProvider } from "../src/cache.js";
 import { QA_SYSTEM_PROMPT } from "../src/qaAgent.js";
 import { defaultPrompts } from "../src/prompts.js";
+import { adjacentTimelineRange, buildTimelineEventsUrl, canCommitTimelineRequest, initialTimelineRange, isTimelineAbortError, isTimelineRangeCovered, isTimelineTimeoutError, mergeTimelineEvents, mergeTimelineRanges, timelineMonthRange } from "../public/timelineData.js";
+import { buildTimelineSearchText, createTimelineSearchController, timelineEventMatchesQuery } from "../public/timelineSearch.js";
+import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigateByMonths, calWeekBoundary } from "../public/calendarHelpers.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -583,7 +586,7 @@ test("chat workspace exposes modern composer, progress, history, and accessibili
 test("recent chat drawer loads independently and session listing stays compact", () => {
   const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
   const supabaseSource = fs.readFileSync(new URL("../src/supabase.js", import.meta.url), "utf8");
-  assert.match(appSource, /wireQa\(\);\s+\$\("refreshHistory"\).*;\s+refreshChatSessions\(\);/s);
+  assert.match(appSource, /safeInitStep\("qa", wireQa\);[\s\S]*safeInitStep\("history refresh", \(\) => \$\("refreshHistory"\)\.addEventListener\("click", loadHistory\)\);[\s\S]*safeInitStep\("chat sessions", refreshChatSessions\);/);
   assert.match(supabaseSource, /select=session_id,status,created_at,user_message&/);
   assert.doesNotMatch(supabaseSource, /select=session_id,status,created_at,user_message,ai_response&/);
 });
@@ -755,6 +758,448 @@ test("timeline links remain on App Supabase", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("timeline events query defaults source, sort and limit", () => {
+  assert.deepEqual(parseTimelineEventsQuery(new URLSearchParams()), {
+    source: "index",
+    sort: "desc",
+    limit: 200,
+    from: null,
+    to: null,
+    cursor: null
+  });
+});
+
+test("timeline frontend builds ranged paginated event URLs", () => {
+  const url = new URL(buildTimelineEventsUrl({
+    source: "alerts",
+    from: "2026-03-01T00:00:00.000Z",
+    to: "2026-03-31T23:59:59.999Z",
+    limit: 200,
+    cursor: "opaque-cursor",
+    sort: "desc"
+  }), "http://localhost");
+  assert.equal(url.pathname, "/api/timeline/events");
+  assert.equal(url.searchParams.get("source"), "alerts");
+  assert.equal(url.searchParams.get("from"), "2026-03-01T00:00:00.000Z");
+  assert.equal(url.searchParams.get("to"), "2026-03-31T23:59:59.999Z");
+  assert.equal(url.searchParams.get("limit"), "200");
+  assert.equal(url.searchParams.get("cursor"), "opaque-cursor");
+  assert.equal(url.searchParams.get("sort"), "desc");
+});
+
+test("timeline frontend default range covers 1826 local calendar days", () => {
+  const range = initialTimelineRange(new Date(2026, 5, 9, 12, 0, 0));
+  const from = new Date(range.from);
+  const to = new Date(range.to);
+  const calendarDays = Math.round((Date.UTC(to.getFullYear(), to.getMonth(), to.getDate()) -
+    Date.UTC(from.getFullYear(), from.getMonth(), from.getDate())) / 86400000) + 1;
+  assert.equal(calendarDays, 1826);
+});
+
+test("timeline search matches content tags ids dates source and severity", () => {
+  const event = {
+    id: "42",
+    date: "2026-06-09T12:30:00Z",
+    content: "פגישה עם ACME לגבי crane delay",
+    tags: ["schedule", "crane"],
+    source: "alerts",
+    severity: 4,
+    metadata: {}
+  };
+  assert.equal(timelineEventMatchesQuery(event, "acme"), true);
+  assert.equal(timelineEventMatchesQuery(event, "crane"), true);
+  assert.equal(timelineEventMatchesQuery(event, "42"), true);
+  assert.equal(timelineEventMatchesQuery(event, "2026-06-09"), true);
+  assert.equal(timelineEventMatchesQuery(event, "alerts"), true);
+  assert.equal(timelineEventMatchesQuery(event, "4"), true);
+});
+
+test("timeline search includes only allowed metadata fields", () => {
+  const indexEvent = {
+    id: "1",
+    date: "2026-06-09T00:00:00Z",
+    content: "",
+    tags: [],
+    source: "index",
+    severity: null,
+    metadata: {
+      title: "Procurement hold",
+      source_table: "emails",
+      secret_internal: "should not match"
+    }
+  };
+  const alertsEvent = {
+    id: "2",
+    date: "2026-06-09T00:00:00Z",
+    content: "",
+    tags: [],
+    source: "alerts",
+    severity: null,
+    metadata: {
+      alert_description: "Critical safety alert",
+      is_relevant: false,
+      internal_payload: "ignore me"
+    }
+  };
+  assert.equal(timelineEventMatchesQuery(indexEvent, "procurement"), true);
+  assert.equal(timelineEventMatchesQuery(indexEvent, "emails"), true);
+  assert.equal(timelineEventMatchesQuery(indexEvent, "secret_internal"), false);
+  assert.equal(timelineEventMatchesQuery(alertsEvent, "critical safety"), true);
+  assert.equal(timelineEventMatchesQuery(alertsEvent, "false"), true);
+  assert.equal(timelineEventMatchesQuery(alertsEvent, "internal_payload"), false);
+});
+
+test("timeline search supports arrays booleans numbers and normalized whitespace", () => {
+  const event = {
+    id: "3",
+    date: "2026-06-09T00:00:00Z",
+    content: "  רווחים   מרובים ",
+    tags: ["alpha", "beta"],
+    source: "index",
+    severity: 2,
+    metadata: {
+      mentioned_dates: ["2026-06-01", "2026-06-05"],
+      severity_or_risk: 2,
+      item_status: true
+    }
+  };
+  const text = buildTimelineSearchText(event);
+  assert.match(text, /רווחים מרובים/);
+  assert.equal(timelineEventMatchesQuery(event, "beta"), true);
+  assert.equal(timelineEventMatchesQuery(event, "2026-06-05"), true);
+  assert.equal(timelineEventMatchesQuery(event, "true"), true);
+  assert.equal(timelineEventMatchesQuery(event, "2"), true);
+});
+
+test("timeline search debounce applies once after 250ms and clears immediately", () => {
+  const scheduled = [];
+  const cleared = [];
+  const applied = [];
+  const pending = [];
+  let nextTimerId = 0;
+  let activeTimer = null;
+  const controller = createTimelineSearchController({
+    delay: 250,
+    onPending(value) {
+      pending.push(value);
+    },
+    onApply(value) {
+      applied.push(value);
+    },
+    setTimer(fn, delay) {
+      activeTimer = { id: ++nextTimerId, fn, delay };
+      scheduled.push(delay);
+      return activeTimer.id;
+    },
+    clearTimer(id) {
+      cleared.push(id);
+      if (activeTimer?.id === id) activeTimer = null;
+    }
+  });
+  controller.schedule("a");
+  controller.schedule("ab");
+  assert.deepEqual(scheduled, [250, 250]);
+  assert.deepEqual(cleared, [1]);
+  assert.deepEqual(applied, []);
+  activeTimer.fn();
+  assert.deepEqual(applied, ["ab"]);
+  controller.schedule("");
+  assert.deepEqual(applied, ["ab", ""]);
+  assert.deepEqual(pending, [true, true, false, false]);
+  controller.dispose();
+});
+
+test("timeline frontend merges pages, deduplicates and keeps newest first", () => {
+  const merged = mergeTimelineEvents([
+    { id: "1", source: "index", date: "2026-06-01T10:00:00Z", content: "old" },
+    { id: "2", source: "index", date: "2026-06-03T10:00:00Z", content: "second" }
+  ], [
+    { id: "2", source: "index", date: "2026-06-03T10:00:00Z", content: "updated" },
+    { id: "1", source: "alerts", date: "2026-06-04T10:00:00Z", content: "alert" }
+  ]);
+  assert.deepEqual(merged.map((event) => `${event.source}|${event.id}`), [
+    "alerts|1",
+    "index|2",
+    "index|1"
+  ]);
+  assert.equal(merged[1].content, "updated");
+});
+
+test("timeline frontend avoids covered ranges and identifies missing months", () => {
+  const march = timelineMonthRange(2026, 2);
+  const april = timelineMonthRange(2026, 3);
+  const ranges = mergeTimelineRanges([], march);
+  assert.equal(isTimelineRangeCovered(ranges, march), true);
+  assert.equal(isTimelineRangeCovered(ranges, april), false);
+  const before = adjacentTimelineRange(march, "before", 7 * 86400000);
+  assert.ok(Date.parse(before.to) < Date.parse(march.from));
+});
+
+test("timeline frontend rejects stale source responses and classifies aborts", () => {
+  assert.equal(canCommitTimelineRequest(5, 5, "alerts", "alerts"), true);
+  assert.equal(canCommitTimelineRequest(4, 5, "alerts", "alerts"), false);
+  assert.equal(canCommitTimelineRequest(5, 5, "index", "alerts"), false);
+  assert.equal(isTimelineAbortError({ name: "AbortError" }), true);
+  assert.equal(isTimelineTimeoutError({ kind: "timeout" }), true);
+  assert.equal(isTimelineAbortError(new Error("network")), false);
+});
+
+test("timeline UI uses ranged loading, cancellation and isolated pagination", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(appSource, /buildTimelineEventsUrl\(\{[\s\S]*limit: getTimelineLoadLimit\(\),[\s\S]*sort: "desc"/);
+  assert.match(appSource, /getTimelineInitialRange\(\)/);
+  assert.match(appSource, /const requestId = \+\+timelineState\.requestId/);
+  assert.match(appSource, /canCommitTimelineRequest\(requestId, timelineState\.requestId, source, getActiveTimelineSource\(\)\)/);
+  assert.match(appSource, /abortActiveTimelineRequest\(\);[\s\S]*reason: "refresh"/);
+  assert.match(appSource, /refreshRelated: false,[\s\S]*cursor: pagination\.nextCursor/);
+  assert.match(appSource, /catch\(\(error\) => \{[\s\S]*timelineDebug\("links failed"/);
+  assert.match(appSource, /catch\(\(error\) => \{[\s\S]*timelineDebug\("suggestions failed"/);
+  assert.match(appSource, /controller\.abort\("timeout"\)/);
+  assert.match(appSource, /controller\?\.abort\("user"\)/);
+  assert.match(htmlSource, /id="timelineLoadStatus" aria-live="polite"/);
+  assert.match(htmlSource, /id="timelineContainer" aria-busy="false"/);
+  assert.match(htmlSource, /id="timelineLoadMore">טען עוד/);
+});
+
+test("timeline loading elapsed is aria-hidden to avoid per-second live announcements", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /id="timelineLoadElapsed" aria-hidden="true"/);
+});
+
+test("timeline AI panel collapse button references a real element id", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  // panel.id must be set before aria-controls references it
+  assert.match(appSource, /panel\.id = "tlAiPanel"[\s\S]*aria-controls.*tlAiPanel/);
+});
+
+test("timeline UI keeps search local, debounced and clears on source switch", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /createTimelineSearchController\(\{[\s\S]*delay: 250/);
+  assert.match(appSource, /timelineState\.searchQuery = value;[\s\S]*renderTimeline\(\);/);
+  assert.match(appSource, /async function handleTimelineSourceSwitch\(source\) \{[\s\S]*timelineState\.source = source;[\s\S]*clearTimelineSearch\(\{ resetInput: true \}\);/);
+  assert.doesNotMatch(appSource, /timelineSearch"\)\?\.addEventListener\("input",[\s\S]*timelineState\.searchQuery = event\.target\.value/);
+});
+
+test("timeline UI makes calendar cards native buttons and restores detail selection", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /document\.createElement\("button"\)/);
+  assert.match(appSource, /card\.type = "button"/);
+  assert.match(appSource, /setAttribute\("aria-pressed"/);
+  assert.match(appSource, /e\.detail === 0/);
+  assert.match(appSource, /reconcileTimelineSelection\(filtered\)/);
+  assert.match(appSource, /document\.querySelectorAll\("\.tlCard\[data-event-id\]"\)/);
+});
+
+test("timeline UI registers dropdown listeners once and keeps alerts label visible", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(appSource, /if \(!timelineState\.dropdownListenersBound\) \{[\s\S]*bindTimelineDropdownListeners\(\);[\s\S]*timelineState\.dropdownListenersBound = true;/);
+  assert.match(appSource, /document\.addEventListener\("keydown", \(event\) => \{[\s\S]*event\.key !== "Escape"/);
+  assert.match(appSource, /if \(event\.target\.closest\("\.tlTagsDropdownWrap"\) \|\| event\.target\.closest\("\.tlFieldsPicker"\) \|\| event\.target\.closest\("\.tlFieldsBtn"\)\) return;/);
+  assert.match(htmlSource, /data-src="alerts">התראות/);
+  assert.match(htmlSource, /<option value="alerts">התראות<\/option>/);
+  assert.match(htmlSource, /id="tlTagsBtn" type="button" aria-expanded="false" aria-controls="tlTagsDropdown"/);
+});
+
+test("compact index timeline query filters and paginates in Supabase", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const rows = [
+    {
+      id: "3",
+      created_at: "2026-06-03T08:00:00Z",
+      primary_date: "2026-06-03T10:00:00Z",
+      hashtags: ["schedule"],
+      title: "Newest",
+      summary: "",
+      index_text: "Internal duplicate",
+      source_table: "emails",
+      source_id: "mail-3",
+      project_id: null,
+      item_status: "open",
+      severity_or_risk: "high",
+      mail_id: "",
+      attachment_id: null,
+      source_url: "https://example.test/3",
+      mentioned_dates: []
+    },
+    {
+      id: "2",
+      created_at: "2026-06-02T08:00:00Z",
+      primary_date: "2026-06-02T10:00:00Z",
+      hashtags: ["approval"],
+      title: "",
+      summary: "Second",
+      index_text: "Second internal text",
+      source_table: "meetings",
+      source_id: "meeting-2",
+      severity_or_risk: null
+    },
+    {
+      id: "1",
+      created_at: "2026-06-01T08:00:00Z",
+      primary_date: null,
+      hashtags: null,
+      title: "Fallback date"
+    }
+  ];
+  globalThis.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), options });
+    return new Response(JSON.stringify(calls.length === 1 ? rows : [rows[2]]), { status: 200 });
+  };
+  try {
+    const config = {
+      contentSource: {
+        supabaseUrl: "https://content.supabase.co",
+        supabaseServiceRoleKey: "content-key",
+        indexTable: "data_index"
+      }
+    };
+    const query = parseTimelineEventsQuery(new URLSearchParams({
+      from: "2026-06-01",
+      to: "2026-06-30T23:59:59Z",
+      limit: "2"
+    }));
+    const first = await fetchTimelineEventPage({ config, ...query });
+    const request = new URL(calls[0].url);
+    const select = request.searchParams.get("select");
+    assert.ok(select.includes("primary_date"));
+    assert.ok(select.includes("index_text"));
+    assert.ok(!select.includes("analyzed_data"));
+    assert.ok(!select.includes("metadata"));
+    assert.equal(request.searchParams.get("order"), "primary_date.desc.nullslast,created_at.desc,id.desc");
+    assert.equal(request.searchParams.get("limit"), "3");
+    assert.match(request.searchParams.get("and"), /primary_date\.gte\.2026-06-01T00:00:00\.000Z/);
+    assert.match(request.searchParams.get("and"), /primary_date\.lte\.2026-06-30T23:59:59\.000Z/);
+    assert.equal(first.events.length, 2);
+    assert.equal(first.page.hasMore, true);
+    assert.ok(first.page.nextCursor);
+    assert.equal(first.events[0].source, "index");
+    assert.equal(first.events[0].metadata.title, "Newest");
+    assert.equal(first.events[0].metadata.summary, undefined);
+    assert.equal(first.events[0].metadata.mail_id, undefined);
+    assert.equal(first.events[0].metadata.mentioned_dates, undefined);
+    assert.equal(first.events[0].metadata.index_text, undefined);
+    assert.equal(first.events[0].index_text, undefined);
+
+    const secondQuery = parseTimelineEventsQuery(new URLSearchParams({
+      from: "2026-06-01",
+      to: "2026-06-30T23:59:59Z",
+      limit: "2",
+      cursor: first.page.nextCursor
+    }));
+    const second = await fetchTimelineEventPage({ config, ...secondQuery });
+    assert.deepEqual(second.events.map((event) => event.id), ["1"]);
+    assert.equal(second.page.hasMore, false);
+    assert.equal(second.page.nextCursor, null);
+    assert.match(new URL(calls[1].url).searchParams.get("and"), /id\.lt\.2/);
+    assert.equal(new Set([...first.events, ...second.events].map((event) => event.id)).size, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("compact alerts timeline query excludes analyzed data and filters metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  globalThis.fetch = async (url) => {
+    requestedUrl = String(url);
+    return new Response(JSON.stringify([{
+      id: "9",
+      created_at: "2026-06-08T08:00:00Z",
+      data_date: null,
+      hashtags: ["risk"],
+      summary: "",
+      content: "Compact alert",
+      answer: "Duplicate answer",
+      question: "What happened?",
+      alert_description: "Description",
+      alert_type: "safety",
+      severity_level: 4,
+      input_data_type: "email",
+      input_data_id: "mail-9",
+      data_link: "",
+      status: "open",
+      item_status: null,
+      is_relevant: false
+    }]), { status: 200 });
+  };
+  try {
+    const result = await fetchTimelineEventPage({
+      config: {
+        contentSource: {
+          supabaseUrl: "https://content.supabase.co",
+          supabaseServiceRoleKey: "content-key",
+          alertsTable: "alerts"
+        }
+      },
+      ...parseTimelineEventsQuery(new URLSearchParams({ source: "alerts", sort: "asc", limit: "10" }))
+    });
+    const request = new URL(requestedUrl);
+    const select = request.searchParams.get("select");
+    assert.ok(!select.includes("analyzed_data"));
+    assert.ok(!select.includes("metadata"));
+    assert.equal(request.searchParams.get("order"), "data_date.asc.nullslast,created_at.asc,id.asc");
+    assert.equal(request.searchParams.get("limit"), "11");
+    assert.deepEqual(result.events[0], {
+      id: "alert_9",
+      date: "2026-06-08T08:00:00Z",
+      content: "Description",
+      tags: ["risk", "safety"],
+      source: "alerts",
+      severity: 4,
+      metadata: {
+        question: "What happened?",
+        alert_description: "Description",
+        alert_type: "safety",
+        severity_level: 4,
+        input_data_type: "email",
+        input_data_id: "mail-9",
+        status: "open",
+        is_relevant: false
+      }
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("timeline events query rejects invalid input and cursors", () => {
+  const invalidQueries = [
+    ["source", { source: "other" }],
+    ["sort", { sort: "newest" }],
+    ["limit", { limit: "0" }],
+    ["limit", { limit: "2001" }],
+    ["limit", { limit: "2.5" }],
+    ["empty source", { source: "" }],
+    ["empty sort", { sort: "" }],
+    ["empty limit", { limit: "" }],
+    ["from", { from: "not-a-date" }],
+    ["calendar date", { from: "2026-02-30" }],
+    ["empty from", { from: "" }],
+    ["to", { to: "2026/06/01" }],
+    ["range", { from: "2026-06-02", to: "2026-06-01" }],
+    ["cursor", { cursor: "not-a-valid-cursor" }],
+    ["empty cursor", { cursor: "" }]
+  ];
+  for (const [label, values] of invalidQueries) {
+    assert.throws(
+      () => parseTimelineEventsQuery(new URLSearchParams(values)),
+      (error) => error instanceof TimelineRequestError && error.statusCode === 400,
+      label
+    );
+  }
+});
+
+test("legacy timeline endpoints and heavy timeline operations keep full-data helpers", () => {
+  const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.match(serverSource, /url\.pathname === "\/api\/timeline"[\s\S]*fetchTimelineEvents/);
+  assert.match(serverSource, /url\.pathname === "\/api\/timeline\/alerts"[\s\S]*fetchAlertsTimelineEvents/);
+  assert.match(serverSource, /url\.pathname === "\/api\/timeline\/link-suggestions"[\s\S]*fetchAlertsTimelineEvents[\s\S]*fetchTimelineEvents/);
+  assert.match(serverSource, /url\.pathname === "\/api\/timeline\/graph\/rebuild"[\s\S]*fetchAlertsTimelineEvents[\s\S]*fetchTimelineEvents/);
 });
 
 test("timeline events can use metadata date when date column is empty", async () => {
@@ -1154,6 +1599,304 @@ test("cached operation records hits and avoids duplicate execution", async () =>
   assert.equal(metrics.cache_hits, 1);
   assert.equal(metrics.saved_model_calls, 1);
   assert.equal(metrics.cache_hit_rate, 50);
+});
+
+test("calendar helper: days in month returns correct values", () => {
+  assert.equal(calDaysInMonth(2026, 0), 31);  // January
+  assert.equal(calDaysInMonth(2026, 1), 28);  // February non-leap
+  assert.equal(calDaysInMonth(2024, 1), 29);  // February leap year
+  assert.equal(calDaysInMonth(2026, 3), 30);  // April
+  assert.equal(calDaysInMonth(2026, 11), 31); // December
+});
+
+test("calendar helper: clamp day to month bounds", () => {
+  assert.equal(calClampDay(2026, 1, 31), 28); // Feb 31 → Feb 28
+  assert.equal(calClampDay(2024, 1, 31), 29); // Leap year Feb 31 → Feb 29
+  assert.equal(calClampDay(2026, 0, 31), 31); // Jan 31 stays
+  assert.equal(calClampDay(2026, 3, 31), 30); // Apr 31 → Apr 30
+  assert.equal(calClampDay(2026, 0, 1), 1);   // Min clamp
+});
+
+test("calendar helper: dateKey pads single-digit month and day", () => {
+  assert.equal(calDateKey(2026, 0, 5), "2026-01-05");
+  assert.equal(calDateKey(2026, 11, 31), "2026-12-31");
+  assert.equal(calDateKey(2026, 5, 10), "2026-06-10");
+});
+
+test("calendar helper: navigate by days crosses months forward", () => {
+  const next = calNavigateByDays(2026, 0, 31, 1); // Jan 31 + 1 = Feb 1
+  assert.equal(next.year, 2026);
+  assert.equal(next.month, 1);
+  assert.equal(next.day, 1);
+});
+
+test("calendar helper: navigate by days crosses months backward", () => {
+  const prev = calNavigateByDays(2026, 1, 1, -1); // Feb 1 - 1 = Jan 31
+  assert.equal(prev.year, 2026);
+  assert.equal(prev.month, 0);
+  assert.equal(prev.day, 31);
+});
+
+test("calendar helper: navigate by months clamps day to shorter month", () => {
+  const result = calNavigateByMonths(2026, 0, 31, 1); // Jan 31 +1mo = Feb 28
+  assert.equal(result.year, 2026);
+  assert.equal(result.month, 1);
+  assert.equal(result.day, 28);
+});
+
+test("calendar helper: navigate by months crosses year boundary forward", () => {
+  const result = calNavigateByMonths(2026, 11, 15, 1); // Dec +1 = Jan 2027
+  assert.equal(result.year, 2027);
+  assert.equal(result.month, 0);
+  assert.equal(result.day, 15);
+});
+
+test("calendar helper: navigate by months crosses year boundary backward", () => {
+  const result = calNavigateByMonths(2026, 0, 10, -1); // Jan -1 = Dec 2025
+  assert.equal(result.year, 2025);
+  assert.equal(result.month, 11);
+  assert.equal(result.day, 10);
+});
+
+test("calendar helper: navigate by months +12 and -12 are year jumps", () => {
+  const fwd = calNavigateByMonths(2026, 5, 10, 12);
+  assert.equal(fwd.year, 2027);
+  assert.equal(fwd.month, 5);
+  const back = calNavigateByMonths(2026, 5, 10, -12);
+  assert.equal(back.year, 2025);
+  assert.equal(back.month, 5);
+});
+
+test("calendar helper: week boundary start is Sunday", () => {
+  // June 10 2026 is Wednesday (getDay()=3); week start = June 7 (Sunday)
+  const start = calWeekBoundary(2026, 5, 10, "start");
+  assert.equal(start.year, 2026);
+  assert.equal(start.month, 5);
+  assert.equal(start.day, 7);
+  assert.equal(new Date(start.year, start.month, start.day).getDay(), 0);
+});
+
+test("calendar helper: week boundary end is Saturday", () => {
+  // June 10 2026 (Wed) + 3 = June 13 (Saturday)
+  const end = calWeekBoundary(2026, 5, 10, "end");
+  assert.equal(end.day, 13);
+  assert.equal(new Date(end.year, end.month, end.day).getDay(), 6);
+});
+
+test("calendar helper: week boundary for Sunday stays at Sunday", () => {
+  const start = calWeekBoundary(2026, 5, 7, "start"); // June 7 is Sunday
+  assert.equal(start.day, 7);
+});
+
+test("calendar helper: week boundary for Saturday stays at Saturday", () => {
+  const end = calWeekBoundary(2026, 5, 13, "end"); // June 13 is Saturday
+  assert.equal(end.day, 13);
+});
+
+test("calendar helper: week boundary end crosses month", () => {
+  // March 31 2026 = Tuesday (getDay()=2); week end = March 31 + (6-2)=4 = April 4
+  const end = calWeekBoundary(2026, 2, 31, "end");
+  assert.equal(end.month, 3); // April
+  assert.equal(end.day, 4);
+});
+
+test("calendar helper: navigate by months preserves day in leap year to prev year", () => {
+  const result = calNavigateByMonths(2024, 1, 29, -1); // Feb 29 2024 -1mo = Jan 29
+  assert.equal(result.year, 2024);
+  assert.equal(result.month, 0);
+  assert.equal(result.day, 29);
+});
+
+test("calendar accessibility uses ARIA grid roles in app.js", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /setAttribute\("role", "grid"\)/);
+  assert.match(appSource, /setAttribute\("role", "row"\)/);
+  assert.match(appSource, /setAttribute\("role", "gridcell"\)/);
+  assert.match(appSource, /setAttribute\("role", "columnheader"\)/);
+  assert.match(appSource, /setAttribute\("aria-label", CAL_DAY_FULL\[/);
+  assert.match(appSource, /setAttribute\("aria-current", "date"\)/);
+  assert.match(appSource, /setAttribute\("aria-selected"/);
+  assert.match(appSource, /aria-live.*polite/);
+  assert.match(appSource, /aria-busy/);
+});
+
+test("calendar keyboard navigation covers all required keys", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /wireCalendarKeyboard/);
+  assert.match(appSource, /ArrowLeft.*calNavigateByDays/);
+  assert.match(appSource, /ArrowRight.*calNavigateByDays/);
+  assert.match(appSource, /ArrowUp.*calNavigateByDays/);
+  assert.match(appSource, /ArrowDown.*calNavigateByDays/);
+  assert.match(appSource, /PageUp.*calNavigateByMonths/);
+  assert.match(appSource, /PageDown.*calNavigateByMonths/);
+  assert.match(appSource, /calWeekBoundary.*start/);
+  assert.match(appSource, /calWeekBoundary.*end/);
+  assert.match(appSource, /e\.shiftKey/);
+  // RTL: ArrowLeft = +1, ArrowRight = -1
+  assert.match(appSource, /ArrowLeft.*calNavigateByDays\(cy, cm, cd, 1\)/);
+  assert.match(appSource, /ArrowRight.*calNavigateByDays\(cy, cm, cd, -1\)/);
+});
+
+test("calendar day panel uses semantic list structure", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /document\.createElement\("ul"\)/);
+  assert.match(appSource, /document\.createElement\("li"\)/);
+  assert.match(appSource, /calEventList/);
+  assert.match(appSource, /calEventListItem/);
+  assert.match(appSource, /document\.createElement\("h2"\)/);
+  assert.match(appSource, /setAttribute\("role", "list"\)/);
+  assert.match(appSource, /setAttribute\("aria-labelledby", "calDayPanelTitle"\)/);
+});
+
+test("calendar day panel list keyboard navigation handles Escape, ArrowUp/Down, Home/End", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /Escape/);
+  assert.match(appSource, /ArrowDown.*cards/s);
+  assert.match(appSource, /ArrowUp.*cards/s);
+  assert.match(appSource, /Home.*cards\[0\]/s);
+  assert.match(appSource, /End.*cards\[cards\.length/s);
+});
+
+test("detail panel has focusable title and keyboard-triggered focus management", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /id="tlDetailTitle" tabindex="-1"/);
+  assert.match(appSource, /fromKeyboard.*\$\("tlDetailTitle"\)\?\.focus\(\)/s);
+  assert.match(appSource, /prefers-reduced-motion/);
+});
+
+test("metadata button has aria-expanded and aria-controls", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /setAttribute\("aria-expanded", "false"\)/);
+  assert.match(appSource, /setAttribute\("aria-expanded", "true"\)/);
+  assert.match(appSource, /setAttribute\("aria-controls", "tlMetaBox"\)/);
+});
+
+test("calendar CSS includes srOnly, focus-visible, and today styles", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /\.srOnly/);
+  assert.match(cssSource, /clip: rect\(0,0,0,0\)/);
+  assert.match(cssSource, /\.calCell:focus-visible/);
+  assert.match(cssSource, /\.calCell\.today/);
+  assert.match(cssSource, /\.calEventList/);
+  assert.match(cssSource, /\.calDayEmpty/);
+});
+
+test("4C: --text-muted is updated to accessible value", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /--text-muted: #767c87/);
+  assert.doesNotMatch(cssSource, /--text-muted: #555a63/);
+});
+
+test("4C: focus ring uses solid brand-500 outline", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /outline: 2px solid var\(--brand-500\)/);
+  assert.doesNotMatch(cssSource, /outline:.*rgb\(20 140 114 \/ 0\.22\)/);
+});
+
+test("4C: inactive dark timeline buttons use accessible color", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /color: #7890aa/);
+  assert.doesNotMatch(cssSource, /color: #4a6070/);
+});
+
+test("4C: 980px panel order is list then detail then ai", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /grid-template-areas:\s*\n\s*"list"\s*\n\s*"detail"\s*\n\s*"ai"/);
+  assert.doesNotMatch(cssSource, /grid-template-areas:\s*\n\s*"detail"\s*\n\s*"list"/);
+});
+
+test("4C: touch targets min-height 44px on timeline controls", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /\.tlSrcBtn\s*\{[^}]*min-height: 44px/s);
+  assert.match(cssSource, /\.resBtn\s*\{[^}]*min-height: 44px/s);
+  assert.match(cssSource, /\.tlTagsBtn\s*\{[^}]*min-height: 44px/s);
+  assert.match(cssSource, /#timelineLoadMore\s*\{[^}]*min-height: 44px/s);
+});
+
+test("4C: dropdown stays within viewport with max-width constraint", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /\.tlTagsDropdown\s*\{[^}]*max-width:/s);
+  assert.match(cssSource, /min\(380px,\s*calc\(100vw - 24px\)\)/);
+});
+
+test("4C: active state uses non-color indicator", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /\.tlSrcBtn\.active::after/);
+  assert.match(cssSource, /\.tlSrcBtn\.active::after[\s\S]*?height: 2px/s);
+});
+
+test("4C: reduced motion hides tlNode::after pulsing ring", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /prefers-reduced-motion: reduce[\s\S]*?\.tlNode::after\s*\{\s*display: none/s);
+});
+
+test("4C: graphical timeline hidden at 375px with CSS fallback note", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /max-width: 375px/);
+  assert.match(cssSource, /\.tlWave[\s\S]*?display: none/s);
+  assert.match(cssSource, /\.tlPanels::before[\s\S]*?content:/s);
+});
+
+test("4C: AI panel collapse button added to buildAiPanel", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /tlAiCollapseBtn/);
+  assert.match(appSource, /setAttribute\("aria-expanded"/);
+  assert.match(appSource, /dataset\.collapsed/);
+});
+
+test("4C: AI collapse button CSS shown at 768px, hidden on desktop", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /\.tlAiCollapseBtn\s*\{\s*display: none/);
+  assert.match(cssSource, /max-width: 768px[\s\S]*?\.tlAiCollapseBtn[\s\S]*?display: flex/s);
+  assert.match(cssSource, /\.tlAi\[data-collapsed="true"\] > \*:not\(\.tlAiCollapseBtn\)\s*\{\s*display: none/s);
+});
+
+test("4C: detail body and title use 16px on mobile and overflow-wrap break-word", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  // Mobile font size ≥ 16px
+  assert.match(cssSource, /max-width: 768px[\s\S]*?tlDetailBody[\s\S]*?font-size: 16px/s);
+  assert.match(cssSource, /max-width: 768px[\s\S]*?tlDetailTitle[\s\S]*?font-size: 16px/s);
+  // Long content breaks within container
+  assert.match(cssSource, /#timeline\.active .tlDetailBody[\s\S]*?overflow-wrap: break-word/s);
+  assert.match(cssSource, /#timeline\.active .tlDetailTitle[\s\S]*?overflow-wrap: break-word/s);
+});
+
+test("timeline mobile layout uses advanced disclosure and grouped control stack", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(htmlSource, /timelineControlStack/);
+  assert.match(htmlSource, /id="tlAdvancedToggle"/);
+  assert.match(htmlSource, /aria-controls="timelineAdvancedControls"/);
+  assert.match(htmlSource, /id="timelineAdvancedControls" hidden/);
+});
+
+test("timeline mobile layout builds primary and secondary panel columns", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /tlPrimaryColumn/);
+  assert.match(appSource, /tlSecondaryColumn/);
+  assert.match(appSource, /primary\.appendChild\(buildListPanel\(events\)\)/);
+  assert.match(appSource, /primary\.appendChild\(detail\)/);
+  assert.match(appSource, /secondary\.appendChild\(buildAiPanel\(events\)\)/);
+});
+
+test("timeline responsive state exposes mobile graph modes and collapses AI by default off desktop", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /if \(width <= 375\) return "phone-narrow"/);
+  assert.match(appSource, /if \(width <= 768\) return "phone-compact"/);
+  assert.match(appSource, /if \(width <= 980\) return "tablet-stacked"/);
+  assert.match(appSource, /if \(kind === "phone-narrow"\) return "hidden"/);
+  assert.match(appSource, /if \(kind === "phone-compact"\) return "compact"/);
+  assert.match(appSource, /if \(kind === "tablet-stacked"\) return "secondary"/);
+  assert.match(appSource, /return getTimelineViewportKind\(\) !== "desktop"/);
+  assert.match(appSource, /panel\.dataset\.mobileGraph = getTimelineGraphMode\(\)/);
+  assert.match(appSource, /panel\.dataset\.aiCollapsed = isTimelineAiCollapsed\(\) \? "true" : "false"/);
+});
+
+test("timeline mobile CSS makes list first and AI secondary under 980px", () => {
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(cssSource, /@media \(max-width: 980px\)[\s\S]*?\.tlPanels[\s\S]*?grid-template-areas:\s*\n\s*"primary"\s*\n\s*"secondary"/s);
+  assert.match(cssSource, /@media \(max-width: 980px\)[\s\S]*?\.tlPrimaryColumn[\s\S]*?grid-template-columns:\s*1fr/s);
+  assert.match(cssSource, /@media \(max-width: 980px\)[\s\S]*?\.timelineAdvancedControls[\s\S]*?grid-template-columns:\s*1fr/s);
+  assert.match(cssSource, /@media \(max-width: 768px\)[\s\S]*?\.tlFetchControls[\s\S]*?grid-template-columns:\s*1fr/s);
 });
 
 let failed = 0;

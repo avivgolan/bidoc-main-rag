@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BiDoc — AI Document Intelligence</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260611-4c2" />
   </head>
   <body>
     <a class="skipLink" href="#chatMain">דלג לתוכן הצ׳אט</a>
@@ -863,27 +863,48 @@
             <button id="refreshTimeline" type="button">רענן</button>
           </div>
         </header>
-        <div class="timelineSourceToggle">
-          <button class="tlSrcBtn active" data-src="index">הכל</button>
-          <button class="tlSrcBtn" data-src="alerts">אירועים</button>
-        </div>
-        <div class="timelineToolbar">
-          <div class="tlTagsDropdownWrap">
-            <button class="tlTagsBtn" id="tlTagsBtn">תגיות ▾</button>
-            <div class="tlTagsDropdown" id="tlTagsDropdown" hidden>
-              <div class="timelineFilters" id="timelineFilters"></div>
+        <div class="timelineControlStack">
+          <div class="timelineSourceToggle">
+            <button class="tlSrcBtn active" type="button" data-src="index">הכל</button>
+            <button class="tlSrcBtn" type="button" data-src="alerts">התראות</button>
+          </div>
+          <div class="timelineToolbar">
+            <div class="timelineViewControls">
+              <div class="timelineResolution" id="timelineResolution">
+                <button class="resBtn active" type="button" data-res="month">חודש</button>
+                <button class="resBtn" type="button" data-res="week">שבוע</button>
+                <button class="resBtn" type="button" data-res="day">יום</button>
+                <button class="resBtn" type="button" data-res="cal">לוח</button>
+              </div>
+              <button class="tlAdvancedToggle" id="tlAdvancedToggle" type="button" aria-expanded="false" aria-controls="timelineAdvancedControls">טווח ותצוגה מתקדמת</button>
             </div>
           </div>
-          <div class="timelineViewControls">
-            <div class="timelineResolution" id="timelineResolution">
-              <button class="resBtn active" data-res="month">חודש</button>
-              <button class="resBtn" data-res="week">שבוע</button>
-              <button class="resBtn" data-res="day">יום</button>
-              <button class="resBtn" data-res="cal">לוח</button>
+          <div class="timelineAdvancedControls" id="timelineAdvancedControls" hidden>
+            <div class="tlTagsDropdownWrap tlTagsInlineWrap">
+              <button class="tlTagsBtn" id="tlTagsBtn" type="button" aria-expanded="false" aria-controls="tlTagsDropdown">תגיות ▾</button>
+              <div class="tlTagsDropdown" id="tlTagsDropdown" role="menu" hidden>
+                <div class="timelineFilters" id="timelineFilters"></div>
+              </div>
+            </div>
+            <div class="tlFetchControls">
+              <label class="tlFetchLabel">מתאריך
+                <input id="tlFromDate" type="date" class="tlFetchInput tlDateInput" />
+              </label>
+              <label class="tlFetchLabel">עד
+                <input id="tlToDate" type="date" class="tlFetchInput tlDateInput" />
+              </label>
+              <label class="tlFetchLabel">רשומות
+                <input id="tlLimitInput" type="number" min="50" max="5000" step="50" value="1000" class="tlFetchInput tlNumInput" />
+              </label>
+              <button id="tlApplyFetch" type="button" class="tlApplyBtn">טען</button>
             </div>
           </div>
         </div>
-        <div class="timelineContainer" id="timelineContainer">טוען...</div>
+        <div class="timelineLoadStatus" id="timelineLoadStatus" aria-live="polite" hidden></div>
+        <div class="timelineContainer" id="timelineContainer" aria-busy="false"></div>
+        <div class="timelineLoadMoreBar" id="timelineLoadMoreBar" hidden>
+          <button type="button" id="timelineLoadMore">טען עוד</button>
+        </div>
       </section>
 
       <!-- ======================================================
@@ -1016,7 +1037,7 @@
               <label>מקור
                 <select id="linkAgentTestSource">
                   <option value="index">הכל</option>
-                  <option value="alerts">אירועים</option>
+                  <option value="alerts">התראות</option>
                 </select>
               </label>
             </div>
@@ -1070,6 +1091,6 @@
     <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
-    <script src="/app.js" type="module"></script>
+    <script src="/app.js?v=20260611-4c2" type="module"></script>
   </body>
 </html>

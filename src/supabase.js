@@ -13,6 +13,39 @@ const GRAPH_EDGES_TABLE = "graph_edges";
 const GRAPH_UPSERT_BATCH_SIZE = 300;
 const GRAPH_NODE_TYPES = new Set(["event", "alert", "supplier", "person", "company", "document", "topic", "risk", "invoice", "quote", "source"]);
 const GRAPH_EDGE_TYPES = new Set(["mentions", "caused_by", "blocks", "approved_by", "related_to", "same_topic", "from_document", "has_status", "has_risk"]);
+const TIMELINE_PAGE_DEFAULT_LIMIT = 200;
+const TIMELINE_PAGE_MAX_LIMIT = 2000;
+const TIMELINE_CURSOR_VERSION = 1;
+const TIMELINE_PAGE_FIELDS = {
+  index: [
+    "id", "created_at", "primary_date", "hashtags", "title", "summary", "index_text",
+    "source_table", "source_id", "project_id", "item_status", "severity_or_risk",
+    "mail_id", "attachment_id", "source_url", "mentioned_dates"
+  ],
+  alerts: [
+    "id", "created_at", "data_date", "hashtags", "summary", "content", "answer",
+    "question", "alert_description", "alert_type", "severity_level", "input_data_type",
+    "input_data_id", "data_link", "status", "item_status", "is_relevant"
+  ]
+};
+const TIMELINE_METADATA_FIELDS = {
+  index: [
+    "title", "summary", "source_table", "source_id", "project_id", "item_status",
+    "severity_or_risk", "mail_id", "attachment_id", "source_url", "mentioned_dates"
+  ],
+  alerts: [
+    "question", "alert_description", "alert_type", "severity_level", "input_data_type",
+    "input_data_id", "data_link", "status", "item_status", "is_relevant"
+  ]
+};
+
+export class TimelineRequestError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "TimelineRequestError";
+    this.statusCode = 400;
+  }
+}
 
 export async function saveMessage({ config, userMessage, sanitizedMessage, sessionId }) {
   if (!isConfigured(config)) return localMessage({ userMessage, sanitizedMessage, sessionId });
@@ -232,6 +265,207 @@ function normalizeHashtags(hashtags) {
 
 function looksLikeRpcSignatureError(message) {
   return /function|parameter|argument|schema cache|could not find|PGRST202/i.test(String(message || ""));
+}
+
+export function parseTimelineEventsQuery(searchParams = new URLSearchParams()) {
+  const sourceValue = searchParams.get("source");
+  const sortValue = searchParams.get("sort");
+  const limitValue = searchParams.get("limit");
+  const source = sourceValue == null ? "index" : sourceValue;
+  const sort = sortValue == null ? "desc" : sortValue;
+
+  if (!["index", "alerts"].includes(source)) {
+    throw new TimelineRequestError("source must be index or alerts");
+  }
+  if (!["asc", "desc"].includes(sort)) {
+    throw new TimelineRequestError("sort must be asc or desc");
+  }
+
+  let limit = TIMELINE_PAGE_DEFAULT_LIMIT;
+  if (limitValue != null) {
+    if (!/^\d+$/.test(limitValue)) throw new TimelineRequestError("limit must be an integer between 1 and 2000");
+    limit = Number(limitValue);
+    if (limit < 1 || limit > TIMELINE_PAGE_MAX_LIMIT) {
+      throw new TimelineRequestError("limit must be between 1 and 2000");
+    }
+  }
+
+  const from = parseTimelineIsoDate(searchParams.get("from"), "from");
+  const to = parseTimelineIsoDate(searchParams.get("to"), "to");
+  if (from && to && Date.parse(from) > Date.parse(to)) {
+    throw new TimelineRequestError("from must not be later than to");
+  }
+
+  const cursor = decodeTimelineCursor(searchParams.get("cursor"), { source, sort });
+  return { source, sort, limit, from, to, cursor };
+}
+
+export async function fetchTimelineEventPage({ config, source = "index", sort = "desc", limit = TIMELINE_PAGE_DEFAULT_LIMIT, from = null, to = null, cursor = null }) {
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig)) {
+    return {
+      events: [],
+      page: { nextCursor: null, hasMore: false, from, to, sort, limit }
+    };
+  }
+
+  const primaryDateField = source === "alerts" ? "data_date" : "primary_date";
+  const table = source === "alerts" ? contentConfig.alertsTable : contentConfig.indexTable;
+  const direction = sort === "asc" ? "asc" : "desc";
+  const params = new URLSearchParams({
+    select: TIMELINE_PAGE_FIELDS[source].join(","),
+    order: `${primaryDateField}.${direction}.nullslast,created_at.${direction},id.${direction}`,
+    limit: String(limit + 1)
+  });
+  const filters = buildTimelinePageFilters({ primaryDateField, from, to, cursor, sort });
+  if (filters.length) params.set("and", `(${filters.join(",")})`);
+
+  const rows = await supabaseFetch(contentConfig, `/rest/v1/${table}?${params.toString()}`);
+  const hasMore = rows.length > limit;
+  const pageRows = rows.slice(0, limit);
+  const events = pageRows.map((row) => compactTimelineEvent(row, source));
+  const lastRow = pageRows.at(-1);
+  return {
+    events,
+    page: {
+      nextCursor: hasMore && lastRow ? encodeTimelineCursor(lastRow, { source, sort, primaryDateField }) : null,
+      hasMore,
+      from,
+      to,
+      sort,
+      limit
+    }
+  };
+}
+
+function parseTimelineIsoDate(value, field) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  const isoDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/;
+  if ((!isoDate.test(text) && !isoDateTime.test(text)) || !validIsoCalendarDate(text) || Number.isNaN(Date.parse(text))) {
+    throw new TimelineRequestError(`${field} must be a valid ISO date`);
+  }
+  return new Date(text).toISOString();
+}
+
+function validIsoCalendarDate(value) {
+  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function buildTimelinePageFilters({ primaryDateField, from, to, cursor, sort }) {
+  const filters = [];
+  if (from) {
+    filters.push(`or(${primaryDateField}.gte.${from},and(${primaryDateField}.is.null,created_at.gte.${from}))`);
+  }
+  if (to) {
+    filters.push(`or(${primaryDateField}.lte.${to},and(${primaryDateField}.is.null,created_at.lte.${to}))`);
+  }
+  if (cursor) filters.push(timelineCursorFilter({ primaryDateField, cursor, sort }));
+  return filters;
+}
+
+function timelineCursorFilter({ primaryDateField, cursor, sort }) {
+  const comparison = sort === "asc" ? "gt" : "lt";
+  const id = cursor.id;
+  if (cursor.fallback) {
+    return `and(${primaryDateField}.is.null,or(created_at.${comparison}.${cursor.date},and(created_at.eq.${cursor.date},id.${comparison}.${id})))`;
+  }
+  return `or(${primaryDateField}.${comparison}.${cursor.date},and(${primaryDateField}.eq.${cursor.date},created_at.${comparison}.${cursor.createdAt}),and(${primaryDateField}.eq.${cursor.date},created_at.eq.${cursor.createdAt},id.${comparison}.${id}),${primaryDateField}.is.null)`;
+}
+
+function encodeTimelineCursor(row, { source, sort, primaryDateField }) {
+  const fallback = !row[primaryDateField];
+  const date = fallback ? row.created_at : row[primaryDateField];
+  const payload = {
+    v: TIMELINE_CURSOR_VERSION,
+    source,
+    sort,
+    date: normalizeCursorDate(date),
+    createdAt: normalizeCursorDate(row.created_at),
+    id: normalizeCursorId(row.id),
+    fallback
+  };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+function decodeTimelineCursor(value, { source, sort }) {
+  if (value == null) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(String(value), "base64url").toString("utf8"));
+    if (
+      payload?.v !== TIMELINE_CURSOR_VERSION ||
+      payload.source !== source ||
+      payload.sort !== sort ||
+      typeof payload.fallback !== "boolean" ||
+      normalizeCursorDate(payload.date) !== payload.date ||
+      normalizeCursorDate(payload.createdAt) !== payload.createdAt ||
+      normalizeCursorId(payload.id) !== payload.id
+    ) {
+      throw new Error("invalid cursor payload");
+    }
+    return payload;
+  } catch {
+    throw new TimelineRequestError("cursor is invalid");
+  }
+}
+
+function normalizeCursorDate(value) {
+  if (typeof value !== "string" || Number.isNaN(Date.parse(value))) throw new Error("invalid cursor date");
+  return new Date(value).toISOString();
+}
+
+function normalizeCursorId(value) {
+  if (!["string", "number"].includes(typeof value)) throw new Error("invalid cursor id");
+  const id = String(value);
+  if (!id || !/^[A-Za-z0-9:_-]+$/.test(id)) throw new Error("invalid cursor id");
+  return id;
+}
+
+function compactTimelineEvent(row, source) {
+  const metadata = pickNonEmpty(row, TIMELINE_METADATA_FIELDS[source]);
+  if (source === "alerts") {
+    return {
+      id: `alert_${row.id}`,
+      date: row.data_date || row.created_at,
+      content: row.summary || row.alert_description || row.content || row.answer || row.question || "",
+      tags: uniqueTimelineTags(row.hashtags, row.alert_type),
+      source: "alerts",
+      severity: emptyTimelineValue(row.severity_level) ? null : row.severity_level,
+      metadata
+    };
+  }
+  return {
+    id: row.id,
+    date: row.primary_date || row.created_at,
+    content: row.title || row.summary || row.index_text || "",
+    tags: uniqueTimelineTags(row.hashtags),
+    source: "index",
+    severity: emptyTimelineValue(row.severity_or_risk) ? null : row.severity_or_risk,
+    metadata
+  };
+}
+
+function pickNonEmpty(row, fields) {
+  return Object.fromEntries(fields
+    .map((field) => [field, row[field]])
+    .filter(([, value]) => !emptyTimelineValue(value)));
+}
+
+function emptyTimelineValue(value) {
+  return value == null ||
+    (typeof value === "string" && value.trim() === "") ||
+    (Array.isArray(value) && value.length === 0) ||
+    (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
+}
+
+function uniqueTimelineTags(value, extra = null) {
+  return [...new Set([
+    ...parseHashtags(value),
+    ...(emptyTimelineValue(extra) ? [] : [String(extra).replace(/^#+/, "")])
+  ].filter(Boolean))];
 }
 
 export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {

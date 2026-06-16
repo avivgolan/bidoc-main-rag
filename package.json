@@ -6,12 +6,18 @@
   "scripts": {
     "dev": "node src/server.js",
     "start": "node src/server.js",
-    "test": "node test/run-tests.js"
+    "test": "node test/run-tests.js",
+    "test:ui": "playwright test",
+    "test:ui:headed": "playwright test --headed",
+    "test:ui:debug": "playwright test --debug"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "graphology": "^0.26.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
   }
 }

@@ -7,7 +7,7 @@ import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSe
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEvents, getMessage, getLatestQaReport, graphSearch, hybridSearch, listDislikedMessages, listMessages, listProjectGraph, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, saveQaReport, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
+import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, getMessage, getLatestQaReport, graphSearch, hybridSearch, listDislikedMessages, listMessages, listProjectGraph, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, parseTimelineEventsQuery, saveQaReport, TimelineRequestError, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
@@ -347,6 +347,19 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/timeline/alerts") {
     const events = await fetchAlertsTimelineEvents({ config: config() }).catch(() => []);
     return sendJson(res, 200, { events });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/timeline/events") {
+    try {
+      const query = parseTimelineEventsQuery(url.searchParams);
+      const result = await fetchTimelineEventPage({ config: config(), ...query });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      if (error instanceof TimelineRequestError || error?.statusCode === 400) {
+        return sendJson(res, 400, { error: error.message });
+      }
+      throw error;
+    }
   }
 
   if (req.method === "GET" && url.pathname === "/api/timeline/links") {

@@ -80,8 +80,15 @@ tags:
 - 2026-06-08 -- Reworked Settings persistence so initial loads are fresh from Supabase, imports remain unsaved drafts, saves preserve hidden settings and secrets, and serverless stale-cache responses cannot reset the form.
 - 2026-06-08 -- Added bounded, configurable retrieval row limits beside the Embedding model for primary Hybrid Search, Knowledge Planner queries, Alert retrieval, reranking, and Main Agent context.
 
+## Recent Changes (continued)
+
+- 2026-06-12 -- Added `@playwright/test` devDependency and Chromium; `npm run test:ui` runs Playwright smoke tests from `test/ui/`; config at `playwright.config.js`; artifacts go to `test-results/` and `playwright-report/` (both gitignored).
+- 2026-06-12 -- `playwright.config.js` retries set to 1 (was 0) to tolerate OS-level transient failures without masking real bugs.
+
 ## Gotchas
 
 - On this Windows machine, `npm.ps1` may be blocked by PowerShell execution policy; `node .\test\run-tests.js` runs the test suite directly.
+- Playwright tests use port 4099 (not 4000) and pass empty `SUPABASE_URL` to the webServer to prevent real Supabase traffic during smoke runs.
+- Two events in index fixtures share date 2026-04-20 (`idx-001`, `idx-002`); use `.filter({ hasText })` or `[data-event-id]` selectors instead of `.first()` / `.last()` to avoid sort-order brittleness.
 - If Supabase already contains a masked key from an older save, the next settings save will clear that stored masked value; re-enter the real key if there is no env fallback.
 - Content Supabase diagnostics expose the decoded key role; `anon` keys can return zero content rows under RLS even when the table exists, so timeline/RAG content should use a service-role key or matching read policies.
