@@ -1925,6 +1925,9 @@ function wireSettings() {
     $("settingsImportFile")?.click();
   });
   $("settingsImportFile")?.addEventListener("change", importSettingsFile);
+  $("applySettingsPreset")?.addEventListener("click", applySelectedSettingsPreset);
+  $("saveSettingsPreset")?.addEventListener("click", saveCurrentSettingsAsPreset);
+  $("settingsPresetSelect")?.addEventListener("change", renderSelectedSettingsPresetMeta);
   $("settings")?.addEventListener("input", markSettingsDraftChanged);
   $("settings")?.addEventListener("change", (event) => {
     if (event.target?.id !== "settingsImportFile") markSettingsDraftChanged();
@@ -2036,7 +2039,8 @@ function readSettingsForm() {
     },
     tools: Object.fromEntries(n8nTools.map((tool) => [tool, $(`tool_${tool}`).value])),
     timelineLinks: state.settings?.timelineLinks || {},
-    subagents: state.settings?.subagents || {}
+    subagents: state.settings?.subagents || {},
+    presets: customSettingsPresets()
   };
 }
 
@@ -2333,6 +2337,7 @@ function applySettingsResponse(settings) {
 
 function applySettingsToForm() {
   if (!state.settings) return;
+  renderSettingsPresetControls();
   applyModelSelectsToSettingsForm();
   applyChatPromptFieldsToSettingsForm();
   $("hybridRpcName").value = state.settings.retrieval.rpcName;
@@ -2401,6 +2406,140 @@ function applyChatPromptFieldsToSettingsForm() {
 function markSettingsDraftChanged() {
   state.settingsDirty = true;
   setSettingsSaveState("יש שינויים בטופס שטרם נשמרו ב-Supabase.", "dirty");
+}
+
+function renderSettingsPresetControls() {
+  const select = $("settingsPresetSelect");
+  const meta = $("settingsPresetMeta");
+  if (!select) return;
+  const currentValue = select.value;
+  const presets = Array.isArray(state.settings?.presets) ? state.settings.presets : [];
+  select.innerHTML = "";
+  if (!presets.length) {
+    select.append(new Option("אין פריסטים זמינים", ""));
+    select.disabled = true;
+    if (meta) meta.textContent = "עדיין אין פריסטים זמינים.";
+    return;
+  }
+  select.disabled = false;
+  select.append(new Option("בחר פריסט...", ""));
+  for (const preset of presets) {
+    const label = preset.builtin ? `${preset.name} · מובנה` : `${preset.name} · מותאם`;
+    select.append(new Option(label, preset.id));
+  }
+  const nextValue = presets.some((preset) => preset.id === currentValue) ? currentValue : "";
+  select.value = nextValue;
+  renderSelectedSettingsPresetMeta();
+}
+
+function renderSelectedSettingsPresetMeta() {
+  const meta = $("settingsPresetMeta");
+  if (!meta) return;
+  const preset = selectedSettingsPreset();
+  if (!preset) {
+    meta.textContent = "בחר פריסט כדי לראות מה הוא משנה.";
+    return;
+  }
+  meta.textContent = preset.description || "פריסט מוכן לטעינה לתוך הטופס.";
+}
+
+function selectedSettingsPreset() {
+  const presetId = $("settingsPresetSelect")?.value || "";
+  return (state.settings?.presets || []).find((item) => item.id === presetId) || null;
+}
+
+async function applySelectedSettingsPreset() {
+  const preset = selectedSettingsPreset();
+  if (!preset) {
+    showToast("צריך לבחור פריסט קודם.", "error");
+    return;
+  }
+  const nextSettings = mergeSettingsDraft(state.settings || {}, preset.settings || {});
+  state.settings = nextSettings;
+  applySettingsToForm();
+  state.settingsDirty = true;
+  setSettingsSaveState(`הפריסט "${preset.name}" נטען לטופס. כדי לשמור אותו למערכת יש ללחוץ על "שמור".`, "dirty");
+  showToast(`הפריסט "${preset.name}" נטען לטופס`);
+}
+
+async function saveCurrentSettingsAsPreset() {
+  const input = $("newSettingsPresetName");
+  const button = $("saveSettingsPreset");
+  const name = String(input?.value || "").trim();
+  if (!name) {
+    showToast("צריך להזין שם לפריסט החדש.", "error");
+    input?.focus();
+    return;
+  }
+  const preset = {
+    id: `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    name,
+    description: "פריסט מותאם אישית שנשמר מתוך עמוד ההגדרות",
+    settings: buildSettingsPresetSnapshot()
+  };
+  const body = {
+    ...readSettingsForm(),
+    presets: [...customSettingsPresets(), preset]
+  };
+  if (button) button.disabled = true;
+  try {
+    const result = await api("/api/settings", { method: "PUT", body });
+    applySettingsResponse(result.settings);
+    state.settingsDirty = false;
+    if (input) input.value = "";
+    const select = $("settingsPresetSelect");
+    if (select) {
+      select.value = preset.id;
+      renderSelectedSettingsPresetMeta();
+    }
+    setSettingsSaveState("הפריסט החדש נשמר יחד עם ההגדרות ב-Supabase.", "saved");
+    showToast(`הפריסט "${name}" נשמר בהצלחה`);
+  } catch (error) {
+    setSettingsSaveState("שמירת הפריסט נכשלה. הטופס נשאר כפי שהוא.", "error");
+    showToast(`שגיאה בשמירת פריסט: ${error.message}`, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function customSettingsPresets() {
+  return (state.settings?.presets || []).filter((preset) => !preset.builtin);
+}
+
+function buildSettingsPresetSnapshot() {
+  const current = readSettingsForm();
+  return {
+    models: cloneJson(current.models || {}),
+    prompts: cloneJson(current.prompts || {}),
+    retrieval: cloneJson(current.retrieval || {}),
+    ai: cloneJson(current.ai || {}),
+    rag: cloneJson(current.rag || {}),
+    graph: cloneJson(current.graph || {}),
+    cache: cloneJson(current.cache || {}),
+    knowledge: cloneJson(current.knowledge || {}),
+    timelineLinks: cloneJson(current.timelineLinks || {}),
+    timezone: current.timezone || "",
+    toolsRuntime: cloneJson(current.toolsRuntime || {}),
+    subagents: cloneJson(current.subagents || {})
+  };
+}
+
+function mergeSettingsDraft(base, patch) {
+  const next = cloneJson(base || {});
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (Array.isArray(value)) {
+      next[key] = cloneJson(value);
+      continue;
+    }
+    if (value && typeof value === "object") {
+      next[key] = mergeSettingsDraft(next[key] && typeof next[key] === "object" ? next[key] : {}, value);
+      continue;
+    }
+    if (value !== undefined && value !== "") {
+      next[key] = value;
+    }
+  }
+  return next;
 }
 
 function setSettingsSaveState(message, status = "saved") {
@@ -2657,6 +2796,10 @@ function parseMultilineList(value) {
     .split(/[,\n]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 async function loadHistory() {

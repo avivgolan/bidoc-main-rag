@@ -41,6 +41,122 @@ const DEFAULT_CACHE_SETTINGS = {
   memoryMaxEntries: 10_000,
   timeoutMs: 5_000
 };
+const BUILT_IN_SETTINGS_PRESETS = [
+  {
+    id: "profile-a-conservative",
+    name: "Profile A - Conservative",
+    description: "High-quality configuration with broader retrieval and larger answer budgets.",
+    settings: {
+      models: {
+        main: "openai/gpt-4o",
+        knowledgePlanner: "openai/gpt-4o",
+        qa: "openai/gpt-4o"
+      },
+      retrieval: {
+        candidates: 30,
+        rerankTopK: 8
+      },
+      ai: {
+        knowledgePlanner: { maxTokens: 2200 },
+        main: { maxTokens: 4096 },
+        reranker: { maxTokens: 1200 },
+        alert: { maxTokens: 1200 }
+      },
+      rag: {
+        contextRecordsLimit: 10,
+        chunkTextLimit: 1800
+      },
+      graph: {
+        contextLimit: 10
+      },
+      knowledge: {
+        agentLimit: 2,
+        topK: 4
+      },
+      subagents: {
+        alert: {
+          model: "openai/gpt-4o-mini"
+        }
+      }
+    }
+  },
+  {
+    id: "profile-b-balanced",
+    name: "Profile B - Balanced",
+    description: "Balanced cost and quality profile for regular day-to-day work.",
+    settings: {
+      models: {
+        main: "openai/gpt-4o-mini",
+        knowledgePlanner: "openai/gpt-4o-mini",
+        qa: "openai/gpt-4o-mini"
+      },
+      retrieval: {
+        candidates: 25,
+        rerankTopK: 8
+      },
+      ai: {
+        knowledgePlanner: { maxTokens: 1500 },
+        main: { maxTokens: 3000 },
+        reranker: { maxTokens: 1200 },
+        alert: { maxTokens: 1000 }
+      },
+      rag: {
+        contextRecordsLimit: 10,
+        chunkTextLimit: 1500
+      },
+      graph: {
+        contextLimit: 8
+      },
+      knowledge: {
+        agentLimit: 2,
+        topK: 3
+      },
+      subagents: {
+        alert: {
+          model: "openai/gpt-4o-mini"
+        }
+      }
+    }
+  },
+  {
+    id: "profile-c-cheap-test",
+    name: "Profile C - Cheap Test",
+    description: "Lean and cheaper preset for quick experiments and lower-cost checks.",
+    settings: {
+      models: {
+        main: "openai/gpt-4o-mini",
+        knowledgePlanner: "openai/gpt-4o-mini",
+        qa: "openai/gpt-4o-mini"
+      },
+      retrieval: {
+        candidates: 15,
+        rerankTopK: 5
+      },
+      ai: {
+        knowledgePlanner: { maxTokens: 1000 },
+        main: { maxTokens: 2000 },
+        reranker: { maxTokens: 800 },
+        alert: { maxTokens: 800 }
+      },
+      rag: {
+        contextRecordsLimit: 6,
+        chunkTextLimit: 1000
+      },
+      graph: {
+        contextLimit: 5
+      },
+      knowledge: {
+        agentLimit: 1,
+        topK: 2
+      },
+      subagents: {
+        alert: {
+          model: "openai/gpt-4o-mini"
+        }
+      }
+    }
+  }
+];
 
 // ---------------------------------------------------------------------------
 // Supabase persistence for settings
@@ -401,7 +517,8 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
       })
     ),
     agents: buildAgentList(config),
-    subagents: settings.subagents || {}
+    subagents: settings.subagents || {},
+    presets: mergeSettingsPresets(settings.presets || [])
   };
 }
 
@@ -533,7 +650,8 @@ export function exportFullSettings(config = getConfig()) {
       timezone: config.timezone,
       tools: Object.fromEntries(TOOL_NAMES.map((tool) => [tool, resolveToolUrl(tool, config)])),
       toolsRuntime: config.n8n.runtime,
-      subagents: settings.subagents || {}
+      subagents: settings.subagents || {},
+      presets: normalizeSettingsPresets(settings.presets || [])
     }
   };
 }
@@ -559,7 +677,8 @@ export function normalizeImportedSettingsFile(value = {}) {
     timezone: raw.timezone || "UTC+0",
     tools: raw.tools || {},
     toolsRuntime: raw.toolsRuntime || raw.toolRuntime || {},
-    subagents: raw.subagents || {}
+    subagents: raw.subagents || {},
+    presets: normalizeSettingsPresets(raw.presets || [])
   };
 }
 
@@ -677,7 +796,8 @@ export async function writeLocalSettings(settings) {
     ),
     toolsRuntime: normalizeToolRuntimeSettings(settings.toolsRuntime || existing.toolsRuntime || settings.toolRuntime || existing.toolRuntime),
     timezone: settings.timezone || existing.timezone || "UTC+0",
-    subagents: settings.subagents || existing.subagents || {}
+    subagents: settings.subagents || existing.subagents || {},
+    presets: normalizeSettingsPresets(settings.presets || existing.presets || [])
   };
   await sbFetch("/rest/v1/agent_settings", {
     method: "POST",
@@ -762,4 +882,70 @@ export function supabaseKeyRole(key = "") {
 
 function isLegacyJwtKey(key = "") {
   return String(key || "").startsWith("eyJ");
+}
+
+function mergeSettingsPresets(customPresets = []) {
+  const builtIns = BUILT_IN_SETTINGS_PRESETS.map((preset) => ({
+    ...cloneJson(preset),
+    builtin: true
+  }));
+  const customs = normalizeSettingsPresets(customPresets).map((preset) => ({
+    ...preset,
+    builtin: false
+  }));
+  return [...builtIns, ...customs];
+}
+
+function normalizeSettingsPresets(value = []) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const output = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const name = String(item.name || "").trim();
+    if (!name) continue;
+    const baseId = String(item.id || "").trim() || slugifyPresetName(name);
+    let id = baseId;
+    let index = 2;
+    while (seen.has(id)) {
+      id = `${baseId}-${index++}`;
+    }
+    seen.add(id);
+    output.push({
+      id,
+      name,
+      description: String(item.description || "").trim(),
+      settings: normalizePresetSettingsPatch(item.settings || {})
+    });
+  }
+  return output;
+}
+
+function normalizePresetSettingsPatch(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    models: raw.models && typeof raw.models === "object" ? cloneJson(raw.models) : {},
+    prompts: raw.prompts && typeof raw.prompts === "object" ? cloneJson(raw.prompts) : {},
+    retrieval: raw.retrieval && typeof raw.retrieval === "object" ? cloneJson(raw.retrieval) : {},
+    ai: raw.ai && typeof raw.ai === "object" ? cloneJson(raw.ai) : {},
+    rag: raw.rag && typeof raw.rag === "object" ? cloneJson(raw.rag) : {},
+    graph: raw.graph && typeof raw.graph === "object" ? cloneJson(raw.graph) : {},
+    cache: raw.cache && typeof raw.cache === "object" ? cloneJson(raw.cache) : {},
+    knowledge: raw.knowledge && typeof raw.knowledge === "object" ? cloneJson(raw.knowledge) : {},
+    timelineLinks: raw.timelineLinks && typeof raw.timelineLinks === "object" ? cloneJson(raw.timelineLinks) : {},
+    timezone: typeof raw.timezone === "string" ? raw.timezone : "",
+    toolsRuntime: raw.toolsRuntime && typeof raw.toolsRuntime === "object" ? cloneJson(raw.toolsRuntime) : {},
+    subagents: raw.subagents && typeof raw.subagents === "object" ? cloneJson(raw.subagents) : {}
+  };
+}
+
+function slugifyPresetName(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || `preset-${Date.now()}`;
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
 }

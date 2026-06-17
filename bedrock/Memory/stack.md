@@ -33,6 +33,7 @@ tags:
 - Settings export/import controls are wired during Settings initialization; downloads defer object-URL cleanup and imports validate JSON before saving and refreshing the form.
 - Settings saves and imports now report success only after the shared App Supabase write succeeds; failed persistence leaves the prior runtime cache unchanged.
 - Settings now follows an explicit persisted-versus-draft lifecycle: initial page load always reads App Supabase, file import only populates an unsaved browser draft, and Save writes the complete form before adopting the returned persisted state.
+- Settings now exposes a presets card at the top of the page: users can load built-in tuning presets into the draft form and save custom presets back into `agent_settings` without storing a separate table.
 - Vercel settings saves no longer perform an immediate follow-up GET that can hit a stale serverless instance and reset the form; the UI uses the successful PUT response instead.
 - Imported App Supabase credentials can bootstrap a write on a running server, while stateless deployments still require `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the server environment for fresh instances and cross-browser consistency.
 - Settings UI has a dedicated Chat section that owns chat-affecting models, prompts, hybrid search tuning, knowledge vocabulary, timezone, and Content Supabase settings.
@@ -79,6 +80,7 @@ tags:
 - 2026-06-08 -- Improved QA report diagnosis so Hebrew runs produce Hebrew reports, optional skipped n8n tools are not blamed automatically, and retrieval failures are separated from answer-generation failures.
 - 2026-06-08 -- Reworked Settings persistence so initial loads are fresh from Supabase, imports remain unsaved drafts, saves preserve hidden settings and secrets, and serverless stale-cache responses cannot reset the form.
 - 2026-06-08 -- Added bounded, configurable retrieval row limits beside the Embedding model for primary Hybrid Search, Knowledge Planner queries, Alert retrieval, reranking, and Main Agent context.
+- 2026-06-17 -- Added top-of-page Settings presets with 3 built-in calibration profiles (Conservative, Balanced, Cheap Test) plus persisted custom presets saved inside the shared `agent_settings` record.
 
 ## Recent Changes (continued)
 

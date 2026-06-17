@@ -9,7 +9,7 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
-import { exportFullSettings, getConfig, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, previewImportedSettingsFile, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
+import { exportFullSettings, getConfig, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
@@ -454,6 +454,46 @@ test("settings import preserves advanced AI controls", () => {
   assert.equal(wrapped.toolsRuntime.parallelLimit, 2);
 });
 
+test("settings import preserves custom presets", () => {
+  const wrapped = normalizeImportedSettingsFile({
+    settings: {
+      presets: [
+        {
+          id: "fast-check",
+          name: "Fast Check",
+          description: "Cheap and fast",
+          settings: {
+            retrieval: { candidates: 12 },
+            ai: { main: { maxTokens: 1800 } }
+          }
+        }
+      ]
+    }
+  });
+  assert.equal(wrapped.presets.length, 1);
+  assert.equal(wrapped.presets[0].id, "fast-check");
+  assert.equal(wrapped.presets[0].settings.retrieval.candidates, 12);
+  assert.equal(wrapped.presets[0].settings.ai.main.maxTokens, 1800);
+});
+
+test("public settings expose built-in presets alongside custom presets", () => {
+  const settings = {
+    presets: [
+      {
+        id: "team-balanced",
+        name: "Team Balanced",
+        settings: {
+          retrieval: { candidates: 22 }
+        }
+      }
+    ]
+  };
+  const output = publicSettings(getConfig(settings), settings);
+  assert.equal(output.presets.filter((preset) => preset.builtin).length, 3);
+  assert.ok(output.presets.some((preset) => preset.id === "profile-a-conservative"));
+  assert.ok(output.presets.some((preset) => preset.id === "team-balanced" && preset.builtin === false));
+});
+
 test("settings import preview does not mutate persisted runtime settings", () => {
   const before = structuredClone(readLocalSettings());
   const preview = previewImportedSettingsFile({
@@ -524,6 +564,22 @@ test("settings import uses a native file label that works before JavaScript wiri
   assert.match(htmlSource, /<label id="importSettings"[^>]+for="settingsImportFile"/);
   assert.match(htmlSource, /<input id="settingsImportFile" type="file"/);
   assert.match(appSource, /\$\("settingsImportFile"\)\?\.addEventListener\("change", importSettingsFile\)/);
+});
+
+test("settings page exposes presets controls and wiring", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(htmlSource, /id="settingsPresetSelect"/);
+  assert.match(htmlSource, /id="applySettingsPreset"/);
+  assert.match(htmlSource, /id="saveSettingsPreset"/);
+  assert.match(htmlSource, /id="newSettingsPresetName"/);
+  assert.match(appSource, /addEventListener\("click", applySelectedSettingsPreset\)/);
+  assert.match(appSource, /addEventListener\("click", saveCurrentSettingsAsPreset\)/);
+  assert.match(appSource, /function renderSettingsPresetControls\(\)/);
+  assert.match(appSource, /function buildSettingsPresetSnapshot\(\)/);
+  assert.match(cssSource, /\.settingsPresetCard/);
+  assert.match(cssSource, /\.settingsPresetMeta/);
 });
 
 test("settings flow loads from Supabase, imports as draft, and saves without stale reload", () => {

@@ -399,6 +399,50 @@ button:disabled {
   background: var(--error-bg);
 }
 
+.settingsPresetCard {
+  margin: 0 0 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.settingsPresetHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.settingsPresetHeader h3 {
+  margin: 0;
+}
+
+.settingsPresetGrid {
+  align-items: center;
+}
+
+.settingsPresetActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.settingsPresetMeta {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
 .retrievalSettingsCard {
   margin-top: 18px;
   padding: 16px;
@@ -5442,6 +5486,16 @@ body:has(#timeline.active) .sidebar {
 }
 
 @media (max-width: 768px) {
+  .settingsPresetActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .settingsPresetActions button,
+  .settingsPresetMeta {
+    width: 100%;
+  }
+
   #timeline.active .panelHeader {
     display: grid;
     grid-template-columns: 1fr auto;

@@ -348,6 +348,31 @@
 
         <p class="hint">בכניסה לעמוד ההגדרות נטענות מ-App Supabase. טעינת קובץ מעדכנת את הטופס בלבד; כדי לכתוב את השינויים ל-Supabase יש ללחוץ על “שמור”.</p>
         <p class="settingsSaveState" id="settingsSaveState" data-state="saved">ההגדרות המוצגות נטענו מ-Supabase.</p>
+        <section class="settingsPresetCard" aria-labelledby="settingsPresetTitle">
+          <div class="settingsPresetHeader">
+            <div>
+              <h3 id="settingsPresetTitle">פריסטים</h3>
+              <p class="hint">בחירה מהירה של תצורות מוכנות, עם אפשרות לשמור את המצב הנוכחי כפריסט חדש.</p>
+            </div>
+          </div>
+          <div class="grid settingsPresetGrid">
+            <label class="wide">בחר פריסט
+              <select id="settingsPresetSelect">
+                <option value="">טוען פריסטים...</option>
+              </select>
+            </label>
+            <div class="settingsPresetActions wide">
+              <button id="applySettingsPreset" type="button">טען פריסט</button>
+              <div class="settingsPresetMeta" id="settingsPresetMeta">בחר פריסט כדי לראות מה הוא משנה.</div>
+            </div>
+            <label>שם לפריסט חדש
+              <input id="newSettingsPresetName" placeholder="למשל: פריסט בדיקות מהיר" />
+            </label>
+            <div class="settingsPresetActions">
+              <button id="saveSettingsPreset" type="button">שמור כפריסט חדש</button>
+            </div>
+          </div>
+        </section>
         <h3>חיבורים</h3>
         <div class="grid">
           <label class="wide">OpenRouter API Key
