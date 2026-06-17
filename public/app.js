@@ -250,7 +250,9 @@ const timelineState = {
   delegatedControlsBound: false,
   openDropdown: null,
   lastDropdownTriggerId: null,
-  linksPanelExpanded: false
+  linksPanelExpanded: false,
+  activeModalPanel: null,
+  hoverTooltipState: null
 };
 
 init();
@@ -4124,6 +4126,16 @@ function buildWaveLayer(events, buckets, minDate, maxDate) {
       const handler = () => isCluster
         ? selectTlEvent(evs[0], true, { source: "graph" })
         : selectTlEvent(ev, true, { source: "graph" });
+      node.addEventListener("mouseenter", () => showTimelineNodeTooltip(node, isCluster ? evs : [ev]));
+      node.addEventListener("mouseleave", hideTimelineNodeTooltip);
+      node.addEventListener("focus", () => showTimelineNodeTooltip(node, isCluster ? evs : [ev]));
+      node.addEventListener("blur", hideTimelineNodeTooltip);
+      node.addEventListener("wheel", (event) => {
+        if ((isCluster ? evs.length : 1) < 2) return;
+        event.preventDefault();
+        showTimelineNodeTooltip(node, evs);
+        cycleTimelineNodeTooltip(event.deltaY > 0 ? 1 : -1);
+      }, { passive: false });
       node.addEventListener("click", handler);
       node.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handler(); } });
       nodesWrap.appendChild(node);
@@ -4244,6 +4256,7 @@ function buildPanelsLayer(events) {
 
   const detail = document.createElement("div"); detail.className = "tlDetail"; detail.id = "tlDetailPanel";
   detail.innerHTML = `<div class="tlDetailEmpty"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg><span>לחץ על אירוע לפרטים</span></div>`;
+  decorateTimelinePanelForExpand(detail, "detail", "פרטי אירוע");
   primary.appendChild(detail);
   secondary.appendChild(buildAiPanel(events));
   panels.append(primary, secondary);
@@ -4298,6 +4311,7 @@ function buildListPanel(events) {
   const list = buildVirtualList(events);
   list.id = "tlListPanel";
   wrap.appendChild(list);
+  decorateTimelinePanelForExpand(wrap, "list", "רשימת אירועים");
   return wrap;
 }
 
@@ -4513,6 +4527,7 @@ function buildAiPanel(events) {
     c.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;"><span style="font-size:10.5px;color:#5a7080;">${typeLabels[type]||type}</span><span style="font-size:11px;color:#c8d8e8;font-weight:700;">${count}</span></div><div style="height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${getTypeColor(type)};border-radius:2px;opacity:.7;"></div></div>`;
     panel.appendChild(c);
   }
+  decorateTimelinePanelForExpand(panel, "summary", "סיכום");
   return panel;
 }
 
@@ -4572,16 +4587,15 @@ function selectTlEvent(ev, scroll = true, { fromKeyboard = false, source = "unkn
       metaBtn.setAttribute("aria-expanded", "false");
       return;
     }
-    const box = document.createElement("pre");
-    box.className = "tlMetaBox";
+    const box = buildTimelineMetadataPanel(ev.metadata);
     box.id = "tlMetaBox";
-    box.textContent = ev.metadata != null ? JSON.stringify(ev.metadata, null, 2) : "(אין metadata לרשומה זו)";
     metaSection.appendChild(box);
     metaBtn.textContent = "הסתר metadata";
     metaBtn.setAttribute("aria-expanded", "true");
   });
   metaSection.appendChild(buildTimelineLinksPanel(ev));
   metaSection.appendChild(metaBtn);
+  decorateTimelinePanelForExpand(panel, "detail", "פרטי אירוע");
   if (fromKeyboard) {
     requestAnimationFrame(() => $("tlDetailTitle")?.focus());
   } else if (compactViewport && source === "graph") {
@@ -4601,7 +4615,7 @@ function buildTimelineLinkRow(link, ev) {
     relationLabel(link.relation_type),
     formatTimelineLinkDuration(link),
     link.approver ? `????: ${link.approver}` : ""
-  ].filter(Boolean).join(" � ");
+  ].filter(Boolean).join(" · ");
   const text = document.createElement("div");
   text.className = "tlLinkText";
   text.innerHTML = `<strong>${escapeHtml(otherTitle || "????? ????")}</strong><span>${escapeHtml(meta)}</span>${link.note ? `<small>${escapeHtml(link.note)}</small>` : ""}`;
@@ -4621,6 +4635,74 @@ function buildTimelineLinkRow(link, ev) {
   });
   row.append(text, del);
   return row;
+}
+
+function buildTimelineMetadataPanel(metadata) {
+  const box = document.createElement("div");
+  box.className = "tlMetaBox";
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || !Object.keys(metadata).length) {
+    const empty = document.createElement("div");
+    empty.className = "tlMetaEmpty";
+    empty.textContent = "אין metadata לרשומה זו";
+    box.appendChild(empty);
+    return box;
+  }
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value == null || value === "") continue;
+    const row = document.createElement("div");
+    row.className = "tlMetaRow";
+
+    const keyEl = document.createElement("div");
+    keyEl.className = "tlMetaKey";
+    keyEl.textContent = key;
+
+    const valueEl = document.createElement("div");
+    valueEl.className = "tlMetaVal";
+    appendTimelineMetadataValue(valueEl, value);
+
+    row.append(keyEl, valueEl);
+    box.appendChild(row);
+  }
+  if (!box.children.length) {
+    const empty = document.createElement("div");
+    empty.className = "tlMetaEmpty";
+    empty.textContent = "אין metadata זמין להצגה";
+    box.appendChild(empty);
+  }
+  return box;
+}
+
+function appendTimelineMetadataValue(container, value) {
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      container.textContent = "—";
+      return;
+    }
+    const list = document.createElement("div");
+    list.className = "tlMetaList";
+    for (const item of value) {
+      const chip = document.createElement("span");
+      chip.className = "tlMetaChip";
+      chip.textContent = formatTimelineMetadataPrimitive(item);
+      list.appendChild(chip);
+    }
+    container.appendChild(list);
+    return;
+  }
+  if (typeof value === "object" && value !== null) {
+    const pre = document.createElement("pre");
+    pre.className = "tlMetaJson";
+    pre.textContent = JSON.stringify(value, null, 2);
+    container.appendChild(pre);
+    return;
+  }
+  container.textContent = formatTimelineMetadataPrimitive(value);
+}
+
+function formatTimelineMetadataPrimitive(value) {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  return String(value);
 }
 
 function buildTimelineLinkForm(sourceEvent) {
@@ -4757,6 +4839,99 @@ function buildTimelineLinksPanel(ev) {
   body.appendChild(buildTimelineSuggestionsPanel(ev));
   panel.appendChild(body);
   return panel;
+}
+
+function decorateTimelinePanelForExpand(panel, kind, label) {
+  if (!panel || panel.querySelector(":scope > .tlPanelExpandBtn")) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "tlPanelExpandBtn";
+  button.dataset.tlExpand = kind;
+  button.setAttribute("aria-label", `פתח חלון גדול: ${label}`);
+  button.title = `פתח חלון גדול: ${label}`;
+  button.innerHTML = `<span aria-hidden="true">⤢</span>`;
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openTimelinePanelModal(kind, label);
+  });
+  panel.appendChild(button);
+}
+
+function ensureTimelinePanelModal() {
+  let modal = $("tlPanelModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "tlPanelModal";
+  modal.className = "tlPanelModal";
+  modal.hidden = true;
+  modal.innerHTML = `
+    <div class="tlPanelModalBackdrop" data-close="true"></div>
+    <div class="tlPanelModalDialog" role="dialog" aria-modal="true" aria-labelledby="tlPanelModalTitle">
+      <div class="tlPanelModalHeader">
+        <h3 id="tlPanelModalTitle"></h3>
+        <button type="button" class="tlPanelModalClose" aria-label="סגור חלון">×</button>
+      </div>
+      <div class="tlPanelModalBody" id="tlPanelModalBody"></div>
+    </div>
+  `;
+  modal.addEventListener("click", (event) => {
+    if (event.target?.dataset?.close === "true") closeTimelinePanelModal();
+  });
+  modal.querySelector(".tlPanelModalClose")?.addEventListener("click", closeTimelinePanelModal);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !modal.hidden) closeTimelinePanelModal();
+  });
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function buildTimelineModalPanel(kind) {
+  if (kind === "list") return buildListPanel(getFilteredTimelineEvents());
+  if (kind === "summary") return buildAiPanel(getFilteredTimelineEvents());
+  const detail = $("tlDetailPanel");
+  if (!detail) return null;
+  const clone = detail.cloneNode(true);
+  clone.removeAttribute("id");
+  clone.querySelectorAll(".tlPanelExpandBtn").forEach((node) => node.remove());
+  const linksPanel = clone.querySelector(".tlLinksPanel");
+  const linksBody = clone.querySelector(".tlLinksBody");
+  const linksToggle = clone.querySelector(".tlLinksToggle");
+  if (linksPanel && linksBody && linksToggle) {
+    linksPanel.dataset.expanded = "true";
+    linksBody.hidden = false;
+    linksToggle.setAttribute("aria-expanded", "true");
+    linksToggle.setAttribute("aria-label", "מזער קשרים");
+  }
+  return clone;
+}
+
+function openTimelinePanelModal(kind, label) {
+  const modal = ensureTimelinePanelModal();
+  const title = $("tlPanelModalTitle");
+  const body = $("tlPanelModalBody");
+  if (!modal || !title || !body) return;
+  const content = buildTimelineModalPanel(kind);
+  if (!content) return;
+  content.classList.add("tlModalPanelContent");
+  content.querySelectorAll(".tlPanelExpandBtn").forEach((node) => node.remove());
+  title.textContent = label;
+  body.innerHTML = "";
+  body.appendChild(content);
+  timelineState.activeModalPanel = kind;
+  modal.hidden = false;
+  document.body.classList.add("tlModalOpen");
+  modal.querySelector(".tlPanelModalClose")?.focus();
+}
+
+function closeTimelinePanelModal() {
+  const modal = $("tlPanelModal");
+  if (!modal) return;
+  modal.hidden = true;
+  timelineState.activeModalPanel = null;
+  const body = $("tlPanelModalBody");
+  if (body) body.innerHTML = "";
+  document.body.classList.remove("tlModalOpen");
 }
 
 function renderTimelineSuggestions(container, currentEvent) {
@@ -5025,6 +5200,107 @@ function timelineEventTypeLabel(type) {
 
 function timelineEventTitle(event) {
   return (event?.content || getMailSummarize(event) || event?.tags?.join(", ") || "אירוע ללא כותרת").slice(0, 180);
+}
+
+function timelineEventSummary(event) {
+  const summary = event?.metadata?.summary
+    || event?.metadata?.alert_description
+    || event?.metadata?.question
+    || getMailSummarize(event)
+    || event?.content
+    || "";
+  return String(summary || "").replace(/\s+/g, " ").trim().slice(0, 260);
+}
+
+function formatTimelineTooltipDate(event) {
+  const date = new Date(event?.date);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("he-IL", {
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  });
+}
+
+function ensureTimelineNodeTooltip() {
+  let tooltip = $("tlNodeTooltip");
+  if (tooltip) return tooltip;
+  tooltip = document.createElement("div");
+  tooltip.id = "tlNodeTooltip";
+  tooltip.className = "tlNodeTooltip";
+  tooltip.hidden = true;
+  tooltip.innerHTML = `
+    <div class="tlNodeTooltipDate"></div>
+    <div class="tlNodeTooltipTitle"></div>
+    <div class="tlNodeTooltipSummary"></div>
+    <div class="tlNodeTooltipFooter" hidden>
+      <span class="tlNodeTooltipIndex"></span>
+      <span class="tlNodeTooltipHint">גלגל בעכבר למעבר בין אירועים</span>
+    </div>
+  `;
+  tooltip.addEventListener("mouseenter", () => {
+    if (timelineState.hoverTooltipState) timelineState.hoverTooltipState.insideTooltip = true;
+  });
+  tooltip.addEventListener("mouseleave", () => {
+    if (timelineState.hoverTooltipState) timelineState.hoverTooltipState.insideTooltip = false;
+    hideTimelineNodeTooltip();
+  });
+  tooltip.addEventListener("wheel", (event) => {
+    if (!timelineState.hoverTooltipState?.events?.length || timelineState.hoverTooltipState.events.length < 2) return;
+    event.preventDefault();
+    cycleTimelineNodeTooltip(event.deltaY > 0 ? 1 : -1);
+  }, { passive: false });
+  document.body.appendChild(tooltip);
+  return tooltip;
+}
+
+function showTimelineNodeTooltip(anchor, events) {
+  if (!anchor || !events?.length) return;
+  const prev = timelineState.hoverTooltipState;
+  timelineState.hoverTooltipState = {
+    anchor,
+    events,
+    index: prev?.anchor === anchor && prev?.events?.length === events.length ? prev.index : 0,
+    insideTooltip: false
+  };
+  renderTimelineNodeTooltip();
+}
+
+function cycleTimelineNodeTooltip(step) {
+  if (!timelineState.hoverTooltipState?.events?.length || timelineState.hoverTooltipState.events.length < 2) return;
+  const total = timelineState.hoverTooltipState.events.length;
+  timelineState.hoverTooltipState.index = (timelineState.hoverTooltipState.index + step + total) % total;
+  renderTimelineNodeTooltip();
+}
+
+function renderTimelineNodeTooltip() {
+  const tooltip = ensureTimelineNodeTooltip();
+  const state = timelineState.hoverTooltipState;
+  if (!tooltip || !state?.anchor || !state.events?.length) return;
+  const event = state.events[state.index] || state.events[0];
+  const rect = state.anchor.getBoundingClientRect();
+  const dateEl = tooltip.querySelector(".tlNodeTooltipDate");
+  const titleEl = tooltip.querySelector(".tlNodeTooltipTitle");
+  const summaryEl = tooltip.querySelector(".tlNodeTooltipSummary");
+  const footerEl = tooltip.querySelector(".tlNodeTooltipFooter");
+  const indexEl = tooltip.querySelector(".tlNodeTooltipIndex");
+  if (dateEl) dateEl.textContent = formatTimelineTooltipDate(event);
+  if (titleEl) titleEl.textContent = event?.metadata?.title || timelineEventTitle(event);
+  if (summaryEl) summaryEl.textContent = timelineEventSummary(event) || "ללא תיאור נוסף";
+  const multiple = state.events.length > 1;
+  if (footerEl) footerEl.hidden = !multiple;
+  if (indexEl) indexEl.textContent = multiple ? `${state.index + 1} / ${state.events.length}` : "";
+  tooltip.hidden = false;
+  tooltip.style.left = `${Math.round(rect.left + rect.width / 2)}px`;
+  tooltip.style.top = `${Math.round(rect.top - 12)}px`;
+}
+
+function hideTimelineNodeTooltip() {
+  const tooltip = $("tlNodeTooltip");
+  const state = timelineState.hoverTooltipState;
+  if (state?.insideTooltip) return;
+  if (tooltip) tooltip.hidden = true;
+  timelineState.hoverTooltipState = null;
 }
 
 function shortEventOption(event) {
@@ -5459,6 +5735,7 @@ function renderCalendar() {
   detail.className = "tlDetail calDetail";
   detail.id = "tlDetailPanel";
   detail.innerHTML = `<div class="tlDetailEmpty"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r=".5" fill="currentColor"/></svg><span>לחץ על אירוע לפרטים</span></div>`;
+  decorateTimelinePanelForExpand(detail, "detail", "פרטי אירוע");
   container.appendChild(detail);
   container.appendChild(buildAiPanel(filtered));
 
@@ -6187,5 +6464,3 @@ async function api(path, options = {}) {
     throw error;
   }
 }
-
-

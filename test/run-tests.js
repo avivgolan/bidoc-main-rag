@@ -1772,6 +1772,18 @@ test("metadata button has aria-expanded and aria-controls", () => {
   assert.match(appSource, /setAttribute\("aria-controls", "tlMetaBox"\)/);
 });
 
+test("timeline node tooltip shows title summary date and supports wheel cycling for clusters", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(appSource, /function showTimelineNodeTooltip\(anchor, events\)/);
+  assert.match(appSource, /function renderTimelineNodeTooltip\(\)/);
+  assert.match(appSource, /timelineEventSummary\(event\)/);
+  assert.match(appSource, /addEventListener\("wheel", \(event\) =>/);
+  assert.match(appSource, /גלגל בעכבר למעבר בין אירועים/);
+  assert.match(cssSource, /\.tlNodeTooltip/);
+  assert.match(cssSource, /\.tlNodeTooltipTitle/);
+});
+
 test("calendar CSS includes srOnly, focus-visible, and today styles", () => {
   const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
   assert.match(cssSource, /\.srOnly/);

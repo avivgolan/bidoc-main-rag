@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: timeline
-last_updated: 2026-06-13
+last_updated: 2026-06-17
 tags:
   - timeline
   - frontend
@@ -76,6 +76,8 @@ tags:
 - 2026-06-13 -- Timeline mobile resize follow-up: the `window.resize` handler now re-renders only when the responsive Timeline breakpoint/graph mode actually changes, preventing mobile browser chrome height changes during scroll from triggering full Timeline re-renders and scroll resets. Visible build label bumped to `V1.5`.
 - 2026-06-14 -- Timeline detail follow-up: the event `קשרים` section is now collapsed by default and exposes its links/form/suggestions body only through a dedicated arrow toggle next to the section title, with the expanded state kept in `timelineState.linksPanelExpanded`.
 - 2026-06-17 -- Timeline links-panel cleanup: removed the legacy duplicate `buildTimelineLinksPanel` implementation and kept the newer toggle-based version; the nearby link-row/link-form text was also normalized in `public/app.js` without changing helper boundaries or behavior.
+- 2026-06-17 -- Timeline desktop layout follow-up: the lower desktop panel row now uses a stable left-to-right structure of AI summary, event detail, and event list by keeping `tlPanels` as `secondary primary` and flipping `tlPrimaryColumn` to `detail + list`, so the visible RTL order is right=list, center=detail, left=summary.
+- 2026-06-17 -- Timeline panel expansion follow-up: the event list, event detail, and summary panels now add an in-panel expand button that opens a shared modal dialog with a larger version of the selected section, while preserving the existing list/detail/summary renderers.
 
 ## Gotchas
 
