@@ -75,6 +75,7 @@ tags:
 - 2026-06-13 -- Timeline mobile scroll follow-up: replaced generic `scrollIntoView()` calls in the static list/detail mobile flow with scoped scroll calculations (`outer.scrollTo` for the list, `window.scrollTo` for the detail panel) to stop mobile browsers from jumping the whole page back to the top during Timeline interactions.
 - 2026-06-13 -- Timeline mobile resize follow-up: the `window.resize` handler now re-renders only when the responsive Timeline breakpoint/graph mode actually changes, preventing mobile browser chrome height changes during scroll from triggering full Timeline re-renders and scroll resets. Visible build label bumped to `V1.5`.
 - 2026-06-14 -- Timeline detail follow-up: the event `קשרים` section is now collapsed by default and exposes its links/form/suggestions body only through a dedicated arrow toggle next to the section title, with the expanded state kept in `timelineState.linksPanelExpanded`.
+- 2026-06-17 -- Timeline links-panel cleanup: removed the legacy duplicate `buildTimelineLinksPanel` implementation and kept the newer toggle-based version; the nearby link-row/link-form text was also normalized in `public/app.js` without changing helper boundaries or behavior.
 
 ## Gotchas
 

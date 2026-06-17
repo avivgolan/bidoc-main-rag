@@ -4591,56 +4591,31 @@ function selectTlEvent(ev, scroll = true, { fromKeyboard = false, source = "unkn
   }
 }
 
-function buildTimelineLinksPanel(ev) {
-  const panel = document.createElement("div");
-  panel.className = "tlLinksPanel";
-  const title = document.createElement("div");
-  title.className = "tlLinksTitle";
-  title.innerHTML = `<strong>קשרים</strong><span>${timelineLinksForEvent(ev).length} קשרים</span>`;
-  panel.appendChild(title);
-
-  const list = document.createElement("div");
-  list.className = "tlLinksList";
-  const links = timelineLinksForEvent(ev);
-  if (!links.length) {
-    const empty = document.createElement("div");
-    empty.className = "tlLinksEmpty";
-    empty.textContent = "אין עדיין קשרים לאירוע הזה.";
-    list.appendChild(empty);
-  } else {
-    for (const link of links) list.appendChild(buildTimelineLinkRow(link, ev));
-  }
-  panel.appendChild(list);
-  panel.appendChild(buildTimelineLinkForm(ev));
-  panel.appendChild(buildTimelineSuggestionsPanel(ev));
-  return panel;
-}
-
 function buildTimelineLinkRow(link, ev) {
   const row = document.createElement("div");
   row.className = "tlLinkRow";
   const isOutgoing = String(link.source_event_id) === String(ev.id) && link.source_event_source === getTimelineEventSource(ev);
   const otherTitle = isOutgoing ? link.target_title : link.source_title;
   const meta = [
-    isOutgoing ? "יוצא" : "נכנס",
+    isOutgoing ? "????" : "????",
     relationLabel(link.relation_type),
     formatTimelineLinkDuration(link),
-    link.approver ? `מאשר: ${link.approver}` : ""
-  ].filter(Boolean).join(" · ");
+    link.approver ? `????: ${link.approver}` : ""
+  ].filter(Boolean).join(" � ");
   const text = document.createElement("div");
   text.className = "tlLinkText";
-  text.innerHTML = `<strong>${escapeHtml(otherTitle || "אירוע קשור")}</strong><span>${escapeHtml(meta)}</span>${link.note ? `<small>${escapeHtml(link.note)}</small>` : ""}`;
+  text.innerHTML = `<strong>${escapeHtml(otherTitle || "????? ????")}</strong><span>${escapeHtml(meta)}</span>${link.note ? `<small>${escapeHtml(link.note)}</small>` : ""}`;
   const del = document.createElement("button");
   del.type = "button";
   del.className = "tlLinkDelete";
-  del.textContent = "מחק";
+  del.textContent = "???";
   del.addEventListener("click", async () => {
     del.disabled = true;
     try {
       await api(`/api/timeline/links/${encodeURIComponent(link.id)}`, { method: "DELETE" });
       await refreshTimelineLinks();
     } catch (error) {
-      showToast(`שגיאה במחיקת קשר: ${error.message}`, "error");
+      showToast(`????? ?????? ???: ${error.message}`, "error");
       del.disabled = false;
     }
   });
@@ -4654,14 +4629,14 @@ function buildTimelineLinkForm(sourceEvent) {
   const candidates = timelineState.events.filter((event) => event.id !== sourceEvent.id);
   form.innerHTML = `
     <div class="tlFormGrid">
-      <label>אירוע יעד<select name="target">${candidates.map((event) => `<option value="${escapeHtml(String(event.id))}">${escapeHtml(shortEventOption(event))}</option>`).join("")}</select></label>
-      <label>סוג קשר<select name="relation">
+      <label>????? ???<select name="target">${candidates.map((event) => `<option value="${escapeHtml(String(event.id))}">${escapeHtml(shortEventOption(event))}</option>`).join("")}</select></label>
+      <label>??? ???<select name="relation">
         ${Object.entries(timelineRelationLabels()).map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}
       </select></label>
-      <label>מי אישר<input name="approver" placeholder="שם המאשר, אם ידוע" /></label>
-      <label>הערה<input name="note" placeholder="הערה קצרה" /></label>
+      <label>?? ????<input name="approver" placeholder="?? ?????, ?? ????" /></label>
+      <label>????<input name="note" placeholder="???? ????" /></label>
     </div>
-    <button type="submit" ${candidates.length ? "" : "disabled"}>קשר אירוע</button>
+    <button type="submit" ${candidates.length ? "" : "disabled"}>??? ?????</button>
   `;
   const targetSelect = form.elements.target;
   const approverInput = form.elements.approver;
@@ -4685,10 +4660,10 @@ function buildTimelineLinkForm(sourceEvent) {
         approver: form.elements.approver.value,
         note: form.elements.note.value
       });
-      showToast("הקשר נשמר");
+      showToast("???? ????");
       await refreshTimelineLinks();
     } catch (error) {
-      showToast(`שגיאה בשמירת קשר: ${error.message}`, "error");
+      showToast(`????? ?????? ???: ${error.message}`, "error");
       submit.disabled = false;
     }
   });
@@ -6212,3 +6187,5 @@ async function api(path, options = {}) {
     throw error;
   }
 }
+
+
