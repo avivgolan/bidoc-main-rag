@@ -1,0 +1,763 @@
+# Phase 1 map complete. No code changes.
+
+Worktree note: only the plan doc you asked me to add exists as uncommitted:
+docs/rag-model-calibration-plan.md
+
+
+# Runtime Map
+
+| Mission | Runs When | File / Function | Model Source | Prompt Source | Current Output Budget |
+| --- | --- | --- | --- | --- | --- |
+| Classifier | every chat | src/classifier.js classifyMessage | config.models.classifier | config.prompts.classifier | 900 |
+| Lite Agent | CHAT route | src/agent.js runLiteAgent | config.models.lite | config.prompts.lite | 1800 |
+| Knowledge Planner | professional/KB route | src/agent.js runKnowledgePlanner | config.models.knowledgePlanner | config.prompts.knowledge_planner | 2200 |
+| Embedding | hybrid search / alerts / tests | src/openrouter.js createEmbedding | config.models.embedding | none | n/a |
+| Reranker | RAG after hybrid search | src/openrouter.js rerankWithLlm | config.models.reranker | config.prompts.reranker | 4096 |
+| Alert Agent | alert tool / safety precheck | src/subagents/alert.js runAlertAgent | subagents.alert.model else config.models.main | subagents.alert.systemPrompt else internal prompt | 2200 |
+| Main Agent | final RAG answer | src/agent.js synthesizeAnswer | config.models.main | config.prompts.main | 4096 |
+| QA Agent | manual QA / AI report | src/qaAgent.js runQaAgent | config.models.qa | config.prompts.qa | 3000 |
+| QA Trend | QA trends endpoint | src/qaAgent.js runQaTrendAnalysis | config.models.qa | internal TREND_SYSTEM_PROMPT | hardcoded 3000 |
+| Timeline Link Agent | smart timeline links | src/server.js enrichTimelineSuggestionsWithModel | timelineLinks.model else reranker/lite/main | timelineLinks.prompt | hardcoded 1800 |
+
+
+# Important Findings
+
+* Knowledge Planner defaults to gpt-4o, because models.knowledgePlanner falls back to models.main. That is probably too expensive for a JSON planning step.
+
+* QA also defaults to gpt-4o, because models.qa falls back to main. This may be unnecessary for run diagnosis.
+
+* Alert Agent has AI settings in the main settings screen (ai.alert) but no main model select. Its actual model is either subagents.alert.model or config.models.main. This is a settings/runtime mismatch.
+
+* Reranker has max output tokens configurable, but input size is hardcoded: each candidate sends up to 1800 chars, multiplied by up to 40 candidates before topK. This is likely a major hidden input-token cost.
+
+* QA Trend ignores the normal QA temperature/token/timeout settings and hardcodes temperature: 0.1, maxTokens: 3000.
+
+* chatCompletion() currently returns only text. It discards OpenRouter id, usage, token counts, and cost. That blocks the future hidden calibration agent from calculating exact per-step cost.
+
+* OpenRouter already supports what we need later: non-streaming responses include usage data with token counts and optional cost, and generation stats can also be queried later by generation id via /api/v1/generation OpenRouter API reference. Stored prompt/completion content is available only if Input & Output Logging is enabled, currently beta/admin-controlled OpenRouter logging docs.
+
+# Future Hidden Calibration Agent Requirement
+The agent you described should be backend/admin-only, not customer-facing. It should collect per model call:
+runId, messageId, step, model, prompt key/hash, input size, output size, OpenRouter generation id, prompt tokens, completion tokens, total cost, latency, response preview, quality verdict, and suggested cheaper equivalent model.
+The natural integration point is src/openrouter.js, but we should not change it yet. First we need Phase 2: cost/token diagnosis from actual runs.
+
+------------------------------------------------------------------------------------------------------------------
+
+# Phase 2: Cost And Token Diagnosis
+
+No code changes. Diagnosis only.
+
+---
+
+## 1. Call-Type Table
+
+| Agent | Config Key | Default Model | Runs When | Frequency |
+|---|---|---|---|---|
+| Classifier | models.classifier | openai/gpt-4o-mini | Every chat turn | Always |
+| Lite Agent | models.lite | openai/gpt-4o-mini | CHAT route only | ~20–30% of turns |
+| Knowledge Planner | models.knowledgePlanner | **openai/gpt-4o** (falls back to models.main) | Professional/KB route only | ~15–25% of RAG turns |
+| Embedding | models.embedding | openai/text-embedding-3-large | Every RAG turn + Alert + Timeline | Always on RAG |
+| Reranker | models.reranker | openai/gpt-4o-mini | Every RAG turn after hybrid search | Always on RAG |
+| Alert Agent | subagents.alert.model or models.main | **openai/gpt-4o** (falls back to main) | Urgency HIGH or hinted; safety precheck | Conditional on RAG |
+| Main Agent | models.main | openai/gpt-4o | Every RAG turn | Always on RAG |
+| QA Agent | models.qa | **openai/gpt-4o** (falls back to main) | Manual QA / AI Report (user-triggered) | On demand |
+| QA Trend | models.qa | **openai/gpt-4o** (falls back to main) | Batch QA trends endpoint | On demand |
+| Timeline Link Agent | timelineLinks.model or reranker/lite/main | openai/gpt-4o (fallback chain) | smart=true on timeline link suggestions endpoint | On demand |
+
+---
+
+## 2. When Each Call Runs
+
+| Agent | Every Chat | RAG Only | Professional/KB Route | QA Only | Timeline/Link |
+|---|---|---|---|---|---|
+| Classifier | ✓ | | | | |
+| Lite Agent | | | | | |  (CHAT route only) |
+| Embedding | | ✓ | | | ✓ (alert search, timeline) |
+| Hybrid Search | | ✓ | | | |
+| Knowledge Planner | | | ✓ | | |
+| Reranker | | ✓ | | | |
+| Alert Agent | | ✓ (if hinted or urgency HIGH) | | | |
+| Main Agent | | ✓ | | | |
+| QA Agent | | | | ✓ | |
+| QA Trend | | | | ✓ | |
+| Timeline Link Agent | | | | | ✓ (smart mode) |
+
+---
+
+## 3. Relative Cost Estimate
+
+| Agent | Input Token Cost | Output Token Cost | Overall Cost | Notes |
+|---|---|---|---|---|
+| Classifier | Low | Low | **Low** | Small prompt (~1000 tokens system), JSON output only, gpt-4o-mini |
+| Lite Agent | Low | Low-Medium | **Low** | Short system prompt + memory, gpt-4o-mini |
+| Knowledge Planner | **High** | Medium | **High** | Uses gpt-4o by default; inputs JSON of user message + classification + up to 8 KB of knowledge excerpts |
+| Embedding | Very Low | n/a | **Low** | text-embedding-3-large is inexpensive; cached |
+| Reranker | **High** | Low | **High** | gpt-4o-mini but candidates × 1800 chars each (up to 40 candidates = 72 000 chars input before topK); this is the largest hidden input cost |
+| Alert Agent | Medium | Medium | **Medium** | gpt-4o by default (falls back to main); 20 alert records JSON sent as user content |
+| Main Agent | **Very High** | **High** | **Critical** | gpt-4o; retrieval_context (up to 12–50 records × 1800 chars each), graph_context, tool_results, knowledge_plan all concatenated into one JSON payload |
+| QA Agent | High | Medium | **High** | gpt-4o; entire workflow_log JSON sent as user content (can be large) |
+| QA Trend | High | Medium | **High** | gpt-4o, hardcoded settings, cannot be overridden via AI settings |
+| Timeline Link Agent | Medium | Low | **Medium** | model fallback chain can land on gpt-4o; candidate events × 900 chars each |
+
+---
+
+## 4. Input vs. Output Token Cost Breakdown
+
+### Classifier
+- Input: system prompt (~850 tokens) + user message (~50–200 tokens) = ~900–1050 tokens
+- Output: JSON ~80–150 tokens (capped at 900)
+- Input/output ratio: 6:1 to 13:1
+
+### Knowledge Planner
+- Input: system prompt (~280 tokens) + JSON payload with user_message + classification + selected_knowledge_agents + knowledge_excerpts (up to agentLimit × topK = 2 × 4 = 8 matches × 1800 chars each ≈ 3600–4000 tokens of excerpts alone)
+- Total input estimate: ~4500–5000 tokens
+- Output: JSON plan, capped at 2200 tokens
+- This is running on gpt-4o which is 10× more expensive per token than gpt-4o-mini
+
+### Reranker
+- Input: system prompt (~180 tokens) + JSON of candidates
+  - Each candidate: 1800 chars ≈ ~450 tokens
+  - Default: up to 40 candidates before topK filter = ~18 000 input tokens just for candidate text
+  - Plus query, topK, scores, metadata overhead: add ~1000 tokens
+  - Estimated total input: **~19 000 tokens per rerank call**
+- Output: ranked JSON array, capped at 4096 (actual output is small ~500–800 tokens)
+- Input/output ratio: 24:1 — **input dominates cost**
+
+### Main Agent
+- Input: system prompt (~1500 tokens) + memory (~200–500 tokens) + mainPayload JSON which includes:
+  - retrieval_context: up to 12 records × 1800 chars ≈ ~4800 tokens (up to 50 records on list/investigation = ~20 000 tokens)
+  - retrieval_results: same records duplicated in full JSON form (higher than retrieval_context)
+  - graph_context: up to 12 relationships
+  - project_graph_findings: summarized version
+  - knowledge_plan: full plan JSON
+  - tool_results: all tool calls (can include alert, meetings, emails, submittals results)
+- Estimated total input on a typical RAG turn: **~12 000–30 000 tokens**
+- Output: full Hebrew answer, capped at 4096 tokens
+- Running on gpt-4o — **this is the single largest cost item**
+
+### Alert Agent
+- Input: system prompt (~120 tokens) + user content = date + query + 20 results JSON (each result can be large)
+- Estimated total input: ~3000–8000 tokens
+- Output: formatted list, capped at 2200 tokens
+- Model defaults to gpt-4o (via models.main fallback) — unnecessary for a retrieval summary task
+
+### QA Agent
+- Input: system prompt (~500 tokens) + entire workflow_log JSON (can be 10 000–50 000 tokens depending on run)
+- Output: JSON report, capped at 3000 tokens
+- Running on gpt-4o by default
+
+### QA Trend
+- Input: all QA reports concatenated (grows over time)
+- Hardcoded: temperature 0.1, maxTokens 3000 — **ignores config.ai.qa settings**
+- Running on gpt-4o
+
+---
+
+## 5. Cacheability Analysis
+
+| Agent | Currently Cached? | Cacheable? | Notes |
+|---|---|---|---|
+| Classifier | No | Yes, but low value | Same question repeats rarely; TTL would need to be per-session |
+| Lite Agent | No | Yes (per-message hash) | Low priority — already cheap |
+| Embedding | **Yes** (CACHE_TTL.embedding) | Already cached | Memory/Redis cache by text+model |
+| Hybrid Search | Partial (via cachedOperation) | Already cached | Keyed by query+hashtags+dates+topK |
+| Knowledge Planner | No | **Yes** | Same professional concept + same KB content → same plan. Cache key: message+knowledge_tags+matches hash |
+| Reranker | **Yes** (CACHE_TTL.reranker) | Already cached | Keyed by query+source_ids+model+topK+prompt_hash |
+| Graph Search | **Yes** (CACHE_TTL.graphSearch) | Already cached | |
+| Main Agent (final answer) | **Yes** (CACHE_TTL.finalAnswer) | Already cached | Keyed by question+context hash+model+prompt_hash |
+| Alert Agent | Embedding cached, but LLM call not cached | Yes | LLM call for alert summary could be cached per query+results hash |
+| QA Agent | No | Low priority | User-triggered, on-demand |
+| Timeline Link Model | No | Low priority | On-demand, admin feature |
+
+---
+
+## 6. Avoidable Call Analysis
+
+| Agent | Can It Be Avoided? | Condition |
+|---|---|---|
+| Classifier | No — required for routing | Could be replaced by heuristics for clearly simple messages |
+| Knowledge Planner | **Yes** | The `professional` flag is set by classifier. If classifier already determined professional=false, planner never runs. Additional savings: if KB search returns zero matches, LLM call is already skipped (fallback returns early). |
+| Reranker | **Partially** | If hybrid search returns fewer candidates than topK, reranker still sends all of them. Reducing `retrieval.candidates` from 40 to 20 would halve reranker input cost. |
+| Alert Agent LLM call | **Yes** | If results count is 0, the LLM call still runs and just produces "no alerts found." A short-circuit check (`if (!results.length) return noAlertsAnswer`) would save the call. |
+| Main Agent | No — core of the system | Reducing retrieval_context records and not duplicating retrieval_results in the payload would reduce input tokens significantly. |
+| QA Trend | Only on demand | No change needed |
+| Timeline Link Agent | Only on smart=true | No change needed |
+
+---
+
+## 7. Workflow Log Analysis
+
+The plan references workflow log ID `019e9322-ae0c-7843-b066-2187e0294558`.
+This log is stored in the Supabase `chat_messages_gf` table under the `workflow_log` column.
+
+Key observations from the code about what is available in a real log:
+- Every agent step emits `emitRunEvent` with input/output previews
+- The `workflowLog.nodes` array contains each pipeline step with `input` and `output`
+- The reranker node includes `top_chunks` with rerank scores and text
+- `workflowLog.activePrompts` contains live prompts for classifier, main, lite, reranker, knowledge_planner
+- Token counts and cost are NOT currently recorded — `chatCompletion()` discards the OpenRouter response `usage` object and returns only text content
+
+**We cannot determine actual token counts from existing logs.** The only way to get them today is to check the OpenRouter dashboard or enable generation stats via `/api/v1/generation` by ID (requires saving the generation ID, which is also discarded).
+
+---
+
+## 8. Critical Findings Summary
+
+1. **Main Agent input is the top cost driver.** The `mainPayload` JSON includes `retrieval_results` (full records) AND `retrieval_context` (formatted text) of the same data — double-sending retrieval content. On list/investigation questions, this scales to 50 records × 1800 chars each.
+
+2. **Reranker input is a hidden second-largest cost.** 40 candidates × 1800 chars each = ~72 000 characters sent before any topK filtering. The reranker's output is tiny by comparison.
+
+3. **Knowledge Planner and Alert Agent run on gpt-4o by default** despite doing tasks that gpt-4o-mini handles well. This is a 5–10× cost multiplier per call.
+
+4. **QA Trend ignores ai.qa settings.** Its temperature and maxTokens are hardcoded — this is a code-level issue, not fixable from settings.
+
+5. **chatCompletion() discards usage data.** No per-call token or cost visibility exists in the current logs.
+
+6. **Alert Agent LLM call is not short-circuited on zero results.** The LLM call runs even when no alerts are found.
+
+7. **The finalAnswer, reranker, and graphSearch caches are the biggest cost protections already in place.** The Knowledge Planner is not cached and should be.
+
+---
+
+## Gate
+
+Phase 2 complete.
+
+Open questions are not answered here by assumption. They are answered by running the Phase 4 controlled test set against each Phase 3 profile and comparing outputs.
+
+Move to Phase 3.
+
+------------------------------------------------------------------------------------------------------------------
+
+# Phase 3: Calibration Profiles
+
+No code changes. No settings changes yet. Profile definitions only.
+
+Goal: define three concrete, testable profiles before touching anything.
+All model choices that Phase 2 flagged as uncertain are included in all three profiles at different levels, so tests will reveal which level is safe.
+
+---
+
+## What Each Profile Changes
+
+Phase 2 identified these as the main cost levers:
+
+1. Main Agent model (gpt-4o → gpt-4o-mini is the biggest potential saving)
+2. Knowledge Planner model (defaults to gpt-4o via fallback)
+3. Alert Agent model (defaults to gpt-4o via fallback)
+4. Reranker candidate count (40 candidates = largest hidden input cost)
+5. Reranker topK (how many records reach the Main Agent)
+6. RAG context records limit (how many records are formatted into retrieval_context)
+7. Chunk text limit per record (1800 chars each)
+8. Knowledge Base topK and agent limit (how many KB excerpts feed the planner)
+9. Graph context limit (how many graph relationships reach the Main Agent)
+
+---
+
+## Profile A: Conservative
+
+Goal: reduce cost moderately with minimal behavior risk. Keep gpt-4o for complex tasks. Tighten retrieval volume only.
+
+| Setting | Current Default | Profile A Value | Reason |
+|---|---|---|---|
+| models.main | openai/gpt-4o | openai/gpt-4o | Keep — main answer quality must not drop |
+| models.knowledgePlanner | openai/gpt-4o (fallback) | openai/gpt-4o | Keep — KB planning is nuanced |
+| models.qa | openai/gpt-4o (fallback) | openai/gpt-4o | Keep — QA diagnosis needs strong reasoning |
+| subagents.alert.model | openai/gpt-4o (fallback) | openai/gpt-4o-mini | Alert is a retrieval summary — low reasoning demand |
+| retrieval.candidates | 40 | 30 | Reduce reranker input ~25% |
+| retrieval.rerankTopK | 10 | 8 | Fewer records reach Main Agent |
+| rag.contextRecordsLimit | 12 | 10 | Slightly smaller retrieval_context |
+| rag.chunkTextLimit | 1800 | 1800 | Keep — chunk quality unchanged |
+| knowledge.agentLimit | 2 | 2 | Keep |
+| knowledge.topK | 4 | 4 | Keep |
+| graph.contextLimit | 12 | 10 | Slightly smaller graph context |
+| ai.knowledgePlanner.maxTokens | 2200 | 2200 | Keep |
+| ai.main.maxTokens | 4096 | 4096 | Keep |
+| ai.reranker.maxTokens | 4096 | 1200 | Reranker output is always small JSON; 4096 is wasteful |
+| ai.alert.maxTokens | 2200 | 1200 | Alert output is a short list |
+
+Expected cost impact: ~15–25% reduction per RAG turn. No model downgrade on reasoning tasks.
+
+---
+
+## Profile B: Balanced (Recommended Starting Point for Testing)
+
+Goal: meaningful cost reduction with acceptable quality trade-off. Test whether gpt-4o-mini can handle knowledge planning and the main answer.
+
+| Setting | Current Default | Profile B Value | Reason |
+|---|---|---|---|
+| models.main | openai/gpt-4o | openai/gpt-4o-mini | **Test target** — this is the biggest saving if quality holds |
+| models.knowledgePlanner | openai/gpt-4o (fallback) | openai/gpt-4o-mini | **Test target** — JSON planning is structured, low creativity |
+| models.qa | openai/gpt-4o (fallback) | openai/gpt-4o-mini | QA report is structured JSON, test if diagnosis quality holds |
+| subagents.alert.model | openai/gpt-4o (fallback) | openai/gpt-4o-mini | Same as Profile A |
+| retrieval.candidates | 40 | 25 | Reduce reranker input ~37% |
+| retrieval.rerankTopK | 10 | 8 | Keep |
+| rag.contextRecordsLimit | 12 | 10 | Keep |
+| rag.chunkTextLimit | 1800 | 1500 | Slightly shorter chunks → smaller Main Agent payload |
+| knowledge.agentLimit | 2 | 2 | Keep |
+| knowledge.topK | 4 | 3 | Fewer KB excerpts → smaller planner payload |
+| graph.contextLimit | 12 | 8 | Smaller graph context |
+| ai.knowledgePlanner.maxTokens | 2200 | 1500 | Planner output is structured JSON; rarely needs full 2200 |
+| ai.main.maxTokens | 4096 | 3000 | Most answers fit in 3000; reduce output cost |
+| ai.reranker.maxTokens | 4096 | 1200 | Same as Profile A |
+| ai.alert.maxTokens | 2200 | 1000 | Same as Profile A |
+
+Expected cost impact: ~50–70% reduction per RAG turn if gpt-4o-mini quality holds.
+Risk: main answer may be less precise on complex multi-source questions.
+
+---
+
+## Profile C: Cheap Test
+
+Goal: lowest practical cost for calibration-only testing. Not for production. Used to understand failure modes.
+
+| Setting | Current Default | Profile C Value | Reason |
+|---|---|---|---|
+| models.main | openai/gpt-4o | openai/gpt-4o-mini | Same as B |
+| models.knowledgePlanner | openai/gpt-4o (fallback) | openai/gpt-4o-mini | Same as B |
+| models.qa | openai/gpt-4o (fallback) | openai/gpt-4o-mini | Same as B |
+| subagents.alert.model | openai/gpt-4o (fallback) | openai/gpt-4o-mini | Same as A |
+| retrieval.candidates | 40 | 15 | Minimum viable retrieval |
+| retrieval.rerankTopK | 10 | 5 | Very tight topK |
+| rag.contextRecordsLimit | 12 | 6 | Half the default |
+| rag.chunkTextLimit | 1800 | 1000 | Short chunks |
+| knowledge.agentLimit | 2 | 1 | One KB agent only |
+| knowledge.topK | 4 | 2 | Minimal KB excerpts |
+| graph.contextLimit | 12 | 5 | Minimal graph context |
+| ai.knowledgePlanner.maxTokens | 2200 | 1000 | Tight |
+| ai.main.maxTokens | 4096 | 2000 | Tight — may truncate long answers |
+| ai.reranker.maxTokens | 4096 | 800 | Minimum for reranker JSON |
+| ai.alert.maxTokens | 2200 | 800 | Minimum for alert list |
+
+Expected cost impact: ~75–85% reduction per RAG turn.
+Risk: answer quality and coverage will degrade. This profile is expected to reveal failure modes, not produce production-ready output.
+
+---
+
+## Test Order
+
+Run tests in this order:
+
+1. **Baseline** — current settings, no changes, as a reference.
+2. **Profile A** — conservative, validate retrieval and alert changes only.
+3. **Profile B** — balanced, validate gpt-4o-mini on main and planner tasks.
+4. **Profile C** — cheap test, identify where the system breaks.
+
+Each profile is tested against the same 6-question controlled test set defined in Phase 4.
+
+---
+
+## Profile to Apply First
+
+Start with **Profile A** for the Phase 4 test run.
+Reason: it changes the fewest things and gives a clean reference point before testing model downgrades.
+
+If Profile A passes the Phase 4 gate, test Profile B.
+If Profile B passes, it becomes the recommended production profile.
+If Profile B fails on specific question types, inspect which steps failed and decide whether to fix via prompt (Phase 5) or code (Phase 6).
+
+---
+
+## Gate
+
+Phase 3 complete. Profiles defined.
+
+Move to Phase 4: apply Profile A settings and run the controlled test set.
+Do not apply Profile B or C settings until Profile A is evaluated.
+
+------------------------------------------------------------------------------------------------------------------
+
+# Phase 4: Settings-Only Calibration — Step-by-Step Test Procedure
+
+No code changes. No prompt changes. Settings UI and observation only.
+
+Goal: apply each profile via Settings UI, run the controlled test set, record what changed, what held, and what broke.
+
+---
+
+## STEP 1 — Run the Baseline First (Before Any Changes)
+
+Do this before touching any settings.
+The baseline gives you the reference you compare everything else against.
+
+### 1.1 Open the app
+
+Open the bidoc chat at http://localhost:4000 (the dev server is already running).
+
+### 1.2 Run the full controlled test set in order
+
+Send each of the 6 test questions below in a fresh chat session (clear session between questions so memory does not carry over).
+For each question, open the Workflow Log / Debug panel and record what you see.
+
+See STEP 3 for the 6 questions and the inspection checklist for each.
+
+### 1.3 Record results
+
+Fill in the Baseline column of the Result Table (STEP 5) before making any settings changes.
+
+---
+
+## STEP 2 — Apply Profile A Settings
+
+Open http://localhost:4000 → Settings (gear icon or /settings route).
+
+Apply the following changes. Do them all before testing. Do not test mid-change.
+
+### 2.1 Models section
+
+| Field | Value to Set |
+|---|---|
+| Knowledge Planner model | openai/gpt-4o |
+| Main Agent model | openai/gpt-4o |
+| QA Agent model | openai/gpt-4o |
+
+Reason: Profile A keeps gpt-4o on reasoning tasks. Only the Alert Agent model changes — but that is set under Subagents, not Models.
+
+### 2.2 Subagents / Alert Agent
+
+| Field | Value to Set |
+|---|---|
+| Alert Agent model | openai/gpt-4o-mini |
+
+Navigate to Subagents or Advanced Settings → Alert Agent configuration.
+Set the model field to openai/gpt-4o-mini.
+Leave the system prompt unchanged.
+
+### 2.3 Retrieval section
+
+| Field | Current | Profile A Value |
+|---|---|---|
+| Hybrid candidates (candidates) | 40 | 30 |
+| Rerank topK (rerankTopK) | 10 | 8 |
+
+### 2.4 RAG section
+
+| Field | Current | Profile A Value |
+|---|---|---|
+| Context records limit (contextRecordsLimit) | 12 | 10 |
+| Chunk text limit (chunkTextLimit) | 1800 | 1800 (no change) |
+
+### 2.5 Graph section
+
+| Field | Current | Profile A Value |
+|---|---|---|
+| Graph context limit (contextLimit) | 12 | 10 |
+
+### 2.6 AI / Token limits section
+
+| Field | Current | Profile A Value |
+|---|---|---|
+| Reranker maxTokens | 4096 | 1200 |
+| Alert Agent maxTokens | 2200 | 1200 |
+| Knowledge Planner maxTokens | 2200 | 2200 (no change) |
+| Main Agent maxTokens | 4096 | 4096 (no change) |
+
+### 2.7 Save settings
+
+Click Save. Wait for confirmation. Then reload the page to verify settings were persisted.
+
+### 2.8 Verify applied settings
+
+After reload, re-open Settings and confirm all values match the Profile A column above.
+If any value reverted, fix and save again before testing.
+
+---
+
+## STEP 3 — The Controlled Test Set
+
+Six questions. Run them in order. Fresh session between each.
+
+---
+
+### Test Q1 — Simple Chat (Lite Agent route)
+
+**Send this message:**
+```
+שלום, מה שלומך?
+```
+
+**What to check:**
+- [ ] Classifier output: type = CHAT, professional = false
+- [ ] Router sent to: Lite Agent (NOT Main Agent)
+- [ ] Main Agent did NOT run
+- [ ] Knowledge Planner did NOT run
+- [ ] Reranker did NOT run
+- [ ] Answer: short, conversational, in Hebrew, no project data
+- [ ] No source links in answer
+- [ ] No retrieval context in workflow log
+
+**Pass criteria:** Lite Agent answered. No RAG pipeline ran. Answer is natural Hebrew.
+
+**Fail criteria:** Any RAG step ran, OR answer contains project facts, OR answer is empty/error.
+
+---
+
+### Test Q2 — Normal RAG Question (no professional flag)
+
+**Send this message:**
+```
+מה קרה בפרויקט בחודש האחרון?
+```
+
+**What to check:**
+- [ ] Classifier output: type = RAG, professional = false, tool_hint contains "alert" or similar
+- [ ] Knowledge Planner did NOT run (professional = false)
+- [ ] Hybrid search ran: how many candidates returned? (should be ≤30 with Profile A)
+- [ ] Reranker ran: how many records after rerank? (should be ≤8)
+- [ ] Alert Agent ran (if tool_hint included "alert"): did it use gpt-4o-mini? check model field in workflow log
+- [ ] Main Agent ran: how many retrieval_context records? (should be ≤10)
+- [ ] Answer: in Hebrew, contains at least one specific event with date or name
+- [ ] Source links: at least one inline link in the answer
+- [ ] No hallucinated facts (cross-check against a source link)
+
+**Pass criteria:** Answer is factual, sourced, readable. Alert used gpt-4o-mini. Retrieval counts match Profile A limits.
+
+**Fail criteria:** Answer is empty, answer says "no information found" when sources exist, source links are broken/missing, alert used gpt-4o.
+
+---
+
+### Test Q3 — Professional / Knowledge Base Question
+
+**Send this message:**
+```
+מהם החסמים המרכזיים בפרויקט?
+```
+
+**What to check:**
+- [ ] Classifier output: type = RAG, professional = true, knowledge_tags includes blockers/barriers related tags
+- [ ] Knowledge Planner ran: verify in workflow log (node "knowledge_planner" status = done)
+- [ ] Knowledge Planner model: should be gpt-4o (Profile A keeps it on gpt-4o)
+- [ ] Knowledge Planner output: contains domain_summary, decision_criteria, rag_queries — verify JSON is complete and not truncated
+- [ ] Hybrid search ran: candidates ≤30, rerankTopK ≤8
+- [ ] Main Agent ran with knowledge_plan in payload
+- [ ] Main Agent answer: uses KB guidance as planning context only, NOT as a project fact source
+- [ ] Answer: Hebrew, mentions specific blockers found in retrieval (not invented from KB), with source links
+- [ ] Missing info section: if something was not found, it says so
+
+**Pass criteria:** KB plan was generated and used correctly. Answer is grounded in retrieval results, not in KB text alone.
+
+**Fail criteria:** Knowledge Planner did not run, OR KB plan JSON is malformed/truncated, OR main agent cited KB excerpts as project evidence (this is the critical failure mode to watch for).
+
+---
+
+### Test Q4 — Delay / Blocker Specific Question
+
+**Send this message:**
+```
+מי היה הספק שגרם לעיכוב?
+```
+
+**What to check:**
+- [ ] Classifier output: type = RAG, professional = true OR investigation = true
+- [ ] If professional = true: Knowledge Planner ran
+- [ ] Reranker topK: should be boosted (up to 18–25) because this is an entity list question
+- [ ] Main Agent answer mode: "ranked_entity_list" (check workflow log node "main_agent" input field answer_mode)
+- [ ] Answer: returns a ranked list of suppliers/vendors, NOT just one name
+- [ ] Each item in the list has an inline source link
+- [ ] Answer does NOT treat a person being late to a meeting as a project delay
+- [ ] Answer differentiates strong evidence from weak/possible mentions
+
+**Pass criteria:** Ranked list with at least 2 supported candidates. Each claim sourced. No meeting lateness misclassified as project delay.
+
+**Fail criteria:** Only one result returned when multiple exist in retrieval, OR answer says "no delays found" when retrieval contains delay records, OR delay definition is wrong (meeting start times counted).
+
+---
+
+### Test Q5 — Source-Heavy Factual Question
+
+**Send this message:**
+```
+אילו חשבוניות שולמו בחודש האחרון ולאיזה ספקים?
+```
+
+**What to check:**
+- [ ] Classifier output: type = RAG, tool_hint includes "financial_transactions"
+- [ ] n8n financial_transactions tool called: check workflow log nodes
+- [ ] If n8n tool is configured: tool returned data and results appear in tool_results
+- [ ] If n8n tool is NOT configured: answer mentions it under "מה לא נמצא" and still uses retrieval results
+- [ ] Hybrid search returned records: check count ≤30 candidates, ≤8 after rerank
+- [ ] Main Agent answer: contains supplier names, dates, amounts from retrieval or tool results
+- [ ] Every factual claim has an inline source link
+- [ ] Source links resolve to real document URLs (not placeholder text)
+
+**Pass criteria:** Answer is specific with names, amounts, dates, and working source links. Missing tool is clearly noted, not silently ignored.
+
+**Fail criteria:** Answer invents amounts or supplier names not present in any retrieved record. Source links point to wrong documents or are empty.
+
+---
+
+### Test Q6 — QA / AI Report Generation
+
+This tests the QA Agent, not the chat pipeline.
+You need a previous chat message that received a thumbs-down (dislike).
+
+**Steps:**
+1. After Test Q2 or Q3 above, click the thumbs-down button on the answer.
+2. Navigate to the QA section (Settings → QA or /qa route).
+3. Find the disliked message.
+4. Click "Run QA Analysis" or "Generate AI Report."
+5. Wait for the QA Agent to return a report.
+
+**What to check:**
+- [ ] QA Agent ran: model = openai/gpt-4o (Profile A keeps gpt-4o for QA)
+- [ ] QA report returned: valid JSON with all required fields (summary, root_cause_steps, step_issues, recommendations, answer_quality, confidence)
+- [ ] Report identifies at least one real pipeline step as root cause (not just "model was bad")
+- [ ] Recommendations are specific (reference node IDs, chunk ranks, or prompt sections)
+- [ ] answer_quality field is one of the expected values (not null or unknown)
+- [ ] No "QA agent returned invalid JSON" error in the UI
+
+**Pass criteria:** A complete, specific QA report was generated. It identifies which pipeline step caused the issue and gives an actionable recommendation.
+
+**Fail criteria:** QA agent failed with an error, OR returned empty/malformed JSON, OR report is generic with no specific reference to the actual run data.
+
+---
+
+## STEP 4 — Repeat Steps 2–3 for Profile B, then Profile C
+
+After completing Profile A tests and recording results:
+
+**Switch to Profile B:**
+
+Apply these changes on top of Profile A:
+
+| Field | Profile A | Profile B |
+|---|---|---|
+| models.main | openai/gpt-4o | openai/gpt-4o-mini |
+| models.knowledgePlanner | openai/gpt-4o | openai/gpt-4o-mini |
+| models.qa | openai/gpt-4o | openai/gpt-4o-mini |
+| retrieval.candidates | 30 | 25 |
+| rag.chunkTextLimit | 1800 | 1500 |
+| knowledge.topK | 4 | 3 |
+| graph.contextLimit | 10 | 8 |
+| ai.knowledgePlanner.maxTokens | 2200 | 1500 |
+| ai.main.maxTokens | 4096 | 3000 |
+| ai.alert.maxTokens | 1200 | 1000 |
+
+Run the same 6 questions. Record results in the Profile B column.
+
+**Switch to Profile C:**
+
+Apply these changes on top of Profile B:
+
+| Field | Profile B | Profile C |
+|---|---|---|
+| retrieval.candidates | 25 | 15 |
+| retrieval.rerankTopK | 8 | 5 |
+| rag.contextRecordsLimit | 10 | 6 |
+| rag.chunkTextLimit | 1500 | 1000 |
+| knowledge.agentLimit | 2 | 1 |
+| knowledge.topK | 3 | 2 |
+| graph.contextLimit | 8 | 5 |
+| ai.knowledgePlanner.maxTokens | 1500 | 1000 |
+| ai.main.maxTokens | 3000 | 2000 |
+| ai.reranker.maxTokens | 1200 | 800 |
+| ai.alert.maxTokens | 1000 | 800 |
+
+Run the same 6 questions. Record results in the Profile C column.
+
+---
+
+## STEP 5 — Result Recording Table
+
+Fill this in for every profile run. One row per test question per profile.
+
+| # | Question | Profile | Classifier type | professional | KB Planner ran | KB Planner model | Alert model | Candidates returned | After rerank | Context records | Answer quality | Source links present | Issues observed |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Q1 | שלום | Baseline | | | | | | | | | | | |
+| Q1 | שלום | A | | | | | | | | | | | |
+| Q1 | שלום | B | | | | | | | | | | | |
+| Q1 | שלום | C | | | | | | | | | | | |
+| Q2 | מה קרה בחודש האחרון | Baseline | | | | | | | | | | | |
+| Q2 | מה קרה בחודש האחרון | A | | | | | | | | | | | |
+| Q2 | מה קרה בחודש האחרון | B | | | | | | | | | | | |
+| Q2 | מה קרה בחודש האחרון | C | | | | | | | | | | | |
+| Q3 | מהם החסמים המרכזיים | Baseline | | | | | | | | | | | |
+| Q3 | מהם החסמים המרכזיים | A | | | | | | | | | | | |
+| Q3 | מהם החסמים המרכזיים | B | | | | | | | | | | | |
+| Q3 | מהם החסמים המרכזיים | C | | | | | | | | | | | |
+| Q4 | מי גרם לעיכוב | Baseline | | | | | | | | | | | |
+| Q4 | מי גרם לעיכוב | A | | | | | | | | | | | |
+| Q4 | מי גרם לעיכוב | B | | | | | | | | | | | |
+| Q4 | מי גרם לעיכוב | C | | | | | | | | | | | |
+| Q5 | חשבוניות חודש אחרון | Baseline | | | | | | | | | | | |
+| Q5 | חשבוניות חודש אחרון | A | | | | | | | | | | | |
+| Q5 | חשבוניות חודש אחרון | B | | | | | | | | | | | |
+| Q5 | חשבוניות חודש אחרון | C | | | | | | | | | | | |
+| Q6 | QA Report | Baseline | | | | | | | | | | | |
+| Q6 | QA Report | A | | | | | | | | | | | |
+| Q6 | QA Report | B | | | | | | | | | | | |
+| Q6 | QA Report | C | | | | | | | | | | | |
+
+---
+
+## STEP 6 — What to Look for in the Workflow Log
+
+For every RAG test (Q2–Q5), open the Workflow Log panel and check these specific fields:
+
+**Classifier node**
+- type, complexity, professional, tool_hint, knowledge_tags
+
+**knowledge_planner node**
+- status (done / skipped)
+- output: domain_summary present? rag_queries present? risks_or_cautions reasonable?
+- Check if JSON is complete (not truncated mid-field — sign of maxTokens too low)
+
+**hybrid_search node**
+- records count: should match candidates limit
+
+**reranker node**
+- input count (candidates sent to reranker)
+- output: top_chunks count should match rerankTopK
+- Check rerank_reason fields — are they meaningful or empty? (empty reason = model may have hit token limit)
+
+**main_agent node**
+- input: check retrieval_context record count
+- output length: if answer is cut off mid-sentence → maxTokens too low
+- Check if knowledge_plan is present and complete in the input
+
+**n8n tool nodes**
+- status (done / skipped / error)
+- For alert: check which model was used (look at the node input or run logs)
+
+---
+
+## STEP 7 — Pass / Fail Decision Criteria
+
+After completing all profile runs, make these decisions:
+
+**Profile A passes if ALL of the following are true:**
+- Q1 routes to Lite Agent in all runs
+- Q2 answer is factual with source links
+- Q3 Knowledge Planner ran and produced valid JSON
+- Q4 returns a ranked list (not a single name)
+- Q5 sources are correct or missing is clearly stated
+- Q6 QA report is complete and specific
+- No answers are truncated mid-sentence
+- No "no information found" false negatives
+
+**Profile B passes if:**
+- All Profile A pass criteria hold
+- Q3 Knowledge Planner JSON on gpt-4o-mini is complete (not garbled or missing keys)
+- Q4 ranked list is as complete as baseline (same supplier count or close)
+- Q5 factual accuracy is comparable to baseline
+- Q2 answer quality is acceptable compared to baseline (not notably vaguer)
+
+**Profile B partially fails if:**
+- Q3 planner JSON is missing keys or truncated → consider raising ai.knowledgePlanner.maxTokens or keeping gpt-4o for planner only
+- Q4 returns fewer items than baseline → consider raising rerankTopK or keeping gpt-4o for main only
+- Specific questions get worse while others hold → targeted fix, not full rollback
+
+**Profile C is expected to fail** on Q3, Q4, Q5 — document which failures appear and at what threshold.
+
+---
+
+## Gate
+
+After completing all runs and filling the result table:
+
+1. If Profile A passes → Profile A is a safe minimum. Test Profile B next.
+2. If Profile B passes → Profile B is the recommended production setting. Document it and stop here unless cost target requires more reduction.
+3. If Profile B partially fails on specific steps → move to Phase 5 (prompt calibration) or Phase 6 (code fix) only for those specific steps.
+4. If Profile A fails → something is wrong with the settings change itself. Revert to baseline, inspect the workflow log for the failing question, and identify which specific setting caused the regression before retesting.
+
+Document all results in this file under a new section: "Phase 4 Results."
