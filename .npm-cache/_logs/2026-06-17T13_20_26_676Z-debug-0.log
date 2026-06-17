@@ -1,0 +1,71 @@
+0 verbose cli C:\Program Files\nodejs\node.exe C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js
+1 info using npm@10.9.2
+2 info using node@v22.14.0
+3 silly config load:file:C:\Program Files\nodejs\node_modules\npm\npmrc
+4 silly config load:file:C:\Users\user\OneDrive - post.bgu.ac.il\Documents\GitHub\n8n\main-rag-backend\bidoc-main-rag\.npmrc
+5 silly config load:file:C:\Users\user\.npmrc
+6 silly config load:file:C:\Users\user\AppData\Roaming\npm\etc\npmrc
+7 verbose title npm install
+8 verbose argv "install" "--omit" "dev" "--cache" ".npm-cache"
+9 verbose logfile logs-max:10 dir:C:\Users\user\OneDrive - post.bgu.ac.il\Documents\GitHub\n8n\main-rag-backend\bidoc-main-rag\.npm-cache\_logs\2026-06-17T13_20_26_676Z-
+10 verbose logfile C:\Users\user\OneDrive - post.bgu.ac.il\Documents\GitHub\n8n\main-rag-backend\bidoc-main-rag\.npm-cache\_logs\2026-06-17T13_20_26_676Z-debug-0.log
+11 silly logfile done cleaning log files
+12 silly packumentCache heap:4345298944 maxSize:1086324736 maxEntrySize:543162368
+13 silly idealTree buildDeps
+14 silly reify moves {}
+15 silly reify mark deleted [
+15 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\@playwright\\test',
+15 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright',
+15 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright.cmd',
+15 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright.ps1'
+15 silly reify ]
+16 silly reify mark deleted [
+16 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\fsevents'
+16 silly reify ]
+17 silly reify mark deleted [
+17 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\playwright',
+17 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright',
+17 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright.cmd',
+17 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright.ps1'
+17 silly reify ]
+18 silly reify mark deleted [
+18 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\playwright-core',
+18 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright-core',
+18 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright-core.cmd',
+18 silly reify   'C:\\Users\\user\\OneDrive - post.bgu.ac.il\\Documents\\GitHub\\n8n\\main-rag-backend\\bidoc-main-rag\\node_modules\\.bin\\playwright-core.ps1'
+18 silly reify ]
+19 silly audit bulk request {
+19 silly audit   events: [ '3.3.0' ],
+19 silly audit   graphology: [ '0.26.0' ],
+19 silly audit   'graphology-types': [ '0.24.8' ]
+19 silly audit }
+20 http cache graphology-types@https://registry.npmjs.org/graphology-types/-/graphology-types-0.24.8.tgz 1ms (cache hit)
+21 http cache graphology@https://registry.npmjs.org/graphology/-/graphology-0.26.0.tgz 0ms (cache hit)
+22 http cache events@https://registry.npmjs.org/events/-/events-3.3.0.tgz 1ms (cache hit)
+23 silly tarball no local data for graphology-types@https://registry.npmjs.org/graphology-types/-/graphology-types-0.24.8.tgz. Extracting by manifest.
+24 silly tarball no local data for graphology@https://registry.npmjs.org/graphology/-/graphology-0.26.0.tgz. Extracting by manifest.
+25 silly tarball no local data for events@https://registry.npmjs.org/events/-/events-3.3.0.tgz. Extracting by manifest.
+26 http fetch GET 200 https://registry.npmjs.org/npm 204ms
+27 http fetch GET 200 https://registry.npmjs.org/graphology-types/-/graphology-types-0.24.8.tgz 147ms (cache miss)
+28 http fetch GET 200 https://registry.npmjs.org/events/-/events-3.3.0.tgz 237ms (cache miss)
+29 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 320ms
+30 silly audit report {}
+31 http fetch GET 200 https://registry.npmjs.org/graphology/-/graphology-0.26.0.tgz 435ms (cache miss)
+32 silly ADD
+33 silly ADD
+34 silly ADD node_modules/graphology-types
+35 silly ADD node_modules/graphology
+36 silly ADD
+37 silly ADD node_modules/events
+38 silly ADD
+39 verbose cwd C:\Users\user\OneDrive - post.bgu.ac.il\Documents\GitHub\n8n\main-rag-backend\bidoc-main-rag
+40 verbose os Windows_NT 10.0.26200
+41 verbose node v22.14.0
+42 verbose npm  v10.9.2
+43 notice
+43 notice New major version of npm available! 10.9.2 -> 11.17.0
+43 notice Changelog: https://github.com/npm/cli/releases/tag/v11.17.0
+43 notice To update run: npm install -g npm@11.17.0
+43 notice  { force: true, [Symbol(proc-log.meta)]: true }
+44 verbose exit 0
+45 info ok

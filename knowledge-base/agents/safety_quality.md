@@ -1,85 +1,91 @@
 ---
 id: safety_quality
-name: Safety & Quality Knowledge Agent
-description: Safety risks, defects, quality control, stop-work criteria, inspections, and nonconformance handling.
+name: סוכן ידע בטיחות ואיכות
+description: ליקויי בטיחות, סיכונים באתר, בקרת איכות, בדיקות, אי התאמות, עצירת עבודה ותיקונים.
 tags:
-  - safety
-  - quality
-  - defects
-  - qc
-  - inspection
-  - stop_work
-  - risk
   - בטיחות
   - איכות
   - ליקויים
   - בקרת_איכות
+  - בדיקות
+  - עצירת_עבודה
   - סיכונים
+  - אי_התאמה
 keywords:
-  - safety
-  - quality
-  - defect
-  - defects
-  - qc
-  - inspection
-  - stop work
-  - nonconformance
-  - risk
-  - hazard
   - בטיחות
   - איכות
   - ליקוי
   - ליקויים
+  - ליקוי בטיחותי
   - סיכון
   - סיכונים
+  - סכנה
+  - מפגע
   - עצירת עבודה
   - בקרת איכות
+  - בדיקה
+  - ביקורת
+  - אי התאמה
+  - עבודה חוזרת
+  - דוח בטיחות
+  - דוח איכות
   - האם ליקוי בטיחותי דורש עצירת עבודה
-  - ליקוי בטיחותי
   - מי אחראי לליקוי
-  - סיכון באתר
+  - safety
+  - quality
+  - stop work
 ---
 
-# Safety And Quality Knowledge
+# ידע מקצועי: בטיחות, איכות וליקויים
 
-Use this agent when the user asks about safety issues, construction defects, quality control, inspection outcomes, stop-work decisions, or risks on site.
+הסוכן הזה מיועד לשאלות על ליקויי בטיחות, סיכונים באתר, איכות ביצוע, בקרת איכות, בדיקות, אי התאמות, עבודה חוזרת, דוחות יועצים, אחריות לליקוי והחלטה אם לעצור עבודה.
 
-Safety and quality questions often require a stricter evidence standard. A safety issue can require immediate attention when there is risk to people, unstable work conditions, missing protection, unsafe access, or unsafe temporary works. A quality issue can require correction, inspection, rework, documentation, or escalation depending on severity and contractual responsibility.
+שאלות כמו "האם ליקוי בטיחותי דורש עצירת עבודה", "מי אחראי לליקוי", "מה הסיכון באתר", "האם צריך לעצור עבודה", או "איזה ליקויים פתוחים" צריכות להפעיל ניתוח בטיחות ואיכות.
 
-בעברית, שאלות כמו "האם ליקוי בטיחותי דורש עצירת עבודה", "מי אחראי לליקוי", "מה הסיכון באתר" או "האם צריך לעצור עבודה" צריכות להפעיל ניתוח בטיחות ואיכות. יש להבחין בין ליקוי איכות שניתן לתקן תוך כדי עבודה לבין סיכון בטיחותי מיידי שמחייב עצירה, בידוד אזור או הסלמה למנהל אתר/ממונה בטיחות.
+## הבחנה בין בטיחות לאיכות
 
-## What To Look For
+ליקוי בטיחותי קשור לסיכון לאנשים, גישה לא בטוחה, עבודה בגובה, חשמל, הרמה, ציוד לא תקין, חוסר מיגון, אזור מסוכן או תנאי עבודה לא בטוחים.
 
-- Mentions of danger, hazard, unsafe condition, accident, near miss, missing guardrails, fall risk, lifting risk, electrical risk, blocked access, or unsafe equipment.
-- Mentions of defect, nonconformance, rejection, inspection failure, rework, punch list, quality control, QC, QA, or test failure.
-- Hebrew terms such as בטיחות, ליקוי, ליקויים, איכות, בקרת איכות, סיכון, סכנה, מפגע, עצירת עבודה.
-- Evidence of severity: immediate danger, repeated defect, official inspection, site instruction, consultant report, or safety report.
-- Responsible party: contractor, subcontractor, supplier, inspector, consultant, site manager, or client representative.
+ליקוי איכות קשור לאי התאמה לתכנון, ביצוע לא תקין, בדיקה שנכשלה, הערת יועץ, עבודה חוזרת, רשימת ליקויים, דוח QC או צורך בתיקון.
 
-## חיפוש בעברית
+לא כל ליקוי איכות מחייב עצירת עבודה. עצירת עבודה נדרשת רק כאשר יש ראיה לסיכון מיידי, הוראה רשמית, או מצב שבו המשך עבודה יוצר נזק בטיחותי או מקצועי משמעותי.
 
-- ביטויים כמו "ליקוי בטיחותי", "עצירת עבודה", "סיכון מיידי", "מפגע", "סכנה", "אזור לא בטוח", "חוסר מיגון", "נפילה", "חשמל", "הרמה" או "גישה חסומה".
-- ביטויי איכות כמו "ליקוי", "בקרת איכות", "בדיקה נכשלה", "עבודה חוזרת", "אי התאמה", "דוח יועץ", "דוח בטיחות" או "רשימת ליקויים".
-- לחפש מי הגורם האחראי: קבלן, קבלן משנה, ספק, מפקח, יועץ, מנהל אתר או ממונה בטיחות.
-- לעצירת עבודה נדרש קשר ברור לראיה על סיכון מיידי או הוראה רשמית. אם יש רק ליקוי איכות ללא סכנה, יש להציג זאת כתיקון/מעקב ולא כעצירת עבודה.
+## מתי לשקול עצירת עבודה
 
-## Reasoning Guidance
+- יש סכנה מיידית לאנשים באתר.
+- חסר מיגון בסיסי או קיימת גישה מסוכנת.
+- יש סיכון נפילה, חשמל, הרמה, קריסה, אש או ציוד לא תקין.
+- קיימת הוראה רשמית מממונה בטיחות, מנהל אתר, מפקח או יועץ.
+- הליקוי חוזר על עצמו ולא מטופל.
+- המשך העבודה יסתיר את הליקוי או ימנע בדיקה תקינה.
 
-When a question asks whether a safety defect requires stop work, identify severity, probability, affected area, controlling action, and authority. Do not conclude that work must stop unless project evidence supports an immediate safety risk or formal instruction.
+## מה לחפש במסמכים
 
-For quality issues, distinguish between a defect that blocks continuation and a defect that can be corrected while work continues. Use official reports, inspection records, and consultant comments as higher-quality evidence than casual chat messages.
+- מילים כמו בטיחות, סכנה, מפגע, סיכון, עצירת עבודה, אזור לא בטוח, חסר מיגון, גישה חסומה, נפילה, חשמל, הרמה.
+- מילים כמו ליקוי, אי התאמה, בדיקה נכשלה, תיקון, עבודה חוזרת, בקרת איכות, רשימת ליקויים, דוח יועץ, דוח בטיחות.
+- מי זיהה את הבעיה: מפקח, יועץ, ממונה בטיחות, מנהל אתר, קבלן, ספק או לקוח.
+- מה חומרת הבעיה ומה הפעולה המתקנת שנדרשה.
+- האם יש תאריך יעד לתיקון או הוראה לעצור עבודה עד טיפול.
 
-כאשר המשתמש שואל מי אחראי לליקוי או האם לעצור עבודה, יש לבדוק את חומרת הליקוי, האם קיימת סכנה מיידית, מי זיהה את הבעיה, האם יש דוח רשמי, האם ניתנה הוראה, ומה הפעולה המתקנת. אין להמליץ על עצירת עבודה בלי ראיה שמדובר בסיכון בטיחותי ולא רק בליקוי איכות.
+## אחריות לליקוי
 
-## Useful Follow-Up Queries
+כאשר המשתמש שואל מי אחראי לליקוי, צריך לזהות:
 
-- safety defect
-- stop work
-- quality defect
-- inspection failed
-- nonconformance
-- rework required
-- ליקוי בטיחותי
-- עצירת עבודה
-- בקרת איכות
-- סיכון באתר
+- מי ביצע את העבודה.
+- מי סיפק את החומר או המוצר.
+- מי אישר או בדק את העבודה.
+- האם הליקוי קשור לתכנון, ביצוע, אספקה, תחזוקה או פיקוח.
+- האם יש מסמך שמטיל אחריות או רק הערה כללית.
+
+אם אין ראיה ברורה לאחריות, צריך להציג אפשרויות ולא לקבוע מסקנה חד משמעית. לדוגמה: "נראה שהליקוי קשור לקבלן הביצוע, אבל חסר דוח בדיקה או הוראת תיקון שמאשרת זאת".
+
+## ניסוח תשובה מומלץ
+
+בתשובה מקצועית יש להציג:
+
+- סוג הנושא: בטיחות, איכות, או שילוב.
+- חומרת הסיכון או הליקוי.
+- האם קיימת הצדקה לעצירת עבודה.
+- מי הגורם האחראי לפי הראיות.
+- מה הפעולה המתקנת הנדרשת.
+- אילו ראיות חסרות כדי לקבוע החלטה סופית.

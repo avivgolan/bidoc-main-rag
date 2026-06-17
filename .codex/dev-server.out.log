@@ -1,0 +1,7 @@
+[config] Running one-time prompts migration: clearing stale stored defaults…
+[config] Prompts migration complete.
+bidoc agent running at http://localhost:4000
+[startup] OpenRouter : ✗ MISSING — RAG agent will use fallback
+[startup] App DB     : ✗ MISSING
+[startup] Content DB : ✗ MISSING
+[startup] Timezone   : UTC+0

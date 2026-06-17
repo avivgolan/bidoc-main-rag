@@ -1,93 +1,94 @@
 ---
 id: schedule
-name: Schedule Knowledge Agent
-description: Delays, blockers, schedule control, dependencies, critical path, and supplier delay analysis.
+name: סוכן ידע לו"ז וחסמים
+description: עיכובים, חסמים, תלויות, נתיב קריטי, אספקות מאחרות והשפעה על לוחות הזמנים.
 tags:
-  - delays
-  - blockers
-  - schedule
-  - dependencies
-  - critical_path
-  - supplier_delay
   - עיכובים
   - חסמים
+  - לו"ז
   - לוחות_זמנים
   - תלויות
+  - נתיב_קריטי
+  - ספקים
+  - אספקות
 keywords:
-  - delay
-  - delayed supplier
-  - supplier delay
-  - blocker
-  - blockers
-  - schedule
-  - critical path
-  - dependency
-  - dependencies
-  - מי היה הספק שגרם לעיכוב
-  - הספק שגרם לעיכוב
-  - הספק המעכב
-  - ספק מעכב
-  - ספק שהתעכב
-  - מי אחראי לעיכוב
-  - גורם העיכוב
-  - גורמי עיכוב
   - עיכוב
   - עיכובים
+  - איחור
+  - התעכב
+  - מתעכב
   - חסם
   - חסמים
   - לוח זמנים
+  - לוחות זמנים
   - לו"ז
-  - תלות
   - תלויות
+  - נתיב קריטי
+  - ספק
+  - ספק מעכב
+  - ספק שהתעכב
+  - הספק המעכב
+  - הספק שגרם לעיכוב
+  - מי היה הספק שגרם לעיכוב
+  - מי הספק שהתעכב
+  - מי אחראי לעיכוב
+  - גורם העיכוב
+  - גורמי עיכוב
+  - delayed supplier
+  - schedule blocker
 ---
 
-# Schedule Knowledge
+# ידע מקצועי: לו"ז, עיכובים וחסמים
 
-Use this agent when the user asks about project delays, blockers, schedule risk, supplier delay, dependencies, or the critical path.
+הסוכן הזה מיועד לשאלות על עיכובים בפרויקט, חסמי ביצוע, תלויות בין פעילויות, נתיב קריטי, ספקים מאחרים, אספקות שלא הגיעו בזמן והשפעה על לוחות הזמנים.
 
-In a construction project, a delay is not only a late date. A delay usually has a cause, an affected activity, an owner, a dependency, and an impact on following work. When the user asks "who was the delayed supplier", the useful interpretation is: identify supplier/vendor entities connected to delayed work, blocked activities, late delivery, missing approval, or schedule risk in project evidence.
+כאשר המשתמש שואל "מי היה הספק שגרם לעיכוב", "מי הספק שהתעכב", "מה גרם לעיכוב", "מה החסם", או "מי אחראי לעיכוב", צריך להפעיל ניתוח לו"ז. המטרה אינה רק למצוא את המילה עיכוב, אלא לזהות את הגורם המקצועי שמחובר לחסם: ספק, קבלן משנה, יועץ, גורם מאשר, מסירה מאוחרת, חוסר באישור, חוסר בחומר, חוסר בשרטוט, או תלות בין פעילויות.
 
-בעברית, שאלות כמו "מי היה הספק שגרם לעיכוב", "מי הספק שהתעכב", "מה גרם לעיכוב", "מי אחראי לעיכוב" או "מה היה גורם העיכוב" צריכות להפעיל ניתוח לו"ז. המטרה אינה רק למצוא את המילה עיכוב, אלא לזהות את הגורם המקצועי שקשור לעיכוב: ספק, קבלן משנה, יועץ, גורם מאשר, מסירה מאוחרת, חוסר באישור, חסם ביצוע או תלות בין פעילויות.
+## איך לזהות עיכוב אמיתי
 
-כאשר מופיעה שאלה על הספק שגרם לעיכוב, יש לחפש בפרויקט ישויות מסוג ספק או קבלן משנה שמופיעות ליד ניסוחים כמו התעכב, גרם לעיכוב, באיחור, חסם את העבודה, לא סיפק בזמן, ממתינים לתשובה, ממתינים לאישור, ממתינים למסירה, חסר חומר, חסר שרטוט, חסר אישור או פעילות שלא יכולה להתחיל. אם יש כמה ספקים קשורים, יש להפריד בין ספק שגרם לעיכוב בפועל לבין ספק שרק הוזכר בהקשר של סיכון לו"ז.
+- לחפש פעולה שלא התחילה, נעצרה, נדחתה או לא יכולה להמשיך.
+- לחפש תאריך מתוכנן מול תאריך בפועל, או ניסוח שמראה שהנושא עדיין פתוח.
+- לחפש מילים כמו עיכוב, איחור, מתעכב, תקוע, ממתינים, חסם, טרם התקבל, לא סופק, חסר אישור, חסר חומר, חסר שרטוט.
+- לבדוק אם העיכוב משפיע על פעילות המשך: התקנה, בדיקה, מסירה, גישה לאתר, עבודות גמר, עבודת קבלן אחר או אישור המשך.
+- להבדיל בין סיכון לו"ז לבין עיכוב שכבר קרה בפועל.
 
-## What To Look For
+## ספק שגרם לעיכוב
 
-- Supplier, subcontractor, vendor, consultant, or contractor names connected to delay language.
-- Activities that cannot start because another party has not finished, approved, delivered, answered, or released something.
-- Words such as delay, delayed, late, blocked, hold, waiting, dependency, critical path, postponed, stuck, and overdue.
-- Hebrew terms such as עיכוב, מתעכב, באיחור, חסם, חסמים, תלות, ממתינים, תקוע, לו"ז, לוח זמנים.
-- Dates that show planned versus actual timing, or messages that say an item is still pending.
-- Links between a delayed item and downstream work: access, procurement, approvals, shop drawings, delivery, installation, inspection, or handover.
+כאשר השאלה היא מי הספק שגרם לעיכוב, יש לחפש ישויות מסוג ספק, קבלן משנה, יצרן, יועץ או גורם מאשר שמופיעות ליד שפת עיכוב. דוגמאות לניסוחים חשובים:
 
-## חיפוש בעברית
+- הספק התעכב.
+- הספק לא סיפק בזמן.
+- ממתינים לספק.
+- ממתינים לאישור ספק או יועץ.
+- טרם התקבל חומר.
+- טרם התקבל שרטוט.
+- האספקה מתעכבת.
+- חסר אישור שמונע התחלת עבודה.
+- הפעילות לא יכולה להתחיל עד למסירה או אישור.
 
-- ספק או קבלן משנה שמופיע ליד "עיכוב", "לעיכוב", "גרם לעיכוב", "התעכב", "הספק המעכב", "ספק מעכב", "באיחור" או "לא הגיע בזמן".
-- גורם שמחזיק פעילות אחרת: "ממתינים לספק", "ממתינים לאישור", "ממתינים לתשובה", "טרם התקבל", "לא סופק", "חסר חומר", "חסר שרטוט", "חסר אישור".
-- קשר בין הספק לבין פעילות מושפעת: אספקה, התקנה, אישור, בדיקה, שחרור שטח, גישה לאתר, עבודת המשך או מסירה.
-- אחריות לעיכוב צריכה להיקבע רק אם יש ראיה בפרויקט שמחברת בין הספק לבין החסם. אם יש רק אזכור כללי, יש לומר "נראה קשור לעיכוב" ולא לקבוע שהוא גרם לעיכוב.
+אם יש כמה ספקים קשורים, אין לבחור אוטומטית את השם הראשון. צריך להפריד בין:
 
-## Reasoning Guidance
+- ספק שגרם לעיכוב בפועל.
+- ספק שקשור לסיכון לו"ז בלבד.
+- ספק שהוזכר במסמך אך אין ראיה שהוא גרם לחסם.
+- גורם מאשר שהעיכוב נובע ממנו ולא מהספק עצמו.
 
-Classify the issue as schedule-related when the question is about delay causes, delayed suppliers, blocked tasks, dependencies, or timing impact. Use the project graph to connect suppliers, events, documents, approvals, and topics. Use retrieval results to confirm the actual project facts before naming a delayed supplier.
+## סדר חשיבה מומלץ
 
-If the evidence only suggests a possible delay, say that the supplier appears connected to schedule risk rather than stating it as a confirmed delay. Separate the professional interpretation from the project evidence.
+1. לזהות את פעילות הפרויקט שנפגעה.
+2. לזהות את הגורם שהחזיק את הפעילות: ספק, קבלן משנה, יועץ, לקוח, מנהל פרויקט או גורם מאשר.
+3. לבדוק איזו ראיה מחברת בין הגורם לבין העיכוב: מייל, התראה, סיכום פגישה, מסמך, אירוע ציר זמן, גרף קשרים או תוצאת חיפוש.
+4. לבדוק אם יש השפעה על פעילות המשך או על הנתיב הקריטי.
+5. אם אין ראיה מספקת, לומר שהגורם "קשור לסיכון לו"ז" ולא לקבוע שהוא גרם לעיכוב.
 
-כאשר המשתמש שואל "מי היה הספק שגרם לעיכוב", התשובה צריכה להיבנות בשלבים: קודם לזהות מועמדים שהם ספקים או קבלני משנה, אחר כך לבדוק אילו מהם מופיעים עם שפת עיכוב, ואז לוודא שיש קשר לראיות פרויקט כמו מייל, התראה, פגישה, מסמך, גרף קשרים או אירוע Timeline. אין להסיק אחריות רק בגלל שהשם מופיע ליד המילה עיכוב; צריך קשר סיבתי או תפעולי ברור.
+## ניסוח תשובה מומלץ
 
-## Useful Follow-Up Queries
+בתשובה מקצועית יש להציג:
 
-- delayed supplier
-- supplier delay
-- schedule blocker
-- critical path delay
-- pending approval blocking work
-- procurement delay
-- delivery delay
-- מי הספק שהתעכב
-- מי היה הספק שגרם לעיכוב
-- הספק שגרם לעיכוב
-- הספק המעכב
-- מי אחראי לעיכוב
-- חסמים בפרויקט
-- גורמי עיכוב
+- מי הגורם או הספק החשוד כגורם העיכוב.
+- מה הפעילות שנפגעה.
+- מה הראיה שקושרת אותו לעיכוב.
+- האם מדובר בעיכוב מאושר, סיכון לו"ז, או חשד שדורש בדיקה נוספת.
+- אילו מסמכים חסרים כדי לקבוע אחריות בוודאות.
+
+אין להסיק אחריות רק בגלל שמופיעה המילה עיכוב ליד שם של ספק. צריך קשר סיבתי או תפעולי ברור בין הספק לבין החסם.

@@ -1,94 +1,95 @@
 ---
 id: commercial
-name: Commercial Knowledge Agent
-description: Contracts, claims, change orders, costs, approvals, responsibility, entitlement, and commercial risk.
+name: סוכן ידע מסחרי וחוזי
+description: חוזים, תביעות, חריגים, פקודות שינוי, עלויות, אישורים, אחריות מסחרית וזכאות לתשלום.
 tags:
-  - commercial
-  - claims
-  - contract
-  - costs
-  - change_order
-  - approval
-  - responsibility
-  - entitlement
-  - contracts
-  - תביעות
+  - מסחרי
   - חוזים
+  - תביעות
+  - חריגים
   - עלויות
   - אישורים
   - אחריות
+  - פקודת_שינוי
 keywords:
-  - commercial
-  - claim
-  - claims
-  - contract
-  - contracts
-  - cost
-  - costs
-  - change order
-  - variation
-  - approval
-  - responsibility
-  - entitlement
-  - retention release
-  - תביעה
-  - תביעות
+  - מסחרי
   - חוזה
   - חוזים
-  - עלות
-  - עלויות
-  - אישור
-  - אחריות
+  - תביעה
+  - תביעות
   - חריג
   - חריגים
+  - פקודת שינוי
+  - שינוי תכולה
+  - עלות
+  - עלויות
+  - תשלום
+  - חשבון
+  - אישור
+  - אישור מסחרי
+  - אחריות
+  - אחריות חוזית
+  - זכאות
   - מי אחראי לעלות
   - מי צריך לשלם
   - האם זו תביעה
-  - פקודת שינוי
-  - אישור מסחרי
+  - האם צריך פקודת שינוי
+  - commercial claim
+  - change order
+  - contract responsibility
 ---
 
-# Commercial Knowledge
+# ידע מקצועי: מסחרי, חוזי ותביעות
 
-Use this agent when the user asks about commercial responsibility, contract meaning, claims, change orders, approvals, costs, entitlement, retention release, payment risk, or who should carry the impact of an event.
+הסוכן הזה מיועד לשאלות על אחריות מסחרית, חוזים, תביעות, חריגים, פקודות שינוי, אישורים, עלויות, תשלומים, זכאות, עיכבון, חשבונות וסיכונים מסחריים.
 
-Commercial analysis in construction should connect the event to contract responsibility and evidence. A claim or change order normally needs a cause, instruction or approval, cost/time impact, notice or documentation, and a responsible party. The Knowledge Planner should help the main agent know what project evidence to search for, but it must not invent commercial facts without project evidence.
+שאלות כמו "מי אחראי לעלות", "מי צריך לשלם", "האם זו תביעה", "האם צריך פקודת שינוי", "האם החריג אושר", או "מה האחריות החוזית" צריכות להפעיל ניתוח מסחרי.
 
-בעברית, שאלות כמו "מי אחראי לעלות", "מי צריך לשלם", "האם זו תביעה", "האם צריך פקודת שינוי", "האם אושר חריג" או "מה האחריות החוזית" צריכות להפעיל ניתוח מסחרי. המטרה היא להפריד בין אירוע מקצועי בפרויקט לבין זכאות מסחרית: האם הייתה הוראה, האם העבודה מחוץ לתכולה, האם יש אישור, האם נמסרה הודעה, ומה הראיות לעלות או לעיכוב.
+## עיקרון בסיסי
 
-## What To Look For
+ניתוח מסחרי בפרויקט בנייה צריך לחבר בין אירוע מקצועי לבין אחריות חוזית וראיות. לא מספיק שיש עיכוב, ליקוי או שינוי. צריך לבדוק אם קיימים תכולה חוזית, הוראה, אישור, הודעה, השפעת עלות או זמן, ומסמך שמראה מי נושא באחריות.
 
-- Contractual terms: scope, responsibility, approval, entitlement, notice, variation, change order, claim, delay damages, retention, payment, invoice, back charge.
-- Hebrew terms such as תביעה, חריג, חוזה, אחריות, אישור, עלות, עלויות, כספים, חשבון, שינוי, פקודת שינוי.
-- Approval chains: who requested, who approved, who rejected, and whether approval happened before or after the work.
-- Evidence of instruction: email, meeting decision, signed form, consultant instruction, client approval, or formal report.
-- Cost/time impact: extra work, delayed work, rework, acceleration, procurement change, or rejected payment.
+## מה לחפש
 
-## חיפוש בעברית
+- חוזה, תכולה, כתב כמויות, תנאי תשלום, אחריות, התחייבות, אישור, הודעה, הוראה או נספח.
+- חריג, פקודת שינוי, שינוי תכולה, עבודה נוספת, תביעה, דרישת תשלום, חשבון, עלות, זכאות או עיכבון.
+- שרשרת אישורים: מי ביקש, מי אישר, מי דחה, האם האישור ניתן לפני ביצוע העבודה או בדיעבד.
+- ראיות להוראה: מייל, סיכום פגישה, הוראת יועץ, אישור לקוח, מסמך חתום, הצעת מחיר או דוח רשמי.
+- השפעת זמן או כסף: עבודה נוספת, עבודה חוזרת, האצה, עיכוב, שינוי אספקה או תשלום שנדחה.
 
-- ביטויים כמו "תביעה", "חריג", "פקודת שינוי", "אישור מסחרי", "עלות", "עלויות", "מי צריך לשלם", "מי אחראי", "אחריות חוזית", "תשלום", "חשבון", "עיכבון" או "שחרור ערבות".
-- לחפש שרשרת אישורים: מי ביקש, מי אישר, מי דחה, האם האישור לפני ביצוע העבודה או אחרי.
-- לחפש ראיות להוראה או שינוי תכולה: מייל, סיכום פגישה, הוראת יועץ, אישור לקוח, מסמך חתום, הצעת מחיר או דוח רשמי.
-- אחריות מסחרית לא נקבעת רק לפי זה שהיה עיכוב או ליקוי. צריך לבדוק חוזה, תכולה, אישור, הודעה, השפעת עלות/זמן ומי הגורם שגרם לאירוע.
+## האם זו תביעה או חריג
 
-## Reasoning Guidance
+כדי להחליט אם אירוע יכול להפוך לתביעה או חריג, צריך לבדוק:
 
-When the question asks who is responsible, first identify the event and the obligation. Then search for approvals, instructions, contract references, and communications. If evidence is incomplete, present possible responsibility paths and what evidence is missing.
+- מה הייתה התכולה המקורית.
+- מה השתנה בפועל.
+- מי נתן את ההוראה או מי יצר את הצורך בשינוי.
+- האם נשלחה הודעה בזמן.
+- האם יש אישור או דחייה.
+- האם קיימות ראיות לעלות או להשפעת זמן.
+- האם קיימים סעיפי חוזה שמגדירים זכאות או מגבלה.
 
-For a variation order entitlement matrix, separate the professional checklist from project facts: instruction, scope change, entitlement basis, cost evidence, time impact, notice, approval status, and disputed items.
+אם חסר אישור או חסרות ראיות לעלות, צריך לציין שהאירוע עשוי להיות בסיס לבדיקה מסחרית אבל לא לקבוע זכאות סופית.
 
-כאשר המשתמש שואל "מי אחראי לעלות" או "האם זו תביעה", יש לבנות תשובה לפי ראיות: מה האירוע, מה התכולה המקורית, מה השתנה, מי נתן הוראה, האם יש אישור, מה העלות, האם נשלחה הודעה, ומה עדיין חסר כדי לקבוע זכאות. אם אין מספיק ראיות, יש לציין אילו מסמכים חסרים במקום להמציא אחריות.
+## מי אחראי לעלות
 
-## Useful Follow-Up Queries
+כאשר המשתמש שואל מי אחראי לעלות, יש להפריד בין:
 
-- commercial claim
-- change order
-- variation order entitlement matrix
-- retention release
-- contract responsibility
-- approval status
-- cost impact
-- תביעה מסחרית
-- פקודת שינוי
-- אחריות חוזית
-- חריגים ועלויות
+- גורם שגרם לאירוע.
+- גורם שאישר את העבודה.
+- גורם שחייב לשלם לפי החוזה.
+- גורם שסיפק חומר או עבודה לא תקינים.
+- מצב שבו האחריות עדיין במחלוקת.
+
+אחריות מסחרית לא נקבעת רק לפי זה שהיה עיכוב או ליקוי. צריך לבדוק חוזה, תכולה, אישור, הודעה, השפעת עלות או זמן, ומי הגורם שגרם לאירוע.
+
+## ניסוח תשובה מומלץ
+
+בתשובה מקצועית יש להציג:
+
+- מה האירוע המסחרי.
+- האם הוא קשור לתביעה, חריג, פקודת שינוי, תשלום או אחריות חוזית.
+- מי הגורמים המעורבים.
+- מה הראיות הקיימות.
+- האם קיימת זכאות ברורה או רק אפשרות לבדיקה.
+- אילו מסמכים חסרים: חוזה, אישור, הודעה, הצעת מחיר, חשבון, סיכום פגישה או הוראת ביצוע.

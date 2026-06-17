@@ -219,18 +219,19 @@ test("knowledge agents load from markdown frontmatter", () => {
   assert.deepEqual(agents.map((agent) => agent.id), ["schedule", "safety_quality", "commercial"]);
   assert.ok(agents.every((agent) => agent.source === "agent"));
   assert.ok(agents.every((agent) => agent.readOnly === true));
-  assert.ok(agents.find((agent) => agent.id === "schedule").keywords.includes("delayed supplier"));
+  assert.ok(agents.find((agent) => agent.id === "schedule").name.includes("לו\"ז"));
+  assert.ok(agents.find((agent) => agent.id === "schedule").keywords.includes("מי היה הספק שגרם לעיכוב"));
 });
 
 test("knowledge routing uses markdown keywords", () => {
-  const routed = routeKnowledgeAgents({ message: "Who was the delayed supplier and what schedule blocker did they cause?", limit: 2 });
+  const routed = routeKnowledgeAgents({ message: "מי היה הספק שגרם לעיכוב ומה החסם בלוח הזמנים?", limit: 2 });
   assert.equal(routed[0].id, "schedule");
   assert.ok(routed[0].score > 0);
 });
 
 test("knowledge search returns built-in markdown chunks without uploads", async () => {
   const result = await searchKnowledgeBase({
-    query: "variation order entitlement matrix",
+    query: "האם צריך פקודת שינוי ומי אחראי לעלות החריג",
     agentId: "commercial",
     topK: 3
   });
@@ -243,9 +244,9 @@ test("knowledge search combines built-in and uploaded documents", async () => {
   await saveKnowledgeDocument({
     agentId: "commercial",
     filename: "test-retention-note.md",
-    content: "Retention release should be checked against payment approval, contract responsibility, and unresolved claims."
+    content: "שחרור עיכבון צריך להיבדק מול אישור תשלום, אחריות חוזית ותביעות פתוחות."
   });
-  const result = await searchKnowledgeBase({ query: "retention release payment approval", agentId: "commercial", topK: 6 });
+  const result = await searchKnowledgeBase({ query: "שחרור עיכבון אישור תשלום אחריות חוזית", agentId: "commercial", topK: 6 });
   assert.ok(result.matches.some((match) => match.source === "agent" && match.filename === "commercial.md"));
   assert.ok(result.matches.some((match) => match.source === "upload" && match.filename === "test-retention-note.md"));
   assert.ok(result.sources.agent.matches >= 1);
@@ -257,7 +258,7 @@ test("built-in knowledge agent markdown is read-only", async () => {
   const document = await readKnowledgeDocument("schedule.md", { agentId: "schedule", source: "agent" });
   assert.equal(document.source, "agent");
   assert.equal(document.readOnly, true);
-  assert.match(document.content, /Schedule Knowledge/);
+  assert.match(document.content, /ידע מקצועי: לו"ז/);
   await assert.rejects(
     () => deleteKnowledgeDocument("schedule.md", { agentId: "schedule", source: "agent" }),
     /read-only/i
