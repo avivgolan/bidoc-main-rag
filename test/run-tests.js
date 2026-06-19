@@ -1835,6 +1835,7 @@ test("timeline node tooltip shows title summary date and supports wheel cycling 
   assert.match(appSource, /function renderTimelineNodeTooltip\(\)/);
   assert.match(appSource, /timelineEventSummary\(event\)/);
   assert.match(appSource, /addEventListener\("wheel", \(event\) =>/);
+  assert.match(appSource, /getTimelineTooltipActiveEvent\(node, evs\) \|\| evs\[0\]/);
   assert.match(appSource, /גלגל בעכבר למעבר בין אירועים/);
   assert.match(cssSource, /\.tlNodeTooltip/);
   assert.match(cssSource, /\.tlNodeTooltipTitle/);

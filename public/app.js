@@ -4266,9 +4266,14 @@ function buildWaveLayer(events, buckets, minDate, maxDate) {
       node.setAttribute("tabindex", "0");
       const nodeLabel = isCluster ? `${evs.length} אירועים ב${bucket.label}` : ((ev.content || "").slice(0, 60) || ev.tags.join(", ") || "אירוע");
       node.setAttribute("aria-label", nodeLabel);
-      const handler = () => isCluster
-        ? selectTlEvent(evs[0], true, { source: "graph" })
-        : selectTlEvent(ev, true, { source: "graph" });
+      const handler = () => {
+        if (!isCluster) {
+          selectTlEvent(ev, true, { source: "graph" });
+          return;
+        }
+        const activeClusterEvent = getTimelineTooltipActiveEvent(node, evs) || evs[0];
+        selectTlEvent(activeClusterEvent, true, { source: "graph" });
+      };
       node.addEventListener("mouseenter", () => showTimelineNodeTooltip(node, isCluster ? evs : [ev]));
       node.addEventListener("mouseleave", hideTimelineNodeTooltip);
       node.addEventListener("focus", () => showTimelineNodeTooltip(node, isCluster ? evs : [ev]));
@@ -5407,6 +5412,13 @@ function showTimelineNodeTooltip(anchor, events) {
     insideTooltip: false
   };
   renderTimelineNodeTooltip();
+}
+
+function getTimelineTooltipActiveEvent(anchor, events) {
+  const state = timelineState.hoverTooltipState;
+  if (!state || state.anchor !== anchor || !state.events?.length) return null;
+  if (state.events.length !== events.length) return null;
+  return state.events[state.index] || state.events[0] || null;
 }
 
 function cycleTimelineNodeTooltip(step) {
