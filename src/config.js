@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { buildAgentList, defaultPrompts } from "./prompts.js";
 
@@ -239,17 +240,14 @@ const DEFAULT_TIMELINE_LINK_AGENT = {
 
 async function sbFetch(path, options = {}, operation = "read", connection = {}) {
   const cachedSecrets = _settingsCache.secrets || {};
-  const url = (
-    process.env.SUPABASE_URL ||
-    connection.supabaseUrl ||
-    cachedSecrets.supabaseUrl ||
-    ""
-  ).replace(/\/+$/, "");
+  const preferExplicit = connection.preferExplicit === true;
+  const url = trimSlash(preferExplicit
+    ? connection.supabaseUrl || process.env.SUPABASE_URL || cachedSecrets.supabaseUrl || ""
+    : process.env.SUPABASE_URL || connection.supabaseUrl || cachedSecrets.supabaseUrl || "");
   const key = resolveSecret(
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    connection.supabaseServiceRoleKey ||
-    cachedSecrets.supabaseServiceRoleKey ||
-    ""
+    preferExplicit
+      ? connection.supabaseServiceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY || cachedSecrets.supabaseServiceRoleKey || ""
+      : process.env.SUPABASE_SERVICE_ROLE_KEY || connection.supabaseServiceRoleKey || cachedSecrets.supabaseServiceRoleKey || ""
   );
   if (!url || !key) {
     const message = "App Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server so settings are shared across browsers and server instances.";
@@ -286,7 +284,7 @@ async function sbFetch(path, options = {}, operation = "read", connection = {}) 
 }
 
 async function loadSettingsFromDb() {
-  const rows = await sbFetch("/rest/v1/agent_settings?id=eq.default&select=data", {}, "read");
+  const rows = await readSettingsSnapshot();
   if (Array.isArray(rows)) {
     _settingsCache = rows?.[0]?.data || {};
     _settingsLoadedFromDb = Boolean(rows?.[0]?.data);
@@ -294,6 +292,26 @@ async function loadSettingsFromDb() {
     _settingsLoadedFromDb = false;
   }
   _settingsCachedAt = Date.now();
+}
+
+async function readSettingsSnapshot(connection = {}) {
+  return sbFetch("/rest/v1/agent_settings?id=eq.default&select=data", {}, "read", connection);
+}
+
+async function verifySettingsWrite(expectedSettings, connection = {}) {
+  const rows = await readSettingsSnapshot({
+    ...connection,
+    required: true,
+    preferExplicit: connection.preferExplicit !== false
+  });
+  const persisted = Array.isArray(rows) ? rows?.[0]?.data || null : null;
+  if (!persisted) {
+    throw new Error("Settings persistence verification failed: Supabase did not return the saved settings row.");
+  }
+  if (!isDeepStrictEqual(persisted, expectedSettings)) {
+    throw new Error("Settings persistence verification failed: the read-back settings did not match the saved payload.");
+  }
+  return persisted;
 }
 
 // ---------------------------------------------------------------------------
@@ -530,7 +548,25 @@ export function resolveToolUrl(toolName, config = getConfig()) {
 }
 
 function trimSlash(value) {
-  return value.replace(/\/+$/, "");
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function mergePlainObject(existing = {}, incoming = {}) {
+  const base = isPlainObject(existing) ? existing : {};
+  if (!isPlainObject(incoming)) return incoming ?? base;
+  const output = { ...base };
+  for (const [key, value] of Object.entries(incoming)) {
+    if (isPlainObject(value) && isPlainObject(base[key])) {
+      output[key] = mergePlainObject(base[key], value);
+    } else {
+      output[key] = value;
+    }
+  }
+  return output;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizeStringList(value, fallback = []) {
@@ -660,26 +696,28 @@ export function normalizeImportedSettingsFile(value = {}) {
   const raw = value && typeof value === "object" && value.settings && typeof value.settings === "object"
     ? value.settings
     : value;
-  if (!raw || typeof raw !== "object") throw new Error("Settings file must contain a JSON object");
-  return {
-    models: raw.models || {},
-    prompts: raw.prompts || {},
-    retrieval: raw.retrieval || {},
-    ai: raw.ai || {},
-    rag: raw.rag || {},
-    graph: raw.graph || {},
-    cache: raw.cache || {},
-    knowledge: raw.knowledge || {},
-    timelineLinks: raw.timelineLinks || {},
-    contentSource: raw.contentSource || {},
-    secrets: raw.secrets || {},
-    n8nBaseUrl: raw.n8nBaseUrl || "",
-    timezone: raw.timezone || "UTC+0",
-    tools: raw.tools || {},
-    toolsRuntime: raw.toolsRuntime || raw.toolRuntime || {},
-    subagents: raw.subagents || {},
-    presets: normalizeSettingsPresets(raw.presets || [])
-  };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Settings file must contain a JSON object");
+  const normalized = {};
+  if (Object.prototype.hasOwnProperty.call(raw, "models")) normalized.models = raw.models || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "prompts")) normalized.prompts = raw.prompts || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "retrieval")) normalized.retrieval = raw.retrieval || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "ai")) normalized.ai = raw.ai || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "rag")) normalized.rag = raw.rag || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "graph")) normalized.graph = raw.graph || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "cache")) normalized.cache = raw.cache || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "knowledge")) normalized.knowledge = raw.knowledge || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "timelineLinks")) normalized.timelineLinks = raw.timelineLinks || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "contentSource")) normalized.contentSource = raw.contentSource || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "secrets")) normalized.secrets = raw.secrets || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "n8nBaseUrl")) normalized.n8nBaseUrl = raw.n8nBaseUrl || "";
+  if (Object.prototype.hasOwnProperty.call(raw, "timezone")) normalized.timezone = raw.timezone || "UTC+0";
+  if (Object.prototype.hasOwnProperty.call(raw, "tools")) normalized.tools = raw.tools || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "toolsRuntime") || Object.prototype.hasOwnProperty.call(raw, "toolRuntime")) {
+    normalized.toolsRuntime = raw.toolsRuntime || raw.toolRuntime || {};
+  }
+  if (Object.prototype.hasOwnProperty.call(raw, "subagents")) normalized.subagents = raw.subagents || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "presets")) normalized.presets = normalizeSettingsPresets(raw.presets || []);
+  return normalized;
 }
 
 export function previewImportedSettingsFile(value = {}) {
@@ -687,6 +725,15 @@ export function previewImportedSettingsFile(value = {}) {
   return {
     draft,
     settings: publicSettings(getConfig(draft), draft)
+  };
+}
+
+export async function persistImportedSettingsFile(value = {}) {
+  const imported = normalizeImportedSettingsFile(value);
+  const saved = await writeLocalSettings(imported, { verifyReadBack: true });
+  return {
+    ok: true,
+    settings: publicSettings(getConfig(saved), saved)
   };
 }
 
@@ -727,20 +774,39 @@ export function readLocalSettings() {
   return _settingsCache;
 }
 
-export async function writeLocalSettings(settings) {
+export async function writeLocalSettings(settings, options = {}) {
   const existing = _settingsCache;
   const incomingSecrets = settings.secrets || {};
   const incomingContentSource = settings.contentSource || {};
   const existingContentSource = existing.contentSource || {};
+  const has = (key) => Object.prototype.hasOwnProperty.call(settings || {}, key);
+  const mergeSection = (key, incoming, current = {}) => has(key) ? mergePlainObject(current, incoming) : (current || {});
+  const mergedModels = mergeSection("models", settings.models || {}, existing.models || {});
+  const mergedPrompts = mergeSection("prompts", settings.prompts || {}, existing.prompts || {});
+  const mergedRetrieval = mergeSection("retrieval", settings.retrieval || {}, existing.retrieval || {});
+  const mergedAi = mergeSection("ai", settings.ai || {}, existing.ai || {});
+  const mergedRag = mergeSection("rag", settings.rag || {}, existing.rag || {});
+  const mergedGraph = mergeSection("graph", settings.graph || {}, existing.graph || {});
+  const mergedCache = mergeSection("cache", settings.cache || {}, existing.cache || {});
+  const mergedKnowledge = mergeSection("knowledge", settings.knowledge || {}, existing.knowledge || {});
+  const mergedTimelineLinks = mergeSection("timelineLinks", settings.timelineLinks || {}, existing.timelineLinks || {});
+  const mergedContentSource = mergeSection("contentSource", incomingContentSource, existingContentSource);
+  const mergedToolsRuntime = has("toolsRuntime") || has("toolRuntime")
+    ? mergePlainObject(existing.toolsRuntime || existing.toolRuntime || {}, settings.toolsRuntime || settings.toolRuntime || {})
+    : (existing.toolsRuntime || existing.toolRuntime || {});
+  const mergedSubagents = mergeSection("subagents", settings.subagents || {}, existing.subagents || {});
+  const mergedTools = has("tools")
+    ? { ...(existing.tools || {}), ...(settings.tools || {}) }
+    : (existing.tools || {});
 
   // Only persist prompts that DIFFER from the current defaults.
   // This ensures that whenever prompts.js is updated, new defaults always take
   // effect for any prompt the user hasn't intentionally customised.
   const currentDefaults = defaultPrompts();
   let resolvedPrompts;
-  if (settings.prompts != null) {
+  if (has("prompts")) {
     resolvedPrompts = {};
-    for (const [key, value] of Object.entries(settings.prompts)) {
+    for (const [key, value] of Object.entries(mergedPrompts)) {
       if (value !== currentDefaults[key]) {
         resolvedPrompts[key] = value; // keep only genuine user customisations
       }
@@ -750,68 +816,74 @@ export async function writeLocalSettings(settings) {
   }
 
   const safe = {
-    models: settings.models || existing.models || {},
+    models: mergedModels,
     prompts: resolvedPrompts,
     [PROMPTS_MIGRATION_FLAG]: true, // mark this record as migrated
     retrieval: {
-      rpcName: settings.retrieval?.rpcName || settings.contentSource?.hybridRpcName || existing.retrieval?.rpcName || existing.contentSource?.hybridRpcName || DEFAULT_HYBRID_RPC_NAME,
-      candidates: clampNumber(settings.retrieval?.candidates ?? existing.retrieval?.candidates, 1, 200, 40),
-      plannerCandidates: clampNumber(settings.retrieval?.plannerCandidates ?? existing.retrieval?.plannerCandidates, 1, 100, 20),
-      alertCandidates: clampNumber(settings.retrieval?.alertCandidates ?? existing.retrieval?.alertCandidates, 1, 100, 20),
-      rerankTopK: clampNumber(settings.retrieval?.rerankTopK ?? existing.retrieval?.rerankTopK, 1, 100, 10),
-      vectorWeight: clampNumber(settings.retrieval?.vectorWeight ?? existing.retrieval?.vectorWeight, 0, 1, 0.65),
-      keywordWeight: clampNumber(settings.retrieval?.keywordWeight ?? existing.retrieval?.keywordWeight, 0, 1, 0.35),
-      timelineLimit: clampNumber(settings.retrieval?.timelineLimit ?? existing.retrieval?.timelineLimit, 1, 5000, 1000),
-      timelineDaysBack: clampNumber(settings.retrieval?.timelineDaysBack ?? existing.retrieval?.timelineDaysBack, 1, 3650, 1825)
+      rpcName: mergedRetrieval.rpcName || mergedContentSource.hybridRpcName || DEFAULT_HYBRID_RPC_NAME,
+      candidates: clampNumber(mergedRetrieval.candidates, 1, 200, 40),
+      plannerCandidates: clampNumber(mergedRetrieval.plannerCandidates, 1, 100, 20),
+      alertCandidates: clampNumber(mergedRetrieval.alertCandidates, 1, 100, 20),
+      rerankTopK: clampNumber(mergedRetrieval.rerankTopK, 1, 100, 10),
+      vectorWeight: clampNumber(mergedRetrieval.vectorWeight, 0, 1, 0.65),
+      keywordWeight: clampNumber(mergedRetrieval.keywordWeight, 0, 1, 0.35),
+      timelineLimit: clampNumber(mergedRetrieval.timelineLimit, 1, 5000, 1000),
+      timelineDaysBack: clampNumber(mergedRetrieval.timelineDaysBack, 1, 3650, 1825)
     },
-    ai: normalizeAiSettings(settings.ai || existing.ai),
-    rag: normalizeRagSettings(settings.rag || existing.rag),
-    graph: normalizeGraphSettings(settings.graph || existing.graph),
-    cache: normalizeCacheSettings(settings.cache || existing.cache, {
-      redisUrl: mergeSecret(existing.cache?.redisUrl, settings.cache?.redisUrl)
+    ai: normalizeAiSettings(mergedAi),
+    rag: normalizeRagSettings(mergedRag),
+    graph: normalizeGraphSettings(mergedGraph),
+    cache: normalizeCacheSettings(mergedCache, {
+      redisUrl: mergeSecret(existing.cache?.redisUrl, has("cache") ? settings.cache?.redisUrl : undefined)
     }),
     contentSource: {
-      supabaseUrl: incomingContentSource.supabaseUrl || existingContentSource.supabaseUrl || "",
-      supabaseServiceRoleKey: mergeSecret(existingContentSource.supabaseServiceRoleKey, incomingContentSource.supabaseServiceRoleKey),
-      hybridRpcName: incomingContentSource.hybridRpcName || existingContentSource.hybridRpcName || settings.retrieval?.rpcName || existing.retrieval?.rpcName || DEFAULT_HYBRID_RPC_NAME,
-      indexTable: incomingContentSource.indexTable || existingContentSource.indexTable || DEFAULT_INDEX_TABLE,
-      alertsTable: incomingContentSource.alertsTable || existingContentSource.alertsTable || DEFAULT_ALERTS_TABLE,
-      alertsRpcName: incomingContentSource.alertsRpcName || existingContentSource.alertsRpcName || `match_${incomingContentSource.alertsTable || existingContentSource.alertsTable || DEFAULT_ALERTS_TABLE}`
+      supabaseUrl: mergedContentSource.supabaseUrl || "",
+      supabaseServiceRoleKey: mergeSecret(existingContentSource.supabaseServiceRoleKey, has("contentSource") ? incomingContentSource.supabaseServiceRoleKey : undefined),
+      hybridRpcName: mergedContentSource.hybridRpcName || mergedRetrieval.rpcName || DEFAULT_HYBRID_RPC_NAME,
+      indexTable: mergedContentSource.indexTable || DEFAULT_INDEX_TABLE,
+      alertsTable: mergedContentSource.alertsTable || DEFAULT_ALERTS_TABLE,
+      alertsRpcName: mergedContentSource.alertsRpcName || `match_${mergedContentSource.alertsTable || DEFAULT_ALERTS_TABLE}`
     },
     knowledge: {
-      triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, existing.knowledge?.triggerKeywords || DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS),
-      agentLimit: clampNumber(settings.knowledge?.agentLimit ?? existing.knowledge?.agentLimit, 1, 5, 2),
-      topK: clampNumber(settings.knowledge?.topK ?? existing.knowledge?.topK, 1, 20, 4),
-      chunkSize: clampNumber(settings.knowledge?.chunkSize ?? existing.knowledge?.chunkSize, 300, 6000, 1800)
+      triggerKeywords: normalizeStringList(mergedKnowledge.triggerKeywords, existing.knowledge?.triggerKeywords || DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS),
+      agentLimit: clampNumber(mergedKnowledge.agentLimit, 1, 5, 2),
+      topK: clampNumber(mergedKnowledge.topK, 1, 20, 4),
+      chunkSize: clampNumber(mergedKnowledge.chunkSize, 300, 6000, 1800)
     },
-    timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks || existing.timelineLinks),
-    n8nBaseUrl: settings.n8nBaseUrl || "",
+    timelineLinks: normalizeTimelineLinkAgentSettings(mergedTimelineLinks),
+    n8nBaseUrl: has("n8nBaseUrl") ? settings.n8nBaseUrl || "" : existing.n8nBaseUrl || "",
     secrets: {
-      openRouterApiKey: mergeSecret(existing.secrets?.openRouterApiKey, incomingSecrets.openRouterApiKey),
-      supabaseUrl: incomingSecrets.supabaseUrl || existing.secrets?.supabaseUrl || "",
-      supabaseServiceRoleKey: mergeSecret(existing.secrets?.supabaseServiceRoleKey, incomingSecrets.supabaseServiceRoleKey)
+      openRouterApiKey: mergeSecret(existing.secrets?.openRouterApiKey, has("secrets") ? incomingSecrets.openRouterApiKey : undefined),
+      supabaseUrl: has("secrets") && Object.prototype.hasOwnProperty.call(incomingSecrets, "supabaseUrl")
+        ? incomingSecrets.supabaseUrl || ""
+        : existing.secrets?.supabaseUrl || "",
+      supabaseServiceRoleKey: mergeSecret(existing.secrets?.supabaseServiceRoleKey, has("secrets") ? incomingSecrets.supabaseServiceRoleKey : undefined)
     },
     tools: Object.fromEntries(
-      TOOL_NAMES.map((tool) => [tool, settings.tools?.[tool] || ""])
+      TOOL_NAMES.map((tool) => [tool, mergedTools[tool] ?? ""])
     ),
-    toolsRuntime: normalizeToolRuntimeSettings(settings.toolsRuntime || existing.toolsRuntime || settings.toolRuntime || existing.toolRuntime),
-    timezone: settings.timezone || existing.timezone || "UTC+0",
-    subagents: settings.subagents || existing.subagents || {},
-    presets: normalizeSettingsPresets(settings.presets || existing.presets || [])
+    toolsRuntime: normalizeToolRuntimeSettings(mergedToolsRuntime),
+    timezone: has("timezone") ? settings.timezone || "UTC+0" : existing.timezone || "UTC+0",
+    subagents: mergedSubagents,
+    presets: has("presets") ? normalizeSettingsPresets(settings.presets || []) : normalizeSettingsPresets(existing.presets || [])
+  };
+  const writeConnection = {
+    required: true,
+    preferExplicit: true,
+    ...(options.connection || {}),
+    supabaseUrl: options.connection?.supabaseUrl || safe.secrets.supabaseUrl,
+    supabaseServiceRoleKey: options.connection?.supabaseServiceRoleKey || safe.secrets.supabaseServiceRoleKey
   };
   await sbFetch("/rest/v1/agent_settings", {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({ id: "default", data: safe, updated_at: new Date().toISOString() })
-  }, "write", {
-    required: true,
-    supabaseUrl: safe.secrets.supabaseUrl,
-    supabaseServiceRoleKey: safe.secrets.supabaseServiceRoleKey
-  });
-  _settingsCache = safe;
+  }, "write", writeConnection);
+  const persisted = options.verifyReadBack ? await verifySettingsWrite(safe, writeConnection) : safe;
+  _settingsCache = persisted;
   _settingsCachedAt = Date.now();
   _settingsLoadedFromDb = true;
-  return safe;
+  return persisted;
 }
 
 function markSettingsDbStatus(operation, ok, error = "") {

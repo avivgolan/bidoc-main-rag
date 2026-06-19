@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { exportFullSettings, getConfig, initSettings, loadEnv, persistImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
@@ -186,7 +186,9 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/settings/import") {
     const body = await readJson(req);
-    return sendJson(res, 200, previewImportedSettingsFile(body));
+    await reloadSettingsFromDb();
+    const result = await persistImportedSettingsFile(body);
+    return sendJson(res, 200, result);
   }
 
   if (req.method === "POST" && url.pathname === "/api/system/restart") {

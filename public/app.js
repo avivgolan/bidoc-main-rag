@@ -5243,10 +5243,10 @@ async function importSettingsFile(event) {
     }
     const result = await api("/api/settings/import", { method: "POST", body });
     applySettingsResponse(result.settings);
-    applyImportedSecretValues(result.draft);
-    state.settingsDirty = true;
-    setSettingsSaveState("הקובץ נטען לטופס. השינויים טרם נשמרו ב-Supabase.", "dirty");
-    showToast("הקובץ נטען לטופס. לחץ שמור כדי לעדכן את Supabase");
+    // Previously this flow was draft-only: השינויים טרם נשמרו ב-Supabase.
+    state.settingsDirty = false;
+    setSettingsSaveState("קובץ ההגדרות יובא ונשמר ב-Supabase.", "saved");
+    showToast("קובץ ההגדרות יובא ונשמר בהצלחה");
   } catch (error) {
     showToast(`שגיאה בטעינת קובץ הגדרות: ${error.message}`, "error");
   } finally {
@@ -5307,16 +5307,6 @@ function renderChatDrawer() {
 function conversationTitle(value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > 52 ? `${text.slice(0, 49)}…` : text || "שיחה חדשה";
-}
-
-function applyImportedSecretValues(draft = {}) {
-  if ($("openRouterApiKey")) $("openRouterApiKey").value = draft.secrets?.openRouterApiKey || "";
-  if ($("supabaseUrl")) $("supabaseUrl").value = draft.secrets?.supabaseUrl || "";
-  if ($("supabaseServiceRoleKey")) $("supabaseServiceRoleKey").value = draft.secrets?.supabaseServiceRoleKey || "";
-  if ($("contentSupabaseServiceRoleKey")) {
-    $("contentSupabaseServiceRoleKey").value = draft.contentSource?.supabaseServiceRoleKey || "";
-  }
-  if ($("cacheRedisUrl")) $("cacheRedisUrl").value = draft.cache?.redisUrl || "";
 }
 
 function timelineRelationLabels() {
