@@ -5084,6 +5084,10 @@ body:has(#timeline.active) .sidebar {
 
   .mobileShellBar {
     display: flex;
+    min-height: 58px;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px calc(8px + env(safe-area-inset-top));
   }
 
   .shell {
@@ -5147,43 +5151,54 @@ body:has(#timeline.active) .sidebar {
   .chatHeader {
     min-height: 0;
     display: grid;
-    grid-template-columns: 1fr;
-    align-items: stretch;
-    gap: 12px;
-    padding: 16px 14px 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    padding: 12px 14px 10px;
+    background: transparent;
+    border-bottom: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+    position: static;
   }
   .chatTitleGroup {
     display: grid;
-    grid-template-columns: 1fr;
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
     gap: 10px;
+  }
+  .chatDrawerToggle {
+    order: 2;
+    min-width: 42px;
+    gap: 6px;
   }
   .chatTitleGroup > div {
     min-width: 0;
     display: grid;
-    gap: 6px;
+    gap: 4px;
   }
   .chatTitleGroup h1 {
-    font-size: 28px;
-    line-height: 1.08;
+    font-size: 22px;
+    line-height: 1.1;
+    letter-spacing: 0;
   }
   .chatContextStatus {
     max-width: none;
     overflow: hidden;
     white-space: normal;
-    line-height: 1.45;
-    font-size: 13px;
+    line-height: 1.4;
+    font-size: 12px;
+    margin-top: 0;
   }
   .chatDrawerToggle,
   .newChatButton {
-    width: 100%;
+    width: auto;
     justify-content: center;
-    min-height: 48px;
-    padding-inline: 14px;
-    border-radius: 16px;
+    min-height: 42px;
+    padding-inline: 12px;
+    border-radius: 14px;
   }
   .chatDrawerToggle {
-    order: 2;
     color: var(--text-primary);
     border-color: rgba(41,66,53,0.08);
     background: rgba(255,255,255,0.76);
@@ -5193,18 +5208,12 @@ body:has(#timeline.active) .sidebar {
     flex: 0 0 auto;
   }
   .chatButtonLabel {
-    font-size: 13px;
+    font-size: 12px;
   }
   .newChatButton {
-    order: 3;
-    font-size: 13px;
-    box-shadow: 0 12px 28px rgba(83, 163, 128, 0.18);
-  }
-  .chatHeader::after {
-    content: "";
-    display: block;
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(41,66,53,0.08), transparent);
+    min-width: 124px;
+    font-size: 12px;
+    box-shadow: 0 10px 24px rgba(83, 163, 128, 0.16);
   }
   .chatDrawer {
     position: absolute;
@@ -5227,8 +5236,8 @@ body:has(#timeline.active) .sidebar {
   }
   #chat .messages {
     width: 100%;
-    padding: 8px 14px 252px;
-    gap: 18px;
+    padding: 6px 14px 208px;
+    gap: 14px;
   }
   #chat .message {
     font-size: 15px;
@@ -5251,52 +5260,91 @@ body:has(#timeline.active) .sidebar {
   .chatWelcome {
     width: min(100% - 24px, 860px);
     margin-top: 0;
-    padding: 10px 0 220px;
+    padding: 6px 0 184px;
     text-align: right;
   }
   .welcomeMark {
-    margin: 0 0 16px auto;
+    width: 48px;
+    height: 48px;
+    margin: 0 0 12px auto;
+    border-radius: 16px;
+    font-size: 18px;
+    box-shadow: 0 14px 26px rgba(129, 102, 68, 0.1);
   }
   .welcomeEyebrow,
   .chatWelcome > p:not(.welcomeEyebrow) {
     margin-inline: 0;
   }
+  .welcomeEyebrow {
+    margin-bottom: 8px;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+  }
   .chatWelcome h2 {
-    font-size: clamp(30px, 10vw, 40px);
+    font-size: clamp(18px, 6vw, 24px);
+    line-height: 1.18;
     text-wrap: pretty;
   }
-  .promptSuggestions { grid-template-columns: 1fr; }
+  .chatWelcome > p:not(.welcomeEyebrow) {
+    max-width: none;
+    margin: 0 0 18px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .promptSuggestions {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding: 2px 0 6px;
+    margin-inline: -2px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
   .promptSuggestions button {
-    min-height: 78px;
+    flex: 0 0 min(78vw, 280px);
+    min-height: 72px;
     align-content: start;
-    gap: 6px;
-    padding: 14px;
+    gap: 5px;
+    padding: 14px 14px 12px;
     text-align: right;
+    scroll-snap-align: start;
+    border-radius: 18px;
+  }
+  .promptSuggestions strong {
+    font-size: 14px;
+  }
+  .promptSuggestions span {
+    font-size: 11.5px;
+    line-height: 1.45;
   }
   #chat .composer {
     inset-inline: 12px;
     width: calc(100% - 24px);
-    bottom: calc(18px + env(safe-area-inset-bottom));
-    padding: 12px 12px 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
+    padding: 10px 10px calc(10px + env(safe-area-inset-bottom));
     border-radius: 20px;
+    box-shadow: 0 20px 44px rgba(129, 102, 68, 0.16);
   }
   .composerContext {
-    padding-bottom: 10px;
+    padding-bottom: 6px;
   }
   .composerInputRow {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
+    align-items: center;
   }
   #chat .composer textarea {
-    min-height: 60px;
-    padding: 10px 4px 6px;
+    min-height: 44px;
+    max-height: 132px;
+    padding: 10px 4px 8px;
     font-size: 16px;
+    line-height: 1.45;
   }
   .composerToolbar {
     display: grid;
-    gap: 10px;
-    margin-top: 8px;
+    gap: 8px;
+    margin-top: 10px;
   }
   .composerTools {
     display: flex;
@@ -5307,35 +5355,32 @@ body:has(#timeline.active) .sidebar {
   .composerTool {
     flex: 1 1 calc(50% - 4px);
     min-width: 0;
-    min-height: 42px;
+    min-height: 40px;
     justify-content: center;
     padding: 0 12px;
-    font-size: 12px;
-  }
-  .composerTool:first-child {
-    flex-basis: 100%;
+    font-size: 11.5px;
+    border-radius: 12px;
   }
   .sendButton {
-    width: 46px;
-    min-width: 46px !important;
-    height: 46px;
-    min-height: 46px !important;
+    width: 48px;
+    min-width: 48px !important;
+    height: 48px;
+    min-height: 48px !important;
   }
   #chat .shortcutHint { display: none; }
   .chatDisclaimer {
-    padding-inline: 28px;
-    line-height: 1.4;
+    margin: 8px 0 calc(8px + env(safe-area-inset-bottom));
+    padding-inline: 14px;
+    font-size: 11px;
+    line-height: 1.45;
+    text-align: center;
   }
 }
 
 @media (max-width: 480px) {
-  .chatContextStatus {
-    display: grid;
-  }
-
   .mobileShellBar {
-    gap: 10px;
-    padding-inline: 12px;
+    min-height: 54px;
+    padding-inline: 10px;
   }
 
   .mobileShellTitle strong {
@@ -5343,11 +5388,15 @@ body:has(#timeline.active) .sidebar {
   }
 
   .chatHeader {
+    grid-template-columns: 1fr;
+    gap: 8px;
     padding-inline: 12px;
+    padding-top: 10px;
   }
 
-  .chatTitleGroup h1 {
-    font-size: 24px;
+  .chatTitleGroup {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
   }
 
   .chatDrawerHeader strong {
@@ -5358,13 +5407,19 @@ body:has(#timeline.active) .sidebar {
     width: min(100% - 20px, 860px);
   }
 
+  .chatWelcome h2 {
+    font-size: 19px;
+  }
+
   .promptSuggestions button {
-    min-height: 74px;
+    flex-basis: min(84vw, 248px);
+    min-height: 68px;
     border-radius: 16px;
   }
 
-  .composerTool {
-    flex-basis: 100%;
+  .chatDrawerToggle .chatButtonLabel,
+  .newChatButton .chatButtonLabel {
+    font-size: 11.5px;
   }
 }
 
