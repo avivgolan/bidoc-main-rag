@@ -24,6 +24,7 @@ tags:
 - The chat workspace visual language now uses a darker editorial control-room style with layered glass surfaces, stronger display typography, upgraded sidebar hierarchy, and richer prompt/composer cards.
 - The current chat shell visual direction is now a lighter contemporary workspace with warm paper tones, soft glass cards, green accents, and a cleaner mobile hierarchy instead of a dark control-room look.
 - Mobile chat now favors an app-like layout over a marketing-style hero: the top shell is shorter, chat actions are compact, the welcome section is tighter, prompt suggestions scroll horizontally as compact cards, and the composer is denser and visually lighter.
+- The `שיחה חדשה` action now lives inside the conversations drawer, and on mobile the secondary composer tools are hidden behind a compact `+` toggle instead of always occupying composer width.
 - The chat pending response is a stable progress card updated from live run events, with an optional human-readable step timeline and client-side stop control.
 - Assistant responses render safe Markdown including headings, lists, quotes, code, tables, and links; structured source cards are rendered separately from inline citations.
 - Completed responses expose copy, regenerate, like, and dislike actions; user messages can be returned to the composer for editing.
@@ -61,6 +62,7 @@ tags:
 - 2026-06-20 -- Restyled the main shell and chat workspace into a more modern editorial command-deck aesthetic without changing chat behavior or test expectations.
 - 2026-06-20 -- Reworked the visual direction again into a brighter, more current light-theme mobile workspace and refreshed asset versioning so clients fetch the new CSS immediately.
 - 2026-06-20 -- Refined the mobile chat UX again to reduce wasted vertical space: compact header actions, smaller welcome hierarchy, horizontal quick prompts, and a denser floating composer better suited to narrow screens.
+- 2026-06-20 -- Moved `שיחה חדשה` into the chat drawer and collapsed mobile composer tools behind a `+` menu so the main input row stays smaller on narrow screens.
 
 ## Related
 

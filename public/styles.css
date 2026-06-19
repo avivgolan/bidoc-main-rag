@@ -4743,6 +4743,11 @@ body:has(#timeline.active) .sidebar {
   background: linear-gradient(135deg, var(--brand-500), #6daf89);
   box-shadow: 0 14px 32px rgba(83, 163, 128, 0.24);
 }
+.drawerNewChatButton {
+  width: 100%;
+  justify-content: center;
+  margin-top: 12px;
+}
 .chatWorkspace { position: relative; flex: 1; min-height: 0; display: flex; }
 .chatMain {
   position: relative;
@@ -5032,6 +5037,22 @@ body:has(#timeline.active) .sidebar {
 .composerContext { display: flex; flex-wrap: wrap; gap: 7px; padding: 3px 2px 8px; }
 .contextChip { display: inline-flex; align-items: center; gap: 7px; min-height: 31px; padding: 4px 10px; border: 1px solid rgba(41,66,53,0.06); border-radius: 999px; color: var(--text-secondary); background: rgba(255,255,255,0.74); font-size: 12px; }
 .contextChip button { width: 22px; min-width: 22px; min-height: 22px; padding: 0; color: var(--text-muted); background: transparent; }
+.composerMenuToggle {
+  display: none;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(41,66,53,0.08);
+  background: rgba(255,255,255,0.78);
+  color: var(--text-secondary);
+}
+.composerMenuToggle:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.95);
+}
 .composerInputRow { align-items: flex-end; gap: 8px; }
 #chat .composer textarea { min-height: 48px; max-height: 180px; padding: 12px 8px 8px; resize: none; line-height: 1.6; }
 .sendButton {
@@ -5330,9 +5351,13 @@ body:has(#timeline.active) .sidebar {
   }
   .composerInputRow {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
+  }
+  .composerMenuToggle {
+    display: grid;
+    place-items: center;
   }
   #chat .composer textarea {
     min-height: 44px;
@@ -5345,6 +5370,14 @@ body:has(#timeline.active) .sidebar {
     display: grid;
     gap: 8px;
     margin-top: 10px;
+  }
+  #chat .composer:not(.composerMenuOpen) .composerToolbar {
+    display: none;
+  }
+  #chat .composer.composerMenuOpen .composerMenuToggle {
+    background: linear-gradient(135deg, var(--brand-500), #6daf89);
+    color: #fff;
+    border-color: transparent;
   }
   .composerTools {
     display: flex;

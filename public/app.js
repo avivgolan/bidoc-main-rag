@@ -137,6 +137,7 @@ const state = {
   chatAttachments: [],
   chatSourcesEnabled: true,
   deepResearchEnabled: false,
+  composerMenuOpen: false,
   settingsDirty: false,
   projectGraph: { nodes: [], edges: [], stats: null }
 };
@@ -607,6 +608,15 @@ function wireChat() {
     toggleComposerTool($("toggleDeepResearch"), state.deepResearchEnabled);
     renderComposerContext();
   });
+  $("toggleComposerMenu")?.addEventListener("click", () => {
+    setComposerMenuOpen(!state.composerMenuOpen);
+  });
+  document.addEventListener("click", (event) => {
+    if (!state.composerMenuOpen) return;
+    const composer = $("chatForm");
+    if (!composer || composer.contains(event.target)) return;
+    setComposerMenuOpen(false);
+  });
 
   $("chatForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -617,6 +627,7 @@ function wireChat() {
     }
     const message = $("messageInput").value.trim();
     if (!message) return;
+    setComposerMenuOpen(false);
     if (!$("sessionId").value) setCurrentSession(createSessionId());
     const runId = `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     $("messageInput").value = "";
@@ -717,6 +728,12 @@ function setChatRunning(running) {
   $("chatForm")?.classList.toggle("running", running);
   $("messages")?.setAttribute("aria-busy", String(running));
   if ($("sendMessage")) $("sendMessage").setAttribute("aria-label", running ? "עצור יצירה" : "שלח הודעה");
+}
+
+function setComposerMenuOpen(open) {
+  state.composerMenuOpen = open;
+  $("chatForm")?.classList.toggle("composerMenuOpen", open);
+  $("toggleComposerMenu")?.setAttribute("aria-expanded", String(open));
 }
 
 function renderComposerContext() {
