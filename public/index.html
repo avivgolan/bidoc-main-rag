@@ -8,12 +8,21 @@
   </head>
   <body>
     <a class="skipLink" href="#chatMain">דלג לתוכן הצ׳אט</a>
-    <main class="shell">
+    <div class="mobileShellBar" aria-label="ניווט ראשי">
+      <button id="toggleSidebar" class="chatIconButton mobileShellMenu" type="button" aria-label="פתח תפריט ראשי" aria-expanded="false" aria-controls="appSidebar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <div class="mobileShellTitle">
+        <span class="mobileShellEyebrow">BiDoc</span>
+        <strong id="mobileActiveTabLabel">צ׳אט</strong>
+      </div>
+    </div>
+    <main class="shell" id="appShell">
 
       <!-- ======================================================
            SIDEBAR
            ====================================================== -->
-      <aside class="sidebar">
+      <aside class="sidebar" id="appSidebar">
 
         <!-- Brand -->
         <div class="sidebarBrand">
@@ -112,6 +121,7 @@
         </div>
 
       </aside>
+      <button class="sidebarBackdrop" id="sidebarBackdrop" type="button" aria-label="סגור תפריט ראשי" tabindex="-1"></button>
 
       <!-- ======================================================
            CHAT

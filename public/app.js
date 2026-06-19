@@ -211,6 +211,7 @@ const WORKFLOW_TEMPLATE_EDGES = [
 
 const $ = (id) => document.getElementById(id);
 const TIMELINE_UI_VERSION = "V1.5";
+const MOBILE_SHELL_QUERY = "(max-width: 980px)";
 
 const timelineState = {
   events: [], resolution: "month", activeTags: new Set(),
@@ -272,6 +273,7 @@ async function init() {
   safeInitStep("advanced ai controls", enhanceAdvancedAiControls);
   safeInitStep("parameter info controls", enhanceParameterInfoControls);
   safeInitStep("timeline", wireTimeline);
+  safeInitStep("shell", wireShell);
   safeInitStep("tabs", wireTabs);
   safeInitStep("chat", wireChat);
   safeInitStep("settings", wireSettings);
@@ -477,6 +479,8 @@ function activateTab(tabId, pushHistory = true, options = {}) {
   document.querySelectorAll(".tab, .panel").forEach((el) => el.classList.remove("active"));
   button.classList.add("active");
   panel.classList.add("active");
+  updateMobileActiveTabLabel(tabId);
+  closeSidebar();
   if (pushHistory && location.hash !== `#${tabId}`) {
     history.pushState({ tab: tabId }, "", `#${tabId}`);
   }
@@ -484,6 +488,45 @@ function activateTab(tabId, pushHistory = true, options = {}) {
   if (tabId === "workflow") {
     requestAnimationFrame(() => renderWorkflow(state.lastWorkflow));
   }
+}
+
+function isMobileShellViewport() {
+  return window.matchMedia(MOBILE_SHELL_QUERY).matches;
+}
+
+function updateMobileActiveTabLabel(tabId) {
+  const activeLabel = $("mobileActiveTabLabel");
+  const source = document.querySelector(`.tab[data-tab="${tabId}"] .tabLabel`);
+  if (activeLabel && source?.textContent?.trim()) {
+    activeLabel.textContent = source.textContent.trim();
+  }
+}
+
+function setSidebarOpen(open) {
+  $("appShell")?.classList.toggle("sidebarOpen", open);
+  document.body.classList.toggle("shellOverlayOpen", open);
+  $("toggleSidebar")?.setAttribute("aria-expanded", String(open));
+  if (open) closeChatDrawer();
+}
+
+function closeSidebar() {
+  setSidebarOpen(false);
+}
+
+function wireShell() {
+  $("toggleSidebar")?.addEventListener("click", () => {
+    const open = !$("appShell")?.classList.contains("sidebarOpen");
+    setSidebarOpen(open);
+  });
+  $("sidebarBackdrop")?.addEventListener("click", closeSidebar);
+  window.matchMedia(MOBILE_SHELL_QUERY).addEventListener("change", (event) => {
+    if (!event.matches) closeSidebar();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    closeSidebar();
+    closeChatDrawer();
+  });
 }
 
 function wireTabs() {
@@ -506,6 +549,7 @@ function wireChat() {
 
   $("toggleChatDrawer")?.addEventListener("click", () => {
     const open = !$("chat").classList.contains("drawerOpen");
+    if (open && isMobileShellViewport()) closeSidebar();
     $("chat").classList.toggle("drawerOpen", open);
     $("toggleChatDrawer").setAttribute("aria-expanded", String(open));
   });

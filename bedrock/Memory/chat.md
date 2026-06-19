@@ -20,6 +20,7 @@ tags:
 - Main RAG calls project tools through `callProjectTool` in `src/agent.js`.
 - Workflow logs include a dedicated `alert_agent` node when the Alert subagent is called.
 - The chat page is a project workspace with a welcome state, suggested prompts, searchable recent-conversation drawer, hidden technical session ID, and a responsive floating composer.
+- Mobile chat now includes an app-level navigation drawer for the main sidebar, a compact mobile shell header, and a denser composer layout that keeps chat tools visible without horizontal overflow.
 - The chat pending response is a stable progress card updated from live run events, with an optional human-readable step timeline and client-side stop control.
 - Assistant responses render safe Markdown including headings, lists, quotes, code, tables, and links; structured source cards are rendered separately from inline citations.
 - Completed responses expose copy, regenerate, like, and dislike actions; user messages can be returned to the composer for editing.
@@ -53,6 +54,7 @@ tags:
 - 2026-06-08 -- Changed grounded answer citations from a bottom source list to inline per-finding links, including multi-source bullets and source-aware fallback answers.
 - 2026-06-09 -- Rebuilt the chat page as a responsive AI project workspace with welcome prompts, conversation drawer, richer Markdown, source cards, response actions, stop/retry states, accessible progress, local drafts, source routing, and deep-research routing.
 - 2026-06-09 -- Decoupled recent-conversation loading from settings/model startup and reduced the sessions payload to compact metadata so the chat drawer populates immediately.
+- 2026-06-20 -- Added a mobile main-navigation drawer, tightened the chat header/composer layout for small screens, and added Playwright coverage for the mobile shell and chat drawer behaviors.
 
 ## Related
 

@@ -44,6 +44,7 @@
   --warning-text: #e5a94a;
   --warning-border: rgba(212, 144, 42, 0.3);
   --sidebar-width: 268px;
+  --mobile-shell-bar-height: 68px;
   --r-xs: 3px;
   --r-sm: 6px;
   --r: 8px;
@@ -90,6 +91,47 @@ select:focus-visible,
   min-height: 100vh;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+}
+
+.mobileShellBar,
+.sidebarBackdrop {
+  display: none;
+}
+
+.mobileShellBar {
+  position: fixed;
+  z-index: 40;
+  inset-block-start: 0;
+  inset-inline: 0;
+  min-height: var(--mobile-shell-bar-height);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px calc(10px + env(safe-area-inset-top));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(15, 15, 17, 0.98), rgba(15, 15, 17, 0.9));
+  backdrop-filter: blur(18px);
+}
+
+.mobileShellTitle {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.mobileShellEyebrow {
+  color: var(--brand-300);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.mobileShellTitle strong {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 /* Sidebar */
@@ -4560,6 +4602,9 @@ body:has(#timeline.active) .sidebar {
   border-bottom: 1px solid var(--line);
   background: rgba(15, 15, 17, 0.88);
   backdrop-filter: blur(16px);
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .chatTitleGroup,
@@ -4893,35 +4938,225 @@ body:has(#timeline.active) .sidebar {
 .messageErrorActions { display: flex; gap: 8px; margin-top: 9px; }
 .messageErrorActions button { min-height: 34px; padding: 5px 10px; }
 
+@media (max-width: 980px) {
+  body.shellOverlayOpen {
+    overflow: hidden;
+  }
+
+  .mobileShellBar {
+    display: flex;
+  }
+
+  .shell {
+    min-height: auto;
+    display: block;
+    padding-top: calc(var(--mobile-shell-bar-height) + env(safe-area-inset-top));
+  }
+
+  .sidebar {
+    position: fixed;
+    z-index: 42;
+    top: 0;
+    right: 0;
+    left: auto;
+    width: min(84vw, 340px);
+    max-width: 340px;
+    height: 100dvh;
+    border-inline-start: 1px solid rgba(255, 255, 255, 0.08);
+    border-inline-end: 0;
+    box-shadow: -24px 0 60px rgba(0, 0, 0, 0.45);
+    transform: translateX(104%);
+    transition: transform 180ms ease;
+  }
+
+  #appShell.sidebarOpen .sidebar {
+    transform: translateX(0);
+  }
+
+  .sidebarBackdrop {
+    position: fixed;
+    z-index: 41;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: rgba(4, 8, 15, 0.66);
+  }
+
+  #appShell.sidebarOpen .sidebarBackdrop {
+    display: block;
+  }
+
+  .panel {
+    min-height: calc(100dvh - var(--mobile-shell-bar-height));
+    padding: 18px 14px 24px;
+  }
+
+  .panelHeader {
+    gap: 12px;
+    padding-bottom: 12px;
+  }
+}
+
 @media (max-width: 760px) {
-  #chat { min-height: 100dvh; }
-  .chatHeader { min-height: 68px; padding: 10px 12px; }
-  .chatContextStatus { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #chat {
+    height: calc(100dvh - var(--mobile-shell-bar-height));
+    min-height: calc(100dvh - var(--mobile-shell-bar-height));
+  }
+  .chatHeader {
+    min-height: 68px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 10px;
+    padding: 12px 12px 10px;
+  }
+  .chatTitleGroup {
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .chatTitleGroup > div {
+    min-width: 0;
+  }
+  .chatTitleGroup h1 {
+    font-size: 18px;
+    line-height: 1.25;
+  }
+  .chatContextStatus {
+    max-width: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    line-height: 1.45;
+  }
   .newChatButton { width: 44px; min-width: 44px; padding: 0; font-size: 0; justify-content: center; }
   .chatDrawer {
     position: absolute;
     z-index: 12;
     inset-block: 0;
     inset-inline-start: 0;
-    width: min(86vw, 320px);
+    width: min(88vw, 340px);
+    padding: 18px 16px 22px;
     transform: translateX(105%);
     border-inline-end: 0;
     border-inline-start: 1px solid var(--line);
     box-shadow: -20px 0 50px rgba(0,0,0,.45);
   }
-  #chat:not(.drawerOpen) .chatDrawer { width: min(86vw, 320px); padding: 18px 14px; transform: translateX(105%); }
+  #chat:not(.drawerOpen) .chatDrawer { width: min(88vw, 340px); transform: translateX(105%); }
   #chat.drawerOpen .chatDrawer { transform: translateX(0); }
   #chat.drawerOpen .chatDrawerBackdrop { position: absolute; z-index: 11; inset: 0; display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: rgba(0,0,0,.52); }
-  #chat .messages { padding: 22px 14px 220px; gap: 24px; }
-  #chat .message.user { max-width: 90%; }
-  .chatWelcome { width: min(100% - 28px, 860px); padding-bottom: 190px; }
+  .chatDrawerList {
+    max-height: calc(100dvh - 220px);
+    padding-bottom: 20px;
+  }
+  #chat .messages {
+    width: 100%;
+    padding: 18px 12px 252px;
+    gap: 20px;
+  }
+  #chat .message {
+    font-size: 15px;
+    line-height: 1.72;
+  }
+  #chat .message.user { max-width: 100%; }
+  .messageActions {
+    flex-wrap: wrap;
+    opacity: 1;
+  }
+  .sourceCards {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .sourceCard {
+    max-width: none;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .chatWelcome { width: min(100% - 24px, 860px); padding: 20px 0 220px; }
+  .chatWelcome h2 {
+    font-size: clamp(23px, 8vw, 32px);
+  }
   .promptSuggestions { grid-template-columns: 1fr; }
-  .promptSuggestions button { min-height: 68px; }
-  #chat .composer { inset-inline: 10px; width: calc(100% - 20px); bottom: calc(31px + env(safe-area-inset-bottom)); }
-  .composerToolbar { align-items: flex-end; }
-  .composerTool { font-size: 0; width: 36px; min-width: 36px; justify-content: center; padding: 0; }
-  .composerTool:not(:first-child) { width: auto; padding: 5px 8px; font-size: 11px; }
+  .promptSuggestions button {
+    min-height: 72px;
+    align-content: start;
+    gap: 6px;
+    padding: 14px;
+  }
+  #chat .composer {
+    inset-inline: 12px;
+    width: calc(100% - 24px);
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    padding: 12px 12px 10px;
+    border-radius: 20px;
+  }
+  .composerContext {
+    padding-bottom: 10px;
+  }
+  .composerInputRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  #chat .composer textarea {
+    min-height: 60px;
+    padding: 10px 4px 6px;
+    font-size: 16px;
+  }
+  .composerToolbar {
+    display: grid;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .composerTools {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+  .composerTool {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    justify-content: center;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .composerTool:first-child {
+    grid-column: 1 / -1;
+  }
+  .sendButton {
+    width: 46px;
+    min-width: 46px !important;
+    height: 46px;
+    min-height: 46px !important;
+  }
   #chat .shortcutHint { display: none; }
+  .chatDisclaimer {
+    padding-inline: 28px;
+    line-height: 1.4;
+  }
+}
+
+@media (max-width: 480px) {
+  .chatContextStatus {
+    display: none;
+  }
+
+  .mobileShellBar {
+    gap: 10px;
+    padding-inline: 12px;
+  }
+
+  .mobileShellTitle strong {
+    font-size: 14px;
+  }
+
+  .chatDrawerHeader strong {
+    font-size: 14px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
