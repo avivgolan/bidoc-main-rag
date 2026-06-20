@@ -706,13 +706,13 @@ label {
   gap: 6px;
 }
 
-.composer button {
+.composer button:not(.composerMenuToggle):not(.sendButton):not(.composerTool) {
   min-width: 92px;
   min-height: 40px;
   background: var(--brand-600);
 }
 
-.composer button:hover:not(:disabled) {
+.composer button:not(.composerMenuToggle):not(.sendButton):not(.composerTool):hover:not(:disabled) {
   background: var(--brand-700);
   box-shadow: 0 12px 24px rgba(15, 112, 95, 0.3);
 }
@@ -5037,22 +5037,27 @@ body:has(#timeline.active) .sidebar {
 .composerContext { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px 2px 8px; }
 .contextChip { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 4px 10px; border: 1px solid rgba(225,216,204,0.88); border-radius: 999px; color: var(--text-secondary); background: rgba(255,255,255,0.9); font-size: 12px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.7); }
 .contextChip button { width: 22px; min-width: 22px; min-height: 22px; padding: 0; color: var(--text-muted); background: transparent; }
-.composerMenuToggle {
+#chat .composer .composerMenuToggle {
   display: none;
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  min-height: 36px;
+  width: 30px;
+  min-width: 30px !important;
+  height: 30px;
+  min-height: 30px !important;
   padding: 0;
   border-radius: 999px;
-  border: 1px solid transparent;
+  border: 0;
   background: transparent;
-  color: var(--text-secondary);
+  color: rgba(82, 99, 87, 0.72);
   box-shadow: none;
 }
-.composerMenuToggle:hover:not(:disabled) {
+#chat .composer .composerMenuToggle svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.9;
+}
+#chat .composer .composerMenuToggle:hover:not(:disabled) {
   color: var(--text-primary);
-  background: rgba(255,255,255,0.72);
+  background: rgba(255,255,255,0.55);
 }
 .composerInputRow { align-items: center; gap: 6px; }
 #chat .composer textarea { min-height: 46px; max-height: 180px; padding: 10px 4px 8px; resize: none; line-height: 1.55; }
@@ -5358,7 +5363,7 @@ body:has(#timeline.active) .sidebar {
     gap: 6px;
     align-items: center;
   }
-  .composerMenuToggle {
+  #chat .composer .composerMenuToggle {
     display: grid;
     place-items: center;
     align-self: end;
@@ -5379,9 +5384,8 @@ body:has(#timeline.active) .sidebar {
     display: none;
   }
   #chat .composer.composerMenuOpen .composerMenuToggle {
-    background: rgba(83, 163, 128, 0.12);
-    color: var(--brand-700);
-    border-color: rgba(83, 163, 128, 0.08);
+    background: rgba(83, 163, 128, 0.08);
+    color: rgba(40, 88, 68, 0.9);
   }
   .composerTools {
     display: flex;

@@ -65,6 +65,7 @@ tags:
 - 2026-06-20 -- Refined the mobile chat UX again to reduce wasted vertical space: compact header actions, smaller welcome hierarchy, horizontal quick prompts, and a denser floating composer better suited to narrow screens.
 - 2026-06-20 -- Moved `שיחה חדשה` into the chat drawer and collapsed mobile composer tools behind a `+` menu so the main input row stays smaller on narrow screens.
 - 2026-06-20 -- Restyled the mobile composer toward a lighter native-chat feel with a softer capsule shell, subtler `+` affordance, rounder send action, and pill-shaped tool chips inspired by modern messaging apps.
+- 2026-06-20 -- Removed a legacy wide `.composer button` treatment from the mobile composer controls so the `+` action stays transparent and proportionate instead of expanding into a large green button.
 
 ## Related
 
