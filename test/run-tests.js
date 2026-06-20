@@ -9,7 +9,7 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
-import { exportFullSettings, getConfig, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, persistImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
+import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
@@ -509,146 +509,19 @@ test("settings import preview does not mutate persisted runtime settings", () =>
   assert.deepEqual(readLocalSettings(), before);
 });
 
-test("settings import persists immediately, saves all fields, and keeps public secrets masked", async () => {
-  const savedFetch = global.fetch;
-  const savedUrl = process.env.SUPABASE_URL;
-  const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  let writtenRow = null;
-  const calls = [];
-  process.env.SUPABASE_URL = "https://old-env.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_old_env";
-  global.fetch = async (url, options = {}) => {
-    calls.push({ url: String(url), options });
-    if (options.method === "POST") {
-      writtenRow = JSON.parse(options.body).data;
-      return { ok: true, status: 201, text: async () => "" };
+test("settings import preview remains draft-only and does not persist", async () => {
+  const before = structuredClone(readLocalSettings());
+  const preview = previewImportedSettingsFile({
+    settings: {
+      models: { main: "openai/import-preview" },
+      secrets: { openRouterApiKey: "sk-import-preview" },
+      cache: { redisUrl: "redis://draft-only" }
     }
-    return { ok: true, status: 200, text: async () => JSON.stringify([{ data: writtenRow }]) };
-  };
-  try {
-    const result = await persistImportedSettingsFile({
-      settings: {
-        models: { main: "openai/gpt-4.1", qa: "openai/gpt-4.1-mini" },
-        prompts: { main: "Imported main prompt" },
-        retrieval: { candidates: 32, plannerCandidates: 11, alertCandidates: 14, rerankTopK: 7, vectorWeight: 0.6, keywordWeight: 0.4 },
-        ai: { main: { temperature: 0.45, maxTokens: 3500, timeoutMs: 47000 } },
-        rag: { contextRecordsLimit: 16, chunkTextLimit: 1600, plannerExtraQueriesLimit: 3 },
-        graph: { enabled: false, searchLimit: 21, contextLimit: 9, expandedForListQuestions: false },
-        cache: { enabled: true, provider: "redis", redisUrl: "redis://cache.internal:6379", namespace: "bidoc:test:", memoryMaxEntries: 321, timeoutMs: 4400 },
-        knowledge: { triggerKeywords: ["delay", "blocker"], agentLimit: 3, topK: 5, chunkSize: 1500 },
-        timelineLinks: { suggestionLimit: 6, semanticTopK: 4, timeWindowDays: 45, minConfidence: 0.55, ignoredTerms: ["general"] },
-        contentSource: {
-          supabaseUrl: "https://content.supabase.co",
-          supabaseServiceRoleKey: "sb_secret_content",
-          hybridRpcName: "content_hybrid_rpc",
-          indexTable: "content_index",
-          alertsTable: "content_alerts",
-          alertsRpcName: "match_content_alerts"
-        },
-        secrets: {
-          openRouterApiKey: "sk-imported-openrouter",
-          supabaseUrl: "https://new-app.supabase.co",
-          supabaseServiceRoleKey: "sb_secret_new_app"
-        },
-        n8nBaseUrl: "https://n8n.example",
-        timezone: "UTC+3",
-        tools: { alert: "https://n8n.test/webhook/alert", meetings: "https://n8n.test/webhook/meetings" },
-        toolsRuntime: { enabled: true, parallelLimit: 4, alertAgentEnabled: true, safetyPrecheckEnabled: false },
-        subagents: { alert: { table: "alerts_embeddings", model: "openai/gpt-4.1-mini", prompt: "Imported alert prompt" } },
-        presets: [{ id: "team-fast", name: "Team Fast", description: "Imported preset", settings: { retrieval: { candidates: 18 } } }]
-      }
-    });
-    assert.equal(calls[0].url, "https://new-app.supabase.co/rest/v1/agent_settings");
-    assert.equal(calls[1].url, "https://new-app.supabase.co/rest/v1/agent_settings?id=eq.default&select=data");
-    assert.equal(calls[0].options.headers.apikey, "sb_secret_new_app");
-    assert.equal(writtenRow.secrets.openRouterApiKey, "sk-imported-openrouter");
-    assert.equal(writtenRow.secrets.supabaseUrl, "https://new-app.supabase.co");
-    assert.equal(writtenRow.secrets.supabaseServiceRoleKey, "sb_secret_new_app");
-    assert.equal(writtenRow.contentSource.supabaseServiceRoleKey, "sb_secret_content");
-    assert.equal(writtenRow.cache.redisUrl, "redis://cache.internal:6379");
-    assert.equal(writtenRow.n8nBaseUrl, "https://n8n.example");
-    assert.equal(writtenRow.tools.alert, "https://n8n.test/webhook/alert");
-    assert.equal(writtenRow.tools.meetings, "https://n8n.test/webhook/meetings");
-    assert.equal(writtenRow.toolsRuntime.parallelLimit, 4);
-    assert.equal(writtenRow.subagents.alert.model, "openai/gpt-4.1-mini");
-    assert.equal(writtenRow.presets[0].id, "team-fast");
-    assert.equal(writtenRow.models.main, "openai/gpt-4.1");
-    assert.equal(writtenRow.contentSource.indexTable, "content_index");
-    assert.equal(result.ok, true);
-    assert.ok(isMaskedSecret(result.settings.secrets.openRouterApiKey));
-    assert.ok(isMaskedSecret(result.settings.secrets.supabaseServiceRoleKey));
-    assert.ok(isMaskedSecret(result.settings.contentSource.supabaseServiceRoleKey));
-    assert.ok(isMaskedSecret(result.settings.cache.redisUrl));
-    assert.equal(result.settings.secrets.supabaseUrl, "https://new-app.supabase.co");
-    assert.equal(result.settings.tools.alert.url, "https://n8n.test/webhook/alert");
-  } finally {
-    global.fetch = savedFetch;
-    if (savedUrl == null) delete process.env.SUPABASE_URL;
-    else process.env.SUPABASE_URL = savedUrl;
-    if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
-  }
-});
-
-test("settings import uses imported app Supabase credentials for write and verification", async () => {
-  const savedFetch = global.fetch;
-  const savedUrl = process.env.SUPABASE_URL;
-  const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const urls = [];
-  let writtenRow = null;
-  process.env.SUPABASE_URL = "https://old-env.supabase.co";
-  process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_old_env";
-  global.fetch = async (url, options = {}) => {
-    urls.push(String(url));
-    if (options.method === "POST") {
-      writtenRow = JSON.parse(options.body).data;
-      return { ok: true, status: 201, text: async () => "" };
-    }
-    return { ok: true, status: 200, text: async () => JSON.stringify([{ data: writtenRow }]) };
-  };
-  try {
-    await persistImportedSettingsFile({
-      models: { main: "openai/gpt-4o-mini" },
-      secrets: {
-        supabaseUrl: "https://fresh-import.supabase.co",
-        supabaseServiceRoleKey: "sb_secret_fresh_import"
-      }
-    });
-    assert.deepEqual(urls, [
-      "https://fresh-import.supabase.co/rest/v1/agent_settings",
-      "https://fresh-import.supabase.co/rest/v1/agent_settings?id=eq.default&select=data"
-    ]);
-  } finally {
-    global.fetch = savedFetch;
-    if (savedUrl == null) delete process.env.SUPABASE_URL;
-    else process.env.SUPABASE_URL = savedUrl;
-    if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
-  }
-});
-
-test("settings import fails when read-after-write verification does not match", async () => {
-  const savedFetch = global.fetch;
-  global.fetch = async (_url, options = {}) => {
-    if (options.method === "POST") {
-      return { ok: true, status: 201, text: async () => "" };
-    }
-    return { ok: true, status: 200, text: async () => JSON.stringify([{ data: { models: { main: "different-model" } } }]) };
-  };
-  try {
-    await assert.rejects(
-      persistImportedSettingsFile({
-        models: { main: "openai/gpt-4o-mini" },
-        secrets: {
-          supabaseUrl: "https://verify.supabase.co",
-          supabaseServiceRoleKey: "sb_secret_verify"
-        }
-      }),
-      /verification failed/i
-    );
-  } finally {
-    global.fetch = savedFetch;
-  }
+  });
+  assert.equal(preview.draft.models.main, "openai/import-preview");
+  assert.equal(preview.draft.secrets.openRouterApiKey, "sk-import-preview");
+  assert.ok(isMaskedSecret(preview.settings.secrets.openRouterApiKey));
+  assert.deepEqual(readLocalSettings(), before);
 });
 
 test("settings config preserves explicit zero retrieval weights", () => {
@@ -724,7 +597,7 @@ test("settings page exposes presets controls and wiring", () => {
   assert.match(cssSource, /\.settingsPresetMeta/);
 });
 
-test("settings flow loads from Supabase, imports persist immediately, and saves without stale reload", () => {
+test("settings flow loads from Supabase, imports stay draft-only, and saves without stale reload", () => {
   const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
   const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   const saveHandler = appSource.slice(
@@ -736,7 +609,7 @@ test("settings flow loads from Supabase, imports persist immediately, and saves 
     appSource.indexOf("async function refreshChatSessions")
   );
   assert.match(serverSource, /GET" && url\.pathname === "\/api\/settings"[\s\S]*await reloadSettingsFromDb\(\)/);
-  assert.match(serverSource, /POST" && url\.pathname === "\/api\/settings\/import"[\s\S]*await reloadSettingsFromDb\(\)[\s\S]*persistImportedSettingsFile\(body\)/);
+  assert.match(serverSource, /POST" && url\.pathname === "\/api\/settings\/import"[\s\S]*previewImportedSettingsFile\(body\)/);
   assert.match(importHandler, /applySettingsResponse\(result\.settings\)/);
   assert.match(importHandler, /השינויים טרם נשמרו ב-Supabase/);
   assert.match(saveHandler, /applySettingsResponse\(result\.settings\)/);
@@ -744,16 +617,76 @@ test("settings flow loads from Supabase, imports persist immediately, and saves 
   assert.match(appSource, /settings:\s+\(\) => state\.settingsDirty \? Promise\.resolve\(\) : loadSettings\(\)/);
 });
 
-test("settings import UI applies saved server state instead of leaving a dirty draft", () => {
+test("settings import UI leaves a dirty draft and reapplies imported secrets locally", () => {
   const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
   const importHandler = appSource.slice(
     appSource.indexOf("async function importSettingsFile"),
     appSource.indexOf("async function refreshChatSessions")
   );
   assert.match(importHandler, /applySettingsResponse\(result\.settings\)/);
-  assert.match(importHandler, /state\.settingsDirty = false/);
-  assert.match(importHandler, /setSettingsSaveState\(".*Supabase\.", "saved"\)/);
-  assert.doesNotMatch(importHandler, /applyImportedSecretValues/);
+  assert.match(importHandler, /applyImportedSecretValues\(result\.draft\)/);
+  assert.match(importHandler, /state\.settingsDirty = true/);
+  assert.match(importHandler, /setSettingsSaveState\(".*", "dirty"\)/);
+});
+
+test("server disables direct subagent config persistence and keeps settings import preview-only", () => {
+  const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.match(serverSource, /POST" && url\.pathname === "\/api\/settings\/import"[\s\S]*previewImportedSettingsFile\(body\)/);
+  assert.match(serverSource, /PUT" && subagentConfigMatch[\s\S]*405[\s\S]*Save them through \/api\/settings/);
+  assert.match(serverSource, /PUT" && url\.pathname === "\/api\/settings"[\s\S]*writeLocalSettings\(body, \{ source: "settings_save" \}\)/);
+  assert.doesNotMatch(serverSource, /persistImportedSettingsFile/);
+});
+
+test("prompt changes still persist through the main settings save route", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /prompts: readChatPromptFieldsFromSettingsForm\(\)/);
+  assert.match(appSource, /const body = readSettingsForm\(\);[\s\S]*api\("\/api\/settings", \{ method: "PUT", body \}\)/);
+});
+
+test("startup settings init does not auto-write agent settings", async () => {
+  const savedFetch = global.fetch;
+  const savedUrl = process.env.SUPABASE_URL;
+  const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const calls = [];
+  process.env.SUPABASE_URL = "https://init.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_init";
+  global.fetch = async (url, options = {}) => {
+    calls.push({ url: String(url), method: options.method || "GET" });
+    return { ok: true, status: 200, text: async () => JSON.stringify([{ data: {} }]) };
+  };
+  try {
+    await initSettings();
+    assert.ok(calls.some((call) => call.url.includes("/rest/v1/agent_settings?id=eq.default&select=data")));
+    assert.equal(calls.filter((call) => call.url.includes("/rest/v1/agent_settings") && call.method === "POST").length, 0);
+  } finally {
+    global.fetch = savedFetch;
+    if (savedUrl == null) delete process.env.SUPABASE_URL;
+    else process.env.SUPABASE_URL = savedUrl;
+    if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
+  }
+});
+
+test("secondary settings buttons stay draft-only and do not call /api/settings directly", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const linkAgentHandler = appSource.slice(
+    appSource.indexOf("async function saveLinkAgentSettings"),
+    appSource.indexOf("async function testLinkAgentSettings")
+  );
+  const presetHandler = appSource.slice(
+    appSource.indexOf("async function saveCurrentSettingsAsPreset"),
+    appSource.indexOf("function customSettingsPresets")
+  );
+  const subagentHandler = appSource.slice(
+    appSource.indexOf('card.querySelector(".subagent-save").addEventListener'),
+    appSource.indexOf('card.querySelector(".subagent-run").addEventListener')
+  );
+  assert.doesNotMatch(linkAgentHandler, /api\("\/api\/settings"/);
+  assert.doesNotMatch(presetHandler, /api\("\/api\/settings"/);
+  assert.doesNotMatch(subagentHandler, /api\(`\/api\/subagents\/\$\{encodeURIComponent\(agent\.id\)\}\/config`/);
+  assert.match(linkAgentHandler, /state\.settingsDirty = true/);
+  assert.match(presetHandler, /state\.settingsDirty = true/);
+  assert.match(subagentHandler, /state\.settingsDirty = true/);
 });
 
 test("embedding settings expose the complete retrieval row funnel", () => {
@@ -823,7 +756,7 @@ test("settings save fails without shared App Supabase persistence", async () => 
   for (const key of Object.keys(cache)) delete cache[key];
   try {
     await assert.rejects(
-      writeLocalSettings({ models: { main: "openai/gpt-4o-mini" } }),
+      writeLocalSettings({ models: { main: "openai/gpt-4o-mini" } }, { source: "settings_save" }),
       /Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY/
     );
     assert.deepEqual(readLocalSettings(), {});
@@ -835,6 +768,17 @@ test("settings save fails without shared App Supabase persistence", async () => 
     if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
     else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
   }
+});
+
+test("settings persistence rejects missing or unapproved write sources", async () => {
+  await assert.rejects(
+    writeLocalSettings({ models: { main: "openai/gpt-4o-mini" } }),
+    /explicit approved source/i
+  );
+  await assert.rejects(
+    writeLocalSettings({ models: { main: "openai/gpt-4o-mini" } }, { source: "settings_import" }),
+    /not allowed/i
+  );
 });
 
 test("settings import credentials can bootstrap a Supabase write", async () => {
@@ -855,7 +799,7 @@ test("settings import credentials can bootstrap a Supabase write", async () => {
         supabaseUrl: "https://shared.supabase.co/",
         supabaseServiceRoleKey: "sb_secret_shared"
       }
-    });
+    }, { source: "settings_save" });
     assert.equal(request.url, "https://shared.supabase.co/rest/v1/agent_settings");
     assert.equal(request.options.headers.apikey, "sb_secret_shared");
     assert.equal(JSON.parse(request.options.body).data.models.main, "openai/gpt-4o-mini");

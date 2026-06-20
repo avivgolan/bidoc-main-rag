@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { exportFullSettings, getConfig, initSettings, loadEnv, persistImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
@@ -186,9 +186,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/settings/import") {
     const body = await readJson(req);
-    await reloadSettingsFromDb();
-    const result = await persistImportedSettingsFile(body);
-    return sendJson(res, 200, result);
+    return sendJson(res, 200, previewImportedSettingsFile(body));
   }
 
   if (req.method === "POST" && url.pathname === "/api/system/restart") {
@@ -258,7 +256,7 @@ async function handleApi(req, res, url) {
   if (req.method === "PUT" && url.pathname === "/api/settings") {
     const body = await readJson(req);
     await reloadSettingsFromDb();
-    const saved = await writeLocalSettings(body);
+    const saved = await writeLocalSettings(body, { source: "settings_save" });
     return sendJson(res, 200, { saved, settings: publicSettings(config()) });
   }
 
@@ -296,22 +294,7 @@ async function handleApi(req, res, url) {
 
   const subagentConfigMatch = url.pathname.match(/^\/api\/subagents\/([^/]+)\/config$/);
   if (req.method === "PUT" && subagentConfigMatch) {
-    const agentId = decodeURIComponent(subagentConfigMatch[1]);
-    const body = await readJson(req);
-    const current = readLocalSettings();
-    const updated = {
-      ...current,
-      subagents: {
-        ...(current.subagents || {}),
-        [agentId]: {
-          table: body.table || "",
-          model: body.model || "",
-          systemPrompt: body.systemPrompt || ""
-        }
-      }
-    };
-    const saved = await writeLocalSettings(updated);
-    return sendJson(res, 200, { ok: true, config: saved.subagents?.[agentId] });
+    return sendJson(res, 405, { error: "Subagent settings are draft-only here. Save them through /api/settings." });
   }
 
   if (req.method === "POST" && url.pathname === "/api/subagents/alert") {

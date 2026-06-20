@@ -421,19 +421,23 @@ function loadSubAgents() {
       const saveBtn = card.querySelector(".subagent-save");
       const saveStatus = card.querySelector(".subagent-save-status");
       saveBtn.disabled = true;
-      saveStatus.textContent = "שומר…";
+      saveStatus.textContent = "מעדכן בטופס…";
       try {
-        await api(`/api/subagents/${encodeURIComponent(agent.id)}/config`, {
-          method: "PUT",
-          body: {
+        state.settings = {
+          ...(state.settings || {}),
+          subagents: {
+            ...(state.settings?.subagents || {}),
+            [agent.id]: {
             table: card.querySelector(".subagent-table").value,
             model: card.querySelector(".subagent-model").value,
             systemPrompt: card.querySelector(".subagent-prompt").value
+            }
           }
-        });
-        const refreshed = await api("/api/settings");
-        state.settings = refreshed.settings ?? refreshed;
-        saveStatus.textContent = "✓ נשמר";
+        };
+        state.settingsDirty = true;
+        setSettingsSaveState("יש שינויים בטופס שטרם נשמרו ב-Supabase.", "dirty");
+        saveStatus.textContent = "✓ עודכן בטופס";
+        showToast("הגדרות הסאב-אייג'נט נטענו לטופס. לחץ שמור כדי לעדכן את Supabase");
         setTimeout(() => { saveStatus.textContent = ""; }, 2500);
       } catch (error) {
         saveStatus.textContent = `שגיאה: ${error.message}`;
@@ -2147,22 +2151,15 @@ async function saveLinkAgentSettings() {
   const button = $("saveLinkAgent");
   button.disabled = true;
   try {
-    const body = {
-      models: state.settings?.models || {},
-      retrieval: state.settings?.retrieval || {},
-      knowledge: state.settings?.knowledge || {},
-      contentSource: state.settings?.contentSource || {},
+    state.settings = {
+      ...(state.settings || {}),
       timelineLinks: readLinkAgentSettingsFromForm(),
-      secrets: {},
-      n8nBaseUrl: state.settings?.n8nBaseUrl || "",
-      timezone: state.settings?.timezone || "UTC+3",
-      tools: Object.fromEntries(n8nTools.map((tool) => [tool, state.settings?.tools?.[tool]?.url || ""])),
-      subagents: state.settings?.subagents || {}
+      presets: state.settings?.presets || []
     };
-    const result = await api("/api/settings", { method: "PUT", body });
-    state.settings = result.settings;
+    state.settingsDirty = true;
     applyLinkAgentSettingsToForm();
-    showToast("הגדרות סוכן הקשרים נשמרו");
+    setSettingsSaveState("יש שינויים בטופס שטרם נשמרו ב-Supabase.", "dirty");
+    showToast("הגדרות סוכן הקשרים נטענו לטופס. לחץ שמור כדי לעדכן את Supabase");
   } catch (error) {
     showToast(`שגיאה בשמירה: ${error.message}`, "error");
   } finally {
@@ -2181,6 +2178,10 @@ async function testLinkAgentSettings() {
   resultBox.textContent = "בודק...";
   try {
     await saveLinkAgentSettings();
+    if (state.settingsDirty) {
+      resultBox.textContent = "יש לשמור את עמוד ההגדרות הראשי לפני הרצת בדיקת סוכן הקשרים.";
+      return;
+    }
     const runId = startLinkAgentLiveRun();
     const result = await api(`/api/timeline/link-suggestions?source=${encodeURIComponent(source)}&smart=1&eventId=${encodeURIComponent(eventId)}&limit=${encodeURIComponent($("linkAgentSuggestionLimit")?.value || 12)}&runId=${encodeURIComponent(runId)}`);
     applyLinkAgentWorkflow(result);
@@ -2538,25 +2539,24 @@ async function saveCurrentSettingsAsPreset() {
     description: "פריסט מותאם אישית שנשמר מתוך עמוד ההגדרות",
     settings: buildSettingsPresetSnapshot()
   };
-  const body = {
-    ...readSettingsForm(),
-    presets: [...customSettingsPresets(), preset]
-  };
   if (button) button.disabled = true;
   try {
-    const result = await api("/api/settings", { method: "PUT", body });
-    applySettingsResponse(result.settings);
-    state.settingsDirty = false;
+    state.settings = {
+      ...(state.settings || {}),
+      presets: [...customSettingsPresets(), preset]
+    };
+    applySettingsToForm();
+    state.settingsDirty = true;
     if (input) input.value = "";
     const select = $("settingsPresetSelect");
     if (select) {
       select.value = preset.id;
       renderSelectedSettingsPresetMeta();
     }
-    setSettingsSaveState("הפריסט החדש נשמר יחד עם ההגדרות ב-Supabase.", "saved");
-    showToast(`הפריסט "${name}" נשמר בהצלחה`);
+    setSettingsSaveState("הפריסט החדש נטען לטופס. לחץ שמור כדי לעדכן את Supabase.", "dirty");
+    showToast(`הפריסט "${name}" נוסף לטופס. לחץ שמור כדי לשמור אותו`);
   } catch (error) {
-    setSettingsSaveState("שמירת הפריסט נכשלה. הטופס נשאר כפי שהוא.", "error");
+    setSettingsSaveState("הוספת הפריסט נכשלה. הטופס נשאר כפי שהוא.", "error");
     showToast(`שגיאה בשמירת פריסט: ${error.message}`, "error");
   } finally {
     if (button) button.disabled = false;
@@ -5304,16 +5304,24 @@ async function importSettingsFile(event) {
     }
     const result = await api("/api/settings/import", { method: "POST", body });
     applySettingsResponse(result.settings);
-    // Previously this flow was draft-only: השינויים טרם נשמרו ב-Supabase.
-    state.settingsDirty = false;
-    setSettingsSaveState("קובץ ההגדרות יובא ונשמר ב-Supabase.", "saved");
-    showToast("קובץ ההגדרות יובא ונשמר בהצלחה");
+    applyImportedSecretValues(result.draft);
+    state.settingsDirty = true;
+    setSettingsSaveState("הקובץ נטען לטופס. השינויים טרם נשמרו ב-Supabase.", "dirty");
+    showToast("הקובץ נטען לטופס. לחץ שמור כדי לעדכן את Supabase");
   } catch (error) {
     showToast(`שגיאה בטעינת קובץ הגדרות: ${error.message}`, "error");
   } finally {
     input.value = "";
     button.removeAttribute("aria-disabled");
   }
+}
+
+function applyImportedSecretValues(draft = {}) {
+  if ($("openRouterApiKey")) $("openRouterApiKey").value = draft.secrets?.openRouterApiKey || "";
+  if ($("supabaseUrl")) $("supabaseUrl").value = draft.secrets?.supabaseUrl || "";
+  if ($("supabaseServiceRoleKey")) $("supabaseServiceRoleKey").value = draft.secrets?.supabaseServiceRoleKey || "";
+  if ($("contentSupabaseServiceRoleKey")) $("contentSupabaseServiceRoleKey").value = draft.contentSource?.supabaseServiceRoleKey || "";
+  if ($("cacheRedisUrl")) $("cacheRedisUrl").value = draft.cache?.redisUrl || "";
 }
 
 async function refreshChatSessions() {

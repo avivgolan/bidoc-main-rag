@@ -32,11 +32,12 @@ tags:
 - Settings UI can export/import a local JSON settings file; export includes full unmasked API keys and connection fields, so the file must be handled as a secret.
 - Settings export/import controls are wired during Settings initialization; downloads defer object-URL cleanup and imports validate JSON before saving and refreshing the form.
 - Settings saves and imports now report success only after the shared App Supabase write succeeds; failed persistence leaves the prior runtime cache unchanged.
-- Settings import is now a persistence operation, not a draft-only preview: `POST /api/settings/import` normalizes wrapped/raw JSON, writes immediately to Supabase, verifies by reading back from the same target, and only then returns masked public settings for the UI.
-- Settings now follows an explicit persisted-versus-draft lifecycle: initial page load always reads App Supabase, file import persists immediately and adopts the returned saved state, and Save writes the complete form before adopting the returned persisted state.
+- Settings import is draft-only again: `POST /api/settings/import` previews wrapped/raw JSON into the UI form, reapplies raw secret fields locally, and requires the main Save flow to persist anything to Supabase.
+- Settings now follows an explicit persisted-versus-draft lifecycle: initial page load always reads App Supabase, file import and secondary settings buttons only update the browser draft, and only the main Save flow writes the complete form back to `agent_settings`.
 - Settings now exposes a presets card at the top of the page: users can load built-in tuning presets into the draft form and save custom presets back into `agent_settings` without storing a separate table.
 - Vercel settings saves no longer perform an immediate follow-up GET that can hit a stale serverless instance and reset the form; the UI uses the successful PUT response instead.
 - Imported App Supabase credentials can bootstrap a write on a running server, while stateless deployments still require `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the server environment for fresh instances and cross-browser consistency.
+- `agent_settings` writes are now guarded in `writeLocalSettings`: callers must declare the approved source `settings_save`, so unrelated routes and background flows cannot silently persist stale cache state.
 - Settings UI has a dedicated Chat section that owns chat-affecting models, prompts, hybrid search tuning, knowledge vocabulary, timezone, and Content Supabase settings.
 - Settings UI model fields are OpenRouter-backed dropdowns that show context tokens and input/output pricing when available.
 - Settings UI exposes balanced advanced AI controls for model temperature/max tokens/timeouts, RAG context budget, graph context, Knowledge Base limits, and tool runtime toggles.
@@ -82,7 +83,7 @@ tags:
 - 2026-06-08 -- Reworked Settings persistence so initial loads are fresh from Supabase, imports remain unsaved drafts, saves preserve hidden settings and secrets, and serverless stale-cache responses cannot reset the form.
 - 2026-06-08 -- Added bounded, configurable retrieval row limits beside the Embedding model for primary Hybrid Search, Knowledge Planner queries, Alert retrieval, reranking, and Main Agent context.
 - 2026-06-17 -- Added top-of-page Settings presets with 3 built-in calibration profiles (Conservative, Balanced, Cheap Test) plus persisted custom presets saved inside the shared `agent_settings` record.
-- 2026-06-19 -- Changed Settings import from draft-only preview to immediate Supabase persistence with same-target read-back verification and masked saved-state responses.
+- 2026-06-20 -- Locked `agent_settings` persistence to the main Settings save route only; import, subagent saves, link-agent saves, preset saves, and startup prompt migration are all draft-only or non-persistent.
 
 ## Recent Changes (continued)
 

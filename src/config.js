@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { buildAgentList, defaultPrompts } from "./prompts.js";
 
@@ -298,22 +297,6 @@ async function readSettingsSnapshot(connection = {}) {
   return sbFetch("/rest/v1/agent_settings?id=eq.default&select=data", {}, "read", connection);
 }
 
-async function verifySettingsWrite(expectedSettings, connection = {}) {
-  const rows = await readSettingsSnapshot({
-    ...connection,
-    required: true,
-    preferExplicit: connection.preferExplicit !== false
-  });
-  const persisted = Array.isArray(rows) ? rows?.[0]?.data || null : null;
-  if (!persisted) {
-    throw new Error("Settings persistence verification failed: Supabase did not return the saved settings row.");
-  }
-  if (!isDeepStrictEqual(persisted, expectedSettings)) {
-    throw new Error("Settings persistence verification failed: the read-back settings did not match the saved payload.");
-  }
-  return persisted;
-}
-
 // ---------------------------------------------------------------------------
 // One-time migration: clear stale default-prompts stored in Supabase.
 // Old code used to persist ALL default prompts to Supabase, which meant that
@@ -336,12 +319,7 @@ async function migratePromptsIfNeeded() {
     [PROMPTS_MIGRATION_FLAG]: true
   };
   _settingsCachedAt = Date.now();
-  await sbFetch("/rest/v1/agent_settings", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates" },
-    body: JSON.stringify({ id: "default", data: _settingsCache, updated_at: new Date().toISOString() })
-  }, "write");
-  console.log("[config] Prompts migration complete.");
+  console.log("[config] Prompts migration applied in memory only. Persist through Settings Save if needed.");
 }
 
 function stalePromptKeys(prompts = {}) {
@@ -728,15 +706,6 @@ export function previewImportedSettingsFile(value = {}) {
   };
 }
 
-export async function persistImportedSettingsFile(value = {}) {
-  const imported = normalizeImportedSettingsFile(value);
-  const saved = await writeLocalSettings(imported, { verifyReadBack: true });
-  return {
-    ok: true,
-    settings: publicSettings(getConfig(saved), saved)
-  };
-}
-
 export function normalizeContentSourceSettings(value = {}, fallback = {}) {
   const raw = value && typeof value === "object" ? value : {};
   const fallbackUrl = fallback.fallbackSupabaseUrl || "";
@@ -775,6 +744,13 @@ export function readLocalSettings() {
 }
 
 export async function writeLocalSettings(settings, options = {}) {
+  const source = String(options.source || "").trim();
+  if (!source) {
+    throw new Error("Settings persistence requires an explicit approved source.");
+  }
+  if (source !== "settings_save") {
+    throw new Error(`Settings persistence source "${source}" is not allowed.`);
+  }
   const existing = _settingsCache;
   const incomingSecrets = settings.secrets || {};
   const incomingContentSource = settings.contentSource || {};
@@ -879,11 +855,10 @@ export async function writeLocalSettings(settings, options = {}) {
     headers: { Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({ id: "default", data: safe, updated_at: new Date().toISOString() })
   }, "write", writeConnection);
-  const persisted = options.verifyReadBack ? await verifySettingsWrite(safe, writeConnection) : safe;
-  _settingsCache = persisted;
+  _settingsCache = safe;
   _settingsCachedAt = Date.now();
   _settingsLoadedFromDb = true;
-  return persisted;
+  return safe;
 }
 
 function markSettingsDbStatus(operation, ok, error = "") {
