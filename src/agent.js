@@ -17,6 +17,18 @@ import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, h
 
 export async function runChatPipeline({ message, sessionId, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [] }) {
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
+  const openRouterCalls = [];
+  let openRouterCallSequence = 0;
+  const telemetryFor = (step) => ({
+    step,
+    callId: `${step}_${++openRouterCallSequence}`,
+    record: (entry) => {
+      openRouterCalls.push(entry);
+      emitRunEvent(runId, step, entry.status === "error" ? "OpenRouter call failed" : "OpenRouter usage recorded", {
+        openrouter: entry
+      });
+    }
+  });
   const attachmentContext = attachments.map((item) => `ATTACHMENT: ${item.name}\n${item.content}`).join("\n\n");
   const effectiveMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
   emitRunEvent(runId, "chat_input", "Received user message", {
@@ -33,7 +45,7 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
 
   try {
     emitRunEvent(runId, "classifier", "Classifying message", {});
-    classification = await classifyMessage({ message: sanitized, config });
+    classification = await classifyMessage({ message: sanitized, config, telemetry: telemetryFor("classifier") });
     emitRunEvent(runId, "classifier", "Classification completed", classification);
     console.log(`[classifier] type=${classification.type} tool="${classification.tool_hint}" msg="${sanitized.slice(0, 70)}"`);
   } catch (error) {
@@ -87,10 +99,10 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
   let result;
   if (classification.type === "CHAT") {
     emitRunEvent(runId, "switch", "Routing to Lite Agent", { type: classification.type });
-    result = await runLiteAgent({ message: sanitized, memory, memorySummary, config, trace, runId });
+    result = await runLiteAgent({ message: sanitized, memory, memorySummary, config, trace, runId, telemetryFor });
   } else {
     emitRunEvent(runId, "switch", "Routing to Main RAG Agent", { type: classification.type });
-    result = await runRagAgent({ message: sanitized, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext });
+    result = await runRagAgent({ message: sanitized, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext, telemetryFor });
   }
 
   appendLocalMemory(sessionId, message, result.answer);
@@ -104,7 +116,8 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     classification,
     result,
     trace,
-    config
+    config,
+    openRouterCalls
   });
   workflowLog.cacheMetrics = finalizeCacheMetrics(cacheContext);
 
@@ -143,6 +156,7 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     memorySummary: getMemorySummary(sessionId),
     sourceQuality: result.sourceQuality || null,
     conflicts: result.conflicts || [],
+    openRouterUsage: workflowLog.openRouterUsage,
     trace,
     workflowLog
   };
@@ -179,7 +193,7 @@ function buildChatFollowUps({ classification, result }) {
   return followUps;
 }
 
-async function runLiteAgent({ message, memory, memorySummary, config, trace, runId }) {
+async function runLiteAgent({ message, memory, memorySummary, config, trace, runId, telemetryFor }) {
   const fallback = liteFallback(message);
   if (!config.openRouterApiKey) {
     trace.push({ step: "liteAgent", ok: false, fallback: true, error: "OPENROUTER_API_KEY is missing" });
@@ -196,6 +210,7 @@ async function runLiteAgent({ message, memory, memorySummary, config, trace, run
       maxTokens: config.ai?.lite?.maxTokens ?? 1800,
       timeoutMs: config.ai?.lite?.timeoutMs ?? 90_000,
       ...samplingSettings(config, "lite"),
+      telemetry: telemetryFor("lite_agent"),
       messages: [
         {
           role: "system",
@@ -215,7 +230,7 @@ async function runLiteAgent({ message, memory, memorySummary, config, trace, run
   }
 }
 
-async function runRagAgent({ message, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext }) {
+async function runRagAgent({ message, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext, telemetryFor }) {
   const toolCalls = [];
   const sources = [];
   let hybridResults = null;
@@ -234,7 +249,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     : [];
   const safetyResults = await Promise.all(
     safetyPrecheckTools.map((toolName) =>
-      callProjectTool({ toolName, message, classification, sessionId, config, cacheContext }).then((result) => {
+      callProjectTool({ toolName, message, classification, sessionId, config, cacheContext, telemetryFor }).then((result) => {
         emitRunEvent(runId, "safety_precheck", `Safety precheck ${toolName} completed`, {
           ok: result.ok, skipped: result.skipped || false, error: result.error || null
         });
@@ -248,7 +263,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   }
 
   if (classification.professional) {
-    knowledgePlan = await runKnowledgePlanner({ message, classification, config, trace, runId });
+    knowledgePlan = await runKnowledgePlanner({ message, classification, config, trace, runId, telemetryFor });
   }
 
   try {
@@ -268,7 +283,8 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
       topK: config.retrieval.candidates,
       runId,
       context: "primary",
-      cacheContext
+      cacheContext,
+      telemetryFor
     });
     hybridResults = primarySearch.results;
     const allRows = normalizeRows(hybridResults);
@@ -284,7 +300,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
             dateTo: classification.date_to,
             hashtags: classification.hashtags || [],
             topK: config.retrieval.plannerCandidates,
-            runId, context: "knowledge_plan", cacheContext
+            runId, context: "knowledge_plan", cacheContext, telemetryFor
           });
           const plannedRows = normalizeRows(plannedSearch.results);
           const plannedSources = extractLinks(plannedRows);
@@ -383,7 +399,8 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
           temperature: config.ai?.reranker?.temperature ?? 0,
           maxTokens: config.ai?.reranker?.maxTokens ?? 4096,
           timeoutMs: config.ai?.reranker?.timeoutMs ?? 90_000,
-          ...samplingSettings(config, "reranker")
+          ...samplingSettings(config, "reranker"),
+          telemetry: telemetryFor("reranker")
         })
       });
       const rerankSources = extractLinks(rerankedResults);
@@ -407,7 +424,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools in parallel", { tools });
   const toolResults = await Promise.all(
     tools.map((toolName) =>
-      callProjectTool({ toolName, message, classification, sessionId, config, cacheContext }).then((result) => {
+      callProjectTool({ toolName, message, classification, sessionId, config, cacheContext, telemetryFor }).then((result) => {
         emitRunEvent(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, skipped: result.skipped || false, error: result.error || null });
         return result;
       })
@@ -427,11 +444,11 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     emitRunEvent(runId, "conflict_detection", "No obvious source conflicts detected", {});
   }
   emitRunEvent(runId, "source_quality", "Source quality scored", sourceQuality);
-  const answer = await synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults: rerankedResults || hybridResults, graphContext, toolCalls, sources: uniqueSources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId, cacheContext });
+  const answer = await synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults: rerankedResults || hybridResults, graphContext, toolCalls, sources: uniqueSources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId, cacheContext, telemetryFor });
   return { answer, sources: uniqueSources, toolCalls, knowledgePlan, investigationPlan, sourceQuality, conflicts, graphContext };
 }
 
-async function hybridSearchWithRelaxedHashtags({ config, query, dateFrom, dateTo, hashtags = [], topK, runId, context, cacheContext }) {
+async function hybridSearchWithRelaxedHashtags({ config, query, dateFrom, dateTo, hashtags = [], topK, runId, context, cacheContext, telemetryFor }) {
   const requestedHashtags = normalizeTagList(hashtags);
   const results = await hybridSearch({
     config,
@@ -440,7 +457,8 @@ async function hybridSearchWithRelaxedHashtags({ config, query, dateFrom, dateTo
     dateTo,
     hashtags: requestedHashtags,
     topK,
-    cacheContext
+    cacheContext,
+    telemetry: telemetryFor("hybrid_search")
   });
   if (countRows(results) || !requestedHashtags.length) {
     return { results, relaxedHashtags: false };
@@ -458,12 +476,13 @@ async function hybridSearchWithRelaxedHashtags({ config, query, dateFrom, dateTo
     dateTo,
     hashtags: [],
     topK,
-    cacheContext
+    cacheContext,
+    telemetry: telemetryFor("hybrid_search")
   });
   return { results: relaxedResults, relaxedHashtags: true };
 }
 
-async function runKnowledgePlanner({ message, classification, config, trace, runId }) {
+async function runKnowledgePlanner({ message, classification, config, trace, runId, telemetryFor }) {
   const tags = [...new Set([...(classification.knowledge_tags || []), ...(classification.hashtags || [])])];
   const routedAgents = routeKnowledgeAgents({ message, tags, limit: config.knowledge?.agentLimit || 2 });
   emitRunEvent(runId, "knowledge_planner", "Searching local Knowledge Base", {
@@ -520,6 +539,7 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
       maxTokens: config.ai?.knowledgePlanner?.maxTokens ?? 2200,
       timeoutMs: config.ai?.knowledgePlanner?.timeoutMs ?? 90_000,
       ...samplingSettings(config, "knowledgePlanner"),
+      telemetry: telemetryFor("knowledge_planner"),
       messages: [
         { role: "system", content: config.prompts?.knowledge_planner || "" },
         {
@@ -550,10 +570,14 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
   }
 }
 
-async function callProjectTool({ toolName, message, classification, sessionId, config, cacheContext = null }) {
+async function callProjectTool({ toolName, message, classification, sessionId, config, cacheContext = null, telemetryFor }) {
   if (toolName === "alert") {
     try {
-      const result = await runAlertAgent({ ...buildAlertAgentRequest({ message, classification }), cacheContext });
+      const result = await runAlertAgent({
+        ...buildAlertAgentRequest({ message, classification }),
+        cacheContext,
+        telemetry: telemetryFor("alert_agent")
+      });
       return {
         toolName,
         ok: result.ok,
@@ -584,7 +608,7 @@ export function buildAlertAgentRequest({ message, classification }) {
   };
 }
 
-async function synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults, graphContext = [], toolCalls, sources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId, cacheContext }) {
+async function synthesizeAnswer({ message, classification, memory, memorySummary, retrievalResults, graphContext = [], toolCalls, sources, knowledgePlan, investigationPlan, sourceQuality, conflicts, config, trace, runId, cacheContext, telemetryFor }) {
   const successful = toolCalls.filter((call) => call.ok);
   const failed = toolCalls.filter((call) => !call.ok && !call.skipped);
   const skipped = toolCalls.filter((call) => call.skipped);
@@ -647,6 +671,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
           maxTokens: config.ai?.main?.maxTokens ?? 4096,
           timeoutMs: config.ai?.main?.timeoutMs ?? 90_000,
           ...samplingSettings(config, "main"),
+          telemetry: telemetryFor("main_agent"),
           messages: [
             { role: "system", content: systemPrompt },
             ...memorySummaryMessages(memorySummary),
@@ -1183,7 +1208,7 @@ function uniqueByUrl(sources) {
   });
 }
 
-function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, classification, result, trace, config }) {
+function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, classification, result, trace, config, openRouterCalls = [] }) {
   const toolCalls = result.toolCalls || [];
   const hybridCall = toolCalls.find((call) => call.toolName === "hybrid_search");
   const graphCall = toolCalls.find((call) => call.toolName === "graph_search");
@@ -1433,12 +1458,17 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
     reranker: config.prompts?.reranker || null,
     knowledge_planner: config.prompts?.knowledge_planner || null
   };
+  for (const node of nodes) {
+    const calls = openRouterCalls.filter((call) => call.step === node.id);
+    if (calls.length) node.openrouter = calls;
+  }
 
   return {
     nodes,
     edges: edges.map(([from, to]) => ({ from, to })),
     activePrompts,
-    trace
+    trace,
+    openRouterUsage: summarizeOpenRouterUsage(openRouterCalls)
   };
 }
 
@@ -1450,6 +1480,33 @@ function compactLog(value) {
   const text = JSON.stringify(value, null, 2);
   if (text.length <= 5000) return value;
   return { preview: `${text.slice(0, 5000)}...`, truncated: true };
+}
+
+function summarizeOpenRouterUsage(calls = []) {
+  const completed = calls.filter((call) => call.status === "done");
+  const totalDurationMs = completed.reduce((sum, call) => sum + Number(call.duration_ms || 0), 0);
+  const completionTokens = completed.reduce((sum, call) => sum + Number(call.completion_tokens || 0), 0);
+  const knownCosts = completed.filter((call) => call.cost !== null && call.cost !== undefined && Number.isFinite(Number(call.cost)));
+  return {
+    calls,
+    totals: {
+      calls: calls.length,
+      successful_calls: completed.length,
+      failed_calls: calls.length - completed.length,
+      prompt_tokens: completed.reduce((sum, call) => sum + Number(call.prompt_tokens || 0), 0),
+      completion_tokens: completionTokens,
+      total_tokens: completed.reduce((sum, call) => sum + Number(call.total_tokens || 0), 0),
+      cached_tokens: completed.reduce((sum, call) => sum + Number(call.cached_tokens || 0), 0),
+      reasoning_tokens: completed.reduce((sum, call) => sum + Number(call.reasoning_tokens || 0), 0),
+      cost: knownCosts.length
+        ? Number(knownCosts.reduce((sum, call) => sum + Number(call.cost || 0), 0).toFixed(8))
+        : null,
+      duration_ms: totalDurationMs,
+      output_tokens_per_second: completionTokens > 0 && totalDurationMs > 0
+        ? Number((completionTokens / (totalDurationMs / 1000)).toFixed(2))
+        : null
+    }
+  };
 }
 
 function countRows(results) {

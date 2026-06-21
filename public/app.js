@@ -776,6 +776,7 @@ function startLiveRun(runId) {
   if (state.eventSource) state.eventSource.close();
   document.querySelectorAll(".runHistoryItem.active").forEach((el) => el.classList.remove("active"));
   $("liveRunList").innerHTML = "";
+  renderOpenRouterMetrics(null);
   $("liveRunStatus").textContent = `רץ: ${runId}`;
   state.runEvents = [];
   state.fullLogVisible = false;
@@ -802,11 +803,15 @@ function appendLiveRunEvent(item) {
   updateAgentRuntime(item);
   updateChatProgress(item);
   state.runEvents.push(item);
+  if (item?.data?.openrouter) renderOpenRouterMetrics(summarizeLiveOpenRouterUsage());
   const row = document.createElement("details");
   row.className = `liveRunItem ${item.step === "error" ? "error" : ""}`;
   const summary = document.createElement("summary");
   const time = item.time ? new Date(item.time).toLocaleTimeString("he-IL") : "";
-  summary.textContent = `${time} · ${item.step} · ${item.message}`;
+  const usage = item?.data?.openrouter;
+  summary.textContent = usage
+    ? `${time} · ${item.step} · ${usage.actual_model || usage.requested_model || "OpenRouter"} · ${formatOpenRouterNumber(usage.prompt_tokens)}/${formatOpenRouterNumber(usage.completion_tokens)} tok · ${formatOpenRouterCost(usage.cost)} · ${formatOpenRouterSpeed(usage.tokens_per_second)}`
+    : `${time} · ${item.step} · ${item.message}`;
   const pre = document.createElement("pre");
   pre.textContent = JSON.stringify(item.data || {}, null, 2);
   row.append(summary, pre);
@@ -1473,6 +1478,7 @@ function renderWorkflow(workflow) {
   const view = buildWorkflowView(workflow);
   const hasRun = Boolean(workflow?.nodes?.length);
   renderCacheMetrics(workflow?.cacheMetrics || null);
+  renderOpenRouterMetrics(workflow?.openRouterUsage?.totals || null);
   $("workflowHint").style.display = hasRun ? "none" : "block";
   $("workflowBoard").classList.toggle("hasWorkflow", hasRun);
 
@@ -1523,6 +1529,38 @@ function renderCacheMetrics(metrics) {
   $("cacheTotalHits").textContent = String(metrics.cache_hits || 0);
   $("cacheTotalMisses").textContent = String(metrics.cache_misses || 0);
   $("cacheCostSaved").textContent = `$${Number(metrics.estimated_cost_saved || 0).toFixed(4)}`;
+}
+
+function renderOpenRouterMetrics(metrics) {
+  const panel = $("openRouterMetrics");
+  if (!panel) return;
+  panel.hidden = !metrics;
+  if (!metrics) return;
+  $("openRouterCalls").textContent = Number(metrics.successful_calls ?? metrics.calls ?? 0).toLocaleString();
+  $("openRouterInputTokens").textContent = Number(metrics.prompt_tokens || 0).toLocaleString();
+  $("openRouterOutputTokens").textContent = Number(metrics.completion_tokens || 0).toLocaleString();
+  $("openRouterCost").textContent = formatOpenRouterCost(metrics.cost);
+  $("openRouterSpeed").textContent = formatOpenRouterSpeed(metrics.output_tokens_per_second);
+}
+
+function summarizeLiveOpenRouterUsage() {
+  const calls = state.runEvents
+    .map((event) => event?.data?.openrouter)
+    .filter(Boolean);
+  const completed = calls.filter((call) => call.status === "done");
+  const durationMs = completed.reduce((sum, call) => sum + Number(call.duration_ms || 0), 0);
+  const completionTokens = completed.reduce((sum, call) => sum + Number(call.completion_tokens || 0), 0);
+  const knownCosts = completed.filter((call) => call.cost !== null && call.cost !== undefined && Number.isFinite(Number(call.cost)));
+  return {
+    calls: calls.length,
+    successful_calls: completed.length,
+    prompt_tokens: completed.reduce((sum, call) => sum + Number(call.prompt_tokens || 0), 0),
+    completion_tokens: completionTokens,
+    cost: knownCosts.length ? knownCosts.reduce((sum, call) => sum + Number(call.cost || 0), 0) : null,
+    output_tokens_per_second: completionTokens > 0 && durationMs > 0
+      ? completionTokens / (durationMs / 1000)
+      : null
+  };
 }
 
 function pulseErrorNodes(cy) {
@@ -1669,6 +1707,7 @@ function buildWorkflowView(workflow) {
 function renderWorkflowInspector(node) {
   const inspector = $("workflowInspector");
   if (!inspector) return;
+  const openRouterCalls = Array.isArray(node.openrouter) ? node.openrouter : [];
   inspector.innerHTML = `
     <header class="workflowInspectorHeader">
       <span class="workflowIcon ${escapeHtml(node.kind)}">${iconForNode(node.kind)}</span>
@@ -1677,6 +1716,7 @@ function renderWorkflowInspector(node) {
         <small>${escapeHtml(node.id)} · ${statusLabel(node.status)}</small>
       </div>
     </header>
+    ${renderOpenRouterCallDetails(openRouterCalls)}
     <details open>
       <summary>Input</summary>
       <pre>${escapeHtml(JSON.stringify(node.input, null, 2))}</pre>
@@ -1686,6 +1726,53 @@ function renderWorkflowInspector(node) {
       <pre>${escapeHtml(JSON.stringify(node.output, null, 2))}</pre>
     </details>
   `;
+}
+
+function renderOpenRouterCallDetails(calls) {
+  if (!calls.length) return "";
+  return `
+    <section class="openRouterCallList">
+      <h3>OpenRouter usage</h3>
+      ${calls.map((call, index) => `
+        <article class="openRouterCall ${call.status === "error" ? "error" : ""}">
+          <header>
+            <strong>${escapeHtml(call.actual_model || call.requested_model || "Unknown model")}</strong>
+            <span>${calls.length > 1 ? `Call ${index + 1}` : escapeHtml(call.kind || "model")}</span>
+          </header>
+          <div class="openRouterCallGrid">
+            <span><small>Input</small><b>${formatOpenRouterNumber(call.prompt_tokens)}</b></span>
+            <span><small>Output</small><b>${formatOpenRouterNumber(call.completion_tokens)}</b></span>
+            <span><small>Cost</small><b>${formatOpenRouterCost(call.cost)}</b></span>
+            <span><small>Time</small><b>${formatOpenRouterDuration(call.duration_ms)}</b></span>
+            <span><small>Speed</small><b>${formatOpenRouterSpeed(call.tokens_per_second)}</b></span>
+            <span><small>Finish</small><b>${escapeHtml(call.finish_reason || call.status || "—")}</b></span>
+          </div>
+          ${call.generation_id ? `<div class="openRouterGenerationId" title="${escapeHtml(call.generation_id)}">ID: ${escapeHtml(call.generation_id)}</div>` : ""}
+          ${call.error ? `<div class="openRouterCallError">${escapeHtml(call.error)}</div>` : ""}
+        </article>
+      `).join("")}
+    </section>
+  `;
+}
+
+function formatOpenRouterNumber(value) {
+  return value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value).toLocaleString() : "—";
+}
+
+function formatOpenRouterCost(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  const cost = Number(value);
+  return cost < 0.0001 ? `$${cost.toFixed(6)}` : `$${cost.toFixed(4)}`;
+}
+
+function formatOpenRouterDuration(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return "—";
+  const milliseconds = Number(value);
+  return milliseconds < 1000 ? `${Math.round(milliseconds)} ms` : `${(milliseconds / 1000).toFixed(2)} s`;
+}
+
+function formatOpenRouterSpeed(value) {
+  return value !== null && value !== undefined && Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} tok/s` : "—";
 }
 
 function wireProjectGraph() {
@@ -2419,7 +2506,7 @@ function applySettingsToForm() {
   }
   applyAdvancedAiSettingsToForm();
   $("n8nBaseUrl").value = state.settings.n8nBaseUrl || "";
-  if ($("timezone")) $("timezone").value = state.settings.timezone || "UTC+3";
+  if ($("timezone")) $("timezone").value = state.settings.timezone || "Asia/Jerusalem";
   $("openRouterApiKey").value = "";
   $("openRouterApiKey").placeholder = state.settings.secrets.openRouterApiKey || "sk-or-...";
   $("supabaseUrl").value = state.settings.secrets.supabaseUrl || "";

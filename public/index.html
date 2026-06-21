@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BiDoc — AI Document Intelligence</title>
-    <link rel="stylesheet" href="/styles.css?v=20260621-timeline-mobile-gestures3" />
+    <link rel="stylesheet" href="/styles.css?v=20260621-openrouter-telemetry1" />
   </head>
   <body>
     <a class="skipLink" href="#chatMain">דלג לתוכן הצ׳אט</a>
@@ -269,6 +269,13 @@
               <div><span>Total Hits</span><strong id="cacheTotalHits">0</strong></div>
               <div><span>Total Misses</span><strong id="cacheTotalMisses">0</strong></div>
               <div><span>Estimated Cost Saved</span><strong id="cacheCostSaved">$0.0000</strong></div>
+            </section>
+            <section class="cacheMetrics openRouterMetrics" id="openRouterMetrics" hidden>
+              <div><span>Model Calls</span><strong id="openRouterCalls">0</strong></div>
+              <div><span>Input Tokens</span><strong id="openRouterInputTokens">0</strong></div>
+              <div><span>Output Tokens</span><strong id="openRouterOutputTokens">0</strong></div>
+              <div><span>Actual Cost</span><strong id="openRouterCost">—</strong></div>
+              <div><span>Output Speed</span><strong id="openRouterSpeed">—</strong></div>
             </section>
 
             <div class="workflowHint" id="workflowHint">
@@ -673,7 +680,8 @@
               <option value="UTC+0">UTC+0 (Greenwich)</option>
               <option value="UTC+1">UTC+1</option>
               <option value="UTC+2">UTC+2</option>
-              <option value="UTC+3" selected>UTC+3 (ישראל)</option>
+              <option value="Asia/Jerusalem" selected>Asia/Jerusalem (ישראל, שעון קיץ אוטומטי)</option>
+              <option value="UTC+3">UTC+3</option>
               <option value="UTC+4">UTC+4</option>
               <option value="UTC+5">UTC+5</option>
               <option value="UTC+5:30">UTC+5:30 (הודו)</option>
@@ -1137,6 +1145,6 @@
     <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
-    <script src="/app.js?v=20260621-timeline-mobile-gestures3" type="module"></script>
+    <script src="/app.js?v=20260621-openrouter-telemetry1" type="module"></script>
   </body>
 </html>

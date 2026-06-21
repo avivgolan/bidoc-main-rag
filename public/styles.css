@@ -1089,6 +1089,86 @@ label {
 .workflowInspector .workflowIcon.ai { background: var(--brand-600); }
 .workflowInspector .workflowIcon.database { background: #6a4c93; }
 .workflowInspector .workflowIcon.tool { background: var(--amber); }
+.openRouterCallList {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+.openRouterCallList h3 {
+  margin: 0;
+  color: #f9fff4;
+  font-size: 13px;
+}
+.openRouterCall {
+  padding: 10px;
+  border: 1px solid #3d5947;
+  border-radius: var(--r-sm);
+  background: #1b251d;
+}
+.openRouterCall.error {
+  border-color: var(--danger);
+  background: #2c1717;
+}
+.openRouterCall > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  direction: ltr;
+  margin-bottom: 9px;
+}
+.openRouterCall > header strong {
+  overflow: hidden;
+  color: #f2faee;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.openRouterCall > header span {
+  flex: 0 0 auto;
+  color: #aebba7;
+  font-size: 10px;
+}
+.openRouterCallGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  direction: ltr;
+}
+.openRouterCallGrid span {
+  min-width: 0;
+  padding: 6px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 0.04);
+}
+.openRouterCallGrid small,
+.openRouterCallGrid b {
+  display: block;
+}
+.openRouterCallGrid small {
+  color: #9caa96;
+  font-size: 9px;
+}
+.openRouterCallGrid b {
+  overflow: hidden;
+  color: #dff5d7;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.openRouterGenerationId {
+  overflow: hidden;
+  margin-top: 8px;
+  direction: ltr;
+  color: #9caa96;
+  font: 10px/1.4 Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.openRouterCallError {
+  margin-top: 8px;
+  color: #ffb6b6;
+  font-size: 11px;
+}
 
 /* Run history strip */
 .workflowLayout {
@@ -1215,6 +1295,15 @@ label {
   color: var(--success-text);
   font-size: 18px;
   font-weight: 900;
+}
+.openRouterMetrics {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+.openRouterMetrics > div {
+  border-color: color-mix(in srgb, var(--brand-500) 32%, var(--line));
+}
+.openRouterMetrics strong {
+  color: var(--brand-300);
 }
 
 .runHistoryItem .rhAiReport {

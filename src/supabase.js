@@ -168,7 +168,7 @@ export async function recentMemory({ config, sessionId, limit = 8 }) {
   });
 }
 
-export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags = [], topK = config.retrieval.candidates, cacheContext = null }) {
+export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags = [], topK = config.retrieval.candidates, cacheContext = null, telemetry = null }) {
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig)) throw new Error("Content Supabase is not configured");
@@ -177,7 +177,8 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
     apiKey: config.openRouterApiKey,
     model: config.models.embedding,
     input: query,
-    cacheContext
+    cacheContext,
+    telemetry
   });
 
   const payload = {

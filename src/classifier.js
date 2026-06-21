@@ -2,7 +2,7 @@ import { chatCompletion, extractJsonObject } from "./openrouter.js";
 import { defaultPrompts, renderPrompt } from "./prompts.js";
 import { getProjectDateTime } from "./clock.js";
 
-export async function classifyMessage({ message, config }) {
+export async function classifyMessage({ message, config, telemetry = null }) {
   const currentDate = getProjectDateTime(config.timezone);
   const systemPrompt = renderPrompt(config.prompts?.classifier || defaultPrompts().classifier, {
     currentDate
@@ -17,6 +17,7 @@ export async function classifyMessage({ message, config }) {
     frequencyPenalty: config.ai?.classifier?.frequencyPenalty ?? 0,
     presencePenalty: config.ai?.classifier?.presencePenalty ?? 0,
     seed: config.ai?.classifier?.seed ?? null,
+    telemetry,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: message }

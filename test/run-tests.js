@@ -816,11 +816,24 @@ test("settings import credentials can bootstrap a Supabase write", async () => {
 test("chatCompletion forwards advanced model settings to OpenRouter", async () => {
   const previousFetch = global.fetch;
   let captured;
+  const telemetry = [];
   global.fetch = async (url, options) => {
     captured = { url, options };
     return {
       ok: true,
-      json: async () => ({ choices: [{ message: { content: "ok" } }] })
+      json: async () => ({
+        id: "gen-test-123",
+        model: "openai/gpt-4o-mini",
+        choices: [{ finish_reason: "stop", native_finish_reason: "stop", message: { content: "ok" } }],
+        usage: {
+          prompt_tokens: 12,
+          completion_tokens: 4,
+          total_tokens: 16,
+          cost: 0.000014,
+          prompt_tokens_details: { cached_tokens: 2 },
+          completion_tokens_details: { reasoning_tokens: 1 }
+        }
+      })
     };
   };
   try {
@@ -834,7 +847,12 @@ test("chatCompletion forwards advanced model settings to OpenRouter", async () =
       topP: 0.8,
       frequencyPenalty: 0.2,
       presencePenalty: 0.1,
-      seed: 77
+      seed: 77,
+      telemetry: {
+        step: "classifier",
+        callId: "classifier_1",
+        record: (entry) => telemetry.push(entry)
+      }
     });
     assert.equal(answer, "ok");
     const body = JSON.parse(captured.options.body);
@@ -844,9 +862,35 @@ test("chatCompletion forwards advanced model settings to OpenRouter", async () =
     assert.equal(body.frequency_penalty, 0.2);
     assert.equal(body.presence_penalty, 0.1);
     assert.equal(body.seed, 77);
+    assert.equal(telemetry.length, 1);
+    assert.equal(telemetry[0].step, "classifier");
+    assert.equal(telemetry[0].call_id, "classifier_1");
+    assert.equal(telemetry[0].generation_id, "gen-test-123");
+    assert.equal(telemetry[0].actual_model, "openai/gpt-4o-mini");
+    assert.equal(telemetry[0].prompt_tokens, 12);
+    assert.equal(telemetry[0].completion_tokens, 4);
+    assert.equal(telemetry[0].total_tokens, 16);
+    assert.equal(telemetry[0].cached_tokens, 2);
+    assert.equal(telemetry[0].reasoning_tokens, 1);
+    assert.equal(telemetry[0].cost, 0.000014);
+    assert.equal(telemetry[0].finish_reason, "stop");
+    assert.equal(telemetry[0].status, "done");
   } finally {
     global.fetch = previousFetch;
   }
+});
+
+test("workflow UI exposes OpenRouter usage totals and per-node call details", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(htmlSource, /id="openRouterMetrics"/);
+  assert.match(htmlSource, /id="openRouterInputTokens"/);
+  assert.match(htmlSource, /id="openRouterCost"/);
+  assert.match(appSource, /renderOpenRouterMetrics\(workflow\?\.openRouterUsage\?\.totals \|\| null\)/);
+  assert.match(appSource, /function renderOpenRouterCallDetails\(/);
+  assert.match(appSource, /call\.tokens_per_second/);
+  assert.match(cssSource, /\.openRouterCallGrid/);
 });
 
 test("hybridSearch uses Content Supabase while app persistence uses App Supabase", async () => {

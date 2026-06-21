@@ -17,34 +17,58 @@ export async function chatCompletion({
   topP = 1,
   frequencyPenalty = 0,
   presencePenalty = 0,
-  seed = null
+  seed = null,
+  telemetry = null
 }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
-  const response = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": "http://localhost",
-      "X-Title": "bidoc-agent"
-    },
-    body: JSON.stringify(omitNullish({
-      model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-      top_p: topP,
-      frequency_penalty: frequencyPenalty,
-      presence_penalty: presencePenalty,
-      seed
-    }))
-  }, timeoutMs);
+  const startedAt = Date.now();
+  let response;
+  let data = {};
+  try {
+    response = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": "http://localhost",
+        "X-Title": "bidoc-agent"
+      },
+      body: JSON.stringify(omitNullish({
+        model,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+        top_p: topP,
+        frequency_penalty: frequencyPenalty,
+        presence_penalty: presencePenalty,
+        seed
+      }))
+    }, timeoutMs);
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error?.message || `OpenRouter request failed: ${response.status}`);
+    data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error?.message || `OpenRouter request failed: ${response.status}`);
+    }
+    recordTelemetry(telemetry, buildTelemetryEntry({
+      kind: "chat",
+      requestedModel: model,
+      data,
+      durationMs: Date.now() - startedAt,
+      status: "done"
+    }));
+    return data.choices?.[0]?.message?.content || "";
+  } catch (error) {
+    recordTelemetry(telemetry, buildTelemetryEntry({
+      kind: "chat",
+      requestedModel: model,
+      data,
+      durationMs: Date.now() - startedAt,
+      status: "error",
+      error: error.message,
+      httpStatus: response?.status || null
+    }));
+    throw error;
   }
-  return data.choices?.[0]?.message?.content || "";
 }
 
 export async function listOpenRouterModels({ apiKey = "" } = {}) {
@@ -72,7 +96,7 @@ export async function listOpenRouterModels({ apiKey = "" } = {}) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export async function createEmbedding({ apiKey, model, input, cacheContext = null }) {
+export async function createEmbedding({ apiKey, model, input, cacheContext = null, telemetry = null }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const normalizedModel = normalizeEmbeddingModel(model);
   return cachedOperation({
@@ -83,27 +107,50 @@ export async function createEmbedding({ apiKey, model, input, cacheContext = nul
     savedCall: "embedding",
     estimatedCost: 0.0001,
     operation: async () => {
-      const response = await fetchWithTimeout("https://openrouter.ai/api/v1/embeddings", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({ model: normalizedModel, input })
-      }, 30_000);
+      const startedAt = Date.now();
+      let response;
+      let data = {};
+      try {
+        response = await fetchWithTimeout("https://openrouter.ai/api/v1/embeddings", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({ model: normalizedModel, input })
+        }, 30_000);
 
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data?.error?.message || `OpenRouter embedding request failed: ${response.status}`);
+        data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error?.message || `OpenRouter embedding request failed: ${response.status}`);
+        }
+        const embedding = data.data?.[0]?.embedding;
+        if (!Array.isArray(embedding)) throw new Error("OpenRouter embedding response is missing data[0].embedding");
+        recordTelemetry(telemetry, buildTelemetryEntry({
+          kind: "embedding",
+          requestedModel: normalizedModel,
+          data,
+          durationMs: Date.now() - startedAt,
+          status: "done"
+        }));
+        return embedding;
+      } catch (error) {
+        recordTelemetry(telemetry, buildTelemetryEntry({
+          kind: "embedding",
+          requestedModel: normalizedModel,
+          data,
+          durationMs: Date.now() - startedAt,
+          status: "error",
+          error: error.message,
+          httpStatus: response?.status || null
+        }));
+        throw error;
       }
-      const embedding = data.data?.[0]?.embedding;
-      if (!Array.isArray(embedding)) throw new Error("OpenRouter embedding response is missing data[0].embedding");
-      return embedding;
     }
   });
 }
 
-export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, systemPrompt = "", temperature = 0, maxTokens = 4096, timeoutMs = 90_000, topP = 1, frequencyPenalty = 0, presencePenalty = 0, seed = null }) {
+export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, systemPrompt = "", temperature = 0, maxTokens = 4096, timeoutMs = 90_000, topP = 1, frequencyPenalty = 0, presencePenalty = 0, seed = null, telemetry = null }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const candidates = results.map((row, index) => ({
     index,
@@ -125,6 +172,7 @@ export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, 
     frequencyPenalty,
     presencePenalty,
     seed,
+    telemetry,
     messages: [
       {
         role: "system",
@@ -183,6 +231,73 @@ function normalizeEmbeddingModel(model) {
   if (value.startsWith("openai/")) return value;
   if (value.startsWith("text-embedding-")) return `openai/${value}`;
   return value;
+}
+
+function buildTelemetryEntry({
+  kind,
+  requestedModel,
+  data = {},
+  durationMs = 0,
+  status = "done",
+  error = null,
+  httpStatus = null
+}) {
+  const usage = data?.usage || {};
+  const promptTokens = numberOrNull(usage.prompt_tokens ?? usage.input_tokens);
+  const completionTokens = numberOrNull(usage.completion_tokens ?? usage.output_tokens);
+  const totalTokens = numberOrNull(usage.total_tokens)
+    ?? sumNullable(promptTokens, completionTokens);
+  const cost = numberOrNull(usage.cost ?? data?.cost);
+  const measuredDurationMs = Math.max(0, Number(durationMs || 0));
+  const tokensPerSecond = completionTokens !== null && measuredDurationMs > 0
+    ? Number((completionTokens / (measuredDurationMs / 1000)).toFixed(2))
+    : null;
+  return {
+    kind,
+    status,
+    requested_model: requestedModel || null,
+    actual_model: data?.model || requestedModel || null,
+    generation_id: data?.id || null,
+    provider: data?.provider || null,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens,
+    cached_tokens: numberOrNull(usage?.prompt_tokens_details?.cached_tokens),
+    reasoning_tokens: numberOrNull(usage?.completion_tokens_details?.reasoning_tokens),
+    cost,
+    duration_ms: measuredDurationMs,
+    tokens_per_second: tokensPerSecond,
+    finish_reason: data?.choices?.[0]?.finish_reason || null,
+    native_finish_reason: data?.choices?.[0]?.native_finish_reason || null,
+    http_status: httpStatus,
+    error: error || null
+  };
+}
+
+function recordTelemetry(telemetry, entry) {
+  if (!telemetry || !entry) return;
+  const payload = {
+    ...entry,
+    step: telemetry.step || "openrouter",
+    call_id: telemetry.callId || null,
+    recorded_at: new Date().toISOString()
+  };
+  try {
+    if (typeof telemetry.record === "function") telemetry.record(payload);
+  } catch (error) {
+    console.warn("[openrouter] telemetry recording failed:", error.message);
+  }
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function sumNullable(first, second) {
+  if (first === null && second === null) return null;
+  return Number(first || 0) + Number(second || 0);
 }
 
 export function extractJsonObject(text) {

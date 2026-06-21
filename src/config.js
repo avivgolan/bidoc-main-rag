@@ -456,7 +456,7 @@ export function getConfig(settingsOverride = null) {
         TOOL_NAMES.map((tool) => [tool, toolSettings[tool] || process.env[`N8N_TOOL_${tool.toUpperCase()}_URL`] || ""])
       )
     },
-    timezone: settings.timezone || process.env.TIMEZONE || "UTC+0"
+    timezone: settings.timezone || process.env.TIMEZONE || "Asia/Jerusalem"
   };
 }
 
@@ -839,7 +839,7 @@ export async function writeLocalSettings(settings, options = {}) {
       TOOL_NAMES.map((tool) => [tool, mergedTools[tool] ?? ""])
     ),
     toolsRuntime: normalizeToolRuntimeSettings(mergedToolsRuntime),
-    timezone: has("timezone") ? settings.timezone || "UTC+0" : existing.timezone || "UTC+0",
+    timezone: has("timezone") ? settings.timezone || "Asia/Jerusalem" : existing.timezone || "Asia/Jerusalem",
     subagents: mergedSubagents,
     presets: has("presets") ? normalizeSettingsPresets(settings.presets || []) : normalizeSettingsPresets(existing.presets || [])
   };

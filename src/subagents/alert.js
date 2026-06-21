@@ -23,13 +23,14 @@ const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 ## Fallback
 אם לא נמצאו נתונים: "לא נמצאו התראות רלוונטיות."`;
 
-async function searchAlertsEmbeddings(config, query, table, topK = 20, cacheContext = null) {
+async function searchAlertsEmbeddings(config, query, table, topK = 20, cacheContext = null, telemetry = null) {
   const contentConfig = contentSupabaseConfig(config);
   const embedding = await createEmbedding({
     apiKey: config.openRouterApiKey,
     model: config.models.embedding,
     input: query,
-    cacheContext
+    cacheContext,
+    telemetry
   });
 
   const rpcName = contentConfig.alertsRpcName || `match_${table}`;
@@ -45,7 +46,7 @@ async function searchAlertsEmbeddings(config, query, table, topK = 20, cacheCont
   return Array.isArray(data) ? data : [];
 }
 
-export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, dateTo = null, cacheContext = null }) {
+export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, dateTo = null, cacheContext = null, telemetry = null }) {
   const config = getConfig();
   const saved = readLocalSettings().subagents?.alert || {};
   const contentConfig = contentSupabaseConfig(config);
@@ -66,7 +67,8 @@ export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, d
     searchQuery,
     table,
     config.retrieval?.alertCandidates || 20,
-    cacheContext
+    cacheContext,
+    telemetry
   );
   const results = filterAlertsByDateRange(rawResults, normalizedDateFrom, normalizedDateTo);
 
@@ -93,6 +95,7 @@ export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, d
     frequencyPenalty: config.ai?.alert?.frequencyPenalty ?? 0,
     presencePenalty: config.ai?.alert?.presencePenalty ?? 0,
     seed: config.ai?.alert?.seed ?? null,
+    telemetry,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent }
