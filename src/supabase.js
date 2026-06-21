@@ -15,7 +15,8 @@ const GRAPH_NODE_TYPES = new Set(["event", "alert", "supplier", "person", "compa
 const GRAPH_EDGE_TYPES = new Set(["mentions", "caused_by", "blocks", "approved_by", "related_to", "same_topic", "from_document", "has_status", "has_risk"]);
 const TIMELINE_PAGE_DEFAULT_LIMIT = 200;
 const TIMELINE_PAGE_MAX_LIMIT = 2000;
-const TIMELINE_CURSOR_VERSION = 1;
+const TIMELINE_CURSOR_VERSION = 2;
+const TIMELINE_ORIGINS = ["drive", "email", "whatsapp"];
 const TIMELINE_PAGE_FIELDS = {
   index: [
     "id", "created_at", "primary_date", "hashtags", "title", "summary", "index_text",
@@ -273,6 +274,7 @@ export function parseTimelineEventsQuery(searchParams = new URLSearchParams()) {
   const limitValue = searchParams.get("limit");
   const source = sourceValue == null ? "index" : sourceValue;
   const sort = sortValue == null ? "desc" : sortValue;
+  const origins = parseTimelineOrigins(searchParams, source);
 
   if (!["index", "alerts"].includes(source)) {
     throw new TimelineRequestError("source must be index or alerts");
@@ -296,16 +298,16 @@ export function parseTimelineEventsQuery(searchParams = new URLSearchParams()) {
     throw new TimelineRequestError("from must not be later than to");
   }
 
-  const cursor = decodeTimelineCursor(searchParams.get("cursor"), { source, sort });
-  return { source, sort, limit, from, to, cursor };
+  const cursor = decodeTimelineCursor(searchParams.get("cursor"), { source, sort, origins });
+  return { source, sort, limit, from, to, origins, cursor };
 }
 
-export async function fetchTimelineEventPage({ config, source = "index", sort = "desc", limit = TIMELINE_PAGE_DEFAULT_LIMIT, from = null, to = null, cursor = null }) {
+export async function fetchTimelineEventPage({ config, source = "index", sort = "desc", limit = TIMELINE_PAGE_DEFAULT_LIMIT, from = null, to = null, origins = [], cursor = null }) {
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig)) {
     return {
       events: [],
-      page: { nextCursor: null, hasMore: false, from, to, sort, limit }
+      page: { nextCursor: null, hasMore: false, from, to, sort, limit, origins }
     };
   }
 
@@ -317,7 +319,7 @@ export async function fetchTimelineEventPage({ config, source = "index", sort = 
     order: `${primaryDateField}.${direction}.nullslast,created_at.${direction},id.${direction}`,
     limit: String(limit + 1)
   });
-  const filters = buildTimelinePageFilters({ primaryDateField, from, to, cursor, sort });
+  const filters = buildTimelinePageFilters({ primaryDateField, from, to, cursor, sort, origins });
   if (filters.length) params.set("and", `(${filters.join(",")})`);
 
   const rows = await supabaseFetch(contentConfig, `/rest/v1/${table}?${params.toString()}`);
@@ -328,14 +330,32 @@ export async function fetchTimelineEventPage({ config, source = "index", sort = 
   return {
     events,
     page: {
-      nextCursor: hasMore && lastRow ? encodeTimelineCursor(lastRow, { source, sort, primaryDateField }) : null,
+      nextCursor: hasMore && lastRow ? encodeTimelineCursor(lastRow, { source, sort, origins, primaryDateField }) : null,
       hasMore,
       from,
       to,
       sort,
-      limit
+      limit,
+      origins
     }
   };
+}
+
+function parseTimelineOrigins(searchParams, source) {
+  if (!searchParams.has("origins")) return [];
+  if (searchParams.getAll("origins").length !== 1) {
+    throw new TimelineRequestError("origins must be provided once");
+  }
+  const raw = searchParams.get("origins");
+  if (source !== "index") {
+    throw new TimelineRequestError("origins is only supported for index events");
+  }
+  if (!raw) throw new TimelineRequestError("origins must contain drive, email or whatsapp");
+  const values = raw.split(",");
+  if (values.some((value) => !value || !TIMELINE_ORIGINS.includes(value))) {
+    throw new TimelineRequestError("origins must contain drive, email or whatsapp");
+  }
+  return TIMELINE_ORIGINS.filter((origin) => values.includes(origin));
 }
 
 function parseTimelineIsoDate(value, field) {
@@ -355,8 +375,9 @@ function validIsoCalendarDate(value) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-function buildTimelinePageFilters({ primaryDateField, from, to, cursor, sort }) {
+function buildTimelinePageFilters({ primaryDateField, from, to, cursor, sort, origins = [] }) {
   const filters = [];
+  if (origins.length) filters.push(timelineOriginsFilter(origins));
   if (from) {
     filters.push(`or(${primaryDateField}.gte.${from},and(${primaryDateField}.is.null,created_at.gte.${from}))`);
   }
@@ -365,6 +386,16 @@ function buildTimelinePageFilters({ primaryDateField, from, to, cursor, sort }) 
   }
   if (cursor) filters.push(timelineCursorFilter({ primaryDateField, cursor, sort }));
   return filters;
+}
+
+function timelineOriginsFilter(origins) {
+  const clauses = [];
+  if (origins.includes("drive")) {
+    clauses.push("source_url.ilike.*sharepoint.com*", "source_url.ilike.*onedrive*");
+  }
+  if (origins.includes("email")) clauses.push("source_table.eq.emails");
+  if (origins.includes("whatsapp")) clauses.push("source_table.eq.whatsapp_analysis");
+  return `or(${clauses.join(",")})`;
 }
 
 function timelineCursorFilter({ primaryDateField, cursor, sort }) {
@@ -376,13 +407,14 @@ function timelineCursorFilter({ primaryDateField, cursor, sort }) {
   return `or(${primaryDateField}.${comparison}.${cursor.date},and(${primaryDateField}.eq.${cursor.date},created_at.${comparison}.${cursor.createdAt}),and(${primaryDateField}.eq.${cursor.date},created_at.eq.${cursor.createdAt},id.${comparison}.${id}),${primaryDateField}.is.null)`;
 }
 
-function encodeTimelineCursor(row, { source, sort, primaryDateField }) {
+function encodeTimelineCursor(row, { source, sort, origins, primaryDateField }) {
   const fallback = !row[primaryDateField];
   const date = fallback ? row.created_at : row[primaryDateField];
   const payload = {
     v: TIMELINE_CURSOR_VERSION,
     source,
     sort,
+    origins: origins.join(","),
     date: normalizeCursorDate(date),
     createdAt: normalizeCursorDate(row.created_at),
     id: normalizeCursorId(row.id),
@@ -391,7 +423,7 @@ function encodeTimelineCursor(row, { source, sort, primaryDateField }) {
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
 }
 
-function decodeTimelineCursor(value, { source, sort }) {
+function decodeTimelineCursor(value, { source, sort, origins }) {
   if (value == null) return null;
   try {
     const payload = JSON.parse(Buffer.from(String(value), "base64url").toString("utf8"));
@@ -399,6 +431,7 @@ function decodeTimelineCursor(value, { source, sort }) {
       payload?.v !== TIMELINE_CURSOR_VERSION ||
       payload.source !== source ||
       payload.sort !== sort ||
+      payload.origins !== origins.join(",") ||
       typeof payload.fallback !== "boolean" ||
       normalizeCursorDate(payload.date) !== payload.date ||
       normalizeCursorDate(payload.createdAt) !== payload.createdAt ||

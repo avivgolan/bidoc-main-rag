@@ -7,9 +7,12 @@ import {
   isTimelineTimeoutError,
   mergeTimelineEvents,
   mergeTimelineRanges,
+  normalizeTimelineOrigins,
   timelineMonthRange,
-  timelineRangeKey
-} from "./timelineData.js?v=20260610-uifix2";
+  timelineOriginSignature,
+  timelineRangeKey,
+  toggleTimelineOriginSelection
+} from "./timelineData.js?v=20260621-origin1";
 import {
   createTimelineSearchController,
   timelineEventMatchesQuery
@@ -211,13 +214,14 @@ const WORKFLOW_TEMPLATE_EDGES = [
 ].map(([from, to]) => ({ from, to }));
 
 const $ = (id) => document.getElementById(id);
-const TIMELINE_UI_VERSION = "V1.5";
+const TIMELINE_UI_VERSION = "V1.6";
 const MOBILE_SHELL_QUERY = "(max-width: 980px)";
 
 const timelineState = {
   events: [], resolution: "month", activeTags: new Set(),
   calYear: null, calMonth: null, calSelectedDate: null, calFocusedDate: null,
   source: "index",
+  activeOrigins: new Set(),
   selectedEventId: null,
   searchQuery: "",
   viewportStart: null,
@@ -3388,14 +3392,23 @@ async function loadTimeline(options = {}) {
   });
 }
 
-async function runTimelineLoad({ source, range, replace = false, refreshRelated = false, cursor = null, reason = "range" }) {
+async function runTimelineLoad({ source, range, replace = false, refreshRelated = false, cursor = null, reason = "range", origins = getTimelineOriginsForSource(source) }) {
   abortActiveTimelineRequest();
   const requestId = ++timelineState.requestId;
+  const requestOrigins = source === "index" ? normalizeTimelineOrigins(origins) : [];
+  const canCommit = () => canCommitTimelineRequest(
+    requestId,
+    timelineState.requestId,
+    source,
+    getActiveTimelineSource(),
+    requestOrigins,
+    getTimelineOriginsForSource(getActiveTimelineSource())
+  );
   const controller = new AbortController();
   timelineState.controller = controller;
   timelineState.loading = true;
   timelineState.loadingStartedAt = Date.now();
-  timelineState.lastLoad = { source, range, replace, refreshRelated, cursor, reason };
+  timelineState.lastLoad = { source, range, replace, refreshRelated, cursor, reason, origins: requestOrigins };
   let timedOut = false;
   timelineState.timeoutId = setTimeout(() => {
     timedOut = true;
@@ -3412,9 +3425,10 @@ async function runTimelineLoad({ source, range, replace = false, refreshRelated 
       to: range.to,
       limit: getTimelineLoadLimit(),
       cursor,
-      sort: "desc"
+      sort: "desc",
+      origins: requestOrigins
     }), { signal: controller.signal });
-    if (!canCommitTimelineRequest(requestId, timelineState.requestId, source, getActiveTimelineSource())) return false;
+    if (!canCommit()) return false;
 
     const incoming = (eventResult.events || []).map((event) => ({ ...event, source }));
     timelineState.eventsBySource[source] = replace
@@ -3429,12 +3443,13 @@ async function runTimelineLoad({ source, range, replace = false, refreshRelated 
         if (key.startsWith(`${source}|`)) timelineState.paginationByRange.delete(key);
       }
     }
-    const rangeKey = timelineRangeKey(source, range);
+    const rangeKey = timelineRangeKey(source, range, requestOrigins);
     timelineState.paginationByRange.set(rangeKey, {
       nextCursor: eventResult.page?.nextCursor || null,
       hasMore: Boolean(eventResult.page?.hasMore),
       range,
-      source
+      source,
+      origins: requestOrigins
     });
     timelineState.activeRangeKey = rangeKey;
     preserveTimelineSelection();
@@ -3449,7 +3464,7 @@ async function runTimelineLoad({ source, range, replace = false, refreshRelated 
         timelineDebug("links failed", { error: error.message });
         return null;
       });
-      if (!canCommitTimelineRequest(requestId, timelineState.requestId, source, getActiveTimelineSource())) return false;
+      if (!canCommit()) return false;
       if (linksResult) timelineState.linksBySource[source] = linksResult.links || [];
 
       setTimelineLoadingStep("טוען הצעות");
@@ -3458,7 +3473,7 @@ async function runTimelineLoad({ source, range, replace = false, refreshRelated 
         timelineDebug("suggestions failed", { error: error.message });
         return null;
       });
-      if (!canCommitTimelineRequest(requestId, timelineState.requestId, source, getActiveTimelineSource())) return false;
+      if (!canCommit()) return false;
       if (suggestionsResult) {
         timelineState.suggestionsBySource[source] = suggestionsResult.suggestions || [];
         timelineState.suggestionModesBySource[source] = suggestionsResult.mode || "rules";
@@ -3473,7 +3488,7 @@ async function runTimelineLoad({ source, range, replace = false, refreshRelated 
     finishTimelineLoading(requestId);
     return true;
   } catch (error) {
-    if (!canCommitTimelineRequest(requestId, timelineState.requestId, source, getActiveTimelineSource())) return false;
+    if (!canCommit()) return false;
     if (timedOut || isTimelineTimeoutError(error)) {
       showTimelineLoadFailure("הטעינה נמשכה יותר מ־20 שניות.", "timeout");
     } else if (isTimelineAbortError(error)) {
@@ -3527,6 +3542,14 @@ function getActiveTimelineSource() {
   return timelineState.source === "alerts" ? "alerts" : "index";
 }
 
+function getTimelineOriginsForSource(source = getActiveTimelineSource()) {
+  return source === "index" ? normalizeTimelineOrigins(timelineState.activeOrigins) : [];
+}
+
+function getActiveTimelineOriginSignature() {
+  return timelineOriginSignature(getTimelineOriginsForSource());
+}
+
 function syncTimelineSourceState(source = getActiveTimelineSource()) {
   timelineState.events = timelineState.eventsBySource[source] || [];
   timelineState.links = timelineState.linksBySource[source] || [];
@@ -3558,6 +3581,23 @@ function updateTimelineSourceButtons() {
   });
   const refresh = $("refreshTimeline");
   if (refresh) refresh.disabled = timelineState.loading;
+  updateTimelineOriginButtons();
+}
+
+function updateTimelineOriginButtons() {
+  const container = $("timelineOriginFilters");
+  if (!container) return;
+  container.hidden = getActiveTimelineSource() !== "index";
+  container.setAttribute("aria-busy", String(timelineState.loading));
+  const selectedOrigins = new Set(getTimelineOriginsForSource("index"));
+  container.querySelectorAll(".tlOriginBtn").forEach((button) => {
+    const selected = button.dataset.origin === "all"
+      ? selectedOrigins.size === 0
+      : selectedOrigins.has(button.dataset.origin);
+    button.classList.toggle("active", selected);
+    button.classList.toggle("loading", selected && timelineState.loading);
+    button.setAttribute("aria-pressed", String(selected));
+  });
 }
 
 function abortActiveTimelineRequest() {
@@ -3674,8 +3714,9 @@ function renderTimelineInitialSkeleton() {
 
 async function ensureTimelineRange(range, { reason = "range" } = {}) {
   const source = getActiveTimelineSource();
+  const origins = getTimelineOriginsForSource(source);
   if (isTimelineRangeCovered(timelineState.loadedRanges[source], range)) return true;
-  const rangeKey = timelineRangeKey(source, range);
+  const rangeKey = timelineRangeKey(source, range, origins);
   if (timelineState.pendingRangeKeys.has(rangeKey)) return false;
   timelineState.pendingRangeKeys.add(rangeKey);
   try {
@@ -3685,7 +3726,8 @@ async function ensureTimelineRange(range, { reason = "range" } = {}) {
       replace: false,
       refreshRelated: false,
       cursor: null,
-      reason
+      reason,
+      origins
     });
   } finally {
     timelineState.pendingRangeKeys.delete(rangeKey);
@@ -3702,7 +3744,8 @@ async function loadMoreTimelineEvents() {
     replace: false,
     refreshRelated: false,
     cursor: pagination.nextCursor,
-    reason: "pagination"
+    reason: "pagination",
+    origins: pagination.origins
   });
 }
 
@@ -3719,8 +3762,9 @@ function updateTimelineLoadMore() {
 }
 
 function timelineSourceHasMore(source = getActiveTimelineSource()) {
+  const prefix = `${source}|${source === "index" ? getActiveTimelineOriginSignature() : "all"}|`;
   for (const [key, pagination] of timelineState.paginationByRange.entries()) {
-    if (key.startsWith(`${source}|`) && pagination?.hasMore) return true;
+    if (key.startsWith(prefix) && pagination?.hasMore) return true;
   }
   return false;
 }
@@ -6142,6 +6186,34 @@ async function handleTimelineSourceSwitch(source) {
   });
 }
 
+async function handleTimelineOriginToggle(origin) {
+  if (getActiveTimelineSource() !== "index") return;
+  const nextOrigins = toggleTimelineOriginSelection(getTimelineOriginsForSource("index"), origin);
+  if (timelineOriginSignature(nextOrigins) === getActiveTimelineOriginSignature()) return;
+
+  abortActiveTimelineRequest();
+  timelineState.requestId += 1;
+  timelineState.activeOrigins = new Set(nextOrigins);
+  timelineState.eventsBySource.index = [];
+  timelineState.events = [];
+  timelineState.loadedRanges.index = [];
+  timelineState.pendingRangeKeys.clear();
+  timelineState.activeRangeKey = null;
+  timelineState.viewportStart = null;
+  for (const key of timelineState.paginationByRange.keys()) {
+    if (key.startsWith("index|")) timelineState.paginationByRange.delete(key);
+  }
+  updateTimelineOriginButtons();
+  updateTimelineLoadMore();
+  await loadTimeline({
+    force: true,
+    replace: true,
+    refreshRelated: false,
+    range: getTimelineInitialRange(),
+    reason: "origins"
+  });
+}
+
 async function handleTimelineResolutionSwitch(resolution, button = null) {
   if (!resolution) return;
   document.querySelectorAll(".resBtn").forEach((b) => {
@@ -6191,6 +6263,17 @@ function wireTimelineDelegatedControls() {
       event.stopPropagation();
       try {
         await handleTimelineSourceSwitch(sourceBtn.dataset.src);
+      } catch (error) {
+        failTimelineAction(error);
+      }
+      return;
+    }
+    const originBtn = event.target.closest(".tlOriginBtn");
+    if (originBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await handleTimelineOriginToggle(originBtn.dataset.origin);
       } catch (error) {
         failTimelineAction(error);
       }

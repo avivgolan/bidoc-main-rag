@@ -15,6 +15,7 @@ tags:
 - Timeline UI lives in `public/index.html`, `public/app.js`, and `public/styles.css` under the `#timeline` panel.
 - Timeline data is loaded client-side from `GET /api/timeline/events`; legacy `/api/timeline` and `/api/timeline/alerts` remain for older flows, while server-side event reads use Content Supabase when configured.
 - `GET /api/timeline/events` provides a compact, date-filtered Timeline API with validated `source`, `sort`, `limit`, and opaque cursor pagination.
+- Compact index Timeline reads optionally accept validated `origins=drive,email,whatsapp`; origin filtering runs in Content Supabase, Drive is identified by SharePoint/OneDrive `source_url`, and cursors are bound to the normalized origin selection.
 - The compact Timeline API selects only explicit DTO columns, filters and orders in Content Supabase, fetches `limit + 1`, and never selects raw `metadata` or `analyzed_data`.
 - Compact Timeline metadata is allowlisted separately for index and alert events; empty values are omitted.
 - The legacy `/api/timeline` and `/api/timeline/alerts` routes still use the full event helpers required by the current UI, Link Agent, and graph rebuild flows.
@@ -22,6 +23,7 @@ tags:
 - Frontend Timeline state caches events, loaded ranges, and cursor pagination separately for `index` and `alerts`; pages are deduplicated by source/id and kept newest-first.
 - Calendar navigation requests uncovered months before displaying them, and viewport edge navigation can request adjacent unloaded ranges without reloading links or suggestions.
 - Timeline search is local-only over loaded events, debounced by 250ms, and matches shared fields plus allowlisted compact metadata fields from `public/timelineSearch.js`.
+- The index Timeline toolbar has an accessible multi-select origin filter for Drive, WhatsApp, and email; changing it aborts stale requests, resets only event range/pagination caches, preserves local search, and does not reload links or suggestions. The filter is hidden for the alerts source.
 - Switching Timeline source clears the current search input/query; switching between list and calendar views preserves the active local search.
 - Calendar day cards are keyboard-accessible interactive buttons that select an event and reuse the shared Timeline detail panel renderer.
 - Timeline dropdown open/close behavior is handled by one global listener registration with outside-click and Escape handling, rather than re-registering `document.click` on each render.
@@ -83,6 +85,7 @@ tags:
 - 2026-06-21 -- Tightened the Timeline mobile header and control stack so the title/count/search/actions stay inside the viewport at 320/375/768px, removed the visible build label from `#timelineCount`, and deferred the initial detail panel on narrow screens until explicit event selection.
 - 2026-06-21 -- Added direct-manipulation mobile Timeline gestures: the graph now remains visible on narrow phones, horizontal drag changes the viewport, pinch changes the time-window zoom, graph taps update detail in place, and long-press plus vertical drag scrubs between event cards without a page jump.
 - 2026-06-21 -- Added horizontal swipe navigation to open mobile event-detail cards, including finger-following motion, edge resistance, animated card replacement, and an event-position hint.
+- 2026-06-21 -- Added database-backed multi-select Timeline origin filtering for Drive, email, and WhatsApp, including validated API parameters, origin-bound cursors/cache keys, stale-request protection, accessible responsive controls, UI version V1.6, Node regressions, and dedicated Playwright coverage.
 
 ## Gotchas
 

@@ -1,4 +1,5 @@
 const DAY_MS = 86400000;
+const TIMELINE_ORIGIN_ORDER = ["drive", "email", "whatsapp"];
 
 export function initialTimelineRange(now = new Date(), daysBack = 1825) {
   const to = endOfLocalDay(now);
@@ -27,7 +28,8 @@ export function buildTimelineEventsUrl({
   to,
   limit = 200,
   cursor = null,
-  sort = "desc"
+  sort = "desc",
+  origins = []
 }) {
   const params = new URLSearchParams({
     source,
@@ -36,12 +38,33 @@ export function buildTimelineEventsUrl({
     limit: String(limit),
     sort
   });
+  const normalizedOrigins = normalizeTimelineOrigins(origins);
+  if (normalizedOrigins.length) params.set("origins", normalizedOrigins.join(","));
   if (cursor) params.set("cursor", cursor);
   return `/api/timeline/events?${params.toString()}`;
 }
 
-export function timelineRangeKey(source, range) {
-  return `${source}|${range.from}|${range.to}`;
+export function normalizeTimelineOrigins(origins = []) {
+  const values = origins instanceof Set ? [...origins] : Array.isArray(origins) ? origins : [];
+  return TIMELINE_ORIGIN_ORDER.filter((origin) => values.includes(origin));
+}
+
+export function timelineOriginSignature(origins = []) {
+  return normalizeTimelineOrigins(origins).join(",") || "all";
+}
+
+export function toggleTimelineOriginSelection(origins = [], origin) {
+  if (origin === "all") return [];
+  if (!TIMELINE_ORIGIN_ORDER.includes(origin)) return normalizeTimelineOrigins(origins);
+  const selected = new Set(normalizeTimelineOrigins(origins));
+  if (!selected.size) return [origin];
+  if (selected.has(origin)) selected.delete(origin);
+  else selected.add(origin);
+  return normalizeTimelineOrigins(selected);
+}
+
+export function timelineRangeKey(source, range, origins = []) {
+  return `${source}|${timelineOriginSignature(origins)}|${range.from}|${range.to}`;
 }
 
 export function mergeTimelineEvents(existing = [], incoming = []) {
@@ -97,8 +120,10 @@ export function adjacentTimelineRange(range, direction, durationMs) {
   return timelineRange(from, new Date(from.getTime() + width - 1));
 }
 
-export function canCommitTimelineRequest(requestId, currentRequestId, source, currentSource) {
-  return requestId === currentRequestId && source === currentSource;
+export function canCommitTimelineRequest(requestId, currentRequestId, source, currentSource, origins = [], currentOrigins = []) {
+  return requestId === currentRequestId &&
+    source === currentSource &&
+    timelineOriginSignature(origins) === timelineOriginSignature(currentOrigins);
 }
 
 export function isTimelineAbortError(error) {

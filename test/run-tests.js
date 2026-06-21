@@ -18,7 +18,7 @@ import { chatCompletion } from "../src/openrouter.js";
 import { cachedOperation, cacheKey, createCacheContext, finalizeCacheMetrics, MemoryCacheProvider } from "../src/cache.js";
 import { QA_SYSTEM_PROMPT } from "../src/qaAgent.js";
 import { defaultPrompts } from "../src/prompts.js";
-import { adjacentTimelineRange, buildTimelineEventsUrl, canCommitTimelineRequest, initialTimelineRange, isTimelineAbortError, isTimelineRangeCovered, isTimelineTimeoutError, mergeTimelineEvents, mergeTimelineRanges, timelineMonthRange } from "../public/timelineData.js";
+import { adjacentTimelineRange, buildTimelineEventsUrl, canCommitTimelineRequest, initialTimelineRange, isTimelineAbortError, isTimelineRangeCovered, isTimelineTimeoutError, mergeTimelineEvents, mergeTimelineRanges, normalizeTimelineOrigins, timelineMonthRange, timelineOriginSignature, timelineRangeKey, toggleTimelineOriginSelection } from "../public/timelineData.js";
 import { buildTimelineSearchText, createTimelineSearchController, timelineEventMatchesQuery } from "../public/timelineSearch.js";
 import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigateByMonths, calWeekBoundary } from "../public/calendarHelpers.js";
 
@@ -926,6 +926,7 @@ test("timeline events query defaults source, sort and limit", () => {
     limit: 200,
     from: null,
     to: null,
+    origins: [],
     cursor: null
   });
 });
@@ -946,6 +947,30 @@ test("timeline frontend builds ranged paginated event URLs", () => {
   assert.equal(url.searchParams.get("limit"), "200");
   assert.equal(url.searchParams.get("cursor"), "opaque-cursor");
   assert.equal(url.searchParams.get("sort"), "desc");
+});
+
+test("timeline frontend builds canonical origin filters and range keys", () => {
+  const range = {
+    from: "2026-03-01T00:00:00.000Z",
+    to: "2026-03-31T23:59:59.999Z"
+  };
+  const url = new URL(buildTimelineEventsUrl({
+    source: "index",
+    ...range,
+    origins: ["whatsapp", "drive", "email"]
+  }), "http://localhost");
+  assert.equal(url.searchParams.get("origins"), "drive,email,whatsapp");
+  assert.equal(timelineRangeKey("index", range, ["email"]), `index|email|${range.from}|${range.to}`);
+  assert.deepEqual(normalizeTimelineOrigins(new Set(["whatsapp", "drive"])), ["drive", "whatsapp"]);
+  assert.equal(timelineOriginSignature([]), "all");
+});
+
+test("timeline origin multi-select switches from all and falls back to all", () => {
+  assert.deepEqual(toggleTimelineOriginSelection([], "email"), ["email"]);
+  assert.deepEqual(toggleTimelineOriginSelection(["email"], "whatsapp"), ["email", "whatsapp"]);
+  assert.deepEqual(toggleTimelineOriginSelection(["email", "whatsapp"], "email"), ["whatsapp"]);
+  assert.deepEqual(toggleTimelineOriginSelection(["whatsapp"], "whatsapp"), []);
+  assert.deepEqual(toggleTimelineOriginSelection(["drive"], "all"), []);
 });
 
 test("timeline frontend default range covers 1826 local calendar days", () => {
@@ -1100,6 +1125,8 @@ test("timeline frontend rejects stale source responses and classifies aborts", (
   assert.equal(canCommitTimelineRequest(5, 5, "alerts", "alerts"), true);
   assert.equal(canCommitTimelineRequest(4, 5, "alerts", "alerts"), false);
   assert.equal(canCommitTimelineRequest(5, 5, "index", "alerts"), false);
+  assert.equal(canCommitTimelineRequest(5, 5, "index", "index", ["email"], ["email"]), true);
+  assert.equal(canCommitTimelineRequest(5, 5, "index", "index", ["email"], ["whatsapp"]), false);
   assert.equal(isTimelineAbortError({ name: "AbortError" }), true);
   assert.equal(isTimelineTimeoutError({ kind: "timeout" }), true);
   assert.equal(isTimelineAbortError(new Error("network")), false);
@@ -1111,7 +1138,7 @@ test("timeline UI uses ranged loading, cancellation and isolated pagination", ()
   assert.match(appSource, /buildTimelineEventsUrl\(\{[\s\S]*limit: getTimelineLoadLimit\(\),[\s\S]*sort: "desc"/);
   assert.match(appSource, /getTimelineInitialRange\(\)/);
   assert.match(appSource, /const requestId = \+\+timelineState\.requestId/);
-  assert.match(appSource, /canCommitTimelineRequest\(requestId, timelineState\.requestId, source, getActiveTimelineSource\(\)\)/);
+  assert.match(appSource, /canCommitTimelineRequest\([\s\S]*requestId,[\s\S]*timelineState\.requestId,[\s\S]*requestOrigins,[\s\S]*getTimelineOriginsForSource/);
   assert.match(appSource, /abortActiveTimelineRequest\(\);[\s\S]*reason: "refresh"/);
   assert.match(appSource, /refreshRelated: false,[\s\S]*cursor: pagination\.nextCursor/);
   assert.match(appSource, /catch\(\(error\) => \{[\s\S]*timelineDebug\("links failed"/);
@@ -1161,6 +1188,16 @@ test("timeline UI registers dropdown listeners once and keeps alerts label visib
   assert.match(htmlSource, /data-src="alerts">התראות/);
   assert.match(htmlSource, /<option value="alerts">התראות<\/option>/);
   assert.match(htmlSource, /id="tlTagsBtn" type="button" aria-expanded="false" aria-controls="tlTagsDropdown"/);
+});
+
+test("timeline UI exposes accessible multi-select origin filters only for index", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(htmlSource, /id="timelineOriginFilters" role="group" aria-label="סינון לפי מקור המידע"/);
+  assert.match(htmlSource, /data-origin="drive"[\s\S]*data-origin="whatsapp"[\s\S]*data-origin="email"/);
+  assert.match(appSource, /container\.hidden = getActiveTimelineSource\(\) !== "index"/);
+  assert.match(appSource, /handleTimelineOriginToggle[\s\S]*refreshRelated: false/);
+  assert.match(appSource, /const TIMELINE_UI_VERSION = "V1\.6"/);
 });
 
 test("compact index timeline query filters and paginates in Supabase", async () => {
@@ -1261,6 +1298,51 @@ test("compact index timeline query filters and paginates in Supabase", async () 
   }
 });
 
+test("compact index timeline filters origins in Supabase and binds them to cursors", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const rows = [
+    { id: "2", created_at: "2026-06-02T08:00:00Z", primary_date: "2026-06-02T10:00:00Z", title: "Mail", source_table: "emails" },
+    { id: "1", created_at: "2026-06-01T08:00:00Z", primary_date: "2026-06-01T10:00:00Z", title: "Drive", source_url: "https://tenant.sharepoint.com/doc" }
+  ];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify(rows), { status: 200 });
+  };
+  try {
+    const config = {
+      contentSource: {
+        supabaseUrl: "https://content.supabase.co",
+        supabaseServiceRoleKey: "content-key",
+        indexTable: "data_index"
+      }
+    };
+    const query = parseTimelineEventsQuery(new URLSearchParams({
+      origins: "email,drive",
+      limit: "1"
+    }));
+    assert.deepEqual(query.origins, ["drive", "email"]);
+    const first = await fetchTimelineEventPage({ config, ...query });
+    const filter = new URL(calls[0]).searchParams.get("and");
+    assert.match(filter, /source_url\.ilike\.\*sharepoint\.com\*/);
+    assert.match(filter, /source_url\.ilike\.\*onedrive\*/);
+    assert.match(filter, /source_table\.eq\.emails/);
+    assert.doesNotMatch(filter, /whatsapp_analysis/);
+    assert.equal(first.page.hasMore, true);
+    assert.deepEqual(first.page.origins, ["drive", "email"]);
+    assert.doesNotThrow(() => parseTimelineEventsQuery(new URLSearchParams({
+      origins: "drive,email",
+      cursor: first.page.nextCursor
+    })));
+    assert.throws(
+      () => parseTimelineEventsQuery(new URLSearchParams({ origins: "whatsapp", cursor: first.page.nextCursor })),
+      (error) => error instanceof TimelineRequestError && error.message === "cursor is invalid"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("compact alerts timeline query excludes analyzed data and filters metadata", async () => {
   const originalFetch = globalThis.fetch;
   let requestedUrl = "";
@@ -1341,6 +1423,9 @@ test("timeline events query rejects invalid input and cursors", () => {
     ["empty from", { from: "" }],
     ["to", { to: "2026/06/01" }],
     ["range", { from: "2026-06-02", to: "2026-06-01" }],
+    ["empty origins", { origins: "" }],
+    ["unknown origin", { origins: "email,slack" }],
+    ["origins on alerts", { source: "alerts", origins: "email" }],
     ["cursor", { cursor: "not-a-valid-cursor" }],
     ["empty cursor", { cursor: "" }]
   ];
@@ -1351,6 +1436,11 @@ test("timeline events query rejects invalid input and cursors", () => {
       label
     );
   }
+  assert.throws(
+    () => parseTimelineEventsQuery(new URLSearchParams("origins=email&origins=drive")),
+    (error) => error instanceof TimelineRequestError && error.statusCode === 400,
+    "duplicate origins parameter"
+  );
 });
 
 test("legacy timeline endpoints and heavy timeline operations keep full-data helpers", () => {
