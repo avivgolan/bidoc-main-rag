@@ -4785,25 +4785,20 @@ function selectTlEvent(ev, scroll = true, { fromKeyboard = false, source = "unkn
   metaBtn.type = "button";
   metaBtn.className = "tlMetaBtn";
   metaBtn.id = "tlMetaBtn";
-  metaBtn.setAttribute("aria-expanded", "false");
+  metaBtn.setAttribute("aria-expanded", "true");
   metaBtn.setAttribute("aria-controls", "tlMetaBox");
-  metaBtn.textContent = "הצג metadata";
+  metaBtn.textContent = "???? metadata";
+  const metaBox = buildTimelineMetadataPanel(ev.metadata);
+  metaBox.id = "tlMetaBox";
   metaBtn.addEventListener("click", () => {
-    const existing = metaSection.querySelector(".tlMetaBox");
-    if (existing) {
-      existing.remove();
-      metaBtn.textContent = "הצג metadata";
-      metaBtn.setAttribute("aria-expanded", "false");
-      return;
-    }
-    const box = buildTimelineMetadataPanel(ev.metadata);
-    box.id = "tlMetaBox";
-    metaSection.appendChild(box);
-    metaBtn.textContent = "הסתר metadata";
-    metaBtn.setAttribute("aria-expanded", "true");
+    const willExpand = metaBox.hidden;
+    metaBox.hidden = !willExpand;
+    metaBtn.textContent = willExpand ? "???? metadata" : "??? metadata";
+    metaBtn.setAttribute("aria-expanded", willExpand ? "true" : "false");
   });
-  metaSection.appendChild(buildTimelineLinksPanel(ev));
   metaSection.appendChild(metaBtn);
+  metaSection.appendChild(metaBox);
+  metaSection.appendChild(buildTimelineLinksPanel(ev));
   decorateTimelinePanelForExpand(panel, "detail", "פרטי אירוע");
   if (fromKeyboard) {
     requestAnimationFrame(() => $("tlDetailTitle")?.focus());
@@ -5103,15 +5098,6 @@ function buildTimelineModalPanel(kind) {
   const clone = detail.cloneNode(true);
   clone.removeAttribute("id");
   clone.querySelectorAll(".tlPanelExpandBtn").forEach((node) => node.remove());
-  const linksPanel = clone.querySelector(".tlLinksPanel");
-  const linksBody = clone.querySelector(".tlLinksBody");
-  const linksToggle = clone.querySelector(".tlLinksToggle");
-  if (linksPanel && linksBody && linksToggle) {
-    linksPanel.dataset.expanded = "true";
-    linksBody.hidden = false;
-    linksToggle.setAttribute("aria-expanded", "true");
-    linksToggle.setAttribute("aria-label", "מזער קשרים");
-  }
   return clone;
 }
 

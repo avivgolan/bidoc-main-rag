@@ -2002,11 +2002,11 @@ test("4C: reduced motion hides tlNode::after pulsing ring", () => {
   assert.match(cssSource, /prefers-reduced-motion: reduce[\s\S]*?\.tlNode::after\s*\{\s*display: none/s);
 });
 
-test("4C: graphical timeline hidden at 375px with CSS fallback note", () => {
+test("mobile graphical timeline remains visible at 375px", () => {
   const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
   assert.match(cssSource, /max-width: 375px/);
-  assert.match(cssSource, /\.tlWave[\s\S]*?display: none/s);
-  assert.match(cssSource, /\.tlPanels::before[\s\S]*?content:/s);
+  assert.match(cssSource, /max-width: 375px[\s\S]*?#timeline\.active \.tlWave \{ display: block/s);
+  assert.match(cssSource, /max-width: 375px[\s\S]*?#timeline\.active \.tlStrip \{ display: block/s);
 });
 
 test("4C: AI panel collapse button added to buildAiPanel", () => {
@@ -2055,12 +2055,35 @@ test("timeline responsive state exposes mobile graph modes and collapses AI by d
   assert.match(appSource, /if \(width <= 375\) return "phone-narrow"/);
   assert.match(appSource, /if \(width <= 768\) return "phone-compact"/);
   assert.match(appSource, /if \(width <= 980\) return "tablet-stacked"/);
-  assert.match(appSource, /if \(kind === "phone-narrow"\) return "hidden"/);
+  assert.match(appSource, /if \(kind === "phone-narrow"\) return "compact"/);
   assert.match(appSource, /if \(kind === "phone-compact"\) return "compact"/);
   assert.match(appSource, /if \(kind === "tablet-stacked"\) return "secondary"/);
   assert.match(appSource, /return getTimelineViewportKind\(\) !== "desktop"/);
   assert.match(appSource, /panel\.dataset\.mobileGraph = getTimelineGraphMode\(\)/);
   assert.match(appSource, /panel\.dataset\.aiCollapsed = isTimelineAiCollapsed\(\) \? "true" : "false"/);
+});
+
+test("timeline mobile graph supports pan pinch and long-press card scrubbing without detail jumps", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(appSource, /function wireTimelineGraphTouch\(/);
+  assert.match(appSource, /function wireTimelineNodeTouch\(/);
+  assert.match(appSource, /timelineState\.mobileZoom = previewZoom/);
+  assert.match(appSource, /selectTlEvent\(ev, false, \{ source: "graph" \}\)/);
+  assert.doesNotMatch(appSource, /compactViewport && source === "graph"[\s\S]*?scrollIntoView/);
+  assert.match(cssSource, /\.tlWave[\s\S]*?touch-action: pan-y/s);
+  assert.match(cssSource, /\.tlNode[\s\S]*?touch-action: none/s);
+});
+
+test("timeline mobile detail supports horizontal swipe navigation", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(appSource, /function wireTimelineDetailSwipe\(/);
+  assert.match(appSource, /wireTimelineDetailSwipe\(detail, events\)/);
+  assert.match(appSource, /selectTlEvent\(targetEvent, false, \{ source: "detail-swipe" \}\)/);
+  assert.match(appSource, /Math\.abs\(currentX\) >= 52 \|\| velocity >= 0\.42/);
+  assert.match(cssSource, /\.tlDetail\.tlDetailSwiping[\s\S]*?translateX\(var\(--tl-detail-swipe-x/s);
+  assert.match(cssSource, /\.tlDetailSwipeHint[\s\S]*?display: block/s);
 });
 
 test("timeline mobile CSS makes list first and AI secondary under 980px", () => {

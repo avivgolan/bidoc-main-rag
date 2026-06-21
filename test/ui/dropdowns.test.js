@@ -212,12 +212,15 @@ test.describe("Event list keyboard interaction", () => {
     await setupTimelineMocks(page);
     await openTimeline(page);
 
-    const item = page.locator(".tlListItem[data-event-id='idx-001']");
-    await item.click();
+    const item = page.locator(".tlListItem").first();
+    const otherItem = page.locator(".tlListItem").nth(1);
+    await expect(item).toBeVisible();
+    await expect(otherItem).toBeVisible();
+    await item.dispatchEvent("click");
 
     await expect(item).toHaveClass(/tlListActive/);
     // Other items should not have the active class
-    await expect(page.locator(".tlListItem[data-event-id='idx-002']")).not.toHaveClass(/tlListActive/);
+    await expect(otherItem).not.toHaveClass(/tlListActive/);
 
     expect(errors).toHaveLength(0);
   });

@@ -2697,6 +2697,9 @@ label {
   overflow: hidden;
   background: #080b14;
   border-bottom: 1px solid rgba(255,255,255,.04);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .tlWaveSvg { position: absolute; top:0; left:0; width:100%; height:100%; }
 
@@ -2738,6 +2741,8 @@ label {
   font-size: 11px; font-weight: 700;
   border: 1.5px solid transparent; z-index: 10;
   line-height: 1;
+  touch-action: none;
+  -webkit-touch-callout: none;
 }
 .tlNode::after {
   content: '';
@@ -2755,6 +2760,10 @@ label {
 .tlNode:focus:not(:focus-visible) { outline: none; }
 .tlNode.tlSel   { transform: translate(-50%,-50%) scale(1.55); z-index: 25; }
 .tlNode.tlCluster { width: 32px; height: 32px; font-size: 10px; overflow: visible; isolation: isolate; }
+.tlNode.tlNodeScrubbing {
+  transform: translate(-50%,-50%) scale(1.55);
+  box-shadow: 0 0 0 7px color-mix(in srgb, currentColor 18%, transparent), 0 14px 30px rgba(0,0,0,.34);
+}
 
 .tlNodeTooltip {
   position: fixed;
@@ -2871,6 +2880,7 @@ label {
   color: #253545;
   border-bottom: 1px solid rgba(255,255,255,.03);
   flex-shrink: 0;
+  pointer-events: none;
 }
 .tlListItem {
   display: flex; align-items: flex-start; gap: 9px;
@@ -3293,7 +3303,8 @@ body:has(#timeline.active) .sidebar {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  white-space: nowrap;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 #timeline.active .panelHeader h2 {
@@ -3306,6 +3317,9 @@ body:has(#timeline.active) .sidebar {
   color: #8aa3bd;
   font-size: 12px;
   margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .timelineSearch {
@@ -3314,7 +3328,7 @@ body:has(#timeline.active) .sidebar {
   align-items: center;
   gap: 8px;
   max-width: 520px;
-  min-width: 260px;
+  min-width: 0;
   justify-self: start;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 7px;
@@ -3324,6 +3338,7 @@ body:has(#timeline.active) .sidebar {
 }
 
 .timelineSearch input {
+  min-width: 0;
   min-height: 36px;
   padding: 0;
   border: 0;
@@ -3345,6 +3360,7 @@ body:has(#timeline.active) .sidebar {
 
 #timeline.active .headerActions {
   justify-content: flex-end;
+  min-width: 0;
 }
 
 #timeline.active #refreshTimeline {
@@ -4216,6 +4232,10 @@ body:has(#timeline.active) .sidebar {
   gap: 16px;
   padding: 20px;
   overflow-y: auto;
+}
+
+.tlDetailSwipeHint {
+  display: none;
 }
 
 .qaCard {
@@ -5531,8 +5551,8 @@ body:has(#timeline.active) .sidebar {
     gap: 8px;
   }
   #timeline.active .timelineTitleGroup {
-    flex: 1 0 auto;
-    white-space: nowrap;
+    flex: 1 1 100%;
+    min-width: 0;
   }
   #timeline.active .timelineSearch {
     flex: 1 1 100%;
@@ -5585,8 +5605,8 @@ body:has(#timeline.active) .sidebar {
 
 /* ---- 560px: compact phones ---- */
 @media (max-width: 560px) {
-  /* Shrink graphical timeline to save vertical space */
-  #timeline.active .tlWave  { height: 100px; min-height: 100px; }
+  /* Keep enough room for direct manipulation without crowding the page. */
+  #timeline.active .tlWave  { height: 144px; min-height: 144px; }
   #timeline.active .tlStrip { height: 38px; }
 
   /* Compact calendar grid */
@@ -5600,23 +5620,10 @@ body:has(#timeline.active) .sidebar {
   .tlDateInput { width: 130px !important; }
 }
 
-/* ---- 375px: very narrow — graphical timeline CSS fallback ---- */
+/* ---- 375px: very narrow mobile graph ---- */
 @media (max-width: 375px) {
-  /* Hide wave and strip; list/detail/AI remain fully functional */
-  #timeline.active .tlWave,
-  #timeline.active .tlStrip { display: none; }
-
-  /* Brief note where the graphical timeline was */
-  #timeline.active .tlPanels::before {
-    content: "גרף אינטרקטיבי זמין בתצוגה רחבה";
-    display: block;
-    font-size: 11px;
-    color: #5a8090;
-    text-align: center;
-    padding: 6px 0 2px;
-    grid-column: 1 / -1;
-    width: 100%;
-  }
+  #timeline.active .tlWave { display: block; min-height: 132px; height: 132px; }
+  #timeline.active .tlStrip { display: block; }
 
   /* Further compact calendar and detail panel */
   .calCell     { min-height: 34px; }
@@ -5674,6 +5681,42 @@ body:has(#timeline.active) .sidebar {
   display: grid;
   grid-template-rows: minmax(220px, 34vh) 54px;
   overflow: hidden;
+  position: relative;
+}
+
+.tlGestureHint {
+  position: absolute;
+  z-index: 32;
+  inset-inline: 10px;
+  bottom: 58px;
+  width: max-content;
+  max-width: calc(100% - 20px);
+  margin-inline: auto;
+  padding: 5px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  color: rgba(219, 234, 254, 0.72);
+  background: rgba(6, 15, 28, 0.72);
+  backdrop-filter: blur(12px);
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
+}
+
+.tlGraphRegion.tlPanning .tlWaveSvg,
+.tlGraphRegion.tlPanning .tlNodes,
+.tlGraphRegion.tlPanning .tlMonthBar {
+  transform: translateX(var(--tl-pan-x, 0));
+  will-change: transform;
+}
+
+.tlGraphRegion.tlPinching .tlWaveSvg,
+.tlGraphRegion.tlPinching .tlNodes,
+.tlGraphRegion.tlPinching .tlMonthBar {
+  transform: scaleX(var(--tl-pinch-scale, 1));
+  transform-origin: var(--tl-pinch-origin, 50%) center;
+  will-change: transform;
 }
 
 .tlGraphMobileNote {
@@ -5853,6 +5896,37 @@ body:has(#timeline.active) .sidebar {
   min-width: 0;
   width: 100%;
   max-width: 100%;
+}
+
+#timeline.active[data-viewport="phone-narrow"] .tlDetail,
+#timeline.active[data-viewport="phone-compact"] .tlDetail {
+  touch-action: pan-y;
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease;
+  will-change: transform, opacity;
+}
+
+#timeline.active[data-viewport="phone-narrow"] .tlDetail.tlDetailSwiping,
+#timeline.active[data-viewport="phone-compact"] .tlDetail.tlDetailSwiping {
+  transform: translateX(var(--tl-detail-swipe-x, 0));
+  opacity: var(--tl-detail-swipe-opacity, 1);
+  transition: none;
+}
+
+#timeline.active[data-viewport="phone-narrow"] .tlDetailSwipeHint,
+#timeline.active[data-viewport="phone-compact"] .tlDetailSwipeHint {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: -2px auto 12px;
+  padding: 5px 11px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 999px;
+  color: #7f9bb4;
+  background: rgba(15, 27, 46, 0.58);
+  font-size: 10.5px;
+  line-height: 1.35;
+  text-align: center;
+  pointer-events: none;
 }
 
 #timeline.active[data-viewport="phone-narrow"] .tlList,
@@ -6038,33 +6112,70 @@ body:has(#timeline.active) .sidebar {
 
   #timeline.active .panelHeader {
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "title title"
+      "search action";
+    gap: 8px;
     align-items: start;
-    padding-inline: 14px;
+    padding: 12px 14px 10px;
   }
 
   #timeline.active .timelineTitleGroup {
-    grid-column: 1 / -1;
+    grid-area: title;
+    align-items: flex-start;
+    gap: 4px 8px;
   }
 
   #timeline.active .timelineSearch {
-    grid-column: 1 / -1;
-    order: initial;
+    grid-area: search;
+    width: 100%;
+    max-width: none;
+    min-height: 42px;
+    padding-inline: 10px;
   }
 
   #timeline.active .headerActions {
-    justify-content: flex-start;
+    grid-area: action;
+    justify-content: flex-end;
+    align-self: stretch;
+  }
+
+  #timeline.active #refreshTimeline {
+    min-width: 44px;
+    min-height: 42px;
+    padding: 0 12px;
+  }
+
+  #timeline.active #timelineCount {
+    flex-basis: 100%;
+    font-size: 11.5px;
+    line-height: 1.45;
   }
 
   #timeline.active .timelineControlStack {
     gap: 8px;
+    padding: 0 12px 8px;
+  }
+
+  #timeline.active .timelineSourceToggle {
+    gap: 6px;
   }
 
   #timeline.active .tlAdvancedToggle,
   #timeline.active .tlSrcBtn,
   #timeline.active .resBtn {
     min-height: 44px !important;
+  }
+
+  #timeline.active .timelineResolution {
+    gap: 6px;
+  }
+
+  #timeline.active .tlAdvancedToggle {
+    min-height: 38px !important;
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   #timeline.active .timelineAdvancedControls {
@@ -6104,6 +6215,10 @@ body:has(#timeline.active) .sidebar {
     max-height: min(42vh, 360px);
   }
 
+  #timeline.active .tlDetail[hidden][data-deferred="true"] {
+    display: none !important;
+  }
+
   #timeline.active .tlDetail {
     padding: 16px;
   }
@@ -6140,8 +6255,10 @@ body:has(#timeline.active) .sidebar {
   }
 
   #timeline.active .tlGraphRegion {
-    grid-template-rows: minmax(96px, 16vh) 36px;
+    grid-template-rows: 144px 36px;
   }
+
+  #timeline.active .tlGestureHint { bottom: 42px; }
 
   #timeline.active .tlAi {
     border-radius: 10px;

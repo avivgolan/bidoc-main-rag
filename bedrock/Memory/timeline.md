@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: timeline
-last_updated: 2026-06-17
+last_updated: 2026-06-21
 tags:
   - timeline
   - frontend
@@ -42,6 +42,8 @@ tags:
 - Link-agent runs are recorded in local run history and merged into `/api/run-history` alongside persisted chat workflow rows.
 - `public/app.js` uses `timelineState.resolution` for day/week/month bucket sizing and `timelineState.viewportStart` for the lower strip viewport.
 - The lower strip window is draggable/clickable and updates the visible time range; it also supports keyboard movement with Arrow/Home/End keys.
+- Phone Timeline graph view stays visible at 320-375px and supports horizontal touch panning, pinch zoom around the gesture midpoint, tap-to-open detail without page scrolling, and long-press vertical scrubbing between event cards.
+- Open Timeline detail cards on phone viewports support horizontal swipe navigation while preserving native vertical scrolling and interaction with buttons, links, and form controls.
 
 ## Recent Changes
 
@@ -78,12 +80,17 @@ tags:
 - 2026-06-17 -- Timeline links-panel cleanup: removed the legacy duplicate `buildTimelineLinksPanel` implementation and kept the newer toggle-based version; the nearby link-row/link-form text was also normalized in `public/app.js` without changing helper boundaries or behavior.
 - 2026-06-17 -- Timeline desktop layout follow-up: the lower desktop panel row now uses a stable left-to-right structure of AI summary, event detail, and event list by keeping `tlPanels` as `secondary primary` and flipping `tlPrimaryColumn` to `detail + list`, so the visible RTL order is right=list, center=detail, left=summary.
 - 2026-06-17 -- Timeline panel expansion follow-up: the event list, event detail, and summary panels now add an in-panel expand button that opens a shared modal dialog with a larger version of the selected section, while preserving the existing list/detail/summary renderers.
+- 2026-06-21 -- Tightened the Timeline mobile header and control stack so the title/count/search/actions stay inside the viewport at 320/375/768px, removed the visible build label from `#timelineCount`, and deferred the initial detail panel on narrow screens until explicit event selection.
+- 2026-06-21 -- Added direct-manipulation mobile Timeline gestures: the graph now remains visible on narrow phones, horizontal drag changes the viewport, pinch changes the time-window zoom, graph taps update detail in place, and long-press plus vertical drag scrubs between event cards without a page jump.
+- 2026-06-21 -- Added horizontal swipe navigation to open mobile event-detail cards, including finger-following motion, edge resistance, animated card replacement, and an event-position hint.
 
 ## Gotchas
 
 - The timeline panel is re-rendered when the strip window moves, so drag code must not depend on layout from a detached DOM node unless the track rect is captured before render.
 - `#timelineLoadElapsed` inside `#timelineLoadStatus` (aria-live="polite") must stay `aria-hidden="true"` or it causes screen reader announcements every second during load.
 - `initialTimelineRange` is exported from `timelineData.js` but the UI uses its own `getTimelineInitialRange()` which reads from the DOM date inputs — do not confuse the two.
+- Phone-sized Timeline viewports (`phone-narrow`, `phone-compact`) intentionally keep `#tlDetailPanel` hidden on first load and only reveal it after `selectTlEvent(...)` runs from an explicit user action.
+- Mobile graph gestures commit viewport/zoom state only when the gesture ends; the graph uses a temporary CSS transform during movement so re-rendering does not detach the active pointer target.
 - Calendar nav in RTL: LEFT button = next month, RIGHT button = previous month (prevBtn in DOM order appears on the right in RTL flex layout).
 - `console.debug("[timeline]", ...)` is used as lightweight diagnostic output for resolution and viewport changes.
 - Calendar ARIA: ArrowLeft = +1 day (RTL), ArrowRight = -1 day — opposite of LTR ARIA Grid spec.

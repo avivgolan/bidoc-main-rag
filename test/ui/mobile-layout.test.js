@@ -33,6 +33,10 @@ async function checkNoHorizontalOverflow(page, label = "") {
   expect(hasOverflow, `Horizontal overflow detected${label ? " (" + label + ")" : ""}`).toBe(false);
 }
 
+async function getViewportWidth(page) {
+  return page.evaluate(() => document.documentElement.clientWidth);
+}
+
 for (const vp of VIEWPORTS) {
   test.describe(`Mobile layout @ ${vp.label}`, () => {
     test.beforeEach(async ({ page }) => {
@@ -134,6 +138,68 @@ for (const vp of VIEWPORTS) {
       await waitForEvents(page);
 
       await expect(page.locator("#timelineCount")).toBeVisible({ timeout: 5_000 });
+      expect(errors).toHaveLength(0);
+    });
+
+    test(`${vp.label}: header content stays inside viewport and wraps safely`, async ({ page }) => {
+      const errors = collectPageErrors(page);
+      await setupTimelineMocks(page);
+      await openTimeline(page);
+      await waitForEvents(page);
+
+      const viewportWidth = await getViewportWidth(page);
+      const metrics = await page.evaluate(() => {
+        const title = document.querySelector("#timeline.active .timelineTitleGroup");
+        const count = document.querySelector("#timelineCount");
+        const search = document.querySelector("#timeline.active .timelineSearch");
+        const header = document.querySelector("#timeline.active .panelHeader");
+        if (!title || !count || !search || !header) return null;
+        const rect = (el) => el.getBoundingClientRect();
+        return {
+          title: rect(title),
+          count: rect(count),
+          search: rect(search),
+          header: rect(header),
+          countText: count.textContent || "",
+          headerScrollWidth: header.scrollWidth,
+          headerClientWidth: header.clientWidth,
+        };
+      });
+
+      expect(metrics).not.toBeNull();
+      expect(metrics.count.right).toBeLessThanOrEqual(viewportWidth);
+      expect(metrics.count.left).toBeGreaterThanOrEqual(0);
+      expect(metrics.search.right).toBeLessThanOrEqual(viewportWidth);
+      expect(metrics.headerScrollWidth).toBeLessThanOrEqual(metrics.headerClientWidth);
+      expect(metrics.countText.length).toBeGreaterThan(0);
+      expect(errors).toHaveLength(0);
+    });
+
+    test(`${vp.label}: initial mobile detail is deferred until explicit selection`, async ({ page }) => {
+      const errors = collectPageErrors(page);
+      await setupTimelineMocks(page);
+      await openTimeline(page);
+      await waitForEvents(page);
+
+      await expect(page.locator("#tlDetailPanel")).toBeHidden();
+      await expect(page.locator(".tlListItem").first()).toBeVisible();
+
+      expect(errors).toHaveLength(0);
+    });
+
+    test(`${vp.label}: selecting an event reveals detail after interaction`, async ({ page }) => {
+      const errors = collectPageErrors(page);
+      await setupTimelineMocks(page);
+      await openTimeline(page);
+      await waitForEvents(page);
+
+      const firstItem = page.locator(".tlListItem").first();
+      const expectedTitle = await firstItem.locator(".tlListTitle").textContent();
+      await firstItem.click();
+
+      await expect(page.locator("#tlDetailPanel")).toBeVisible();
+      await expect(page.locator("#tlDetailTitle")).toContainText((expectedTitle || "").trim());
+
       expect(errors).toHaveLength(0);
     });
 
