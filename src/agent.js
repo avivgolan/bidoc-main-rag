@@ -1097,8 +1097,8 @@ function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
 }
 
 function liteFallback(message) {
-  if (!isHebrew(message)) return "Hello, I am the bidoc.ai AI assistant for the JFrog project. How can I help?";
-  return "שלום! אני עוזר ה-AI של bidoc.ai לפרויקט JFrog. במה אוכל לסייע?";
+  if (!isHebrew(message)) return "Hello, I am the bidoc.ai AI assistant. How can I help?";
+  return "שלום! אני עוזר ה-AI של bidoc.ai. במה אוכל לסייע?";
 }
 
 function summarizeData(data) {
