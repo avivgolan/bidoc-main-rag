@@ -281,6 +281,30 @@
             <div class="workflowHint" id="workflowHint">
               שלח הודעה בצ׳אט כדי לראות את רכיבי המערכת, הקווים ביניהם והלוגים של ההרצה האחרונה.
             </div>
+            <div class="workflowToolbar" id="workflowToolbar" hidden>
+              <div class="workflowSearchGroup">
+                <input id="workflowSearch" type="search" placeholder="Search node, input, output" autocomplete="off">
+                <select id="workflowStatusFilter" aria-label="Filter workflow status">
+                  <option value="">All statuses</option>
+                  <option value="done">Done</option>
+                  <option value="error">Error</option>
+                  <option value="skipped">Skipped</option>
+                </select>
+              </div>
+              <div class="workflowToolGroup">
+                <button id="workflowErrorsOnly" type="button" title="Show errors only">Errors</button>
+                <button id="workflowSlowNodes" type="button" title="Highlight slow nodes">Slow</button>
+                <button id="workflowExpensiveNodes" type="button" title="Highlight expensive nodes">Cost</button>
+                <button id="workflowFallbackNodes" type="button" title="Highlight fallback route">Fallback</button>
+                <button id="workflowRegressionNodes" type="button" title="Highlight regressions">Regressions</button>
+                <button id="clearWorkflowCompare" type="button" title="Clear run comparison" hidden>Clear Compare</button>
+                <button id="fitWorkflow" type="button" title="Fit to screen">Fit</button>
+                <button id="toggleWorkflowCards" type="button" title="Expand or collapse node cards">Collapse</button>
+                <button id="resetWorkflowFilters" type="button" title="Reset workflow filters">Reset</button>
+              </div>
+              <div class="workflowIssueSummary" id="workflowIssueSummary">0 matches</div>
+            </div>
+            <div class="workflowCompareSummary" id="workflowCompareSummary" hidden></div>
             <div class="workflowBoard" id="workflowBoard">
               <div id="workflowCy"></div>
             </div>

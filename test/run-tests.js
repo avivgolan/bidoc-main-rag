@@ -893,6 +893,115 @@ test("workflow UI exposes OpenRouter usage totals and per-node call details", ()
   assert.match(cssSource, /\.openRouterCallGrid/);
 });
 
+test("workflow MVP renders node cards with previews and fit controls", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(htmlSource, /id="workflowToolbar"/);
+  assert.match(htmlSource, /id="fitWorkflow"/);
+  assert.match(htmlSource, /id="toggleWorkflowCards"/);
+  assert.match(appSource, /workflowCardsExpanded: true/);
+  assert.match(appSource, /function workflowNodeCardLabel\(/);
+  assert.match(appSource, /"Input"/);
+  assert.match(appSource, /"Output"/);
+  assert.match(appSource, /Tokens \$\{metrics\.tokens\}/);
+  assert.match(appSource, /function fitWorkflowToScreen\(/);
+  assert.match(appSource, /function focusWorkflowStart\(/);
+  assert.match(appSource, /const minReadableZoom = state\.workflowCardsExpanded \? 0\.72 : 0\.9/);
+  assert.match(appSource, /const firstVisible = view\.nodes\.find\(\(node\) => filterSummary\.matches\.has\(node\.id\)\) \|\| view\.nodes\[0\]/);
+  assert.match(appSource, /requestAnimationFrame\(\(\) => focusWorkflowStart\(firstVisible\?\.id\)\)/);
+  assert.match(appSource, /maskSensitivePreview/);
+  assert.match(cssSource, /\.workflowToolbar/);
+  assert.match(cssSource, /height: 680px/);
+});
+
+test("workflow QA inspector exposes search filters edge payload and raw details", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  for (const id of [
+    "workflowSearch",
+    "workflowStatusFilter",
+    "workflowErrorsOnly",
+    "workflowSlowNodes",
+    "workflowExpensiveNodes",
+    "workflowFallbackNodes",
+    "workflowRegressionNodes",
+    "resetWorkflowFilters",
+    "workflowIssueSummary"
+  ]) {
+    assert.match(htmlSource, new RegExp(`id="${id}"`));
+  }
+  assert.match(appSource, /workflowFilters: \{ query: "", status: "", errorsOnly: false, issue: "" \}/);
+  assert.match(appSource, /function workflowFilterSummary\(/);
+  assert.match(appSource, /renderWorkflowEdgeInspector\(evt\.target\.data\("edgeData"\), view\)/);
+  assert.match(appSource, /function renderWorkflowEdgeInspector\(/);
+  assert.match(appSource, /function renderWorkflowLogsForNode\(/);
+  assert.match(appSource, /function renderWorkflowSources\(/);
+  assert.match(appSource, /function workflowNodeHasFallback\(/);
+  assert.match(appSource, /function workflowPayloadHasFallback\(/);
+  assert.match(appSource, /workflowFallbackNodes/);
+  assert.match(appSource, /workflowRegressionNodes/);
+  assert.match(appSource, /Fallback route used/);
+  assert.match(appSource, /Raw JSON/);
+  assert.match(appSource, /safeWorkflowJson/);
+  assert.match(cssSource, /\.workflowInspectorMetrics/);
+  assert.match(cssSource, /\.workflowNodeLogs/);
+  assert.match(cssSource, /\.workflowSourceList/);
+  assert.match(cssSource, /\.workflowFallbackNotice/);
+  assert.match(cssSource, /#workflowFallbackNodes\.active/);
+});
+
+test("workflow compare runs exposes base compare selection and node diffs", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(htmlSource, /id="clearWorkflowCompare"/);
+  assert.match(htmlSource, /id="workflowCompareSummary"/);
+  assert.match(appSource, /workflowCompare: \{ baseRun: null, compareRun: null, summary: null \}/);
+  assert.match(appSource, /function workflowCompareSummary\(/);
+  assert.match(appSource, /function setWorkflowCompareRole\(/);
+  assert.match(appSource, /data-compare-role="base"/);
+  assert.match(appSource, /compareState: compareSummary\.nodeStates\.get\(node\.id\)/);
+  assert.match(appSource, /selector: "node\[compareState = 'changed'\]"/);
+  assert.match(appSource, /function renderWorkflowCompareNotice\(/);
+  assert.match(appSource, /function renderWorkflowPayloadDiff\(/);
+  assert.match(appSource, /function workflowPayloadDiffRows\(/);
+  assert.match(appSource, /Base \$\{escapeHtml\(label\)\}/);
+  assert.match(appSource, /Compare \$\{escapeHtml\(label\)\}/);
+  assert.match(appSource, /addedEdges/);
+  assert.match(appSource, /removedEdges/);
+  assert.match(appSource, /function renderWorkflowRouteDiff\(/);
+  assert.match(appSource, /function renderWorkflowRouteDiffSummary\(/);
+  assert.match(appSource, /function workflowPerformanceDiff\(/);
+  assert.match(appSource, /function renderWorkflowPerformanceDiff\(/);
+  assert.match(appSource, /function renderWorkflowPerformanceSummary\(/);
+  assert.match(appSource, /function workflowRegressionSummary\(/);
+  assert.match(appSource, /function renderWorkflowRegressionSummary\(/);
+  assert.match(appSource, /function renderWorkflowRegressionNotice\(/);
+  assert.match(appSource, /new_error/);
+  assert.match(appSource, /new_fallback/);
+  assert.match(appSource, /route_removed/);
+  assert.match(appSource, /durationDeltaMs/);
+  assert.match(appSource, /tokenDelta/);
+  assert.match(appSource, /costDelta/);
+  assert.match(appSource, /compareState: "removed"/);
+  assert.match(appSource, /selector: "edge\[compareState = 'removed'\]"/);
+  assert.match(cssSource, /\.workflowCompareSummary/);
+  assert.match(cssSource, /\.runHistoryCompareActions/);
+  assert.match(cssSource, /\.workflowCompareNotice/);
+  assert.match(cssSource, /\.workflowPayloadDiff/);
+  assert.match(cssSource, /\.workflowPayloadDiffRow/);
+  assert.match(cssSource, /\.workflowPayloadDiffPair/);
+  assert.match(cssSource, /\.workflowRouteDiff/);
+  assert.match(cssSource, /\.workflowRouteDiffSummary/);
+  assert.match(cssSource, /\.workflowPerformanceDiff/);
+  assert.match(cssSource, /\.workflowPerformanceSummary/);
+  assert.match(cssSource, /\.workflowRegressionNotice/);
+  assert.match(cssSource, /\.workflowRegressionSummary/);
+  assert.match(cssSource, /#workflowRegressionNodes\.active/);
+});
+
 test("hybridSearch uses Content Supabase while app persistence uses App Supabase", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];

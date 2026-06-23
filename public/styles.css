@@ -1009,17 +1009,193 @@ label {
   font-size: 14px;
 }
 
+.workflowToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  direction: ltr;
+  margin-top: -2px;
+}
+.workflowToolbar[hidden] { display: none; }
+.workflowSearchGroup,
+.workflowToolGroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.workflowSearchGroup {
+  flex: 1 1 360px;
+}
+.workflowSearchGroup input,
+.workflowSearchGroup select {
+  min-height: 34px;
+  border: 1px solid #35402e;
+  border-radius: var(--r-xs);
+  background: #172015;
+  color: #edf7e8;
+  font-size: 12px;
+  font-weight: 700;
+}
+.workflowSearchGroup input {
+  flex: 1 1 260px;
+  min-width: 220px;
+  padding: 7px 10px;
+}
+.workflowSearchGroup select {
+  width: 132px;
+  padding: 7px 8px;
+}
+.workflowToolbar button {
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid #35402e;
+  border-radius: var(--r-xs);
+  background: #172015;
+  color: #edf7e8;
+  font-size: 12px;
+  font-weight: 800;
+}
+.workflowToolbar button:hover,
+.workflowToolbar button:focus-visible {
+  border-color: #8ee0c8;
+  background: #1c2a20;
+}
+.workflowToolbar button.active {
+  border-color: #f4c36a;
+  background: #2a2315;
+  color: #fff2cf;
+}
+#workflowFallbackNodes.active {
+  border-color: #f59f3a;
+  background: #2a2115;
+  color: #fff3dc;
+}
+#workflowRegressionNodes.active {
+  border-color: #ff7878;
+  background: #2b1717;
+  color: #ffc5c5;
+}
+.workflowIssueSummary {
+  min-width: 82px;
+  color: #bdc9b4;
+  direction: ltr;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: left;
+}
+.workflowCompareSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  direction: ltr;
+  margin-top: -2px;
+  padding: 9px 11px;
+  border: 1px solid #4b3f22;
+  border-radius: var(--r-xs);
+  background: #1f1d14;
+  color: #fff2cf;
+  font-size: 12px;
+  font-weight: 800;
+}
+.workflowCompareSummary[hidden] { display: none; }
+.workflowCompareSummary span {
+  max-width: 560px;
+  overflow: hidden;
+  color: #d7ccb0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflowCompareSummary b {
+  padding: 3px 7px;
+  border: 1px solid rgb(244 195 106 / 0.34);
+  border-radius: var(--r-xs);
+  background: rgb(244 195 106 / 0.1);
+}
+.workflowCompareSummary b.hasRegressions {
+  border-color: rgb(255 120 120 / 0.48);
+  background: rgb(255 120 120 / 0.12);
+  color: #ffc5c5;
+}
+.workflowRegressionSummary {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.workflowRegressionSummary span {
+  max-width: 420px;
+  overflow: hidden;
+  padding: 3px 7px;
+  border: 1px solid rgb(255 120 120 / 0.42);
+  border-radius: var(--r-xs);
+  background: rgb(255 120 120 / 0.1);
+  color: #ffc5c5;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflowRouteDiffSummary {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.workflowRouteDiffSummary span {
+  max-width: 260px;
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+  font-size: 11px;
+}
+.workflowRouteDiffSummary .added {
+  border: 1px solid rgb(120 216 143 / 0.38);
+  background: rgb(120 216 143 / 0.1);
+  color: #c7f8d0;
+}
+.workflowRouteDiffSummary .removed {
+  border: 1px solid rgb(255 120 120 / 0.42);
+  background: rgb(255 120 120 / 0.1);
+  color: #ffc5c5;
+}
+.workflowPerformanceSummary {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.workflowPerformanceSummary span {
+  padding: 3px 7px;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: var(--r-xs);
+  background: rgb(255 255 255 / 0.05);
+  color: #d7ccb0;
+  font-size: 11px;
+}
+.workflowPerformanceSummary .better {
+  border-color: rgb(120 216 143 / 0.38);
+  background: rgb(120 216 143 / 0.1);
+  color: #c7f8d0;
+}
+.workflowPerformanceSummary .worse {
+  border-color: rgb(244 195 106 / 0.45);
+  background: rgb(244 195 106 / 0.12);
+  color: #ffe5a8;
+}
+
 .workflowBoard {
   position: relative;
-  height: 520px;
+  height: 680px;
   direction: ltr;
   border: 1px solid #2c3328;
   border-radius: var(--r);
   background:
-    linear-gradient(90deg, rgb(244 195 106 / 0.06) 0 1px, transparent 1px 40px),
-    linear-gradient(0deg, rgb(244 195 106 / 0.05) 0 1px, transparent 1px 40px),
-    radial-gradient(circle at 12% 18%, rgb(20 140 114 / 0.16), transparent 20rem),
-    linear-gradient(135deg, #12160f, #20271d 58%, #151a13);
+    linear-gradient(90deg, rgb(142 224 200 / 0.055) 0 1px, transparent 1px 40px),
+    linear-gradient(0deg, rgb(142 224 200 / 0.04) 0 1px, transparent 1px 40px),
+    radial-gradient(circle at 12% 18%, rgb(20 140 114 / 0.13), transparent 20rem),
+    linear-gradient(135deg, #101610, #1d241d 58%, #121811);
   background-size: 40px 40px, 40px 40px, auto, auto;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), var(--shadow);
   overflow: hidden;
@@ -1068,6 +1244,356 @@ label {
   direction: ltr;
   text-align: right;
 }
+.workflowInspectorMetrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  padding: 12px 0 2px;
+}
+.workflowInspectorMetrics span {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #2f3a2b;
+  border-radius: var(--r-xs);
+  background: rgb(255 255 255 / 0.035);
+}
+.workflowInspectorMetrics small,
+.workflowInspectorMetrics b {
+  display: block;
+}
+.workflowInspectorMetrics small {
+  color: #aebba7;
+  font-size: 10px;
+  font-weight: 800;
+}
+.workflowInspectorMetrics b {
+  overflow: hidden;
+  color: #eff9ea;
+  direction: ltr;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflowNodeError {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid rgb(224 82 82 / 0.55);
+  border-radius: var(--r-xs);
+  background: rgb(224 82 82 / 0.12);
+  color: #ffc5c5;
+  font-size: 12px;
+  font-weight: 800;
+}
+.workflowFallbackNotice {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid rgb(245 159 58 / 0.62);
+  border-radius: var(--r-xs);
+  background: rgb(245 159 58 / 0.14);
+  color: #ffdca8;
+  font-size: 12px;
+  font-weight: 900;
+}
+.workflowCompareNotice {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid rgb(244 195 106 / 0.55);
+  border-radius: var(--r-xs);
+  background: rgb(244 195 106 / 0.12);
+  color: #ffe5a8;
+  font-size: 12px;
+  font-weight: 800;
+}
+.workflowCompareNotice.added {
+  border-color: rgb(120 216 143 / 0.58);
+  background: rgb(120 216 143 / 0.12);
+  color: #c7f8d0;
+}
+.workflowCompareNotice span {
+  color: inherit;
+  direction: ltr;
+  opacity: 0.86;
+}
+.workflowRegressionNotice {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgb(255 120 120 / 0.52);
+  border-radius: var(--r-xs);
+  background: rgb(255 120 120 / 0.1);
+  color: #ffc5c5;
+}
+.workflowRegressionNotice > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  direction: ltr;
+}
+.workflowRegressionNotice > header strong {
+  color: #fff1f1;
+  font-size: 13px;
+}
+.workflowRegressionNotice > header span {
+  font-size: 11px;
+  font-weight: 800;
+}
+.workflowRegressionNotice > div {
+  display: grid;
+  gap: 6px;
+}
+.workflowRegressionNotice > div > span {
+  display: grid;
+  gap: 2px;
+  direction: ltr;
+  padding: 7px 8px;
+  border: 1px solid rgb(255 120 120 / 0.28);
+  border-radius: var(--r-xs);
+  background: rgb(0 0 0 / 0.16);
+}
+.workflowRegressionNotice b,
+.workflowRegressionNotice small {
+  overflow-wrap: anywhere;
+}
+.workflowRegressionNotice b {
+  color: #fff1f1;
+  font-size: 11px;
+}
+.workflowRegressionNotice small {
+  color: inherit;
+  font-size: 11px;
+}
+.workflowPayloadDiff {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #2f3a2b;
+  border-radius: var(--r-xs);
+  background: rgb(255 255 255 / 0.035);
+}
+.workflowPerformanceDiff {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgb(142 224 200 / 0.35);
+  border-radius: var(--r-xs);
+  background: rgb(142 224 200 / 0.07);
+}
+.workflowPerformanceDiff > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  direction: ltr;
+}
+.workflowPerformanceDiff > header strong {
+  color: #f9fff4;
+  font-size: 13px;
+}
+.workflowPerformanceDiff > header span {
+  color: #aebba7;
+  font-size: 11px;
+  font-weight: 800;
+}
+.workflowPerformanceDiffGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  direction: ltr;
+}
+.workflowPerformanceDiffGrid span {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #2f3a2b;
+  border-radius: var(--r-xs);
+  background: rgb(0 0 0 / 0.16);
+}
+.workflowPerformanceDiffGrid small,
+.workflowPerformanceDiffGrid b,
+.workflowPerformanceDiffGrid em {
+  display: block;
+}
+.workflowPerformanceDiffGrid small {
+  color: #aebba7;
+  font-size: 10px;
+  font-weight: 800;
+}
+.workflowPerformanceDiffGrid b {
+  overflow: hidden;
+  color: #eff9ea;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflowPerformanceDiffGrid em {
+  margin-top: 3px;
+  color: #d7ccb0;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+.workflowPerformanceDiffGrid .better em { color: #c7f8d0; }
+.workflowPerformanceDiffGrid .worse em { color: #ffe5a8; }
+.workflowPayloadDiff.added {
+  border-color: rgb(120 216 143 / 0.5);
+  background: rgb(120 216 143 / 0.1);
+}
+.workflowPayloadDiff > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  direction: ltr;
+}
+.workflowPayloadDiff > header strong {
+  color: #f9fff4;
+  font-size: 13px;
+}
+.workflowPayloadDiff > header span,
+.workflowPayloadDiffEmpty {
+  color: #aebba7;
+  font-size: 11px;
+  font-weight: 800;
+}
+.workflowPayloadDiffGroup {
+  border-top: 1px solid #35402e;
+  margin-top: 2px;
+  padding-top: 8px;
+}
+.workflowPayloadDiffRows {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+.workflowPayloadDiffRow {
+  display: grid;
+  grid-template-columns: 68px minmax(120px, 1fr);
+  gap: 4px 8px;
+  direction: ltr;
+  padding: 7px 8px;
+  border: 1px solid #2f3a2b;
+  border-radius: var(--r-xs);
+  background: #11170f;
+}
+.workflowPayloadDiffRow b {
+  color: #ffe5a8;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.workflowPayloadDiffRow.added b { color: #c7f8d0; }
+.workflowPayloadDiffRow.removed b { color: #ffc5c5; }
+.workflowPayloadDiffRow span {
+  overflow: hidden;
+  color: #eff9ea;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflowPayloadDiffRow small {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+  color: #bdc9b4;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.workflowPayloadDiffPair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 9px;
+}
+.workflowPayloadDiffPair b {
+  display: block;
+  color: #d5dece;
+  direction: ltr;
+  font-size: 11px;
+}
+.workflowPayloadDiffPair pre {
+  max-height: 150px;
+}
+.workflowRouteDiff {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgb(244 195 106 / 0.48);
+  border-radius: var(--r-xs);
+  background: rgb(244 195 106 / 0.1);
+  color: #ffe5a8;
+}
+.workflowRouteDiff.added {
+  border-color: rgb(120 216 143 / 0.52);
+  background: rgb(120 216 143 / 0.1);
+  color: #c7f8d0;
+}
+.workflowRouteDiff.removed {
+  border-color: rgb(255 120 120 / 0.5);
+  background: rgb(255 120 120 / 0.1);
+  color: #ffc5c5;
+}
+.workflowRouteDiff > header,
+.workflowRouteDiffGrid {
+  direction: ltr;
+}
+.workflowRouteDiff > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.workflowRouteDiff > header span {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  opacity: 0.86;
+}
+.workflowRouteDiffGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+.workflowRouteDiffGrid span {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #2f3a2b;
+  border-radius: var(--r-xs);
+  background: rgb(0 0 0 / 0.16);
+}
+.workflowRouteDiffGrid small,
+.workflowRouteDiffGrid b,
+.workflowRouteDiffList b,
+.workflowRouteDiffList span {
+  display: block;
+}
+.workflowRouteDiffGrid small {
+  color: #aebba7;
+  font-size: 10px;
+  font-weight: 800;
+}
+.workflowRouteDiffGrid b,
+.workflowRouteDiffList span {
+  overflow: hidden;
+  color: inherit;
+  direction: ltr;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workflowRouteDiffList {
+  display: grid;
+  gap: 4px;
+  direction: ltr;
+  padding-top: 6px;
+  border-top: 1px solid rgb(255 255 255 / 0.12);
+}
+.workflowRouteDiffList b {
+  color: #f9fff4;
+  font-size: 11px;
+}
 .workflowInspector details {
   border-top: 1px solid #35402e;
   padding-top: 10px;
@@ -1084,6 +1610,43 @@ label {
   max-height: 190px;
   margin-top: 8px;
   padding: 10px;
+}
+.workflowNodeLogs,
+.workflowSourceList {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.workflowNodeLogs > div,
+.workflowSourceList > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #2f3a2b;
+  border-radius: var(--r-xs);
+  background: rgb(255 255 255 / 0.035);
+}
+.workflowNodeLogs b,
+.workflowSourceList strong {
+  display: block;
+  color: #f4fcef;
+  direction: ltr;
+  font-size: 12px;
+}
+.workflowNodeLogs span,
+.workflowSourceList small,
+.workflowSourceList a {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #bdc9b4;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.workflowSourceList a {
+  color: #9ee7d1;
+  direction: ltr;
+}
+.workflowNodeLogs pre {
+  max-height: 110px;
 }
 .workflowInspector .workflowIcon.vector { background: var(--cobalt); }
 .workflowInspector .workflowIcon.ai { background: var(--brand-600); }
@@ -1238,6 +1801,15 @@ label {
   background: rgba(20, 140, 114, 0.12);
   border-right: 3px solid var(--brand-500);
 }
+.runHistoryItem.compareBase {
+  box-shadow: inset -3px 0 0 #f4c36a;
+}
+.runHistoryItem.compareCurrent {
+  box-shadow: inset -3px 0 0 #78d88f;
+}
+.runHistoryItem.compareBase.compareCurrent {
+  box-shadow: inset -3px 0 0 #f4c36a, inset -6px 0 0 #78d88f;
+}
 
 .runHistoryItem.hasError {
   border-right: 3px solid var(--danger);
@@ -1262,6 +1834,27 @@ label {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 160px;
+}
+.runHistoryCompareActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  margin-top: 7px;
+}
+.runHistoryCompareActions button {
+  min-height: 26px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+}
+.runHistoryCompareActions button:hover,
+.runHistoryCompareActions button:focus-visible {
+  border-color: var(--brand-300);
+  color: var(--text-primary);
 }
 
 .runHistoryItem .rhErr {

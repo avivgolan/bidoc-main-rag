@@ -148,6 +148,10 @@ const state = {
   selectedKnowledgeDocument: null,
   selectedKnowledgeAgent: "schedule",
   knowledgeAgents: [],
+  workflowCardsExpanded: true,
+  workflowFilters: { query: "", status: "", errorsOnly: false, issue: "" },
+  workflowCompare: { baseRun: null, compareRun: null, summary: null },
+  runHistory: [],
   runEvents: [],
   fullLogVisible: false,
   chatProgress: null,
@@ -1529,6 +1533,7 @@ function wireWorkflow() {
     state.currentWorkflowMessageId = null;
     state.runEvents = [];
     state.fullLogVisible = false;
+    clearWorkflowCompare(false);
     $("liveRunList").innerHTML = "";
     $("liveRunStatus").textContent = "ממתין לבקשה";
     if ($("fullLogView")) { $("fullLogView").hidden = true; $("fullLogView").textContent = ""; }
@@ -1565,6 +1570,51 @@ function wireWorkflow() {
     }
   });
   $("runAiReport")?.addEventListener("click", runWorkflowAiReport);
+  $("fitWorkflow")?.addEventListener("click", fitWorkflowToScreen);
+  $("toggleWorkflowCards")?.addEventListener("click", () => {
+    state.workflowCardsExpanded = !state.workflowCardsExpanded;
+    renderWorkflow(state.lastWorkflow);
+  });
+  $("workflowSearch")?.addEventListener("input", (event) => {
+    state.workflowFilters.query = event.target.value || "";
+    renderWorkflow(state.lastWorkflow);
+  });
+  $("workflowStatusFilter")?.addEventListener("change", (event) => {
+    state.workflowFilters.status = event.target.value || "";
+    renderWorkflow(state.lastWorkflow);
+  });
+  $("workflowErrorsOnly")?.addEventListener("click", () => {
+    state.workflowFilters.errorsOnly = !state.workflowFilters.errorsOnly;
+    state.workflowFilters.issue = "";
+    renderWorkflow(state.lastWorkflow);
+  });
+  $("workflowSlowNodes")?.addEventListener("click", () => {
+    state.workflowFilters.issue = state.workflowFilters.issue === "slow" ? "" : "slow";
+    state.workflowFilters.errorsOnly = false;
+    renderWorkflow(state.lastWorkflow);
+  });
+  $("workflowExpensiveNodes")?.addEventListener("click", () => {
+    state.workflowFilters.issue = state.workflowFilters.issue === "expensive" ? "" : "expensive";
+    state.workflowFilters.errorsOnly = false;
+    renderWorkflow(state.lastWorkflow);
+  });
+  $("workflowFallbackNodes")?.addEventListener("click", () => {
+    state.workflowFilters.issue = state.workflowFilters.issue === "fallback" ? "" : "fallback";
+    state.workflowFilters.errorsOnly = false;
+    renderWorkflow(state.lastWorkflow);
+  });
+  $("workflowRegressionNodes")?.addEventListener("click", () => {
+    state.workflowFilters.issue = state.workflowFilters.issue === "regression" ? "" : "regression";
+    state.workflowFilters.errorsOnly = false;
+    renderWorkflow(state.lastWorkflow);
+  });
+  $("clearWorkflowCompare")?.addEventListener("click", () => clearWorkflowCompare());
+  $("resetWorkflowFilters")?.addEventListener("click", () => {
+    state.workflowFilters = { query: "", status: "", errorsOnly: false, issue: "" };
+    if ($("workflowSearch")) $("workflowSearch").value = "";
+    if ($("workflowStatusFilter")) $("workflowStatusFilter").value = "";
+    renderWorkflow(state.lastWorkflow);
+  });
 }
 
 function renderWorkflow(workflow) {
@@ -1579,15 +1629,65 @@ function renderWorkflow(workflow) {
   renderOpenRouterMetrics(workflow?.openRouterUsage?.totals || null);
   $("workflowHint").style.display = hasRun ? "none" : "block";
   $("workflowBoard").classList.toggle("hasWorkflow", hasRun);
+  $("workflowToolbar")?.toggleAttribute("hidden", !hasRun);
+  const toggleCards = $("toggleWorkflowCards");
+  if (toggleCards) toggleCards.textContent = state.workflowCardsExpanded ? "Collapse" : "Expand";
+  const compareSummary = workflowCompareSummary(view.nodes, view.edges);
+  state.workflowCompare.summary = compareSummary;
+  renderWorkflowCompareSummary(compareSummary);
 
   if (!hasRun || !view.nodes.length) return;
+  const filterSummary = workflowFilterSummary(view.nodes);
+  renderWorkflowFilterControls(filterSummary);
 
+  const visibleNodeIds = new Set(view.nodes.map((node) => node.id));
+  const renderableRemovedEdges = (compareSummary.removedEdges || [])
+    .filter((edge) => visibleNodeIds.has(edge.from) && visibleNodeIds.has(edge.to));
   const elements = view.nodes.map((node) => ({
     group: "nodes",
-    data: { id: node.id, label: node.label, subtitle: node.id, kind: node.kind, status: node.status, nodeData: node }
+    data: {
+      id: node.id,
+      label: node.label,
+      subtitle: node.id,
+      kind: node.kind,
+      status: node.status,
+      nodeData: node,
+      expanded: state.workflowCardsExpanded,
+      cardWidth: state.workflowCardsExpanded ? 430 : 280,
+      cardHeight: state.workflowCardsExpanded ? 310 : 126,
+      compareState: compareSummary.nodeStates.get(node.id) || "",
+      cardLabel: workflowNodeCardLabel(node, state.workflowCardsExpanded, compareSummary.nodeStates.get(node.id) || ""),
+      regression: compareSummary.regressionNodes.has(node.id),
+      filtered: !filterSummary.matches.has(node.id),
+      searchMatch: filterSummary.searchMatches.has(node.id),
+      issueMatch: filterSummary.issueMatches.has(node.id),
+      fallback: filterSummary.fallbackMatches.has(node.id)
+    }
   })).concat(view.edges.map((edge) => ({
     group: "edges",
-    data: { id: `${edge.from}_${edge.to}`, source: edge.from, target: edge.to, active: edge.active ? true : false }
+    data: {
+      id: `${edge.from}_${edge.to}`,
+      source: edge.from,
+      target: edge.to,
+      active: edge.active ? true : false,
+      edgeData: edge,
+      compareState: compareSummary.edgeStates.get(edgeKey(edge)) || "",
+      regression: compareSummary.removedEdges.some((removed) => edgeKey(removed) === edgeKey(edge)),
+      filtered: !filterSummary.matches.has(edge.from) || !filterSummary.matches.has(edge.to),
+      fallback: filterSummary.fallbackMatches.has(edge.from) || filterSummary.fallbackMatches.has(edge.to) || Boolean(edge.fallback)
+    }
+  }))).concat(renderableRemovedEdges.map((edge) => ({
+    group: "edges",
+    data: {
+      id: `${edge.from}_${edge.to}_removed`,
+      source: edge.from,
+      target: edge.to,
+      active: false,
+      edgeData: { ...edge, removed: true },
+      compareState: "removed",
+      filtered: !filterSummary.matches.has(edge.from) || !filterSummary.matches.has(edge.to),
+      fallback: Boolean(edge.fallback)
+    }
   })));
 
   const graphOptions = {
@@ -1598,24 +1698,547 @@ function renderWorkflow(workflow) {
   try {
     _cy = cytoscape({
       ...graphOptions,
-      layout: { name: "dagre", rankDir: "LR", nodeSep: 50, rankSep: 90, padding: 48, animate: false }
+      layout: { name: "dagre", rankDir: "LR", nodeSep: 72, rankSep: state.workflowCardsExpanded ? 190 : 120, padding: 90, animate: false }
     });
   } catch (error) {
     console.warn("Dagre workflow layout is unavailable; using the built-in breadthfirst layout.", error);
     _cy?.destroy();
     _cy = cytoscape({
       ...graphOptions,
-      layout: { name: "breadthfirst", directed: true, circle: false, spacingFactor: 1.2, padding: 48, animate: false }
+      layout: { name: "breadthfirst", directed: true, circle: false, spacingFactor: state.workflowCardsExpanded ? 1.9 : 1.25, padding: 90, animate: false }
     });
   }
 
   _cy.on("tap", "node", (evt) => {
     renderWorkflowInspector(evt.target.data("nodeData"));
   });
+  _cy.on("tap", "edge", (evt) => {
+    renderWorkflowEdgeInspector(evt.target.data("edgeData"), view);
+  });
 
-  if (view.nodes[0]) renderWorkflowInspector(view.nodes[0]);
+  const firstVisible = view.nodes.find((node) => filterSummary.matches.has(node.id)) || view.nodes[0];
+  if (firstVisible) renderWorkflowInspector(firstVisible);
+  requestAnimationFrame(() => focusWorkflowStart(firstVisible?.id));
 
   pulseErrorNodes(_cy);
+}
+
+function workflowFilterSummary(nodes) {
+  const filters = state.workflowFilters || {};
+  const query = normalizeWorkflowQuery(filters.query);
+  const matches = new Set();
+  const searchMatches = new Set();
+  const issueMatches = new Set();
+  const fallbackMatches = new Set(nodes.filter(workflowNodeHasFallback).map((node) => node.id));
+  const regressionMatches = new Set(state.workflowCompare?.summary?.regressionNodes?.keys?.() || []);
+  for (const node of nodes) {
+    const metrics = workflowNodeMetrics(node);
+    const searchOk = !query || workflowNodeSearchText(node).includes(query);
+    const statusOk = !filters.status || node.status === filters.status;
+    const errorOk = !filters.errorsOnly || node.status === "error" || Boolean(workflowNodeErrorText(node));
+    const issueOk = !filters.issue
+      || (filters.issue === "slow" && metrics.durationMs >= 1500)
+      || (filters.issue === "expensive" && metrics.costValue !== null && metrics.costValue >= 0.0001)
+      || (filters.issue === "fallback" && fallbackMatches.has(node.id))
+      || (filters.issue === "regression" && regressionMatches.has(node.id));
+    if (searchOk && statusOk && errorOk && issueOk) matches.add(node.id);
+    if (query && searchOk) searchMatches.add(node.id);
+    if (filters.issue && issueOk) issueMatches.add(node.id);
+  }
+  const active = Boolean(query || filters.status || filters.errorsOnly || filters.issue);
+  return { matches, searchMatches, issueMatches, fallbackMatches, regressionMatches, active, count: matches.size, total: nodes.length };
+}
+
+function renderWorkflowFilterControls(summary) {
+  const filters = state.workflowFilters || {};
+  if ($("workflowSearch") && $("workflowSearch").value !== filters.query) $("workflowSearch").value = filters.query || "";
+  if ($("workflowStatusFilter") && $("workflowStatusFilter").value !== filters.status) $("workflowStatusFilter").value = filters.status || "";
+  $("workflowErrorsOnly")?.classList.toggle("active", Boolean(filters.errorsOnly));
+  $("workflowSlowNodes")?.classList.toggle("active", filters.issue === "slow");
+  $("workflowExpensiveNodes")?.classList.toggle("active", filters.issue === "expensive");
+  $("workflowFallbackNodes")?.classList.toggle("active", filters.issue === "fallback");
+  $("workflowRegressionNodes")?.classList.toggle("active", filters.issue === "regression");
+  const summaryEl = $("workflowIssueSummary");
+  if (summaryEl) {
+    const fallbackLabel = summary.fallbackMatches?.size ? ` · ${summary.fallbackMatches.size} fallback` : "";
+    summaryEl.textContent = summary.active
+      ? `${summary.count}/${summary.total} matches`
+      : `${summary.total} nodes${fallbackLabel}`;
+  }
+}
+
+function workflowCompareSummary(nodes, edges) {
+  const baseWorkflow = state.workflowCompare?.baseRun?.workflow_log;
+  const activeWorkflow = state.workflowCompare?.compareRun?.workflow_log || state.lastWorkflow;
+  const active = Boolean(baseWorkflow?.nodes?.length && activeWorkflow?.nodes?.length);
+  const empty = {
+    active: false,
+    nodeStates: new Map(),
+    edgeStates: new Map(),
+    addedEdges: [],
+    removedEdges: [],
+    performance: null,
+    regressions: [],
+    regressionNodes: new Map(),
+    added: 0,
+    changed: 0,
+    same: 0,
+    removed: 0,
+    routeAdded: 0,
+    routeRemoved: 0,
+    baseLabel: "",
+    compareLabel: ""
+  };
+  if (!active) return empty;
+
+  const baseNodes = new Map((baseWorkflow.nodes || []).map((node) => [node.id, node]));
+  const currentNodes = new Map(nodes.map((node) => [node.id, node]));
+  const nodeStates = new Map();
+  let added = 0;
+  let changed = 0;
+  let same = 0;
+  for (const node of nodes) {
+    const baseNode = baseNodes.get(node.id);
+    if (!baseNode) {
+      nodeStates.set(node.id, "added");
+      added += 1;
+    } else if (workflowCompareFingerprint(baseNode) !== workflowCompareFingerprint(node)) {
+      nodeStates.set(node.id, "changed");
+      changed += 1;
+    } else {
+      nodeStates.set(node.id, "same");
+      same += 1;
+    }
+  }
+  const removed = [...baseNodes.keys()].filter((id) => !currentNodes.has(id)).length;
+
+  const baseEdges = new Set((baseWorkflow.edges || []).map(edgeKey));
+  const currentEdges = new Set(edges.map(edgeKey));
+  const edgeStates = new Map();
+  const addedEdges = [];
+  let routeAdded = 0;
+  for (const edge of edges) {
+    const key = edgeKey(edge);
+    if (!baseEdges.has(key)) {
+      edgeStates.set(key, "added");
+      addedEdges.push(edge);
+      routeAdded += 1;
+    } else {
+      edgeStates.set(key, "same");
+    }
+  }
+  const removedEdgeKeys = [...baseEdges].filter((key) => !currentEdges.has(key));
+  const baseEdgeByKey = new Map((baseWorkflow.edges || []).map((edge) => [edgeKey(edge), edge]));
+  const removedEdges = removedEdgeKeys.map((key) => baseEdgeByKey.get(key) || workflowEdgeFromKey(key)).filter(Boolean);
+  for (const edge of removedEdges) edgeStates.set(edgeKey(edge), "removed");
+  const routeRemoved = removedEdges.length;
+  const performance = workflowPerformanceDiff(baseWorkflow.nodes || [], nodes);
+  const regressionSummary = workflowRegressionSummary({
+    baseNodes,
+    currentNodes,
+    nodes,
+    removedEdges,
+    performance
+  });
+
+  return {
+    active: true,
+    nodeStates,
+    edgeStates,
+    addedEdges,
+    removedEdges,
+    performance,
+    regressions: regressionSummary.regressions,
+    regressionNodes: regressionSummary.regressionNodes,
+    added,
+    changed,
+    same,
+    removed,
+    routeAdded,
+    routeRemoved,
+    baseLabel: workflowRunCompareLabel(state.workflowCompare.baseRun),
+    compareLabel: workflowRunCompareLabel(state.workflowCompare.compareRun)
+  };
+}
+
+function workflowCompareFingerprint(node) {
+  return safeWorkflowJson({
+    status: node?.status || "",
+    input: node?.input ?? null,
+    output: node?.output ?? null,
+    openrouter: (node?.openrouter || []).map((call) => ({
+      status: call.status,
+      model: call.model,
+      prompt_tokens: call.prompt_tokens,
+      completion_tokens: call.completion_tokens,
+      cost: call.cost,
+      error: call.error
+    }))
+  });
+}
+
+function workflowRunCompareLabel(run) {
+  if (!run) return "";
+  const prefix = run.created_at ? timeAgo(new Date(run.created_at)) : "run";
+  return `${prefix} - ${String(run.user_message || run.id || "").slice(0, 34)}`;
+}
+
+function workflowEdgeFromKey(key) {
+  const [from, to] = String(key || "").split("->");
+  return from && to ? { from, to, active: false, removed: true } : null;
+}
+
+function edgeLabel(edge) {
+  return `${edge?.from || "?"} -> ${edge?.to || "?"}`;
+}
+
+function workflowPerformanceDiff(baseNodes, currentNodes) {
+  const base = workflowPerformanceTotals(baseNodes);
+  const current = workflowPerformanceTotals(currentNodes);
+  return {
+    base,
+    current,
+    durationDeltaMs: current.durationMs - base.durationMs,
+    tokenDelta: current.totalTokens - base.totalTokens,
+    costDelta: current.costValue !== null && base.costValue !== null ? current.costValue - base.costValue : null
+  };
+}
+
+function workflowPerformanceTotals(nodes) {
+  const metrics = (nodes || []).map(workflowNodeMetrics);
+  const knownCosts = metrics.filter((item) => item.costValue !== null);
+  const costValue = knownCosts.length ? knownCosts.reduce((sum, item) => sum + Number(item.costValue || 0), 0) : null;
+  return {
+    durationMs: metrics.reduce((sum, item) => sum + Number(item.durationMs || 0), 0),
+    promptTokens: metrics.reduce((sum, item) => sum + Number(item.promptTokens || 0), 0),
+    completionTokens: metrics.reduce((sum, item) => sum + Number(item.completionTokens || 0), 0),
+    totalTokens: metrics.reduce((sum, item) => sum + Number(item.totalTokens || 0), 0),
+    costValue
+  };
+}
+
+function workflowSignedDelta(value, formatter) {
+  if (!Number.isFinite(value) || value === 0) return "0";
+  return `${value > 0 ? "+" : "-"}${formatter(Math.abs(value))}`;
+}
+
+function workflowRegressionSummary({ baseNodes, currentNodes, nodes, removedEdges, performance }) {
+  const regressions = [];
+  const regressionNodes = new Map();
+  const addRegression = (nodeId, type, message, severity = "warning") => {
+    const item = { nodeId, type, message, severity };
+    regressions.push(item);
+    if (!nodeId) return;
+    if (!regressionNodes.has(nodeId)) regressionNodes.set(nodeId, []);
+    regressionNodes.get(nodeId).push(item);
+  };
+
+  for (const node of nodes) {
+    const baseNode = baseNodes.get(node.id);
+    if (!baseNode) continue;
+    const baseMetrics = workflowNodeMetrics(baseNode);
+    const currentMetrics = workflowNodeMetrics(node);
+    const baseFallback = workflowNodeHasFallbackInRun(baseNode, state.workflowCompare.baseRun);
+    const currentFallback = workflowNodeHasFallback(node);
+
+    if (baseNode.status !== "error" && node.status === "error") {
+      addRegression(node.id, "new_error", "Node changed from non-error to error", "critical");
+    }
+    if (!baseFallback && currentFallback) {
+      addRegression(node.id, "new_fallback", "Fallback appeared in compare run", "warning");
+    }
+    if (baseMetrics.durationMs > 0 && currentMetrics.durationMs > baseMetrics.durationMs * 1.35 && currentMetrics.durationMs - baseMetrics.durationMs >= 500) {
+      addRegression(node.id, "slower", `Duration increased by ${workflowSignedDelta(currentMetrics.durationMs - baseMetrics.durationMs, formatOpenRouterDuration)}`);
+    }
+    if (baseMetrics.totalTokens > 0 && currentMetrics.totalTokens > baseMetrics.totalTokens * 1.35 && currentMetrics.totalTokens - baseMetrics.totalTokens >= 250) {
+      addRegression(node.id, "more_tokens", `Token use increased by ${workflowSignedDelta(currentMetrics.totalTokens - baseMetrics.totalTokens, (value) => value.toLocaleString())}`);
+    }
+    if (baseMetrics.costValue !== null && currentMetrics.costValue !== null && currentMetrics.costValue > baseMetrics.costValue * 1.35 && currentMetrics.costValue - baseMetrics.costValue >= 0.0001) {
+      addRegression(node.id, "higher_cost", `Cost increased by ${workflowSignedDelta(currentMetrics.costValue - baseMetrics.costValue, formatOpenRouterCost)}`);
+    }
+  }
+
+  for (const nodeId of baseNodes.keys()) {
+    if (!currentNodes.has(nodeId)) addRegression(nodeId, "node_removed", "Node was present in base run and is missing in compare run");
+  }
+  for (const edge of removedEdges || []) {
+    addRegression(edge.from || "", "route_removed", `Route removed: ${edgeLabel(edge)}`);
+  }
+  if (performance?.durationDeltaMs > 2500) addRegression("", "run_slower", `Run duration increased by ${workflowSignedDelta(performance.durationDeltaMs, formatOpenRouterDuration)}`);
+  return { regressions, regressionNodes };
+}
+
+function workflowNodeHasFallbackInRun(node, run) {
+  if (!node) return false;
+  const nodeIds = new Set([node.id, workflowCanonicalStep(node.id)]);
+  const hasFallbackEvent = [
+    ...(run?.workflow_log?.trace || []),
+    ...(run?.run_events || [])
+  ].some((entry) => {
+    const step = workflowCanonicalStep(entry?.step || entry?.node_id || entry?.data?.node_id || "");
+    if (!nodeIds.has(step)) return false;
+    return entry?.fallback === true
+      || entry?.data?.fallback === true
+      || /fallback/i.test(entry?.message || "")
+      || /fallback/i.test(entry?.error || "");
+  });
+  return hasFallbackEvent
+    || workflowPayloadHasFallback(node.input)
+    || workflowPayloadHasFallback(node.output)
+    || /fallback/i.test(`${node.id} ${node.label || ""}`);
+}
+
+function renderWorkflowCompareSummary(summary = state.workflowCompare?.summary) {
+  const summaryEl = $("workflowCompareSummary");
+  const clearButton = $("clearWorkflowCompare");
+  const active = Boolean(summary?.active);
+  if (clearButton) clearButton.hidden = !active;
+  if (!summaryEl) return;
+  summaryEl.hidden = !active;
+  if (!active) {
+    summaryEl.textContent = "";
+    return;
+  }
+  summaryEl.innerHTML = `
+    <strong>Compare Runs</strong>
+    <span>${escapeHtml(summary.baseLabel || "Base")} -> ${escapeHtml(summary.compareLabel || "Compare")}</span>
+    <b>${summary.changed} changed</b>
+    <b>${summary.added} added</b>
+    <b>${summary.removed} removed</b>
+    <b>${summary.routeAdded + summary.routeRemoved} route diffs</b>
+    <b class="${summary.regressions.length ? "hasRegressions" : ""}">${summary.regressions.length} regressions</b>
+    ${renderWorkflowRegressionSummary(summary)}
+    ${renderWorkflowPerformanceSummary(summary.performance)}
+    ${renderWorkflowRouteDiffSummary(summary)}
+  `;
+}
+
+function renderWorkflowPerformanceSummary(performance) {
+  if (!performance) return "";
+  return `
+    <div class="workflowPerformanceSummary">
+      <span class="${performance.durationDeltaMs > 0 ? "worse" : performance.durationDeltaMs < 0 ? "better" : ""}">
+        Duration ${escapeHtml(workflowSignedDelta(performance.durationDeltaMs, formatOpenRouterDuration))}
+      </span>
+      <span class="${performance.tokenDelta > 0 ? "worse" : performance.tokenDelta < 0 ? "better" : ""}">
+        Tokens ${escapeHtml(workflowSignedDelta(performance.tokenDelta, (value) => value.toLocaleString()))}
+      </span>
+      <span class="${performance.costDelta > 0 ? "worse" : performance.costDelta < 0 ? "better" : ""}">
+        Cost ${escapeHtml(performance.costDelta === null ? "n/a" : workflowSignedDelta(performance.costDelta, formatOpenRouterCost))}
+      </span>
+    </div>
+  `;
+}
+
+function renderWorkflowRegressionSummary(summary) {
+  if (!summary?.regressions?.length) return "";
+  return `
+    <div class="workflowRegressionSummary">
+      ${summary.regressions.slice(0, 5).map((item) => `
+        <span class="${escapeHtml(item.severity || "warning")}">
+          ${escapeHtml(item.nodeId ? `${item.nodeId}: ${item.message}` : item.message)}
+        </span>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderWorkflowRouteDiffSummary(summary) {
+  const routeDiffs = [...(summary.addedEdges || []), ...(summary.removedEdges || [])];
+  if (!routeDiffs.length) return "";
+  return `
+    <div class="workflowRouteDiffSummary">
+      ${(summary.addedEdges || []).slice(0, 3).map((edge) => `<span class="added">+ ${escapeHtml(edgeLabel(edge))}</span>`).join("")}
+      ${(summary.removedEdges || []).slice(0, 3).map((edge) => `<span class="removed">- ${escapeHtml(edgeLabel(edge))}</span>`).join("")}
+    </div>
+  `;
+}
+
+function workflowCompareLabel(compareState) {
+  return {
+    added: "Compare: Added in this run",
+    changed: "Compare: Changed from base",
+    same: "Compare: Same as base"
+  }[compareState] || "";
+}
+
+function normalizeWorkflowQuery(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function workflowNodeSearchText(node) {
+  return [
+    node.id,
+    node.label,
+    node.kind,
+    node.status,
+    formatWorkflowPreview(node.input),
+    formatWorkflowPreview(node.output),
+    workflowNodeErrorText(node)
+  ].join(" ").toLowerCase();
+}
+
+function workflowNodeHasFallback(node) {
+  if (!node) return false;
+  const nodeIds = new Set([node.id, workflowCanonicalStep(node.id)]);
+  const hasFallbackEvent = [
+    ...(state.lastWorkflow?.trace || []),
+    ...(state.runEvents || [])
+  ].some((entry) => {
+    const step = workflowCanonicalStep(entry?.step || entry?.node_id || entry?.data?.node_id || "");
+    if (!nodeIds.has(step)) return false;
+    return entry?.fallback === true
+      || entry?.data?.fallback === true
+      || /fallback/i.test(entry?.message || "")
+      || /fallback/i.test(entry?.error || "");
+  });
+  return hasFallbackEvent
+    || workflowPayloadHasFallback(node.input)
+    || workflowPayloadHasFallback(node.output)
+    || /fallback/i.test(`${node.id} ${node.label || ""}`);
+}
+
+function workflowCanonicalStep(step) {
+  const normalized = String(step || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+  return {
+    mainagent: "main_agent",
+    main_agent: "main_agent",
+    liteagent: "lite_agent",
+    lite_agent: "lite_agent",
+    knowledgeplanner: "knowledge_planner",
+    knowledge_planner: "knowledge_planner"
+  }[normalized] || normalized;
+}
+
+function workflowPayloadHasFallback(value, depth = 0) {
+  if (!value || depth > 5) return false;
+  if (typeof value === "string") return /\bfallback\b/i.test(value) && value.length < 800;
+  if (typeof value !== "object") return false;
+  if (value.fallback === true || value.used_fallback === true || value.cache_fallback === true) return true;
+  for (const [key, child] of Object.entries(value)) {
+    if (/fallback/i.test(key) && child !== false && child !== null && child !== undefined) return true;
+    if (typeof child === "object" && workflowPayloadHasFallback(child, depth + 1)) return true;
+  }
+  return false;
+}
+
+function fitWorkflowToScreen() {
+  if (!_cy || _cy.destroyed()) return;
+  _cy.fit(_cy.elements(), 40);
+  const minReadableZoom = state.workflowCardsExpanded ? 0.72 : 0.9;
+  if (_cy.zoom() < minReadableZoom) _cy.zoom(minReadableZoom);
+  if (_cy.zoom() > 1.05) _cy.zoom(1.05);
+  focusWorkflowStart();
+}
+
+function focusWorkflowStart(nodeId = null) {
+  if (!_cy || _cy.destroyed()) return;
+  const first = nodeId ? _cy.getElementById(nodeId) : _cy.nodes().sort((a, b) => a.position("x") - b.position("x"))[0];
+  if (!first?.length) return;
+  const targetZoom = state.workflowCardsExpanded ? 0.92 : 1.05;
+  _cy.zoom(targetZoom);
+  _cy.center(first);
+  _cy.panBy({ x: 210, y: 0 });
+}
+
+function workflowNodeCardLabel(node, expanded, compareState = "") {
+  const metrics = workflowNodeMetrics(node);
+  const status = statusLabel(node.status);
+  const header = `[${iconForNode(node.kind)}] ${node.label}`;
+  const subheader = `${node.id} · ${status} · Duration ${metrics.duration}`;
+  const footer = `Tokens ${metrics.tokens} · Cost ${metrics.cost} · Calls ${metrics.calls}`;
+  const errorText = workflowNodeErrorText(node);
+  const compareText = workflowCompareLabel(compareState);
+
+  if (!expanded) {
+    return [
+      header,
+      subheader,
+      compareText,
+      workflowNodeHasFallback(node) ? "Fallback route used" : "",
+      footer,
+      errorText ? `Error: ${clipWorkflowLine(errorText, 56)}` : ""
+    ].filter(Boolean).join("\n");
+  }
+
+  return [
+    header,
+    subheader,
+    compareText,
+    workflowNodeHasFallback(node) ? "Fallback route used" : "",
+    "Input",
+    clipWorkflowBlock(formatWorkflowPreview(node.input), 190),
+    "Output",
+    clipWorkflowBlock(formatWorkflowPreview(node.output), 210),
+    footer,
+    errorText ? `Error: ${clipWorkflowLine(errorText, 92)}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+function workflowNodeMetrics(node) {
+  const calls = Array.isArray(node.openrouter) ? node.openrouter : [];
+  const completed = calls.filter((call) => call.status === "done");
+  const durationMs = completed.reduce((sum, call) => sum + Number(call.duration_ms || 0), 0);
+  const promptTokens = completed.reduce((sum, call) => sum + Number(call.prompt_tokens || 0), 0);
+  const completionTokens = completed.reduce((sum, call) => sum + Number(call.completion_tokens || 0), 0);
+  const knownCosts = completed.filter((call) => call.cost !== null && call.cost !== undefined && Number.isFinite(Number(call.cost)));
+  const cost = knownCosts.length ? knownCosts.reduce((sum, call) => sum + Number(call.cost || 0), 0) : null;
+  return {
+    calls: calls.length ? String(calls.length) : "0",
+    durationMs,
+    promptTokens,
+    completionTokens,
+    totalTokens: promptTokens + completionTokens,
+    costValue: cost,
+    duration: durationMs > 0 ? formatOpenRouterDuration(durationMs) : "—",
+    tokens: promptTokens || completionTokens ? `${promptTokens.toLocaleString()}/${completionTokens.toLocaleString()}` : "—",
+    cost: cost !== null ? formatOpenRouterCost(cost) : "—"
+  };
+}
+
+function formatWorkflowPreview(value) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "string") return maskSensitivePreview(value);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value.preview && typeof value.preview === "string") return maskSensitivePreview(value.preview);
+  try {
+    return maskSensitivePreview(JSON.stringify(value, null, 2));
+  } catch {
+    return maskSensitivePreview(String(value));
+  }
+}
+
+function maskSensitivePreview(text) {
+  return String(text)
+    .replace(/(authorization|api[_-]?key|token|secret|password)(["'\s:=-]+)([^"',\s}]+)/gi, "$1$2[masked]")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[masked]");
+}
+
+function clipWorkflowBlock(text, maxChars) {
+  const compact = String(text || "—")
+    .replace(/\s+/g, " ")
+    .trim();
+  return clipWorkflowLine(compact, maxChars);
+}
+
+function clipWorkflowLine(text, maxChars) {
+  const value = String(text || "—");
+  return value.length > maxChars ? `${value.slice(0, Math.max(0, maxChars - 1))}…` : value;
+}
+
+function workflowNodeErrorText(node) {
+  const values = [node.output, node.input];
+  for (const value of values) {
+    if (!value || typeof value !== "object") continue;
+    const error = value.error || value.message || value.reason;
+    if (error && (node.status === "error" || value.error)) return String(error);
+  }
+  const failedCall = (Array.isArray(node.openrouter) ? node.openrouter : []).find((call) => call.status === "error" || call.error);
+  return failedCall?.error || "";
 }
 
 function renderCacheMetrics(metrics) {
@@ -1665,10 +2288,14 @@ function pulseErrorNodes(cy) {
   const errorNodes = cy.nodes('[status="error"]');
   if (!errorNodes.length) return;
   const step = (nodes, big) => {
-    nodes.animate(
-      { style: { "border-width": big ? 5.5 : 3.5, "shadow-blur": big ? 36 : 22 } },
-      { duration: 700, easing: "ease-in-out", complete: () => { if (cy.destroyed()) return; step(nodes, !big); } }
-    );
+    try {
+      nodes.animate(
+        { style: { "border-width": big ? 5.5 : 3.5 } },
+        { duration: 700, easing: "ease-in-out", complete: () => { if (cy.destroyed()) return; step(nodes, !big); } }
+      );
+    } catch (error) {
+      console.warn("Workflow error pulse animation skipped", error);
+    }
   };
   step(errorNodes, true);
 }
@@ -1684,29 +2311,116 @@ function cytoscapeStyle() {
       selector: "node",
       style: {
         shape: "round-rectangle",
-        width: 148, height: 64,
-        "background-color": (e) => kindColor[e.data("kind")] || "#2a3d28",
-        "border-width": 2, "border-color": "#3a5238",
-        color: "#e4ede0",
-        "font-family": "Inter, system-ui, sans-serif",
+        width: "data(cardWidth)", height: "data(cardHeight)",
+        "background-color": "#182019",
+        "background-blacken": -0.03,
+        "border-width": 2, "border-color": (e) => kindColor[e.data("kind")] || "#3a5238",
+        color: "#edf7e8",
+        "font-family": "IBM Plex Sans Hebrew, Segoe UI, system-ui, sans-serif",
+        "font-weight": 600,
         "text-valign": "center", "text-halign": "center",
-        "text-wrap": "wrap", "text-max-width": "132px",
-        label: (e) => `${e.data("label")}\n${e.data("subtitle")}`,
-        "line-height": 1.5, "font-size": 12
+        "text-wrap": "wrap", "text-max-width": (e) => `${Math.max(190, Number(e.data("cardWidth") || 300) - 34)}px`,
+        label: (e) => e.data("cardLabel"),
+        "line-height": 1.32, "font-size": 13,
+        "padding": 12,
+        "text-margin-y": 0
       }
     },
     {
       selector: "node[status='done']",
       style: {
-        "border-color": "#8ee0c8", "border-width": 2.5,
+        "border-color": "#4fb99d", "border-width": 2.5,
         "shadow-blur": 14, "shadow-color": "rgb(142 224 200 / 0.45)",
         "shadow-offset-x": 0, "shadow-offset-y": 0, "shadow-opacity": 1
       }
     },
     {
+      selector: "node[status='skipped']",
+      style: {
+        "background-color": "#20241e",
+        "border-color": "#78816f",
+        color: "#c9d4c1",
+        opacity: 0.76
+      }
+    },
+    {
+      selector: "node[?filtered]",
+      style: {
+        opacity: 0.18,
+        "text-opacity": 0.22,
+        "border-color": "#596356",
+        "shadow-opacity": 0
+      }
+    },
+    {
+      selector: "node[?searchMatch], node[?issueMatch]",
+      style: {
+        "border-color": "#f4c36a",
+        "border-width": 4,
+        "shadow-blur": 24,
+        "shadow-color": "rgb(244 195 106 / 0.52)",
+        "shadow-offset-x": 0,
+        "shadow-offset-y": 0,
+        "shadow-opacity": 1
+      }
+    },
+    {
+      selector: "node[?fallback]",
+      style: {
+        "border-color": "#f59f3a",
+        "border-width": 4,
+        "background-color": "#2a2115",
+        color: "#fff3dc",
+        "shadow-blur": 24,
+        "shadow-color": "rgb(245 159 58 / 0.55)",
+        "shadow-offset-x": 0,
+        "shadow-offset-y": 0,
+        "shadow-opacity": 1
+      }
+    },
+    {
+      selector: "node[compareState = 'added']",
+      style: {
+        "border-color": "#78d88f",
+        "border-width": 4,
+        "background-color": "#15261b",
+        "shadow-blur": 24,
+        "shadow-color": "rgb(120 216 143 / 0.48)",
+        "shadow-offset-x": 0,
+        "shadow-offset-y": 0,
+        "shadow-opacity": 1
+      }
+    },
+    {
+      selector: "node[compareState = 'changed']",
+      style: {
+        "border-color": "#f4c36a",
+        "border-width": 4,
+        "background-color": "#272315",
+        "shadow-blur": 24,
+        "shadow-color": "rgb(244 195 106 / 0.52)",
+        "shadow-offset-x": 0,
+        "shadow-offset-y": 0,
+        "shadow-opacity": 1
+      }
+    },
+    {
+      selector: "node[?regression]",
+      style: {
+        "border-color": "#ff7878",
+        "border-width": 5,
+        "background-color": "#2b1717",
+        "shadow-blur": 28,
+        "shadow-color": "rgb(255 120 120 / 0.58)",
+        "shadow-offset-x": 0,
+        "shadow-offset-y": 0,
+        "shadow-opacity": 1
+      }
+    },
+    {
       selector: "node[status='error']",
       style: {
-        "background-color": "#3d1212",
+        "background-color": "#2b1717",
         "border-color": "#ff3333", "border-width": 3.5,
         "shadow-blur": 22, "shadow-color": "rgb(255 51 51 / 0.65)",
         "shadow-offset-x": 0, "shadow-offset-y": 0, "shadow-opacity": 1
@@ -1734,6 +2448,50 @@ function cytoscapeStyle() {
       }
     },
     {
+      selector: "edge[?filtered]",
+      style: {
+        opacity: 0.14,
+        "line-color": "rgb(202 213 195 / 0.16)",
+        "target-arrow-color": "rgb(202 213 195 / 0.16)"
+      }
+    },
+    {
+      selector: "edge[?fallback]",
+      style: {
+        width: 3.4,
+        "line-color": "#f59f3a",
+        "target-arrow-color": "#f59f3a",
+        "line-style": "solid",
+        opacity: 1,
+        "shadow-blur": 10,
+        "shadow-color": "rgb(245 159 58 / 0.45)",
+        "shadow-offset-x": 0,
+        "shadow-offset-y": 0,
+        "shadow-opacity": 1
+      }
+    },
+    {
+      selector: "edge[compareState = 'added']",
+      style: {
+        width: 3.4,
+        "line-color": "#78d88f",
+        "target-arrow-color": "#78d88f",
+        "line-style": "solid",
+        opacity: 1
+      }
+    },
+    {
+      selector: "edge[compareState = 'removed']",
+      style: {
+        width: 3,
+        "line-color": "#ff7878",
+        "target-arrow-color": "#ff7878",
+        "line-style": "dashed",
+        "line-dash-pattern": [3, 5],
+        opacity: 0.86
+      }
+    },
+    {
       selector: "edge[?active]",
       style: {
         width: 2.8,
@@ -1743,6 +2501,27 @@ function cytoscapeStyle() {
         opacity: 1,
         "shadow-blur": 8, "shadow-color": "rgb(142 224 200 / 0.4)",
         "shadow-offset-x": 0, "shadow-offset-y": 0, "shadow-opacity": 1
+      }
+    },
+    {
+      selector: "edge[compareState = 'added']",
+      style: {
+        width: 3.4,
+        "line-color": "#78d88f",
+        "target-arrow-color": "#78d88f",
+        "line-style": "solid",
+        opacity: 1
+      }
+    },
+    {
+      selector: "edge[compareState = 'removed']",
+      style: {
+        width: 3,
+        "line-color": "#ff7878",
+        "target-arrow-color": "#ff7878",
+        "line-style": "dashed",
+        "line-dash-pattern": [3, 5],
+        opacity: 0.86
       }
     }
   ];
@@ -1806,6 +2585,8 @@ function renderWorkflowInspector(node) {
   const inspector = $("workflowInspector");
   if (!inspector) return;
   const openRouterCalls = Array.isArray(node.openrouter) ? node.openrouter : [];
+  const metrics = workflowNodeMetrics(node);
+  const compareState = state.workflowCompare?.summary?.nodeStates?.get(node.id) || "";
   inspector.innerHTML = `
     <header class="workflowInspectorHeader">
       <span class="workflowIcon ${escapeHtml(node.kind)}">${iconForNode(node.kind)}</span>
@@ -1814,16 +2595,358 @@ function renderWorkflowInspector(node) {
         <small>${escapeHtml(node.id)} · ${statusLabel(node.status)}</small>
       </div>
     </header>
+    <section class="workflowInspectorMetrics">
+      <span><small>Duration</small><b>${escapeHtml(metrics.duration)}</b></span>
+      <span><small>Tokens</small><b>${escapeHtml(metrics.tokens)}</b></span>
+      <span><small>Cost</small><b>${escapeHtml(metrics.cost)}</b></span>
+      <span><small>Calls</small><b>${escapeHtml(metrics.calls)}</b></span>
+    </section>
+    ${renderWorkflowCompareNotice(node, compareState)}
+    ${renderWorkflowRegressionNotice(node)}
+    ${renderWorkflowPerformanceDiff(node)}
+    ${renderWorkflowPayloadDiff(node)}
+    ${workflowNodeHasFallback(node) ? '<div class="workflowFallbackNotice">Fallback route used in this step</div>' : ""}
+    ${workflowNodeErrorText(node) ? `<div class="workflowNodeError">${escapeHtml(workflowNodeErrorText(node))}</div>` : ""}
     ${renderOpenRouterCallDetails(openRouterCalls)}
     <details open>
       <summary>Input</summary>
-      <pre>${escapeHtml(JSON.stringify(node.input, null, 2))}</pre>
+      <pre>${escapeHtml(safeWorkflowJson(node.input))}</pre>
     </details>
     <details open>
       <summary>Output</summary>
-      <pre>${escapeHtml(JSON.stringify(node.output, null, 2))}</pre>
+      <pre>${escapeHtml(safeWorkflowJson(node.output))}</pre>
+    </details>
+    ${renderWorkflowSources(node)}
+    ${renderWorkflowLogsForNode(node.id)}
+    <details>
+      <summary>Raw JSON</summary>
+      <pre>${escapeHtml(safeWorkflowJson(node))}</pre>
     </details>
   `;
+}
+
+function renderWorkflowCompareNotice(node, compareState) {
+  if (!state.workflowCompare?.summary?.active || !compareState) return "";
+  const baseNode = (state.workflowCompare.baseRun?.workflow_log?.nodes || []).find((item) => item.id === node.id);
+  const baseMetrics = baseNode ? workflowNodeMetrics(baseNode) : null;
+  const currentMetrics = workflowNodeMetrics(node);
+  const title = workflowCompareLabel(compareState).replace("Compare: ", "");
+  return `
+    <div class="workflowCompareNotice ${escapeHtml(compareState)}">
+      <strong>${escapeHtml(title)}</strong>
+      <span>Status ${escapeHtml(baseNode?.status || "new")} -> ${escapeHtml(node.status || "unknown")}</span>
+      ${baseMetrics ? `<span>Duration ${escapeHtml(baseMetrics.duration)} -> ${escapeHtml(currentMetrics.duration)}</span>` : ""}
+      ${baseMetrics ? `<span>Tokens ${escapeHtml(baseMetrics.tokens)} -> ${escapeHtml(currentMetrics.tokens)}</span>` : ""}
+    </div>
+  `;
+}
+
+function renderWorkflowRegressionNotice(node) {
+  const regressions = state.workflowCompare?.summary?.regressionNodes?.get(node.id) || [];
+  if (!regressions.length) return "";
+  return `
+    <section class="workflowRegressionNotice">
+      <header>
+        <strong>Regression indicators</strong>
+        <span>${regressions.length} issue${regressions.length === 1 ? "" : "s"}</span>
+      </header>
+      <div>
+        ${regressions.map((item) => `
+          <span class="${escapeHtml(item.severity || "warning")}">
+            <b>${escapeHtml(item.type)}</b>
+            <small>${escapeHtml(item.message)}</small>
+          </span>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkflowPerformanceDiff(node) {
+  if (!state.workflowCompare?.summary?.active) return "";
+  const baseNode = (state.workflowCompare.baseRun?.workflow_log?.nodes || []).find((item) => item.id === node.id);
+  if (!baseNode) return "";
+  const baseMetrics = workflowNodeMetrics(baseNode);
+  const currentMetrics = workflowNodeMetrics(node);
+  const durationDelta = currentMetrics.durationMs - baseMetrics.durationMs;
+  const tokenDelta = currentMetrics.totalTokens - baseMetrics.totalTokens;
+  const costDelta = currentMetrics.costValue !== null && baseMetrics.costValue !== null
+    ? currentMetrics.costValue - baseMetrics.costValue
+    : null;
+  return `
+    <section class="workflowPerformanceDiff">
+      <header>
+        <strong>Performance diff</strong>
+        <span>Base -> Compare</span>
+      </header>
+      <div class="workflowPerformanceDiffGrid">
+        ${renderWorkflowPerformanceDiffMetric("Duration", baseMetrics.duration, currentMetrics.duration, workflowSignedDelta(durationDelta, formatOpenRouterDuration), durationDelta)}
+        ${renderWorkflowPerformanceDiffMetric("Tokens", baseMetrics.tokens, currentMetrics.tokens, workflowSignedDelta(tokenDelta, (value) => value.toLocaleString()), tokenDelta)}
+        ${renderWorkflowPerformanceDiffMetric("Cost", baseMetrics.cost, currentMetrics.cost, costDelta === null ? "n/a" : workflowSignedDelta(costDelta, formatOpenRouterCost), costDelta)}
+      </div>
+    </section>
+  `;
+}
+
+function renderWorkflowPerformanceDiffMetric(label, baseValue, currentValue, delta, numericDelta) {
+  const direction = numericDelta === null || numericDelta === 0 ? "" : numericDelta > 0 ? "worse" : "better";
+  return `
+    <span class="${direction}">
+      <small>${escapeHtml(label)}</small>
+      <b>${escapeHtml(baseValue)} -> ${escapeHtml(currentValue)}</b>
+      <em>${escapeHtml(delta)}</em>
+    </span>
+  `;
+}
+
+function renderWorkflowPayloadDiff(node) {
+  if (!state.workflowCompare?.summary?.active) return "";
+  const baseNode = (state.workflowCompare.baseRun?.workflow_log?.nodes || []).find((item) => item.id === node.id);
+  if (!baseNode) {
+    return `
+      <section class="workflowPayloadDiff added">
+        <header>
+          <strong>Payload diff</strong>
+          <span>New node in compare run</span>
+        </header>
+      </section>
+    `;
+  }
+  const inputDiff = workflowPayloadDiffRows(baseNode.input, node.input);
+  const outputDiff = workflowPayloadDiffRows(baseNode.output, node.output);
+  return `
+    <section class="workflowPayloadDiff">
+      <header>
+        <strong>Payload diff</strong>
+        <span>${inputDiff.total + outputDiff.total} changed fields</span>
+      </header>
+      ${renderWorkflowPayloadDiffGroup("Input", inputDiff, baseNode.input, node.input)}
+      ${renderWorkflowPayloadDiffGroup("Output", outputDiff, baseNode.output, node.output)}
+    </section>
+  `;
+}
+
+function renderWorkflowPayloadDiffGroup(label, diff, basePayload, currentPayload) {
+  const rows = diff.rows.slice(0, 16).map((row) => `
+    <div class="workflowPayloadDiffRow ${escapeHtml(row.type)}">
+      <b>${escapeHtml(row.type)}</b>
+      <span>${escapeHtml(row.path)}</span>
+      <small>${escapeHtml(row.before)} -> ${escapeHtml(row.after)}</small>
+    </div>
+  `).join("");
+  const empty = '<div class="workflowPayloadDiffEmpty">No payload changes in this section</div>';
+  const overflow = diff.total > diff.rows.length
+    ? `<div class="workflowPayloadDiffEmpty">${diff.total - diff.rows.length} more changes hidden</div>`
+    : "";
+  return `
+    <details class="workflowPayloadDiffGroup" ${diff.total ? "open" : ""}>
+      <summary>${escapeHtml(label)} diff · ${diff.total}</summary>
+      <div class="workflowPayloadDiffRows">${rows || empty}${overflow}</div>
+      <div class="workflowPayloadDiffPair">
+        <div>
+          <b>Base ${escapeHtml(label)}</b>
+          <pre>${escapeHtml(safeWorkflowJson(basePayload))}</pre>
+        </div>
+        <div>
+          <b>Compare ${escapeHtml(label)}</b>
+          <pre>${escapeHtml(safeWorkflowJson(currentPayload))}</pre>
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function workflowPayloadDiffRows(baseValue, currentValue, path = "$", rows = []) {
+  if (rows.length >= 16) return { rows, total: rows.length };
+  if (workflowPayloadDiffEqual(baseValue, currentValue)) return { rows, total: rows.length };
+  const baseIsObject = baseValue && typeof baseValue === "object";
+  const currentIsObject = currentValue && typeof currentValue === "object";
+  if (!baseIsObject || !currentIsObject || Array.isArray(baseValue) !== Array.isArray(currentValue)) {
+    rows.push({
+      type: baseValue === undefined ? "added" : currentValue === undefined ? "removed" : "changed",
+      path,
+      before: workflowPayloadDiffPreview(baseValue),
+      after: workflowPayloadDiffPreview(currentValue)
+    });
+    return { rows, total: rows.length };
+  }
+  const keys = Array.isArray(baseValue) || Array.isArray(currentValue)
+    ? [...Array(Math.max(baseValue?.length || 0, currentValue?.length || 0)).keys()]
+    : [...new Set([...Object.keys(baseValue || {}), ...Object.keys(currentValue || {})])].sort();
+  let total = rows.length;
+  for (const key of keys) {
+    const childPath = Array.isArray(baseValue) || Array.isArray(currentValue) ? `${path}[${key}]` : `${path}.${key}`;
+    const before = baseValue?.[key];
+    const after = currentValue?.[key];
+    if (workflowPayloadDiffEqual(before, after)) continue;
+    total += 1;
+    if (rows.length < 16) workflowPayloadDiffRows(before, after, childPath, rows);
+  }
+  return { rows, total };
+}
+
+function workflowPayloadDiffEqual(left, right) {
+  if (left === right) return true;
+  return safeWorkflowJson(left) === safeWorkflowJson(right);
+}
+
+function workflowPayloadDiffPreview(value) {
+  if (value === undefined) return "(missing)";
+  if (value === null) return "null";
+  if (typeof value === "string") return clipWorkflowLine(maskSensitivePreview(value), 80);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return clipWorkflowLine(formatWorkflowPreview(value), 100);
+}
+
+function renderWorkflowEdgeInspector(edge, view) {
+  const inspector = $("workflowInspector");
+  if (!inspector || !edge) return;
+  const source = view.nodes.find((node) => node.id === edge.from);
+  const target = view.nodes.find((node) => node.id === edge.to);
+  const routeState = edge.removed ? "removed" : state.workflowCompare?.summary?.edgeStates?.get(edgeKey(edge)) || "";
+  inspector.innerHTML = `
+    <header class="workflowInspectorHeader">
+      <span class="workflowIcon tool">EDGE</span>
+      <div>
+        <strong>${escapeHtml(source?.label || edge.from)} -> ${escapeHtml(target?.label || edge.to)}</strong>
+        <small>${escapeHtml(edge.from)} Â· ${escapeHtml(edge.to)} Â· ${edge.active ? "active" : "inactive"}</small>
+      </div>
+    </header>
+    <section class="workflowInspectorMetrics">
+      <span><small>Source</small><b>${escapeHtml(edge.from)}</b></span>
+      <span><small>Target</small><b>${escapeHtml(edge.to)}</b></span>
+      <span><small>Status</small><b>${edge.active ? "Active" : "Skipped"}</b></span>
+      <span><small>Mapping</small><b>${escapeHtml(workflowMappingSummary(source?.output, target?.input))}</b></span>
+    </section>
+    ${renderWorkflowRouteDiff(edge, routeState)}
+    <details open>
+      <summary>Payload from source output</summary>
+      <pre>${escapeHtml(safeWorkflowJson(source?.output || {}))}</pre>
+    </details>
+    <details open>
+      <summary>Target input</summary>
+      <pre>${escapeHtml(safeWorkflowJson(target?.input || {}))}</pre>
+    </details>
+    <details>
+      <summary>Raw edge JSON</summary>
+      <pre>${escapeHtml(safeWorkflowJson(edge))}</pre>
+    </details>
+  `;
+}
+
+function renderWorkflowRouteDiff(edge, routeState) {
+  if (!state.workflowCompare?.summary?.active) return "";
+  const summary = state.workflowCompare.summary;
+  const label = {
+    added: "Route added in compare run",
+    removed: "Route removed from compare run",
+    same: "Route unchanged"
+  }[routeState] || "Route changed";
+  return `
+    <section class="workflowRouteDiff ${escapeHtml(routeState || "changed")}">
+      <header>
+        <strong>Route diff</strong>
+        <span>${escapeHtml(label)}</span>
+      </header>
+      <div class="workflowRouteDiffGrid">
+        <span><small>Selected edge</small><b>${escapeHtml(edgeLabel(edge))}</b></span>
+        <span><small>Added routes</small><b>${summary.routeAdded}</b></span>
+        <span><small>Removed routes</small><b>${summary.routeRemoved}</b></span>
+      </div>
+      ${renderWorkflowRouteDiffList("Added", summary.addedEdges, "added")}
+      ${renderWorkflowRouteDiffList("Removed", summary.removedEdges, "removed")}
+    </section>
+  `;
+}
+
+function renderWorkflowRouteDiffList(label, edges, type) {
+  if (!edges?.length) return "";
+  return `
+    <div class="workflowRouteDiffList ${escapeHtml(type)}">
+      <b>${escapeHtml(label)}</b>
+      ${edges.slice(0, 8).map((edge) => `<span>${escapeHtml(edgeLabel(edge))}</span>`).join("")}
+    </div>
+  `;
+}
+
+function workflowMappingSummary(sourceOutput, targetInput) {
+  const sourceKeys = sourceOutput && typeof sourceOutput === "object" ? Object.keys(sourceOutput).slice(0, 4) : [];
+  const targetKeys = targetInput && typeof targetInput === "object" ? Object.keys(targetInput).slice(0, 4) : [];
+  if (!sourceKeys.length && !targetKeys.length) return "preview only";
+  return `${sourceKeys.join(", ") || "output"} -> ${targetKeys.join(", ") || "input"}`;
+}
+
+function renderWorkflowLogsForNode(nodeId) {
+  const entries = [
+    ...(state.lastWorkflow?.trace || []),
+    ...(state.runEvents || [])
+  ].filter((entry) => entry?.step === nodeId || entry?.node_id === nodeId || entry?.data?.node_id === nodeId);
+  if (!entries.length) return "";
+  return `
+    <details open>
+      <summary>Logs for node (${entries.length})</summary>
+      <div class="workflowNodeLogs">
+        ${entries.slice(-12).map((entry) => `
+          <div>
+            <b>${escapeHtml(entry.step || nodeId)}</b>
+            <span>${escapeHtml(entry.message || entry.status || entry.type || "")}</span>
+            ${entry.data ? `<pre>${escapeHtml(safeWorkflowJson(entry.data))}</pre>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function renderWorkflowSources(node) {
+  const sources = collectWorkflowSources(node.output);
+  if (!sources.length) return "";
+  return `
+    <details open>
+      <summary>Sources (${sources.length})</summary>
+      <div class="workflowSourceList">
+        ${sources.slice(0, 8).map((source) => `
+          <div>
+            <strong>${escapeHtml(source.title || source.id || source.source_table || "Source")}</strong>
+            ${source.source_url ? `<a href="${escapeHtml(source.source_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.source_url)}</a>` : ""}
+            ${source.summary || source.text ? `<small>${escapeHtml(clipWorkflowLine(source.summary || source.text, 180))}</small>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </details>
+  `;
+}
+
+function collectWorkflowSources(value) {
+  const sources = [];
+  const visit = (item, depth = 0) => {
+    if (!item || depth > 4) return;
+    if (Array.isArray(item)) {
+      for (const child of item.slice(0, 30)) visit(child, depth + 1);
+      return;
+    }
+    if (typeof item !== "object") return;
+    if (item.source_url || item.url || item.source_table || item.source_id) {
+      sources.push({
+        ...item,
+        source_url: item.source_url || item.url || "",
+        text: item.text || item.content || item.index_text || ""
+      });
+    }
+    for (const key of ["sources", "records", "results", "documents", "rows", "items"]) {
+      if (item[key]) visit(item[key], depth + 1);
+    }
+  };
+  visit(value);
+  return sources;
+}
+
+function safeWorkflowJson(value) {
+  try {
+    return maskSensitivePreview(JSON.stringify(value ?? null, null, 2));
+  } catch {
+    return maskSensitivePreview(String(value));
+  }
 }
 
 function renderOpenRouterCallDetails(calls) {
@@ -3085,7 +4208,8 @@ async function loadRunHistory() {
   if (!listEl) return;
   try {
     const { runs } = await api("/api/run-history?limit=30");
-    renderRunHistoryStrip(runs || []);
+    state.runHistory = runs || [];
+    renderRunHistoryStrip(state.runHistory);
   } catch {
     listEl.innerHTML = '<div class="runHistoryEmpty">שגיאה בטעינת היסטוריה</div>';
   }
@@ -3103,7 +4227,9 @@ function renderRunHistoryStrip(runs) {
     const hasError = (run.workflow_log?.nodes || []).some((n) => n.status === "error");
     const hasAiReport = Boolean(run.workflow_log?.ai_report);
     const item = document.createElement("div");
-    item.className = `runHistoryItem${hasError ? " hasError" : ""}${hasAiReport ? " hasAiReport" : ""}`;
+    const isBase = state.workflowCompare?.baseRun?.id === run.id;
+    const isCompare = state.workflowCompare?.compareRun?.id === run.id;
+    item.className = `runHistoryItem${hasError ? " hasError" : ""}${hasAiReport ? " hasAiReport" : ""}${isBase ? " compareBase" : ""}${isCompare ? " compareCurrent" : ""}`;
     item.dataset.runId = run.id;
     const time = run.created_at ? timeAgo(new Date(run.created_at)) : "";
     const msg = (run.user_message || "").slice(0, 60);
@@ -3112,12 +4238,47 @@ function renderRunHistoryStrip(runs) {
       <div class="rhTime">${escapeHtml(time)}</div>
       <div class="rhMsg">${escapeHtml(msg)}</div>
       <small>${escapeHtml(kindLabel)}</small>
+      <div class="runHistoryCompareActions">
+        <button type="button" data-compare-role="base">${isBase ? "Base *" : "Base"}</button>
+        <button type="button" data-compare-role="compare">${isCompare ? "Compare *" : "Compare"}</button>
+      </div>
       ${hasError ? '<div class="rhErr">⚠ שגיאה בריצה</div>' : ""}
       ${hasAiReport ? '<div class="rhAiReport">דוח AI</div>' : ""}
     `;
+    item.querySelectorAll("[data-compare-role]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setWorkflowCompareRole(run, button.dataset.compareRole);
+      });
+    });
     item.addEventListener("click", () => showHistoricalRun(run, item));
     listEl.append(item);
   }
+}
+
+function setWorkflowCompareRole(run, role) {
+  if (!run?.workflow_log?.nodes?.length) {
+    showToast("No workflow data for this run", "error");
+    return;
+  }
+  if (role === "base") {
+    state.workflowCompare.baseRun = run;
+  } else {
+    state.workflowCompare.compareRun = run;
+    showHistoricalRun(run, null);
+  }
+  if (!state.workflowCompare.compareRun && state.lastWorkflow) {
+    state.workflowCompare.compareRun = { workflow_log: state.lastWorkflow, id: state.currentWorkflowMessageId };
+  }
+  renderRunHistoryStrip(state.runHistory || []);
+  renderWorkflow(state.workflowCompare.compareRun?.workflow_log || state.lastWorkflow);
+}
+
+function clearWorkflowCompare(shouldRender = true) {
+  state.workflowCompare = { baseRun: null, compareRun: null, summary: null };
+  renderWorkflowCompareSummary(null);
+  if (state.runHistory?.length) renderRunHistoryStrip(state.runHistory);
+  if (shouldRender) renderWorkflow(state.lastWorkflow);
 }
 
 function showHistoricalRun(run, itemEl) {
