@@ -1630,8 +1630,7 @@ function renderWorkflow(workflow) {
 
   const view = buildWorkflowView(workflow);
   const hasRun = Boolean(workflow?.nodes?.length);
-  renderCacheMetrics(workflow?.cacheMetrics || null);
-  renderOpenRouterMetrics(workflow?.openRouterUsage?.totals || null);
+  renderWorkflowMetrics(workflow);
   $("workflowHint").style.display = hasRun ? "none" : "block";
   $("workflowBoard").classList.toggle("hasWorkflow", hasRun);
   $("workflowToolbar")?.toggleAttribute("hidden", !hasRun);
@@ -2475,6 +2474,80 @@ function workflowNodeErrorText(node) {
   }
   const failedCall = (Array.isArray(node.openrouter) ? node.openrouter : []).find((call) => call.status === "error" || call.error);
   return failedCall?.error || "";
+}
+
+function renderWorkflowMetrics(workflow) {
+  const panel = $("workflowMetricCards");
+  if (!panel) return;
+  const hasRun = Boolean(workflow?.nodes?.length);
+  panel.hidden = !hasRun;
+  if (!hasRun) return;
+
+  const or = workflow?.openRouterUsage?.totals || {};
+  const cache = workflow?.cacheMetrics || {};
+  const nodes = workflow?.nodes || [];
+
+  // Tokens
+  const totalTokens = (Number(or.prompt_tokens || 0) + Number(or.completion_tokens || 0));
+  $("wfMetric_totalTokens").textContent = totalTokens.toLocaleString();
+  const avgTokens = calcHistoryAvg((r) => {
+    const t = r.workflow_log?.openRouterUsage?.totals;
+    return t ? Number(t.prompt_tokens || 0) + Number(t.completion_tokens || 0) : null;
+  });
+  $("wfMetricSub_totalTokens").textContent = avgTokens !== null ? `ממוצע ריצה ${avgTokens.toLocaleString()}` : "—";
+
+  // Cost
+  const cost = or.cost != null ? Number(or.cost) : null;
+  $("wfMetric_totalCost").textContent = cost !== null ? formatOpenRouterCost(cost) : "—";
+  const avgCost = calcHistoryAvg((r) => {
+    const c = r.workflow_log?.openRouterUsage?.totals?.cost;
+    return c != null ? Number(c) : null;
+  });
+  $("wfMetricSub_totalCost").textContent = avgCost !== null ? `ממוצע ריצה ${formatOpenRouterCost(avgCost)}` : "—";
+
+  // Latency (total duration from nodes)
+  const doneNodes = nodes.filter((n) => n.status === "done" || n.status === "error");
+  const totalDurationMs = doneNodes.reduce((sum, n) => {
+    const calls = Array.isArray(n.openrouter) ? n.openrouter : [];
+    return sum + calls.reduce((s, c) => s + Number(c.duration_ms || 0), 0);
+  }, 0);
+  $("wfMetric_latency").textContent = totalDurationMs > 0 ? formatOpenRouterDuration(totalDurationMs) : "—";
+  const avgLatency = calcHistoryAvg((r) => {
+    const ns = r.workflow_log?.nodes || [];
+    const ms = ns.reduce((sum, n) => {
+      const calls = Array.isArray(n.openrouter) ? n.openrouter : [];
+      return sum + calls.reduce((s, c) => s + Number(c.duration_ms || 0), 0);
+    }, 0);
+    return ms > 0 ? ms : null;
+  });
+  $("wfMetricSub_latency").textContent = avgLatency !== null ? `ממוצע ריצה ${formatOpenRouterDuration(avgLatency)}` : "—";
+
+  // Cache hit rate
+  const hitRate = Number(cache.cache_hit_rate || 0);
+  $("wfMetric_cacheHitRate").textContent = `${hitRate.toFixed(1)}%`;
+  const totalRuns = (state.runHistory || []).length;
+  const hitRuns = (state.runHistory || []).filter((r) => (r.workflow_log?.cacheMetrics?.cache_hits || 0) > 0).length;
+  $("wfMetricSub_cacheHitRate").textContent = totalRuns ? `${hitRuns}/${totalRuns} ריצות` : "—";
+
+  // Cache HIT/MISS
+  const hits = Number(cache.cache_hits || 0);
+  const misses = Number(cache.cache_misses || 0);
+  $("wfMetric_cache").textContent = `HIT ${hits} / ${misses} MISS`;
+  $("wfMetricSub_cache").textContent = `פחות ${totalRuns || 0} ריצות`;
+
+  // Success rate
+  const total = nodes.length;
+  const successful = nodes.filter((n) => n.status === "done").length;
+  const successRate = total > 0 ? Math.round((successful / total) * 100) : 100;
+  $("wfMetric_successRate").textContent = `${successRate}%`;
+  $("wfMetricSub_successRate").textContent = `ריצות ${totalRuns}/${totalRuns}`;
+}
+
+function calcHistoryAvg(accessor) {
+  const history = state.runHistory || [];
+  const values = history.map(accessor).filter((v) => v !== null && v !== undefined && Number.isFinite(v));
+  if (!values.length) return null;
+  return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
 function renderCacheMetrics(metrics) {
