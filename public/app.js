@@ -37,6 +37,22 @@ const SUB_AGENTS = [
   },
 ];
 
+const MEETINGS_EVIDENCE_DEFAULTS = {
+  enabled: true,
+  model: "",
+  rpcName: "hybrid_match_meetings_documents",
+  table: "meetings_documents",
+  matchCount: 20,
+  matchThreshold: 0.3,
+  vectorWeight: 0.55,
+  textWeight: 0.25,
+  keywordWeight: 0.15,
+  metadataWeight: 0.05,
+  adjacentChunks: 1,
+  requireQuote: true,
+  timeoutMs: 10000
+};
+
 const n8nTools = [
   "alert",
   "meetings",
@@ -465,6 +481,88 @@ function loadSubAgents() {
 
     list.append(card);
   }
+
+  // Meeting Evidence Agent card (custom settings panel)
+  const meCfg = { ...MEETINGS_EVIDENCE_DEFAULTS, ...(state.settings?.subagents?.meetingsEvidence || {}) };
+  const meModels = models.map((m) =>
+    `<option value="${m.id}" ${m.id === (meCfg.model || "") ? "selected" : ""}>${m.id}</option>`
+  ).join("");
+  const meCard = document.createElement("div");
+  meCard.className = "subagent-card";
+  meCard.innerHTML = `
+    <div class="subagent-header">
+      <span class="subagent-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span>
+      <span class="subagent-name">Meeting Evidence Agent</span>
+      <span class="subagent-status ${meCfg.enabled ? "status-ok" : "status-warn"}">${meCfg.enabled ? "פעיל" : "כבוי"}</span>
+    </div>
+    <p class="subagent-desc">מאתר ראיות מתוך סיכומי ישיבות בטבלת meetings_documents. מחזיר ציטוטים מדויקים עם מידע מקור. מופעל אוטומטית כשהשאילתה עוסקת בישיבות.</p>
+    <div class="subagent-config">
+      <label class="subagent-config-label">
+        <input type="checkbox" id="meEnabled" ${meCfg.enabled ? "checked" : ""} /> הפעל סוכן
+      </label>
+      <label class="subagent-config-label">מודל (ריק = מודל ראשי)
+        <select id="meModel"><option value="">— מודל ראשי —</option>${meModels}</select>
+      </label>
+      <label class="subagent-config-label">RPC Name
+        <input id="meRpcName" value="${meCfg.rpcName}" />
+      </label>
+      <label class="subagent-config-label">מספר תוצאות (matchCount)
+        <input type="number" id="meMatchCount" value="${meCfg.matchCount}" min="1" max="100" />
+      </label>
+      <label class="subagent-config-label">סף דמיון מינימלי (matchThreshold)
+        <input type="number" id="meMatchThreshold" value="${meCfg.matchThreshold}" min="0" max="1" step="0.05" />
+      </label>
+      <label class="subagent-config-label">משקל וקטורי (vectorWeight)
+        <input type="number" id="meVectorWeight" value="${meCfg.vectorWeight}" min="0" max="1" step="0.05" />
+      </label>
+      <label class="subagent-config-label">משקל טקסט (textWeight)
+        <input type="number" id="meTextWeight" value="${meCfg.textWeight}" min="0" max="1" step="0.05" />
+      </label>
+      <label class="subagent-config-label">משקל מילות מפתח (keywordWeight)
+        <input type="number" id="meKeywordWeight" value="${meCfg.keywordWeight}" min="0" max="1" step="0.05" />
+      </label>
+      <label class="subagent-config-label">משקל metadata (metadataWeight)
+        <input type="number" id="meMetadataWeight" value="${meCfg.metadataWeight}" min="0" max="1" step="0.05" />
+      </label>
+      <label class="subagent-config-label">צ'אנקים סמוכים (adjacentChunks)
+        <input type="number" id="meAdjacentChunks" value="${meCfg.adjacentChunks}" min="0" max="3" />
+      </label>
+      <label class="subagent-config-label">
+        <input type="checkbox" id="meRequireQuote" ${meCfg.requireQuote ? "checked" : ""} /> חייב ציטוט
+      </label>
+      <label class="subagent-config-label">Timeout (ms)
+        <input type="number" id="meTimeoutMs" value="${meCfg.timeoutMs}" min="1000" max="60000" step="1000" />
+      </label>
+      <button id="meSaveBtn">שמור הגדרות</button>
+      <span id="meSaveStatus"></span>
+    </div>
+  `;
+  meCard.querySelector("#meSaveBtn").addEventListener("click", () => {
+    const updated = {
+      enabled: meCard.querySelector("#meEnabled").checked,
+      model: meCard.querySelector("#meModel").value || null,
+      rpcName: meCard.querySelector("#meRpcName").value.trim() || MEETINGS_EVIDENCE_DEFAULTS.rpcName,
+      matchCount: Number(meCard.querySelector("#meMatchCount").value) || MEETINGS_EVIDENCE_DEFAULTS.matchCount,
+      matchThreshold: Number(meCard.querySelector("#meMatchThreshold").value),
+      vectorWeight: Number(meCard.querySelector("#meVectorWeight").value),
+      textWeight: Number(meCard.querySelector("#meTextWeight").value),
+      keywordWeight: Number(meCard.querySelector("#meKeywordWeight").value),
+      metadataWeight: Number(meCard.querySelector("#meMetadataWeight").value),
+      adjacentChunks: Number(meCard.querySelector("#meAdjacentChunks").value),
+      requireQuote: meCard.querySelector("#meRequireQuote").checked,
+      timeoutMs: Number(meCard.querySelector("#meTimeoutMs").value) || MEETINGS_EVIDENCE_DEFAULTS.timeoutMs
+    };
+    state.settings = {
+      ...(state.settings || {}),
+      subagents: { ...(state.settings?.subagents || {}), meetingsEvidence: updated }
+    };
+    state.settingsDirty = true;
+    setSettingsSaveState("יש שינויים בטופס שטרם נשמרו ב-Supabase.", "dirty");
+    meCard.querySelector("#meSaveStatus").textContent = "✓ עודכן בטופס";
+    showToast("הגדרות Meeting Evidence Agent נטענו לטופס. לחץ שמור כדי לעדכן את Supabase");
+    setTimeout(() => { meCard.querySelector("#meSaveStatus").textContent = ""; }, 2500);
+  });
+  list.append(meCard);
 }
 
 async function refreshAgentsFromApi() {

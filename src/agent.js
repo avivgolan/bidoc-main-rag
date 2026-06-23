@@ -5,6 +5,7 @@ import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.j
 import { graphSearch, hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
+import { formatMeetingCitation, runMeetingEvidenceAgent } from "./subagents/meeting.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
 import { completeRun, emitRunEvent, getRunEvents } from "./runLog.js";
 import { renderPrompt } from "./prompts.js";
@@ -416,16 +417,35 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   }
 
   const plannerTools = recommendedProjectTools(knowledgePlan);
-  const tools = buildToolOrder(classification, [...hintedTools(classification), ...plannerTools])
+  const meetingsEvidenceEnabled = config.meetingsEvidence?.enabled !== false;
+  const shouldRunMeetingEvidence = meetingsEvidenceEnabled && (
+    (classification.tool_hint || "").includes("meetings") ||
+    (rerankedResults && normalizeRows(rerankedResults).some((r) => r.meeting_id || r.source_table === "meetings_documents")) ||
+    Boolean(classification.investigation)
+  );
+  const meetingsEvidenceTool = shouldRunMeetingEvidence ? ["meeting_evidence_search"] : [];
+  const tools = buildToolOrder(classification, [...hintedTools(classification), ...plannerTools, ...meetingsEvidenceTool])
     .filter((toolName) => !safetyPrecheckTools.includes(toolName))
     .filter((toolName) => toolsRuntime.enabled !== false)
     .filter((toolName) => toolsRuntime.alertAgentEnabled !== false || toolName !== "alert")
+    .filter((toolName) => toolName !== "meeting_evidence_search" || shouldRunMeetingEvidence)
     .slice(0, Number(toolsRuntime.parallelLimit || 6));
   emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools in parallel", { tools });
   const toolResults = await Promise.all(
     tools.map((toolName) =>
       callProjectTool({ toolName, message, classification, sessionId, config, cacheContext, telemetryFor }).then((result) => {
-        emitRunEvent(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, skipped: result.skipped || false, error: result.error || null });
+        if (toolName === "meeting_evidence_search") {
+          emitRunEvent(runId, "meeting_evidence", `Meeting Evidence Agent completed`, {
+            ok: result.ok,
+            skipped: result.skipped || false,
+            status: result.data?.status || null,
+            evidenceCount: result.data?.evidence?.length || 0,
+            conflictsCount: result.data?.conflicts?.length || 0,
+            error: result.error || result.data?.error || null
+          });
+        } else {
+          emitRunEvent(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, skipped: result.skipped || false, error: result.error || null });
+        }
         return result;
       })
     )
@@ -571,6 +591,35 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
 }
 
 async function callProjectTool({ toolName, message, classification, sessionId, config, cacheContext = null, telemetryFor }) {
+  if (toolName === "meeting_evidence_search") {
+    try {
+      const result = await runMeetingEvidenceAgent({
+        query: message,
+        keywords: classification?.hashtags || [],
+        dateFrom: classification?.date_from || null,
+        dateTo: classification?.date_to || null,
+        requireQuote: config.meetingsEvidence?.requireQuote !== false,
+        cacheContext,
+        telemetry: telemetryFor("meeting_evidence")
+      });
+      const evidenceText = result.status === "found"
+        ? result.evidence.slice(0, 8).map((e) => {
+            const quote = e.quote && e.quote.length > 700 ? e.quote.slice(0, 700) + "…" : e.quote;
+            return `${formatMeetingCitation(e)}\n${quote}`;
+          }).join("\n\n")
+        : null;
+      return {
+        toolName,
+        ok: result.status !== "error",
+        skipped: result.status === "not_found",
+        data: result,
+        answer: evidenceText,
+        sources: []
+      };
+    } catch (error) {
+      return { toolName, ok: false, error: error.message, data: null, sources: [] };
+    }
+  }
   if (toolName === "alert") {
     try {
       const result = await runAlertAgent({

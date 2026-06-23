@@ -388,8 +388,25 @@ export const TOOL_NAMES = [
   "exceptions_report",
   "quality_control",
   "safety_report",
-  "submittals"
+  "submittals",
+  "meeting_evidence_search"
 ];
+
+export const DEFAULT_MEETINGS_EVIDENCE_SETTINGS = {
+  enabled: true,
+  model: null,
+  rpcName: "hybrid_match_meetings_documents",
+  table: "meetings_documents",
+  matchCount: 20,
+  matchThreshold: 0.3,
+  vectorWeight: 0.55,
+  textWeight: 0.25,
+  keywordWeight: 0.15,
+  metadataWeight: 0.05,
+  adjacentChunks: 1,
+  requireQuote: true,
+  timeoutMs: 10000
+};
 
 export function getConfig(settingsOverride = null) {
   const settings = settingsOverride && typeof settingsOverride === "object"
@@ -449,6 +466,7 @@ export function getConfig(settingsOverride = null) {
       chunkSize: clampNumber(settings.knowledge?.chunkSize, 300, 6000, 1800)
     },
     timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks),
+    meetingsEvidence: normalizeMeetingsEvidenceSettings(settings.subagents?.meetingsEvidence),
     n8n: {
       baseUrl: trimSlash(settings.n8nBaseUrl || process.env.N8N_BASE_URL || ""),
       runtime: normalizeToolRuntimeSettings(settings.toolsRuntime || settings.toolRuntime),
@@ -513,7 +531,7 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
       })
     ),
     agents: buildAgentList(config),
-    subagents: settings.subagents || {},
+    subagents: { ...(settings.subagents || {}), meetingsEvidence: config.meetingsEvidence },
     presets: mergeSettingsPresets(settings.presets || [])
   };
 }
@@ -724,6 +742,26 @@ export function normalizeContentSourceSettings(value = {}, fallback = {}) {
     alertsTable,
     alertsRpcName: String(raw.alertsRpcName || process.env.CONTENT_ALERTS_RPC_NAME || `match_${alertsTable}`).trim(),
     usesAppSupabase: !configuredUrl && !configuredKey
+  };
+}
+
+function normalizeMeetingsEvidenceSettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const d = DEFAULT_MEETINGS_EVIDENCE_SETTINGS;
+  return {
+    enabled: raw.enabled !== false,
+    model: raw.model || d.model,
+    rpcName: String(raw.rpcName || d.rpcName).trim(),
+    table: String(raw.table || d.table).trim(),
+    matchCount: clampNumber(raw.matchCount, 1, 100, d.matchCount),
+    matchThreshold: clampNumber(raw.matchThreshold, 0, 1, d.matchThreshold),
+    vectorWeight: clampNumber(raw.vectorWeight, 0, 1, d.vectorWeight),
+    textWeight: clampNumber(raw.textWeight, 0, 1, d.textWeight),
+    keywordWeight: clampNumber(raw.keywordWeight, 0, 1, d.keywordWeight),
+    metadataWeight: clampNumber(raw.metadataWeight, 0, 1, d.metadataWeight),
+    adjacentChunks: clampNumber(raw.adjacentChunks, 0, 3, d.adjacentChunks),
+    requireQuote: raw.requireQuote !== false,
+    timeoutMs: clampNumber(raw.timeoutMs, 1000, 60000, d.timeoutMs)
   };
 }
 
