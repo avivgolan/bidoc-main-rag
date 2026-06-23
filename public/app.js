@@ -2305,8 +2305,75 @@ function generateNodeCardSvg(node, expanded, compareState = "", regression = fal
     .compare-banner{background:#fffbea;border:1px solid #f0d060;color:#8a6800;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;margin-bottom:5px;text-align:center;flex-shrink:0}
   </style>`;
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml">${css}${html}</div></foreignObject></svg>`;
-  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+  // Pure SVG — no foreignObject (Chrome blocks it in background-image)
+  const W = width, H = height;
+  const aW = 4, padL = aW + 10, padR = 10, innerW = W - padL - padR;
+  const iconSize = 28, iconX = padL, iconY = 12;
+  const textX = iconX + iconSize + 8;
+  const badgeW = Math.min(badgeText.length * 6.2 + 14, 74);
+  const badgeH = 17, badgeX = W - padR - badgeW, badgeY = iconY + 1;
+  const titleMaxChars = Math.floor((badgeX - textX - 6) / 7);
+  const titleClipped = escapeXml(clipWorkflowLine(node.label || "", titleMaxChars));
+  const kindLabelClipped = escapeXml((node.kind || node.id || "").substring(0, 16));
+  const footerLineY = H - 22, footerTextY = H - 8;
+  const footerStr = `Tokens ${tokens}  ·  Cost ${cost}  ·  Calls ${calls}`;
+  const uid = `n${Math.random().toString(36).slice(2, 7)}`;
+  const p = [];
+
+  p.push(`<defs><clipPath id="${uid}"><rect x="0" y="0" width="${W}" height="${H}" rx="10"/></clipPath></defs>`);
+  p.push(`<g clip-path="url(#${uid})"><rect x="0" y="0" width="${W}" height="${H}" fill="#ffffff"/><rect x="0" y="0" width="${aW}" height="${H}" fill="${accent}"/></g>`);
+  p.push(`<rect x="0.5" y="0.5" width="${W-1}" height="${H-1}" rx="9.5" fill="none" stroke="#dde5da" stroke-width="1"/>`);
+
+  // Icon box
+  p.push(`<rect x="${iconX}" y="${iconY}" width="${iconSize}" height="${iconSize}" rx="6" fill="${iconBg}"/>`);
+  p.push(`<text x="${iconX + iconSize/2}" y="${iconY + 18}" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="8" font-weight="900" fill="white">${abbr}</text>`);
+
+  // Title + kind
+  p.push(`<text x="${textX}" y="${iconY + 13}" font-family="'Segoe UI',system-ui,sans-serif" font-size="12.5" font-weight="700" fill="#18261f">${titleClipped}</text>`);
+  p.push(`<text x="${textX}" y="${iconY + 26}" font-family="'Segoe UI',system-ui,sans-serif" font-size="10" fill="#7a9180">${kindLabelClipped}</text>`);
+
+  // Badge + duration
+  p.push(`<rect x="${badgeX}" y="${badgeY}" width="${badgeW}" height="${badgeH}" rx="4" fill="${badgeBg}"/>`);
+  p.push(`<text x="${badgeX + badgeW/2}" y="${badgeY + 11.5}" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="8.5" font-weight="800" fill="${badgeFg}">${escapeXml(badgeText)}</text>`);
+  p.push(`<text x="${W - padR}" y="${badgeY + badgeH + 12}" text-anchor="end" font-family="'Segoe UI',system-ui,sans-serif" font-size="9.5" fill="#9aaa96" font-weight="600">${duration}</text>`);
+
+  if (expanded) {
+    const btnY = iconY + iconSize + 10;
+    p.push(`<rect x="${padL}" y="${btnY}" width="46" height="20" rx="4" fill="#f2f7f4" stroke="#c8ddd2" stroke-width="1"/>`);
+    p.push(`<text x="${padL+23}" y="${btnY+13}" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="10" font-weight="700" fill="#5a7a68">Log</text>`);
+    p.push(`<rect x="${padL+54}" y="${btnY}" width="52" height="20" rx="4" fill="#f2f7f4" stroke="#c8ddd2" stroke-width="1"/>`);
+    p.push(`<text x="${padL+80}" y="${btnY+13}" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="10" font-weight="700" fill="#5a7a68">Copy</text>`);
+
+    const charsPerLine = Math.floor(innerW / 5.8);
+    const inpLabelY = btnY + 32, inpBoxY = inpLabelY + 13, inpBoxH = 60;
+    p.push(`<text x="${padL}" y="${inpLabelY}" font-family="'Segoe UI',system-ui,sans-serif" font-size="8.5" font-weight="800" fill="#9aaa96" letter-spacing="0.5">INPUT</text>`);
+    p.push(`<rect x="${padL}" y="${inpBoxY}" width="${innerW}" height="${inpBoxH}" rx="5" fill="#f5f8f5" stroke="#e0eadf" stroke-width="1"/>`);
+    formatWorkflowPreview(node.input).split("\n").slice(0, 4).forEach((line, i) => {
+      p.push(`<text x="${padL+6}" y="${inpBoxY+14+i*12}" font-family="Consolas,'Courier New',monospace" font-size="9.5" fill="#2a3d30">${escapeXml(clipWorkflowLine(line, charsPerLine))}</text>`);
+    });
+
+    const outLabelY = inpBoxY + inpBoxH + 10, outBoxY = outLabelY + 13;
+    const outBoxH = Math.max(footerLineY - outBoxY - 8, 30);
+    p.push(`<text x="${padL}" y="${outLabelY}" font-family="'Segoe UI',system-ui,sans-serif" font-size="8.5" font-weight="800" fill="#9aaa96" letter-spacing="0.5">OUTPUT</text>`);
+    p.push(`<rect x="${padL}" y="${outBoxY}" width="${innerW}" height="${outBoxH}" rx="5" fill="#f5f8f5" stroke="#e0eadf" stroke-width="1"/>`);
+    formatWorkflowPreview(node.output).split("\n").slice(0, 4).forEach((line, i) => {
+      p.push(`<text x="${padL+6}" y="${outBoxY+14+i*12}" font-family="Consolas,'Courier New',monospace" font-size="9.5" fill="#2a3d30">${escapeXml(clipWorkflowLine(line, charsPerLine))}</text>`);
+    });
+  }
+
+  if (compareState) {
+    const lbl = workflowCompareLabel(compareState);
+    if (lbl) {
+      p.push(`<rect x="${padL}" y="${footerLineY-20}" width="${innerW}" height="15" rx="3" fill="#fffbea" stroke="#f0d060" stroke-width="1"/>`);
+      p.push(`<text x="${W/2}" y="${footerLineY-9}" text-anchor="middle" font-family="'Segoe UI',system-ui,sans-serif" font-size="8.5" font-weight="700" fill="#8a6800">${escapeXml(lbl)}</text>`);
+    }
+  }
+
+  p.push(`<line x1="${padL}" y1="${footerLineY}" x2="${W-padR}" y2="${footerLineY}" stroke="#ecf2ea" stroke-width="1"/>`);
+  p.push(`<text x="${padL}" y="${footerTextY}" font-family="'Segoe UI',system-ui,sans-serif" font-size="9.5" fill="#9aaa96" font-weight="600">${escapeXml(footerStr)}</text>`);
+
+  const svgOut = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">${p.join("")}</svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svgOut);
 }
 
 function workflowNodeCardLabel(node, expanded, compareState = "") {
