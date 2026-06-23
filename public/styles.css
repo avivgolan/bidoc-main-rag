@@ -1189,15 +1189,14 @@ label {
   position: relative;
   height: 680px;
   direction: ltr;
-  border: 1px solid #2c3328;
+  border: 1px solid var(--line-strong);
   border-radius: var(--r);
   background:
-    linear-gradient(90deg, rgb(142 224 200 / 0.055) 0 1px, transparent 1px 40px),
-    linear-gradient(0deg, rgb(142 224 200 / 0.04) 0 1px, transparent 1px 40px),
-    radial-gradient(circle at 12% 18%, rgb(20 140 114 / 0.13), transparent 20rem),
-    linear-gradient(135deg, #101610, #1d241d 58%, #121811);
-  background-size: 40px 40px, 40px 40px, auto, auto;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), var(--shadow);
+    linear-gradient(90deg, rgba(41,66,53,0.055) 0 1px, transparent 1px 40px),
+    linear-gradient(0deg, rgba(41,66,53,0.045) 0 1px, transparent 1px 40px),
+    #f5f7f5;
+  background-size: 40px 40px, 40px 40px, auto;
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
@@ -1887,15 +1886,23 @@ label {
   box-shadow: var(--shadow-md);
 }
 .metricIcon {
-  font-size: 20px;
-  width: 36px;
-  height: 36px;
-  background: var(--surface-2);
-  border-radius: 50%;
+  width: 38px;
+  height: 38px;
+  background: var(--brand-500);
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+  font-size: 16px;
 }
+#metricCard_tokens   .metricIcon { background: #148c72; }
+#metricCard_cost     .metricIcon { background: #327356; }
+#metricCard_latency  .metricIcon { background: #1a5a8c; }
+#metricCard_cacheHitRate .metricIcon { background: #b07d1a; }
+#metricCard_cache    .metricIcon { background: #6a4c93; }
+#metricCard_successRate  .metricIcon { background: #2e7d52; }
 .metricContent {
   display: flex;
   flex-direction: column;

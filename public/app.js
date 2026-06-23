@@ -2160,339 +2160,153 @@ function escapeXml(unsafe) {
     .replace(/'/g, "&apos;");
 }
 
-function emojiIconForNode(kind, label) {
-  const normLabel = String(label || "").toLowerCase();
-  if (normLabel.includes("trigger")) return "💬";
-  if (normLabel.includes("sanitize")) return "🛡️";
-  if (normLabel.includes("save") || normLabel.includes("store")) return "💾";
-  if (normLabel.includes("classify") || normLabel.includes("smart classifier")) return "⚙️";
-  if (normLabel.includes("knowledge") || normLabel.includes("retrieval")) return "📖";
-  if (normLabel.includes("agent") || normLabel.includes("main")) return "🤖";
-  if (normLabel.includes("cache")) return "🗄️";
-  if (normLabel.includes("memory")) return "🧠";
-  if (normLabel.includes("fallback")) return "🚨";
-  
-  return {
-    trigger: "💬", code: "⚙️", database: "🗄️", memory: "🧠",
-    ai: "🤖", router: "↯", vector: "📖", tool: "🔧"
-  }[kind] || "•";
-}
-
-function getNodeCardBorderColor(node, compareState, regression) {
-  if (regression) return "#ff7878";
-  if (node.status === "error") return "#ff3333";
-  if (compareState === "added") return "#78d88f";
-  if (compareState === "changed") return "#f4c36a";
-  if (node.status === "skipped") return "#78816f";
-  if (workflowNodeHasFallback(node)) return "#f59f3a";
-  if (node.status === "done") return "#4fb99d";
-  const kindColor = {
-    trigger: "#148c72", code: "#2e6b24", database: "#6a4c93",
-    memory: "#1a5a8c", ai: "#148c72", router: "#b07d1a",
-    vector: "#1a5a8c", tool: "#b07d1a"
+function nodeIconMeta(kind, label) {
+  const n = String(label || "").toLowerCase();
+  if (n.includes("trigger") || n.includes("chat"))
+    return { abbr: "CH", color: "#148c72" };
+  if (n.includes("sanitize") || n.includes("shield"))
+    return { abbr: "SA", color: "#327356" };
+  if (n.includes("save") || n.includes("store"))
+    return { abbr: "DB", color: "#6a4c93" };
+  if (n.includes("classif"))
+    return { abbr: "CL", color: "#1a5a8c" };
+  if (n.includes("knowledge") || n.includes("retrieval"))
+    return { abbr: "KB", color: "#327356" };
+  if (n.includes("agent") || n.includes("main"))
+    return { abbr: "AI", color: "#148c72" };
+  if (n.includes("cache"))
+    return { abbr: "CA", color: "#b07d1a" };
+  if (n.includes("memory"))
+    return { abbr: "ME", color: "#1a5a8c" };
+  if (n.includes("fallback"))
+    return { abbr: "FB", color: "#cc3333" };
+  const kindMap = {
+    trigger: { abbr: "TR", color: "#148c72" },
+    code:    { abbr: "CD", color: "#2e6b24" },
+    database:{ abbr: "DB", color: "#6a4c93" },
+    memory:  { abbr: "ME", color: "#1a5a8c" },
+    ai:      { abbr: "AI", color: "#148c72" },
+    router:  { abbr: "RT", color: "#b07d1a" },
+    vector:  { abbr: "VE", color: "#1a5a8c" },
+    tool:    { abbr: "TL", color: "#b07d1a" }
   };
-  return kindColor[node.kind] || "#3a5238";
+  return kindMap[kind] || { abbr: "ND", color: "#3a5238" };
 }
 
-function getNodeCardBgColor(node, compareState, regression) {
-  if (regression) return "#2b1717";
-  if (node.status === "error") return "#2b1717";
-  if (compareState === "added") return "#15261b";
-  if (compareState === "changed") return "#272315";
-  if (node.status === "skipped") return "#20241e";
-  if (workflowNodeHasFallback(node)) return "#2a2115";
-  return "#182019";
+function getNodeCardAccentColor(node, compareState, regression) {
+  if (regression) return "#e05555";
+  if (node.status === "error") return "#e05555";
+  if (compareState === "added") return "#22c27a";
+  if (compareState === "changed") return "#e0a020";
+  if (node.status === "skipped") return "#9aaa96";
+  if (workflowNodeHasFallback(node)) return "#e08a20";
+  if (node.status === "done") return "#22c27a";
+  return nodeIconMeta(node.kind, node.label).color;
 }
 
 function generateNodeCardSvg(node, expanded, compareState = "", regression = false) {
   const width = expanded ? 430 : 280;
   const height = expanded ? 310 : 126;
-  const borderColor = getNodeCardBorderColor(node, compareState, regression);
-  const bgColor = getNodeCardBgColor(node, compareState, regression);
+  const accent = getNodeCardAccentColor(node, compareState, regression);
+  const iconMeta = nodeIconMeta(node.kind, node.label);
   const metrics = workflowNodeMetrics(node);
-  
+
   let badgeText = String(node.status).toUpperCase();
-  let badgeClass = node.status;
+  let badgeBg = "#e8f5e9"; let badgeFg = "#2e7d52";
   if (node.status === "done") {
     if (node.id === "cache" || node.kind === "database") {
-      const outputStr = String(JSON.stringify(node.output) || "").toLowerCase();
-      if (outputStr.includes("miss")) {
-        badgeText = "MISS";
-        badgeClass = "error";
-      } else if (outputStr.includes("hit")) {
-        badgeText = "HIT";
-        badgeClass = "success";
-      } else {
-        badgeText = "SUCCESS";
-        badgeClass = "success";
-      }
+      const out = String(JSON.stringify(node.output) || "").toLowerCase();
+      if (out.includes("miss")) { badgeText = "MISS"; badgeBg = "#fdecea"; badgeFg = "#c0392b"; }
+      else if (out.includes("hit")) { badgeText = "HIT"; badgeBg = "#e8f5e9"; badgeFg = "#2e7d52"; }
+      else { badgeText = "SUCCESS"; }
     } else if (node.id === "local_memory" || node.id === "memory") {
-      badgeText = "UPDATED";
-      badgeClass = "info";
-    } else {
-      badgeText = "SUCCESS";
-      badgeClass = "success";
-    }
+      badgeText = "UPDATED"; badgeBg = "#e3f2fd"; badgeFg = "#1565c0";
+    } else { badgeText = "SUCCESS"; }
   } else if (node.status === "error") {
-    badgeText = "FAILED";
-    badgeClass = "error";
+    badgeText = "FAILED"; badgeBg = "#fdecea"; badgeFg = "#c0392b";
   } else if (node.status === "skipped") {
-    badgeText = "SKIPPED";
-    badgeClass = "skipped";
+    badgeText = "SKIPPED"; badgeBg = "#f5f5f5"; badgeFg = "#757575";
+  } else {
+    badgeBg = "#fff8e1"; badgeFg = "#b07d1a";
   }
-  
-  const icon = emojiIconForNode(node.kind, node.label);
+
   const title = escapeXml(node.label);
-  const subtitle = escapeXml(node.id);
+  const kindLabel = escapeXml(node.kind || node.id);
   const duration = escapeXml(metrics.duration);
   const tokens = escapeXml(metrics.tokens);
   const cost = escapeXml(metrics.cost);
   const calls = escapeXml(metrics.calls);
-  
-  let compareText = "";
+  const abbr = escapeXml(iconMeta.abbr);
+  const iconBg = escapeXml(iconMeta.color);
+
+  let compareBanner = "";
   if (compareState) {
     const lbl = workflowCompareLabel(compareState);
-    if (lbl) {
-      compareText = `<div class="compare-banner">${escapeXml(lbl)}</div>`;
-    }
+    if (lbl) compareBanner = `<div class="compare-banner">${escapeXml(lbl)}</div>`;
   }
-  
-  let html = "";
-  if (!expanded) {
-    html = `
-      <div class="node-card">
-        ${compareText}
-        <div class="header">
-          <div class="title-group">
-            <span class="icon">${icon}</span>
-            <div class="titles">
-              <strong class="title">${title}</strong>
-              <span class="subtitle">${subtitle}</span>
-            </div>
-          </div>
-          <div class="status-group">
-            <span class="status-pill ${badgeClass}">${badgeText}</span>
-            <span class="duration">${duration}</span>
-          </div>
-        </div>
-        <div class="footer">
-          Tokens ${tokens} · Cost ${cost} · Calls ${calls}
+
+  const header = `
+    <div class="header">
+      <div class="title-group">
+        <div class="icon-box" style="background:${iconBg}">${abbr}</div>
+        <div class="titles">
+          <strong class="title">${title}</strong>
+          <span class="subtitle">${kindLabel}</span>
         </div>
       </div>
-    `;
-  } else {
-    const inputPreview = escapeXml(clipWorkflowBlock(formatWorkflowPreview(node.input), 160));
-    const outputPreview = escapeXml(clipWorkflowBlock(formatWorkflowPreview(node.output), 160));
-    html = `
-      <div class="node-card">
-        ${compareText}
-        <div class="header">
-          <div class="title-group">
-            <span class="icon">${icon}</span>
-            <div class="titles">
-              <strong class="title">${title}</strong>
-              <span class="subtitle">${subtitle}</span>
-            </div>
-          </div>
-          <div class="status-group">
-            <span class="status-pill ${badgeClass}">${badgeText}</span>
-            <span class="duration">${duration}</span>
-          </div>
-        </div>
-        <div class="actions">
-          <div class="action-btn">📄 Log</div>
-          <div class="action-btn">📋 Copy</div>
-        </div>
-        <div class="section-title">INPUT</div>
-        <div class="section-content">${inputPreview}</div>
-        <div class="section-title">OUTPUT</div>
-        <div class="section-content">${outputPreview}</div>
-        <div class="footer">
-          Tokens ${tokens} · Cost ${cost} · Calls ${calls}
-        </div>
+      <div class="status-group">
+        <span class="badge" style="background:${escapeXml(badgeBg)};color:${escapeXml(badgeFg)}">${badgeText}</span>
+        <span class="dur">${duration}</span>
       </div>
-    `;
+    </div>`;
+
+  let body = "";
+  if (expanded) {
+    const inp = escapeXml(clipWorkflowBlock(formatWorkflowPreview(node.input), 120));
+    const out = escapeXml(clipWorkflowBlock(formatWorkflowPreview(node.output), 120));
+    body = `
+      <div class="btn-row">
+        <div class="btn">&#128196; Log</div>
+        <div class="btn">&#128203; Copy</div>
+      </div>
+      <div class="sec-label">INPUT</div>
+      <div class="sec-box">${inp}</div>
+      <div class="sec-label">OUTPUT</div>
+      <div class="sec-box">${out}</div>`;
   }
-  
-  const styles = `
-    <style>
-      .node-card {
-        box-sizing: border-box;
-        width: 100%;
-        height: 100%;
-        background: ${bgColor};
-        border: 2.2px solid ${borderColor};
-        border-radius: 12px;
-        padding: 12px;
-        color: #edf7e8;
-        font-family: Segoe UI, system-ui, sans-serif;
-        display: flex;
-        flex-direction: column;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-      }
-      .header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 8px;
-        width: 100%;
-      }
-      .title-group {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-      }
-      .icon {
-        width: 24px;
-        height: 24px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(255,255,255,0.06);
-        border-radius: 6px;
-        font-size: 14px;
-        flex-shrink: 0;
-      }
-      .titles {
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
-      }
-      .title {
-        font-size: 13px;
-        font-weight: 700;
-        color: #eff9ea;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .subtitle {
-        font-size: 10px;
-        color: #8c9b84;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .status-group {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-shrink: 0;
-      }
-      .status-pill {
-        font-size: 9px;
-        font-weight: 800;
-        padding: 3px 6px;
-        border-radius: 4px;
-        text-transform: uppercase;
-      }
-      .status-pill.success {
-        background: rgba(20, 140, 114, 0.15);
-        color: #26c99a;
-        border: 1px solid rgba(20, 140, 114, 0.3);
-      }
-      .status-pill.error {
-        background: rgba(255, 51, 51, 0.15);
-        color: #ff5252;
-        border: 1px solid rgba(255, 51, 51, 0.3);
-      }
-      .status-pill.skipped {
-        background: rgba(120, 129, 111, 0.15);
-        color: #aebba7;
-        border: 1px solid rgba(120, 129, 111, 0.3);
-      }
-      .status-pill.info {
-        background: rgba(14, 165, 233, 0.15);
-        color: #0ea5e9;
-        border: 1px solid rgba(14, 165, 233, 0.3);
-      }
-      .duration {
-        font-size: 10px;
-        color: #8c9b84;
-        font-weight: 600;
-      }
-      .actions {
-        display: flex;
-        gap: 8px;
-        margin-bottom: 6px;
-        flex-shrink: 0;
-      }
-      .action-btn {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 6px;
-        padding: 3px 8px;
-        font-size: 10px;
-        font-weight: 600;
-        color: #d5dece;
-      }
-      .section-title {
-        font-size: 9px;
-        font-weight: 800;
-        color: #8c9b84;
-        margin-top: 5px;
-        margin-bottom: 2px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        flex-shrink: 0;
-      }
-      .section-content {
-        background: rgba(0, 0, 0, 0.2);
-        border: 1px solid rgba(255, 255, 255, 0.03);
-        border-radius: 6px;
-        padding: 6px;
-        font-size: 10.5px;
-        font-family: Consolas, monospace;
-        color: #dff5d7;
-        white-space: pre-wrap;
-        word-break: break-all;
-        overflow: hidden;
-        height: 54px;
-        box-sizing: border-box;
-        flex-shrink: 0;
-      }
-      .footer {
-        margin-top: auto;
-        padding-top: 8px;
-        border-top: 1px solid rgba(255,255,255,0.05);
-        font-size: 10px;
-        color: #8c9b84;
-        text-align: left;
-        font-weight: 600;
-        flex-shrink: 0;
-      }
-      .compare-banner {
-        background: rgba(244, 195, 106, 0.1);
-        border: 1px solid rgba(244, 195, 106, 0.2);
-        color: #f4c36a;
-        font-size: 9px;
-        font-weight: 700;
-        padding: 3px 6px;
-        border-radius: 4px;
-        margin-bottom: 4px;
-        text-align: center;
-        flex-shrink: 0;
-      }
-    </style>
-  `;
-  
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-      <rect width="100%" height="100%" fill="none" />
-      <foreignObject width="100%" height="100%">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;box-sizing:border-box;">
-          ${styles}
-          ${html}
-        </div>
-      </foreignObject>
-    </svg>
-  `;
-  
-  return "data:image/svg+xml;utf8," + encodeURIComponent(svg.trim());
+
+  const footer = `<div class="footer">Tokens ${tokens} &nbsp;·&nbsp; Cost ${cost} &nbsp;·&nbsp; Calls ${calls}</div>`;
+
+  const html = `
+    <div class="card" style="border-left:4px solid ${accent}">
+      ${compareBanner}
+      ${header}
+      ${body}
+      ${footer}
+    </div>`;
+
+  const css = `<style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    .card{width:${width}px;height:${height}px;background:#ffffff;border:1px solid #dde5da;border-radius:10px;padding:11px 12px 10px 10px;font-family:Segoe UI,system-ui,sans-serif;display:flex;flex-direction:column;gap:0;box-shadow:0 2px 8px rgba(30,60,40,0.10);overflow:hidden}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;gap:6px;flex-shrink:0}
+    .title-group{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+    .icon-box{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:900;color:#fff;letter-spacing:0;flex-shrink:0;line-height:1}
+    .titles{display:flex;flex-direction:column;gap:1px;min-width:0}
+    .title{font-size:12.5px;font-weight:700;color:#18261f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .subtitle{font-size:10px;color:#7a9180;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .status-group{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0}
+    .badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;text-transform:uppercase;white-space:nowrap;letter-spacing:0.03em}
+    .dur{font-size:10px;color:#9aaa96;font-weight:600}
+    .btn-row{display:flex;gap:6px;margin-top:8px;flex-shrink:0}
+    .btn{font-size:10px;font-weight:700;color:#5a7a68;background:#f2f7f4;border:1px solid #c8ddd2;border-radius:5px;padding:3px 9px;cursor:pointer}
+    .sec-label{font-size:9px;font-weight:800;color:#9aaa96;text-transform:uppercase;letter-spacing:0.07em;margin-top:7px;margin-bottom:3px;flex-shrink:0}
+    .sec-box{background:#f5f8f5;border:1px solid #e0eadf;border-radius:6px;padding:5px 7px;font-size:10px;font-family:Consolas,monospace;color:#2a3d30;white-space:pre-wrap;word-break:break-all;overflow:hidden;height:50px;flex-shrink:0}
+    .footer{margin-top:auto;padding-top:7px;border-top:1px solid #ecf2ea;font-size:10px;color:#9aaa96;font-weight:600;flex-shrink:0}
+    .compare-banner{background:#fffbea;border:1px solid #f0d060;color:#8a6800;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;margin-bottom:5px;text-align:center;flex-shrink:0}
+  </style>`;
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="${width}" height="${height}"><div xmlns="http://www.w3.org/1999/xhtml">${css}${html}</div></foreignObject></svg>`;
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
 }
 
 function workflowNodeCardLabel(node, expanded, compareState = "") {
