@@ -1,0 +1,57 @@
+---
+note_type: durable-memory-branch
+project: bidoc agent
+branch: workflow
+last_updated: 2026-06-23
+tags:
+  - workflow
+  - frontend
+  - qa
+---
+
+# Workflow
+
+## Current State
+
+- Workflow UI lives in `public/index.html`, `public/app.js`, and `public/styles.css` under the `#workflow` panel.
+- Run selection is handled by the run history strip from `/api/run-history`; selecting a run sets `state.lastWorkflow` and re-renders the workflow canvas.
+- The workflow canvas uses Cytoscape in `renderWorkflow()`, with dagre layout when available and breadthfirst fallback if dagre is unavailable.
+- Workflow MVP node cards render directly in the canvas as larger Cytoscape round-rectangle cards sized for readable inspection.
+- Each node-card label includes node kind, label, id, status, Duration, Input preview, Output preview, Tokens, Cost, Calls, and an inline error line when available.
+- Duration, Tokens, and Cost are derived from per-node `openrouter` telemetry when present; unavailable values are shown as `—` rather than inferred.
+- `workflowCardsExpanded` controls expanded/collapsed node-card display, exposed through the `#toggleWorkflowCards` button.
+- `#fitWorkflow` calls `fitWorkflowToScreen()` to center and fit the current workflow.
+- Initial workflow render uses `focusWorkflowStart()` instead of full-run fit so long workflows do not open as unreadable thumbnails.
+- `fitWorkflowToScreen()` enforces a readable minimum zoom before focusing the start of the workflow.
+- Stage 2 QA Inspector controls live in `#workflowToolbar`: text search, status filter, Errors, Slow, Cost, Fit, Collapse, and Reset.
+- Workflow filters dim non-matching nodes/edges rather than deleting them, preserving route context while highlighting matches.
+- Clicking an edge opens an edge inspector showing source output, target input, mapping summary, and raw edge JSON.
+- The node inspector now includes metrics, node-specific logs, source rendering when source-like objects are present, and masked Raw JSON.
+- Fallback visualization detects fallback from trace/run events and structured payloads, colors fallback nodes/edges orange, adds a Fallback toolbar filter, and shows an inspector notice.
+- Stage 3 compare basics are available from the run history strip: each saved run has Base and Compare selectors, a Compare summary banner, Clear Compare control, and graph-level Added/Changed/Same node markers.
+- Compare mode fingerprints node status, input, output, and OpenRouter call metadata; route differences are counted from workflow edge keys and new compare edges are highlighted.
+- The node inspector shows a Compare notice with status, duration, and token deltas when a compared node is selected.
+- Stage 3 payload diff now appears in the node inspector during Compare mode, showing Input and Output changed fields plus Base/Compare payload panels.
+- Stage 3 route diff now tracks added and removed workflow edges, summarizes route changes in the Compare banner, styles added/removed routes on the graph when both endpoints are visible, and shows route details in the Edge inspector.
+- Stage 3 performance diff now compares duration, token totals, and known cost between Base and Compare at the run summary level and in each comparable node inspector.
+- Stage 3 regression indicators flag new errors, new fallback usage, slower/costlier/token-heavy nodes, removed nodes, removed routes, and run-level slowdown; regressions can be filtered from the toolbar and are surfaced in the Compare banner and node inspector.
+- Preview text masks obvious sensitive keys, bearer tokens, secrets, passwords, and authorization values before rendering.
+- The side inspector still shows full Input/Output details and per-node OpenRouter call details for the selected node.
+
+## Recent Changes
+
+- 2026-06-23 -- Implemented Workflow QA MVP node-card canvas display with Input/Output previews, OpenRouter-derived metrics, error preview, fit-to-screen, collapse/expand control, and a focused Node regression test.
+- 2026-06-23 -- Adjusted Workflow MVP canvas readability after browser review: larger cards/text, start-of-run focus on render, and minimum readable zoom for Fit.
+- 2026-06-23 -- Added Stage 2 QA Inspector basics: toolbar search/status/errors/slow/cost filters, edge payload inspector, node logs, source rendering, masked Raw JSON, and regression coverage.
+- 2026-06-23 -- Completed Stage 2 fallback visualization with fallback detection, toolbar filtering, orange node/edge styling, card marker text, inspector notice, and regression coverage.
+- 2026-06-23 -- Added Stage 3 compare-run basics: Base/Compare history selectors, compare summary banner, node/edge diff styling, inspector compare notice, and regression coverage.
+- 2026-06-23 -- Added Stage 3 payload diff inside the node inspector with changed/added/removed field rows and side-by-side Base/Compare payload previews.
+- 2026-06-23 -- Added Stage 3 route diff with added/removed edge tracking, Compare banner route snippets, graph styling for changed routes, and Edge inspector route diff details.
+- 2026-06-23 -- Added Stage 3 performance diff with run-level duration/tokens/cost deltas and per-node Base-to-Compare metric details.
+- 2026-06-23 -- Completed Stage 3 regression indicators with regression counting, toolbar filtering, graph highlighting, Compare banner chips, and node inspector explanations.
+
+## Gotchas
+
+- Non-AI nodes generally do not have per-node duration telemetry yet; the UI intentionally displays `Duration —` for those nodes.
+- The local dev server starts with empty in-memory run history unless a chat/link-agent run has happened in that server session or persisted rows are available.
+- Existing full Node test runs currently fail on unrelated Timeline mobile assertions that expect `wireTimelineGraphTouch`, `wireTimelineDetailSwipe`, and phone-narrow compact graph behavior; the Workflow MVP regression itself passes before those failures.

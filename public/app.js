@@ -1657,6 +1657,12 @@ function renderWorkflow(workflow) {
       cardHeight: state.workflowCardsExpanded ? 310 : 126,
       compareState: compareSummary.nodeStates.get(node.id) || "",
       cardLabel: workflowNodeCardLabel(node, state.workflowCardsExpanded, compareSummary.nodeStates.get(node.id) || ""),
+      cardSvg: generateNodeCardSvg(
+        node, 
+        state.workflowCardsExpanded, 
+        compareSummary.nodeStates.get(node.id) || "",
+        compareSummary.regressionNodes.has(node.id)
+      ),
       regression: compareSummary.regressionNodes.has(node.id),
       filtered: !filterSummary.matches.has(node.id),
       searchMatch: filterSummary.searchMatches.has(node.id),
@@ -2145,6 +2151,350 @@ function focusWorkflowStart(nodeId = null) {
   _cy.panBy({ x: 210, y: 0 });
 }
 
+function escapeXml(unsafe) {
+  return String(unsafe || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function emojiIconForNode(kind, label) {
+  const normLabel = String(label || "").toLowerCase();
+  if (normLabel.includes("trigger")) return "💬";
+  if (normLabel.includes("sanitize")) return "🛡️";
+  if (normLabel.includes("save") || normLabel.includes("store")) return "💾";
+  if (normLabel.includes("classify") || normLabel.includes("smart classifier")) return "⚙️";
+  if (normLabel.includes("knowledge") || normLabel.includes("retrieval")) return "📖";
+  if (normLabel.includes("agent") || normLabel.includes("main")) return "🤖";
+  if (normLabel.includes("cache")) return "🗄️";
+  if (normLabel.includes("memory")) return "🧠";
+  if (normLabel.includes("fallback")) return "🚨";
+  
+  return {
+    trigger: "💬", code: "⚙️", database: "🗄️", memory: "🧠",
+    ai: "🤖", router: "↯", vector: "📖", tool: "🔧"
+  }[kind] || "•";
+}
+
+function getNodeCardBorderColor(node, compareState, regression) {
+  if (regression) return "#ff7878";
+  if (node.status === "error") return "#ff3333";
+  if (compareState === "added") return "#78d88f";
+  if (compareState === "changed") return "#f4c36a";
+  if (node.status === "skipped") return "#78816f";
+  if (workflowNodeHasFallback(node)) return "#f59f3a";
+  if (node.status === "done") return "#4fb99d";
+  const kindColor = {
+    trigger: "#148c72", code: "#2e6b24", database: "#6a4c93",
+    memory: "#1a5a8c", ai: "#148c72", router: "#b07d1a",
+    vector: "#1a5a8c", tool: "#b07d1a"
+  };
+  return kindColor[node.kind] || "#3a5238";
+}
+
+function getNodeCardBgColor(node, compareState, regression) {
+  if (regression) return "#2b1717";
+  if (node.status === "error") return "#2b1717";
+  if (compareState === "added") return "#15261b";
+  if (compareState === "changed") return "#272315";
+  if (node.status === "skipped") return "#20241e";
+  if (workflowNodeHasFallback(node)) return "#2a2115";
+  return "#182019";
+}
+
+function generateNodeCardSvg(node, expanded, compareState = "", regression = false) {
+  const width = expanded ? 430 : 280;
+  const height = expanded ? 310 : 126;
+  const borderColor = getNodeCardBorderColor(node, compareState, regression);
+  const bgColor = getNodeCardBgColor(node, compareState, regression);
+  const metrics = workflowNodeMetrics(node);
+  
+  let badgeText = String(node.status).toUpperCase();
+  let badgeClass = node.status;
+  if (node.status === "done") {
+    if (node.id === "cache" || node.kind === "database") {
+      const outputStr = String(JSON.stringify(node.output) || "").toLowerCase();
+      if (outputStr.includes("miss")) {
+        badgeText = "MISS";
+        badgeClass = "error";
+      } else if (outputStr.includes("hit")) {
+        badgeText = "HIT";
+        badgeClass = "success";
+      } else {
+        badgeText = "SUCCESS";
+        badgeClass = "success";
+      }
+    } else if (node.id === "local_memory" || node.id === "memory") {
+      badgeText = "UPDATED";
+      badgeClass = "info";
+    } else {
+      badgeText = "SUCCESS";
+      badgeClass = "success";
+    }
+  } else if (node.status === "error") {
+    badgeText = "FAILED";
+    badgeClass = "error";
+  } else if (node.status === "skipped") {
+    badgeText = "SKIPPED";
+    badgeClass = "skipped";
+  }
+  
+  const icon = emojiIconForNode(node.kind, node.label);
+  const title = escapeXml(node.label);
+  const subtitle = escapeXml(node.id);
+  const duration = escapeXml(metrics.duration);
+  const tokens = escapeXml(metrics.tokens);
+  const cost = escapeXml(metrics.cost);
+  const calls = escapeXml(metrics.calls);
+  
+  let compareText = "";
+  if (compareState) {
+    const lbl = workflowCompareLabel(compareState);
+    if (lbl) {
+      compareText = `<div class="compare-banner">${escapeXml(lbl)}</div>`;
+    }
+  }
+  
+  let html = "";
+  if (!expanded) {
+    html = `
+      <div class="node-card">
+        ${compareText}
+        <div class="header">
+          <div class="title-group">
+            <span class="icon">${icon}</span>
+            <div class="titles">
+              <strong class="title">${title}</strong>
+              <span class="subtitle">${subtitle}</span>
+            </div>
+          </div>
+          <div class="status-group">
+            <span class="status-pill ${badgeClass}">${badgeText}</span>
+            <span class="duration">${duration}</span>
+          </div>
+        </div>
+        <div class="footer">
+          Tokens ${tokens} · Cost ${cost} · Calls ${calls}
+        </div>
+      </div>
+    `;
+  } else {
+    const inputPreview = escapeXml(clipWorkflowBlock(formatWorkflowPreview(node.input), 160));
+    const outputPreview = escapeXml(clipWorkflowBlock(formatWorkflowPreview(node.output), 160));
+    html = `
+      <div class="node-card">
+        ${compareText}
+        <div class="header">
+          <div class="title-group">
+            <span class="icon">${icon}</span>
+            <div class="titles">
+              <strong class="title">${title}</strong>
+              <span class="subtitle">${subtitle}</span>
+            </div>
+          </div>
+          <div class="status-group">
+            <span class="status-pill ${badgeClass}">${badgeText}</span>
+            <span class="duration">${duration}</span>
+          </div>
+        </div>
+        <div class="actions">
+          <div class="action-btn">📄 Log</div>
+          <div class="action-btn">📋 Copy</div>
+        </div>
+        <div class="section-title">INPUT</div>
+        <div class="section-content">${inputPreview}</div>
+        <div class="section-title">OUTPUT</div>
+        <div class="section-content">${outputPreview}</div>
+        <div class="footer">
+          Tokens ${tokens} · Cost ${cost} · Calls ${calls}
+        </div>
+      </div>
+    `;
+  }
+  
+  const styles = `
+    <style>
+      .node-card {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        background: ${bgColor};
+        border: 2.2px solid ${borderColor};
+        border-radius: 12px;
+        padding: 12px;
+        color: #edf7e8;
+        font-family: Segoe UI, system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        width: 100%;
+      }
+      .title-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+      .icon {
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255,255,255,0.06);
+        border-radius: 6px;
+        font-size: 14px;
+        flex-shrink: 0;
+      }
+      .titles {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+      }
+      .title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #eff9ea;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .subtitle {
+        font-size: 10px;
+        color: #8c9b84;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .status-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .status-pill {
+        font-size: 9px;
+        font-weight: 800;
+        padding: 3px 6px;
+        border-radius: 4px;
+        text-transform: uppercase;
+      }
+      .status-pill.success {
+        background: rgba(20, 140, 114, 0.15);
+        color: #26c99a;
+        border: 1px solid rgba(20, 140, 114, 0.3);
+      }
+      .status-pill.error {
+        background: rgba(255, 51, 51, 0.15);
+        color: #ff5252;
+        border: 1px solid rgba(255, 51, 51, 0.3);
+      }
+      .status-pill.skipped {
+        background: rgba(120, 129, 111, 0.15);
+        color: #aebba7;
+        border: 1px solid rgba(120, 129, 111, 0.3);
+      }
+      .status-pill.info {
+        background: rgba(14, 165, 233, 0.15);
+        color: #0ea5e9;
+        border: 1px solid rgba(14, 165, 233, 0.3);
+      }
+      .duration {
+        font-size: 10px;
+        color: #8c9b84;
+        font-weight: 600;
+      }
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 6px;
+        flex-shrink: 0;
+      }
+      .action-btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 6px;
+        padding: 3px 8px;
+        font-size: 10px;
+        font-weight: 600;
+        color: #d5dece;
+      }
+      .section-title {
+        font-size: 9px;
+        font-weight: 800;
+        color: #8c9b84;
+        margin-top: 5px;
+        margin-bottom: 2px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        flex-shrink: 0;
+      }
+      .section-content {
+        background: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.03);
+        border-radius: 6px;
+        padding: 6px;
+        font-size: 10.5px;
+        font-family: Consolas, monospace;
+        color: #dff5d7;
+        white-space: pre-wrap;
+        word-break: break-all;
+        overflow: hidden;
+        height: 54px;
+        box-sizing: border-box;
+        flex-shrink: 0;
+      }
+      .footer {
+        margin-top: auto;
+        padding-top: 8px;
+        border-top: 1px solid rgba(255,255,255,0.05);
+        font-size: 10px;
+        color: #8c9b84;
+        text-align: left;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .compare-banner {
+        background: rgba(244, 195, 106, 0.1);
+        border: 1px solid rgba(244, 195, 106, 0.2);
+        color: #f4c36a;
+        font-size: 9px;
+        font-weight: 700;
+        padding: 3px 6px;
+        border-radius: 4px;
+        margin-bottom: 4px;
+        text-align: center;
+        flex-shrink: 0;
+      }
+    </style>
+  `;
+  
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
+      <rect width="100%" height="100%" fill="none" />
+      <foreignObject width="100%" height="100%">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;box-sizing:border-box;">
+          ${styles}
+          ${html}
+        </div>
+      </foreignObject>
+    </svg>
+  `;
+  
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg.trim());
+}
+
 function workflowNodeCardLabel(node, expanded, compareState = "") {
   const metrics = workflowNodeMetrics(node);
   const status = statusLabel(node.status);
@@ -2301,45 +2651,30 @@ function pulseErrorNodes(cy) {
 }
 
 function cytoscapeStyle() {
-  const kindColor = {
-    trigger: "#148c72", code: "#2e6b24", database: "#6a4c93",
-    memory: "#1a5a8c", ai: "#148c72", router: "#b07d1a",
-    vector: "#1a5a8c", tool: "#b07d1a"
-  };
   return [
     {
       selector: "node",
       style: {
         shape: "round-rectangle",
         width: "data(cardWidth)", height: "data(cardHeight)",
-        "background-color": "#182019",
-        "background-blacken": -0.03,
-        "border-width": 2, "border-color": (e) => kindColor[e.data("kind")] || "#3a5238",
-        color: "#edf7e8",
-        "font-family": "IBM Plex Sans Hebrew, Segoe UI, system-ui, sans-serif",
-        "font-weight": 600,
-        "text-valign": "center", "text-halign": "center",
-        "text-wrap": "wrap", "text-max-width": (e) => `${Math.max(190, Number(e.data("cardWidth") || 300) - 34)}px`,
-        label: (e) => e.data("cardLabel"),
-        "line-height": 1.32, "font-size": 13,
-        "padding": 12,
-        "text-margin-y": 0
+        "background-color": "transparent",
+        "border-width": 0,
+        "background-image": (e) => e.data("cardSvg"),
+        "background-fit": "contain",
+        "background-clip": "node",
+        label: ""
       }
     },
     {
       selector: "node[status='done']",
       style: {
-        "border-color": "#4fb99d", "border-width": 2.5,
-        "shadow-blur": 14, "shadow-color": "rgb(142 224 200 / 0.45)",
+        "shadow-blur": 10, "shadow-color": "rgba(38,201,154,0.25)",
         "shadow-offset-x": 0, "shadow-offset-y": 0, "shadow-opacity": 1
       }
     },
     {
       selector: "node[status='skipped']",
       style: {
-        "background-color": "#20241e",
-        "border-color": "#78816f",
-        color: "#c9d4c1",
         opacity: 0.76
       }
     },
@@ -2347,8 +2682,6 @@ function cytoscapeStyle() {
       selector: "node[?filtered]",
       style: {
         opacity: 0.18,
-        "text-opacity": 0.22,
-        "border-color": "#596356",
         "shadow-opacity": 0
       }
     },
