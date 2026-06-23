@@ -884,6 +884,7 @@ function startLiveRun(runId) {
   state.fullLogVisible = false;
   if ($("fullLogView")) { $("fullLogView").hidden = true; $("fullLogView").textContent = ""; }
   if ($("liveRunList")) $("liveRunList").hidden = false;
+  $("liveRun")?.classList.remove("collapsed");
   resetAgentRuntime();
   renderAgents();
   appendLiveRunEvent({ step: "client", message: "Opening live log", data: { runId }, time: new Date().toISOString() });
@@ -1528,6 +1529,10 @@ async function runKnowledgeSearch() {
 }
 
 function wireWorkflow() {
+  $("liveRunHeader")?.addEventListener("click", () => {
+    $("liveRun")?.classList.toggle("collapsed");
+  });
+
   $("clearWorkflow").addEventListener("click", () => {
     state.lastWorkflow = null;
     state.currentWorkflowMessageId = null;

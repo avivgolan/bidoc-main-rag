@@ -745,6 +745,19 @@ label {
 .liveRun {
   overflow: hidden;
 }
+.liveRun.collapsed .liveRunList,
+.liveRun.collapsed .fullLogView {
+  display: none;
+}
+.liveRun.collapsed header {
+  border-bottom: none;
+}
+#liveRunChevron {
+  transition: transform 0.2s;
+}
+.liveRun:not(.collapsed) #liveRunChevron {
+  transform: rotate(90deg);
+}
 
 .liveRun header {
   display: flex;
