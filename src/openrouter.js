@@ -18,6 +18,7 @@ export async function chatCompletion({
   frequencyPenalty = 0,
   presencePenalty = 0,
   seed = null,
+  responseFormat = null,
   telemetry = null
 }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
@@ -41,7 +42,8 @@ export async function chatCompletion({
         top_p: topP,
         frequency_penalty: frequencyPenalty,
         presence_penalty: presencePenalty,
-        seed
+        seed,
+        response_format: responseFormat
       }))
     }, timeoutMs);
 

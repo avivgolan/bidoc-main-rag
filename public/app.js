@@ -162,6 +162,22 @@ const state = {
   deepResearchEnabled: false,
   composerMenuOpen: false,
   settingsDirty: false,
+  delayClaims: [],
+  selectedDelayClaimId: null,
+  delayEvents: [],
+  selectedDelayEventId: null,
+  delayAnalyzeRunning: false,
+  projectInsightsRunning: false,
+  delayEventAnalyzeRunning: false,
+  delayPackageRunning: false,
+  lastProjectInsights: null,
+  projectInsightsScannedKeys: [],
+  projectInsightsRuns: 0,
+  projectInsightHistory: [],
+  selectedProjectInsightRunId: null,
+  lastDelayAnalysis: null,
+  lastDelayEventAnalysis: null,
+  lastDelayPackage: null,
   projectGraph: { nodes: [], edges: [], stats: null }
 };
 
@@ -306,6 +322,7 @@ async function init() {
   safeInitStep("workflow", wireWorkflow);
   safeInitStep("agents", wireAgents);
   safeInitStep("knowledge", wireKnowledge);
+  safeInitStep("delay claims", wireDelayClaims);
   safeInitStep("evaluation", wireEvaluation);
   safeInitStep("reset", wireReset);
   safeInitStep("project graph", wireProjectGraph);
@@ -375,6 +392,7 @@ const TAB_LOADERS = {
   settings:   () => state.settingsDirty ? Promise.resolve() : loadSettings(),
   agents:     () => loadAgentsTabData(),
   subagents:  () => loadSubAgents(),
+  insights:   () => { loadProjectInsightHistory(); loadHashtagChart(); renderProjectInsightsResults(); renderProjectInsightsStatus(); },
   knowledge:  () => loadKnowledgeDocuments(),
   history:    () => loadHistory(),
   timeline:   () => loadTimeline(),
@@ -1631,6 +1649,7 @@ function renderWorkflow(workflow) {
   const view = buildWorkflowView(workflow);
   const hasRun = Boolean(workflow?.nodes?.length);
   renderWorkflowMetrics(workflow);
+  renderOpenRouterMetrics(workflow?.openRouterUsage?.totals || null);
   $("workflowHint").style.display = hasRun ? "none" : "block";
   $("workflowBoard").classList.toggle("hasWorkflow", hasRun);
   $("workflowToolbar")?.toggleAttribute("hidden", !hasRun);
@@ -2405,13 +2424,21 @@ function workflowNodeCardLabel(node, expanded, compareState = "") {
     subheader,
     compareText,
     workflowNodeHasFallback(node) ? "Fallback route used" : "",
-    "Input",
+    `Input (${workflowPayloadSourceText(node, "input")})`,
     clipWorkflowBlock(formatWorkflowPreview(node.input), 190),
-    "Output",
+    `Output (${workflowPayloadSourceText(node, "output")})`,
     clipWorkflowBlock(formatWorkflowPreview(node.output), 210),
     footer,
     errorText ? `Error: ${clipWorkflowLine(errorText, 92)}` : ""
   ].filter(Boolean).join("\n");
+}
+
+function workflowPayloadSourceText(node, direction) {
+  const source = node?.payloadSource?.[direction] || "";
+  if (source === "node.input" || source === "node.output") return "captured";
+  if (source === "nodeDetails") return "details";
+  if (source === "not_captured") return "not captured";
+  return "unknown";
 }
 
 function workflowNodeMetrics(node) {
@@ -2832,9 +2859,7 @@ function buildWorkflowView(workflow) {
     .filter((node) => !node.disconnected && (!hasRun || runtimeIds.has(node.id)))
     .map((node) => {
       const runtime = runtimeNodes.get(node.id);
-      const input = runtime?.input ?? { description: node.description || "", configured_component: true };
-      const output = runtime?.output ?? { status: "not used in the last run" };
-      return {
+      return normalizeWorkflowNodePayloads({
         ...node,
         ...(runtime || {}),
         x: hasRun ? undefined : node.x,
@@ -2843,14 +2868,12 @@ function buildWorkflowView(workflow) {
         kind: runtime?.kind || node.kind,
         status: runtime?.status || "idle",
         used: runtimeIds.has(node.id),
-        disconnected: false,
-        input,
-        output
-      };
+        disconnected: false
+      }, workflow);
     });
 
   for (const runtime of runtimeNodes.values()) {
-    if (!templateIds.has(runtime.id)) nodes.push({ ...runtime, used: true });
+    if (!templateIds.has(runtime.id)) nodes.push(normalizeWorkflowNodePayloads({ ...runtime, used: true }, workflow));
   }
 
   // Only draw edges where both endpoints are in the rendered set.
@@ -2871,6 +2894,41 @@ function buildWorkflowView(workflow) {
   }
 
   return { nodes, edges, activeEdgeKeys };
+}
+
+function normalizeWorkflowNodePayloads(node, workflow) {
+  const details = workflow?.nodeDetails?.[node.id] || null;
+  const hasOwnInput = Object.prototype.hasOwnProperty.call(node, "input");
+  const hasOwnOutput = Object.prototype.hasOwnProperty.call(node, "output");
+  const detailInput = workflowNodeDetailPayload(details, "input");
+  const detailOutput = workflowNodeDetailPayload(details, "output");
+  return {
+    ...node,
+    input: hasOwnInput ? node.input : detailInput,
+    output: hasOwnOutput ? node.output : detailOutput,
+    payloadSource: {
+      input: hasOwnInput ? "node.input" : detailInput === null ? "not_captured" : "nodeDetails",
+      output: hasOwnOutput ? "node.output" : detailOutput === null ? "not_captured" : "nodeDetails"
+    }
+  };
+}
+
+function workflowNodeDetailPayload(details, direction) {
+  if (!details) return null;
+  if (Object.prototype.hasOwnProperty.call(details, direction)) return details[direction];
+  if (direction === "output" && Object.prototype.hasOwnProperty.call(details, "summary")) {
+    const payload = { summary: details.summary };
+    if (Object.prototype.hasOwnProperty.call(details, "output")) payload.output = details.output;
+    return payload;
+  }
+  const logs = Array.isArray(details.logs) ? details.logs : [];
+  if (!logs.length) return null;
+  const selected = direction === "input" ? logs[0] : logs[logs.length - 1];
+  if (!selected?.data) return null;
+  return {
+    from_run_event: selected.message || selected.step || direction,
+    data: selected.data
+  };
 }
 
 function renderWorkflowInspector(node) {
@@ -2901,11 +2959,11 @@ function renderWorkflowInspector(node) {
     ${workflowNodeErrorText(node) ? `<div class="workflowNodeError">${escapeHtml(workflowNodeErrorText(node))}</div>` : ""}
     ${renderOpenRouterCallDetails(openRouterCalls)}
     <details open>
-      <summary>Input</summary>
+      <summary>Input <span class="workflowPayloadSource">${escapeHtml(workflowPayloadSourceText(node, "input"))}</span></summary>
       <pre>${escapeHtml(safeWorkflowJson(node.input))}</pre>
     </details>
     <details open>
-      <summary>Output</summary>
+      <summary>Output <span class="workflowPayloadSource">${escapeHtml(workflowPayloadSourceText(node, "output"))}</span></summary>
       <pre>${escapeHtml(safeWorkflowJson(node.output))}</pre>
     </details>
     ${renderWorkflowSources(node)}
@@ -3286,6 +3344,1286 @@ function formatOpenRouterDuration(value) {
 
 function formatOpenRouterSpeed(value) {
   return value !== null && value !== undefined && Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} tok/s` : "—";
+}
+
+function wireDelayClaims() {
+  initProjectInsightsDefaults();
+  $("refreshDelayClaims")?.addEventListener("click", loadDelayClaims);
+  $("runProjectInsightsAnalysis")?.addEventListener("click", runProjectInsightsAnalysisFromUi);
+  $("expandProjectInsightsAnalysis")?.addEventListener("click", () => runProjectInsightsAnalysisFromUi({ expansion: true }));
+  // Evidence toggle (event delegation — works for dynamically rendered cards)
+  document.querySelector("#insights")?.addEventListener("click", (e) => {
+    const toggle = e.target.closest(".insightEvidenceToggle");
+    if (!toggle) return;
+    const ev = toggle.nextElementSibling;
+    if (!ev) return;
+    const collapsed = ev.dataset.collapsed === "true";
+    ev.dataset.collapsed = collapsed ? "false" : "true";
+    toggle.setAttribute("aria-expanded", collapsed ? "true" : "false");
+  });
+  $("refreshHashtagChart")?.addEventListener("click", loadHashtagChart);
+  $("refreshProjectInsightsHistory")?.addEventListener("click", () => loadProjectInsightHistory({ force: true }));
+  // Reload chart when date range changes
+  let _chartDebounce;
+  const reloadChartOnDateChange = () => { clearTimeout(_chartDebounce); _chartDebounce = setTimeout(loadHashtagChart, 400); };
+  $("projectInsightsFrom")?.addEventListener("change", reloadChartOnDateChange);
+  $("projectInsightsTo")?.addEventListener("change", reloadChartOnDateChange);
+  // Ctrl+Enter on focus query → run; Ctrl+Shift+Enter → expand
+  $("projectInsightsQuery")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        if (!$("expandProjectInsightsAnalysis")?.disabled) runProjectInsightsAnalysisFromUi({ expansion: true });
+      } else {
+        runProjectInsightsAnalysisFromUi();
+      }
+    }
+  });
+  $("delayClaimForm")?.addEventListener("submit", createDelayClaimFromForm);
+  $("delayEventForm")?.addEventListener("submit", createDelayEventFromForm);
+  $("runDelayClaimAnalysis")?.addEventListener("click", runDelayClaimAnalysisFromUi);
+  $("runDelayClaimPackage")?.addEventListener("click", runDelayClaimPackageFromUi);
+}
+
+function initProjectInsightsDefaults() {
+  if ($("projectInsightsFrom") && !$("projectInsightsFrom").value) $("projectInsightsFrom").value = "2024-02-01";
+  if ($("projectInsightsTo") && !$("projectInsightsTo").value) $("projectInsightsTo").value = "2026-01-01";
+}
+
+async function runProjectInsightsAnalysisFromUi({ expansion = false } = {}) {
+  if (state.projectInsightsRunning) return;
+  const button = $("runProjectInsightsAnalysis");
+  const expandButton = $("expandProjectInsightsAnalysis");
+  state.projectInsightsRunning = true;
+  const agentCard = document.querySelector(".projectInsightsAgent");
+  if (agentCard) agentCard.dataset.running = "true";
+  if (!expansion) {
+    state.lastProjectInsights = null;
+    state.projectInsightsScannedKeys = [];
+    state.projectInsightsRuns = 0;
+    state.selectedProjectInsightRunId = null;
+    renderProjectInsightsResults();
+  }
+  const excluded = expansion ? state.projectInsightsScannedKeys : [];
+  renderProjectInsightsStatus(expansion
+    ? `מרחיב תשובה ומדלג על ${excluded.length.toLocaleString()} מקורות שכבר נותחו...`
+    : "מריץ ניתוח על נתוני האינדקס...");
+  // Show skeleton cards while loading
+  const resultsContainer = $("projectInsightsResults");
+  if (resultsContainer && !expansion) {
+    resultsContainer.innerHTML = `<div class="projectInsightsSynthesized"><div class="projectInsightsSectionHeader"><h3>תובנות AI</h3><span>מנתח...</span></div><div class="projectInsightsResultsGrid">${Array(3).fill('<div class="insightSkeleton"></div>').join("")}</div></div>`;
+  }
+  if (button) {
+    button.disabled = true;
+    button.textContent = "מנתח...";
+  }
+  if (expandButton) {
+    expandButton.disabled = true;
+    expandButton.textContent = expansion ? "מרחיב..." : "הרחב תשובה";
+  }
+  try {
+    const result = await api("/api/insights/analyze", {
+      method: "POST",
+      timeoutMs: 120_000,
+      body: {
+        focusQuery: $("projectInsightsQuery")?.value || "",
+        dateFrom: $("projectInsightsFrom")?.value || null,
+        dateTo: $("projectInsightsTo")?.value || null,
+        limit: Number($("projectInsightsLimit")?.value || 350),
+        excludeSourceKeys: excluded,
+        expansion,
+        parentRunId: expansion ? state.lastProjectInsights?.runId || state.selectedProjectInsightRunId || null : null
+      }
+    });
+    state.lastProjectInsights = expansion
+      ? mergeProjectInsightsResults(state.lastProjectInsights, result)
+      : result;
+    state.projectInsightsScannedKeys = mergeUnique([
+      ...state.projectInsightsScannedKeys,
+      ...(result.scannedSourceKeys || [])
+    ]);
+    state.projectInsightsRuns += 1;
+    state.selectedProjectInsightRunId = state.lastProjectInsights?.runId || result.runId || null;
+    state.lastWorkflow = result.workflowLog || null;
+    state.currentWorkflowMessageId = result.runId || null;
+    if (state.lastWorkflow) renderWorkflow(state.lastWorkflow);
+    await loadRunHistory();
+    await loadProjectInsightHistory();
+    renderProjectInsightsStatus();
+    renderProjectInsightHistory();
+    renderProjectInsightsResults();
+    showToast(expansion ? "התשובה הורחבה" : "ניתוח התובנות הסתיים");
+    // Auto-scroll to results
+    setTimeout(() => $("projectInsightsResults")?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+  } catch (error) {
+    state.lastProjectInsights = expansion && state.lastProjectInsights
+      ? { ...state.lastProjectInsights, expansionError: error.message }
+      : { ok: false, error: error.message };
+    renderProjectInsightsStatus();
+    renderProjectInsightsResults();
+    showToast(`ניתוח תובנות נכשל: ${error.message}`, "error");
+  } finally {
+    state.projectInsightsRunning = false;
+    const agentCardFinal = document.querySelector(".projectInsightsAgent");
+    if (agentCardFinal) delete agentCardFinal.dataset.running;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "נתח את הפרויקט";
+    }
+    if (expandButton) {
+      expandButton.disabled = !state.lastProjectInsights || state.lastProjectInsights.ok === false;
+      expandButton.textContent = "הרחב תשובה";
+    }
+  }
+}
+
+function mergeProjectInsightsResults(previous, next) {
+  if (!previous || previous.ok === false) return next;
+  const previousFindings = normalizeProjectFindings(previous, { legacyInsightsAsFindings: true });
+  const nextFindings = normalizeProjectFindings(next);
+  const previousInsights = normalizeProjectInsights(previous);
+  const nextInsights = normalizeProjectInsights(next);
+  return {
+    ...next,
+    summary: {
+      ...(next.summary || {}),
+      totalRecords: Number(previous.summary?.totalRecords || 0) + Number(next.summary?.totalRecords || 0),
+      sourceCounts: mergeSourceCounts(previous.summary?.sourceCounts, next.summary?.sourceCounts),
+      expandedRuns: Number(previous.summary?.expandedRuns || 1) + 1
+    },
+    findings: dedupeProjectFindingCards([...previousFindings, ...nextFindings]),
+    insights: dedupeProjectInsightCards([...previousInsights, ...nextInsights]),
+    recordsSample: [...(previous.recordsSample || []), ...(next.recordsSample || [])].slice(0, 24),
+    scannedSourceKeys: mergeUnique([...(previous.scannedSourceKeys || []), ...(next.scannedSourceKeys || [])]),
+    expansionRuns: [...(previous.expansionRuns || []), next]
+  };
+}
+
+function normalizeProjectFindings(result = {}, { legacyInsightsAsFindings = false } = {}) {
+  if (Array.isArray(result.findings)) return result.findings;
+  if (Array.isArray(result.metadata?.findings)) return result.metadata.findings;
+  const cards = Array.isArray(result.insights) ? result.insights : [];
+  if (!legacyInsightsAsFindings && !result.legacy) return [];
+  if (cards.some((item) => Array.isArray(item?.supporting_finding_ids) && item.supporting_finding_ids.length)) return [];
+  return cards.map((item, index) => legacyInsightToFinding(item, index));
+}
+
+function normalizeProjectInsights(result = {}) {
+  const cards = Array.isArray(result.insights) ? result.insights : [];
+  if (!cards.length) return [];
+  if (Array.isArray(result.findings) || Array.isArray(result.metadata?.findings)) return cards;
+  return cards.filter((item) => Array.isArray(item?.supporting_finding_ids) && item.supporting_finding_ids.length);
+}
+
+function legacyInsightToFinding(item = {}, index = 0) {
+  return {
+    ...item,
+    id: item.id && String(item.id).startsWith("finding_") ? item.id : `legacy_finding_${index + 1}`,
+    finding: item.finding || item.insight || "",
+    statement: item.statement || item.finding || item.insight || "",
+    human_status: item.human_status || "new",
+    legacy: true
+  };
+}
+
+function mergeSourceCounts(first = {}, second = {}) {
+  const merged = { ...(first || {}) };
+  for (const [key, value] of Object.entries(second || {})) {
+    merged[key] = Number(merged[key] || 0) + Number(value || 0);
+  }
+  return merged;
+}
+
+function dedupeProjectInsightCards(insights = []) {
+  const seen = new Set();
+  const output = [];
+  for (const insight of insights) {
+    const evidenceKey = (insight.evidence || []).map((item) => [item.source_table, item.source_id, item.id].filter(Boolean).join(":")).join("|");
+    const supportKey = Array.isArray(insight.supporting_finding_ids) ? insight.supporting_finding_ids.join("|") : "";
+    const key = [insight.category, insight.title, supportKey, evidenceKey || insight.finding || insight.insight].filter(Boolean).join("::");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(insight);
+  }
+  return output;
+}
+
+function dedupeProjectFindingCards(findings = []) {
+  const seen = new Set();
+  const output = [];
+  for (const finding of findings) {
+    const evidenceKey = (finding.evidence || []).map((item) => [item.source_table, item.source_id, item.id].filter(Boolean).join(":")).join("|");
+    const key = [finding.id, finding.category, finding.title, evidenceKey || finding.finding || finding.statement].filter(Boolean).join("::");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(finding);
+  }
+  return output;
+}
+
+function mergeUnique(values = []) {
+  return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
+}
+
+async function loadHashtagChart({ sortAlpha = false, source = loadHashtagChart._source || "alerts" } = {}) {
+  loadHashtagChart._source = source;
+  const canvas = $("hashtagChartCanvas");
+  const empty = $("hashtagChartEmpty");
+  if (!canvas) return;
+  try {
+    const dateFrom = $("projectInsightsFrom")?.value || "";
+    const dateTo = $("projectInsightsTo")?.value || "";
+    const params = new URLSearchParams();
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+    params.set("source", source);
+    const result = await api(`/api/insights/hashtags?${params}`, { timeoutMs: 15_000 });
+    const all = Array.isArray(result.hashtags) ? result.hashtags : [];
+    let hashtags = all.slice(0, 30);
+    if (sortAlpha) hashtags = [...hashtags].sort((a, b) => a.tag.localeCompare(b.tag, "he"));
+
+    // Inject chart controls if not already present
+    const wrap = canvas.parentElement;
+    let controlBar = wrap?.previousElementSibling;
+    if (!controlBar || !controlBar.classList.contains("insightsChartControls")) {
+      controlBar = document.createElement("div");
+      controlBar.className = "insightsChartControls";
+      wrap?.parentElement?.insertBefore(controlBar, wrap);
+    }
+    const totalLabel = result.total != null ? `${result.total} רשומות · ` : "";
+    controlBar.innerHTML = `
+      <span class="insightsChartTotalBadge">${totalLabel}${all.length} האשטגים</span>
+      <div class="insightsChartSourceToggle">
+        <button class="insightsChartSortBtn" aria-pressed="${source === "alerts" ? "true" : "false"}" id="hashtagSourceAlerts">Alerts</button>
+        <button class="insightsChartSortBtn" aria-pressed="${source === "index" ? "true" : "false"}" id="hashtagSourceIndex">אינדקס</button>
+      </div>
+      <div class="insightsChartSortGroup">
+        <button class="insightsChartSortBtn" aria-pressed="${sortAlpha ? "true" : "false"}" id="hashtagSortAlpha">א-ב</button>
+        <button class="insightsChartSortBtn" aria-pressed="${!sortAlpha ? "true" : "false"}" id="hashtagSortCount">כמות</button>
+      </div>
+    `;
+    controlBar.querySelector("#hashtagSortAlpha")?.addEventListener("click", () => loadHashtagChart({ sortAlpha: true }));
+    controlBar.querySelector("#hashtagSortCount")?.addEventListener("click", () => loadHashtagChart({ sortAlpha: false }));
+    controlBar.querySelector("#hashtagSourceAlerts")?.addEventListener("click", () => loadHashtagChart({ source: "alerts" }));
+    controlBar.querySelector("#hashtagSourceIndex")?.addEventListener("click", () => loadHashtagChart({ source: "index" }));
+
+    if (!hashtags.length) {
+      canvas.hidden = true;
+      if (empty) empty.hidden = false;
+      return;
+    }
+    canvas.hidden = false;
+    if (empty) empty.hidden = true;
+    drawHashtagBarChart(canvas, hashtags);
+    attachChartTooltip(canvas, hashtags);
+  } catch {
+    canvas.hidden = true;
+    if (empty) { empty.hidden = false; empty.textContent = "שגיאה בטעינת נתוני האשטגים."; }
+  }
+}
+
+function attachChartTooltip(canvas, hashtags) {
+  // Remove previous listener
+  canvas._tooltipCleanup?.();
+  let tooltip = document.querySelector(".insightsChartTooltip");
+  if (!tooltip) {
+    tooltip = document.createElement("div");
+    tooltip.className = "insightsChartTooltip";
+    document.body.appendChild(tooltip);
+  }
+
+  function getBarIndex(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const W = rect.width;
+    const n = hashtags.length;
+    const PAD_LEFT = 8, PAD_RIGHT = 8;
+    const chartW = W - PAD_LEFT - PAD_RIGHT;
+    const barW = Math.max(4, Math.floor((chartW / n) * 0.72));
+    const gap = (chartW - barW * n) / (n + 1);
+    for (let i = 0; i < n; i++) {
+      const bx = PAD_LEFT + gap + i * (barW + gap);
+      if (x >= bx && x <= bx + barW) return i;
+    }
+    return -1;
+  }
+
+  const onMove = (e) => {
+    const i = getBarIndex(e);
+    if (i < 0) { tooltip.classList.remove("visible"); return; }
+    tooltip.textContent = `#${hashtags[i].tag}: ${hashtags[i].count}`;
+    tooltip.style.left = (e.clientX + 12) + "px";
+    tooltip.style.top  = (e.clientY - 28) + "px";
+    tooltip.classList.add("visible");
+  };
+  const onLeave = () => tooltip.classList.remove("visible");
+
+  canvas.addEventListener("mousemove", onMove);
+  canvas.addEventListener("mouseleave", onLeave);
+  canvas._tooltipCleanup = () => {
+    canvas.removeEventListener("mousemove", onMove);
+    canvas.removeEventListener("mouseleave", onLeave);
+  };
+}
+
+function drawHashtagBarChart(canvas, hashtags) {
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth || canvas.offsetWidth || 600;
+  const H = 220;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.height = H + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const PAD_TOP = 16, PAD_BOTTOM = 52, PAD_LEFT = 8, PAD_RIGHT = 8;
+  const chartW = W - PAD_LEFT - PAD_RIGHT;
+  const chartH = H - PAD_TOP - PAD_BOTTOM;
+  const n = hashtags.length;
+  const maxCount = hashtags[0]?.count || 1;
+  const barW = Math.max(4, Math.floor((chartW / n) * 0.72));
+  const gap = (chartW - barW * n) / (n + 1);
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  const gridLines = 4;
+  ctx.strokeStyle = "rgba(120,216,143,0.10)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= gridLines; i++) {
+    const y = PAD_TOP + (chartH / gridLines) * i;
+    ctx.beginPath(); ctx.moveTo(PAD_LEFT, y); ctx.lineTo(W - PAD_RIGHT, y); ctx.stroke();
+  }
+
+  hashtags.forEach(({ tag, count }, i) => {
+    const x = PAD_LEFT + gap + i * (barW + gap);
+    const barH = Math.max(2, Math.round((count / maxCount) * chartH));
+    const y = PAD_TOP + chartH - barH;
+
+    // Bar gradient
+    const grad = ctx.createLinearGradient(x, y, x, y + barH);
+    grad.addColorStop(0, "#5eefc0");
+    grad.addColorStop(1, "#3f8d68");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(x, y, barW, barH, [3, 3, 0, 0]);
+    ctx.fill();
+
+    // Count label on top
+    ctx.fillStyle = "#c8f5d8";
+    ctx.font = `600 11px Assistant, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.fillText(count, x + barW / 2, y - 4);
+
+    // Hashtag label below
+    ctx.save();
+    ctx.translate(x + barW / 2, PAD_TOP + chartH + 8);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillStyle = "#8aab94";
+    ctx.font = `12px Assistant, sans-serif`;
+    ctx.textAlign = "right";
+    const label = tag.length > 14 ? tag.slice(0, 13) + "…" : tag;
+    ctx.fillText("#" + label, 0, 0);
+    ctx.restore();
+  });
+}
+
+async function loadProjectInsightHistory({ force = false } = {}) {
+  const list = $("projectInsightsHistoryList");
+  if (!list) return;
+  if (!force && state.projectInsightHistory.length) {
+    renderProjectInsightHistory();
+    return;
+  }
+  list.textContent = "טוען היסטוריה...";
+  try {
+    const result = await api("/api/insights/runs?limit=30", { timeoutMs: 20_000 });
+    state.projectInsightHistory = Array.isArray(result.runs) ? result.runs : [];
+    renderProjectInsightHistory();
+  } catch (error) {
+    list.innerHTML = `<div class="projectInsightEmpty">לא ניתן לטעון היסטוריה: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function relativeTime(dateStr) {
+  if (!dateStr) return "";
+  const diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+  if (diff < 60) return "לפני רגע";
+  if (diff < 3600) return `לפני ${Math.round(diff / 60)} דקות`;
+  if (diff < 86400) return `לפני ${Math.round(diff / 3600)} שעות`;
+  if (diff < 86400 * 7) return `לפני ${Math.round(diff / 86400)} ימים`;
+  return new Date(dateStr).toLocaleDateString("he-IL");
+}
+
+function renderProjectInsightHistory() {
+  const list = $("projectInsightsHistoryList");
+  if (!list) return;
+  const runs = Array.isArray(state.projectInsightHistory) ? state.projectInsightHistory : [];
+  if (!runs.length) {
+    list.innerHTML = '<div class="projectInsightEmpty">אין עדיין ריצות תובנות שמורות.</div>';
+    return;
+  }
+  list.innerHTML = runs.map((run) => {
+    const runId = run.run_id || run.runId || "";
+    const normalized = normalizeProjectInsightRun(run);
+    const insightsCount = Array.isArray(normalized.insights) ? normalized.insights.length : 0;
+    const findingsCount = Array.isArray(normalized.findings) ? normalized.findings.length : 0;
+    const scannedCount = Array.isArray(run.scanned_source_keys) ? run.scanned_source_keys.length : 0;
+    const focus = run.focus_query || run.summary?.focusQuery || "סריקת אינדקס כללית";
+    const active = runId && runId === state.selectedProjectInsightRunId;
+    const isError = run.status === "error";
+    const statusLabel = isError ? "נכשל" : run.is_expansion ? "הרחבה" : "ריצה";
+    const statusColor = isError ? "color:var(--i-red)" : run.is_expansion ? "color:var(--i-blue)" : "color:var(--i-green-hi)";
+    return `
+      <button type="button" class="projectInsightsHistoryItem" data-run-id="${escapeHtml(runId)}" aria-pressed="${active ? "true" : "false"}">
+        <span>
+          <strong>${escapeHtml(focus)}</strong>
+          <small>${insightsCount} תובנות · ${findingsCount} ממצאים · ${scannedCount.toLocaleString()} מקורות</small>
+          <small style="${statusColor}">${escapeHtml(statusLabel)} · ${relativeTime(run.created_at)}</small>
+        </span>
+      </button>
+    `;
+  }).join("");
+  list.querySelectorAll(".projectInsightsHistoryItem").forEach((button) => {
+    button.addEventListener("click", () => {
+      const run = runs.find((item) => String(item.run_id || item.runId) === String(button.dataset.runId));
+      if (run) selectProjectInsightRun(run);
+    });
+  });
+}
+
+function selectProjectInsightRun(run) {
+  const normalized = normalizeProjectInsightRun(run);
+  state.selectedProjectInsightRunId = normalized.runId;
+  state.lastProjectInsights = normalized;
+  state.projectInsightsScannedKeys = Array.isArray(run.scanned_source_keys) ? run.scanned_source_keys : [];
+  state.projectInsightsRuns = Number(normalized.summary?.expandedRuns || run.metadata?.runCount || (run.is_expansion ? 2 : 1) || 1);
+  if ($("projectInsightsQuery")) $("projectInsightsQuery").value = run.focus_query || normalized.summary?.focusQuery || "";
+  if ($("projectInsightsFrom") && (run.date_from || normalized.summary?.dateFrom)) $("projectInsightsFrom").value = run.date_from || normalized.summary.dateFrom;
+  if ($("projectInsightsTo") && (run.date_to || normalized.summary?.dateTo)) $("projectInsightsTo").value = run.date_to || normalized.summary.dateTo;
+  if ($("projectInsightsLimit") && run.source_limit) $("projectInsightsLimit").value = String(run.source_limit);
+  state.lastWorkflow = normalized.workflowLog || null;
+  state.currentWorkflowMessageId = normalized.runId || null;
+  if (state.lastWorkflow) renderWorkflow(state.lastWorkflow);
+  renderProjectInsightsStatus();
+  renderProjectInsightsResults();
+  renderProjectInsightHistory();
+  showToast("דוח תובנות נטען מההיסטוריה");
+}
+
+function normalizeProjectInsightRun(run = {}) {
+  const summary = run.summary && typeof run.summary === "object" ? run.summary : {};
+  const metadata = run.metadata && typeof run.metadata === "object" ? run.metadata : {};
+  const normalizedEnvelope = { ...run, metadata };
+  const findings = normalizeProjectFindings(normalizedEnvelope, { legacyInsightsAsFindings: true });
+  const insights = normalizeProjectInsights(normalizedEnvelope);
+  return {
+    ok: run.status !== "error",
+    error: run.error || "",
+    runId: run.run_id || run.runId || "",
+    summary: {
+      ...summary,
+      focusQuery: summary.focusQuery || run.focus_query || "",
+      dateFrom: summary.dateFrom || run.date_from || null,
+      dateTo: summary.dateTo || run.date_to || null
+    },
+    findings,
+    insights,
+    toolContext: run.tool_context || run.toolContext || {},
+    workflowLog: run.workflow_log || run.workflowLog || null,
+    recordsSample: Array.isArray(metadata.recordsSample) ? metadata.recordsSample : [],
+    scannedSourceKeys: Array.isArray(run.scanned_source_keys) ? run.scanned_source_keys : [],
+    hasMore: Boolean(metadata.hasMore)
+  };
+}
+
+function renderProjectInsightsStatus(override = "") {
+  const el = $("projectInsightsStatus");
+  if (!el) return;
+  const expandButton = $("expandProjectInsightsAnalysis");
+  if (override) {
+    el.textContent = override;
+    el.dataset.state = "running";
+    if (expandButton) expandButton.disabled = true;
+    return;
+  }
+  const result = state.lastProjectInsights;
+  if (!result) {
+    el.innerHTML = "לחץ <strong>נתח את הפרויקט</strong> להרצת סוכן התובנות · <kbd style=\"display:inline-flex;align-items:center;height:16px;padding:0 4px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:4px;font-size:10px;font-family:monospace;color:var(--i-text-sub)\">Ctrl+Enter</kbd>";
+    el.dataset.state = "idle";
+    if (expandButton) expandButton.disabled = true;
+    return;
+  }
+  if (result.ok === false) {
+    el.textContent = `שגיאה: ${result.error || "ניתוח התובנות נכשל"}`;
+    el.dataset.state = "error";
+    if (expandButton) expandButton.disabled = true;
+    return;
+  }
+  const summary = result.summary || {};
+  const sourceCount = Object.keys(summary.sourceCounts || {}).length;
+  const scannedCount = state.projectInsightsScannedKeys.length || (result.scannedSourceKeys || []).length || Number(summary.totalRecords || 0);
+  const runCount = state.projectInsightsRuns || summary.expandedRuns || 1;
+  const findingsCount = normalizeProjectFindings(result, { legacyInsightsAsFindings: true }).length;
+  const insightsCount = normalizeProjectInsights(result).length;
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <strong>נותחו ${Number(summary.totalRecords || 0).toLocaleString()} מקורות</strong>
+        <span class="insightStatusPill">${insightsCount} תובנות</span>
+        <span class="insightStatusPill">${findingsCount} ממצאים</span>
+        <span class="insightStatusPill">${sourceCount} סוגי מקור</span>
+        <span class="insightStatusPill">${runCount} ריצות</span>
+        ${result.runId ? `<button type="button" class="delayWorkflowLink" data-tab-target="workflow" style="font-size:11px;padding:2px 8px;height:20px;border-radius:999px;background:var(--i-blue-soft);border:1px solid rgba(56,139,253,0.3);color:var(--i-blue);cursor:pointer;font-weight:600">פתח Workflow</button>` : ""}
+      </div>
+      <span style="font-size:11px;color:var(--i-text-muted)">${summary.dateFrom || ""} – ${summary.dateTo || ""}${result.expansionError ? ` · שגיאת הרחבה: ${escapeHtml(result.expansionError)}` : ""}</span>
+    </div>
+  `;
+  el.dataset.state = "done";
+  if (expandButton) expandButton.disabled = state.projectInsightsRunning || !scannedCount;
+  el.querySelector(".delayWorkflowLink")?.addEventListener("click", () => activateTab("workflow"));
+}
+
+function renderProjectInsightsResults() {
+  const container = $("projectInsightsResults");
+  if (!container) return;
+  const result = state.lastProjectInsights;
+  if (!result) {
+    container.innerHTML = `
+      <div class="insightsWelcome">
+        <div class="insightsWelcomeIcon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        </div>
+        <h4>הרץ ניתוח AI על נתוני הפרויקט</h4>
+        <p>סוכן התובנות סורק את האינדקס, מזהה דפוסים, חסמים, החלטות פתוחות וסיכונים — ומציג אותם כתובנות עם ראיות מהמקור.</p>
+        <button type="button" onclick="document.querySelector('#runProjectInsightsAnalysis')?.click()">נתח את הפרויקט</button>
+        <span class="insightsKbHint">או לחץ <kbd>Ctrl</kbd>+<kbd>Enter</kbd> בשדה המיקוד</span>
+      </div>`;
+    return;
+  }
+  if (result.ok === false) {
+    container.innerHTML = "";
+    return;
+  }
+  const findings = normalizeProjectFindings(result, { legacyInsightsAsFindings: true });
+  const insights = normalizeProjectInsights(result);
+  if (!insights.length && !findings.length) {
+    container.innerHTML = '<div class="projectInsightEmpty">לא נמצאו אותות מספיק חזקים באינדקס עבור הסריקה הזו. אפשר ללחוץ על הרחב תשובה כדי לסרוק מקורות נוספים.</div>';
+    return;
+  }
+  container.innerHTML = renderProjectInsightsEnvelope({ insights, findings });
+}
+
+function renderProjectInsightsEnvelope({ insights = [], findings = [] } = {}) {
+  const findingsById = new Map(findings.map((finding) => [String(finding.id || ""), finding]));
+  const linkedFindingIds = new Set();
+  for (const insight of insights) {
+    for (const id of insight.supporting_finding_ids || []) linkedFindingIds.add(String(id));
+  }
+  const orphanFindings = findings.filter((finding) => !linkedFindingIds.has(String(finding.id || "")));
+  const insightHtml = insights.length
+    ? `<div class="projectInsightsResultsGrid">${insights.map((insight) => renderProjectInsightCardWithFindings(insight, findingsById)).join("")}</div>`
+    : '<div class="projectInsightEmpty">נמצאו ממצאים, אבל אין עדיין מספיק חיבור ביניהם כדי לקרוא לזה תובנה. אפשר להרחיב תשובה כדי להכניס מקורות נוספים לסינתזה.</div>';
+  const orphanHtml = orphanFindings.length
+    ? `<section class="projectFindingsSection">
+        <div class="projectInsightsSectionHeader">
+          <h3>ממצאים שלא הפכו לתובנה</h3>
+          <span>${orphanFindings.length} ממצאים</span>
+        </div>
+        <div class="projectFindingsList">${orphanFindings.map((finding) => renderProjectFindingCard(finding)).join("")}</div>
+      </section>`
+    : "";
+  return `
+    <section class="projectInsightsSynthesized">
+      <div class="projectInsightsSectionHeader">
+        <h3>תובנות AI</h3>
+        <span>${insights.length} תובנות מסונתזות</span>
+      </div>
+      ${insightHtml}
+    </section>
+    ${orphanHtml}
+  `;
+}
+
+function renderProjectInsightCardWithFindings(insight, findingsById = new Map()) {
+  const evidence = Array.isArray(insight.evidence) ? insight.evidence.slice(0, 4) : [];
+  const supportingFindings = (insight.supporting_finding_ids || [])
+    .map((id) => findingsById.get(String(id)))
+    .filter(Boolean);
+  return `
+    <article class="projectInsightCard" data-severity="${escapeHtml(insight.severity || "medium")}">
+      <header>
+        <div>
+          <span>תובנה · ${escapeHtml(projectInsightCategoryLabel(insight.category))}</span>
+          <h4>${escapeHtml(insight.title || "תובנה")}</h4>
+        </div>
+        <strong>${formatConfidence(insight.confidence)}</strong>
+      </header>
+      <p>${escapeHtml(insight.insight || insight.finding || "")}</p>
+      ${insight.why_it_matters ? `<div class="projectInsightWhy"><b>למה זה חשוב</b><span>${escapeHtml(insight.why_it_matters)}</span></div>` : ""}
+      ${insight.recommended_action ? `<div class="projectInsightAction"><b>פעולה מומלצת</b><span>${escapeHtml(insight.recommended_action)}</span></div>` : ""}
+      ${insight.uncertainty ? `<div class="projectInsightUncertainty"><b>אי ודאות</b><span>${escapeHtml(insight.uncertainty)}</span></div>` : ""}
+      ${supportingFindings.length ? `
+        <div class="projectInsightSupport">
+          <b>ממצאים שתומכים בתובנה</b>
+          ${supportingFindings.map((finding) => renderProjectFindingCard(finding, { compact: true })).join("")}
+        </div>
+      ` : ""}
+      <label class="projectInsightStatusControl">סטטוס
+        <select>
+          <option value="new" ${(insight.human_status || "new") === "new" ? "selected" : ""}>חדש</option>
+          <option value="reviewing" ${insight.human_status === "reviewing" ? "selected" : ""}>בבדיקה</option>
+          <option value="accepted" ${insight.human_status === "accepted" ? "selected" : ""}>אושר</option>
+          <option value="dismissed" ${insight.human_status === "dismissed" ? "selected" : ""}>נדחה</option>
+        </select>
+      </label>
+      ${evidence.length ? `
+        <button type="button" class="insightEvidenceToggle" aria-expanded="false" aria-controls="evidence_${Math.random().toString(36).slice(2)}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          ${evidence.length} מקורות ראיה
+        </button>
+        <div class="projectInsightEvidence" data-collapsed="true">
+          ${evidence.map((item) => `
+            <div>
+              <b>${escapeHtml(item.title || item.source_id || "מקור")}</b>
+              <small>${escapeHtml([item.source_table, item.date ? String(item.date).slice(0, 10) : ""].filter(Boolean).join(" · "))}</small>
+              <span>${escapeHtml(item.excerpt || "")}</span>
+              ${item.source_url ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noreferrer">פתח מקור</a>` : ""}
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function renderProjectFindingCard(finding, { compact = false } = {}) {
+  const evidence = Array.isArray(finding.evidence) ? finding.evidence.slice(0, compact ? 2 : 4) : [];
+  return `
+    <article class="projectFindingCard" data-severity="${escapeHtml(finding.severity || "medium")}" data-compact="${compact ? "true" : "false"}">
+      <header>
+        <div>
+          <span>ממצא · ${escapeHtml(projectInsightCategoryLabel(finding.category))}</span>
+          <h4>${escapeHtml(finding.title || "ממצא")}</h4>
+        </div>
+        <strong>${formatConfidence(finding.confidence)}</strong>
+      </header>
+      <p>${escapeHtml(finding.statement || finding.finding || "")}</p>
+      ${!compact && finding.recommended_action ? `<div class="projectInsightAction"><b>פעולה מומלצת</b><span>${escapeHtml(finding.recommended_action)}</span></div>` : ""}
+      ${evidence.length ? `
+        <div class="projectInsightEvidence">
+          ${evidence.map((item) => `
+            <div>
+              <b>${escapeHtml(item.title || item.source_id || "מקור")}</b>
+              <small>${escapeHtml([item.source_table, item.date ? String(item.date).slice(0, 10) : ""].filter(Boolean).join(" · "))}</small>
+              <span>${escapeHtml(item.excerpt || "")}</span>
+              ${item.source_url ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noreferrer">פתח מקור</a>` : ""}
+            </div>
+          `).join("")}
+        </div>
+      ` : ""}
+    </article>
+  `;
+}
+
+function renderProjectInsightCard(insight) {
+  const evidence = Array.isArray(insight.evidence) ? insight.evidence.slice(0, 4) : [];
+  return `
+    <article class="projectInsightCard" data-severity="${escapeHtml(insight.severity || "medium")}">
+      <header>
+        <div>
+          <span>${escapeHtml(projectInsightCategoryLabel(insight.category))}</span>
+          <h4>${escapeHtml(insight.title || "תובנה")}</h4>
+        </div>
+        <strong>${formatConfidence(insight.confidence)}</strong>
+      </header>
+      <p>${escapeHtml(insight.finding || "")}</p>
+      ${insight.why_it_matters ? `<div class="projectInsightWhy"><b>למה זה חשוב</b><span>${escapeHtml(insight.why_it_matters)}</span></div>` : ""}
+      ${insight.recommended_action ? `<div class="projectInsightAction"><b>פעולה מומלצת</b><span>${escapeHtml(insight.recommended_action)}</span></div>` : ""}
+      <label class="projectInsightStatusControl">סטטוס
+        <select>
+          <option value="new" ${(insight.human_status || "new") === "new" ? "selected" : ""}>חדש</option>
+          <option value="reviewing" ${insight.human_status === "reviewing" ? "selected" : ""}>בבדיקה</option>
+          <option value="accepted" ${insight.human_status === "accepted" ? "selected" : ""}>אושר</option>
+          <option value="dismissed" ${insight.human_status === "dismissed" ? "selected" : ""}>נדחה</option>
+        </select>
+      </label>
+      <div class="projectInsightEvidence">
+        ${evidence.map((item) => `
+          <div>
+            <b>${escapeHtml(item.title || item.source_id || "מקור")}</b>
+            <small>${escapeHtml([item.source_table, item.date ? String(item.date).slice(0, 10) : ""].filter(Boolean).join(" · "))}</small>
+            <span>${escapeHtml(item.excerpt || "")}</span>
+            ${item.source_url ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noreferrer">פתח מקור</a>` : ""}
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function projectInsightCategoryLabel(category) {
+  const labels = {
+    risk: "סיכון",
+    blocker: "חסם",
+    decision: "החלטות",
+    gap: "חוסרים",
+    missing_info: "מידע חסר",
+    repeated_topic: "נושא חוזר",
+    commercial: "מסחרי",
+    quality: "איכות",
+    quality_safety: "איכות ובטיחות",
+    entity: "גורם מרכזי"
+  };
+  return labels[category] || "תובנה";
+}
+
+async function loadDelayClaims() {
+  if (!$("delayClaimsList")) return;
+  $("delayClaimsList").innerHTML = '<div class="delayClaimEmpty">טוען תיקי עיכוב...</div>';
+  try {
+    const result = await api("/api/delay-claims");
+    state.delayClaims = result.claims || [];
+    if (!state.selectedDelayClaimId && state.delayClaims.length) state.selectedDelayClaimId = state.delayClaims[0].id;
+    renderDelayClaims();
+    if (state.selectedDelayClaimId) await loadDelayEvents(state.selectedDelayClaimId);
+    else renderDelayClaimContent();
+  } catch (error) {
+    $("delayClaimsList").innerHTML = `<div class="delayClaimEmpty">שגיאה בטעינת תיקים: ${escapeHtml(error.message)}</div>`;
+    renderDelayClaimContent();
+  }
+}
+
+async function createDelayClaimFromForm(event) {
+  event.preventDefault();
+  const title = $("delayClaimTitle")?.value?.trim();
+  if (!title) return;
+  const button = event.currentTarget.querySelector("button");
+  button.disabled = true;
+  try {
+    const result = await api("/api/delay-claims", {
+      method: "POST",
+      body: {
+        title,
+        project_id: $("delayClaimProjectId")?.value || null,
+        description: $("delayClaimDescription")?.value || null,
+        human_status: "candidate",
+        confidence: 0
+      }
+    });
+    event.currentTarget.reset();
+    state.selectedDelayClaimId = result.claim?.id || null;
+    showToast("תיק עיכוב נוצר");
+    await loadDelayClaims();
+  } catch (error) {
+    showToast(`יצירת תיק נכשלה: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function loadDelayEvents(caseId) {
+  if (!caseId) return;
+  $("delayEventsList").innerHTML = '<div class="delayClaimEmpty">טוען אירועים...</div>';
+  try {
+    const result = await api(`/api/delay-claims/${encodeURIComponent(caseId)}/events`);
+    state.delayEvents = result.events || [];
+    if (!state.delayEvents.some((item) => item.id === state.selectedDelayEventId)) {
+      state.selectedDelayEventId = state.delayEvents[0]?.id || null;
+    }
+    renderDelayClaimContent();
+  } catch (error) {
+    $("delayEventsList").innerHTML = `<div class="delayClaimEmpty">שגיאה בטעינת אירועים: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function createDelayEventFromForm(event) {
+  event.preventDefault();
+  const caseId = state.selectedDelayClaimId;
+  const title = $("delayEventTitle")?.value?.trim();
+  if (!caseId || !title) return;
+  const button = event.currentTarget.querySelector("button");
+  button.disabled = true;
+  try {
+    const result = await api(`/api/delay-claims/${encodeURIComponent(caseId)}/events`, {
+      method: "POST",
+      body: {
+        title,
+        start_date: $("delayEventStart")?.value || null,
+        end_date: $("delayEventEnd")?.value || null,
+        event_type: $("delayEventType")?.value || null,
+        confidence: Number($("delayEventConfidence")?.value || 0),
+        contractor_claim: $("delayEventClaim")?.value || null,
+        short_description: $("delayEventDescription")?.value || null,
+        human_status: "candidate"
+      }
+    });
+    event.currentTarget.reset();
+    if ($("delayEventConfidence")) $("delayEventConfidence").value = "0";
+    state.selectedDelayEventId = result.event?.id || null;
+    showToast("אירוע עיכוב נוסף");
+    await loadDelayEvents(caseId);
+  } catch (error) {
+    showToast(`יצירת אירוע נכשלה: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function renderDelayClaims() {
+  const list = $("delayClaimsList");
+  if (!list) return;
+  if (!state.delayClaims.length) {
+    list.innerHTML = '<div class="delayClaimEmpty">אין תיקי עיכוב עדיין.</div>';
+    return;
+  }
+  list.innerHTML = "";
+  for (const claim of state.delayClaims) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `delayClaimItem ${claim.id === state.selectedDelayClaimId ? "active" : ""}`;
+    button.innerHTML = `
+      <strong>${escapeHtml(claim.title || "תיק ללא שם")}</strong>
+      <span>${escapeHtml(claim.project_id || claim.case_key || "")}</span>
+      <small>${delayStatusLabel(claim.human_status)} · ${formatConfidence(claim.confidence)}</small>
+    `;
+    button.addEventListener("click", async () => {
+      state.selectedDelayClaimId = claim.id;
+      state.selectedDelayEventId = null;
+      renderDelayClaims();
+      await loadDelayEvents(claim.id);
+    });
+    list.append(button);
+  }
+}
+
+function renderDelayClaimContent() {
+  const claim = selectedDelayClaim();
+  $("delayClaimEmpty").hidden = Boolean(claim);
+  $("delayClaimContent").hidden = !claim;
+  if (!claim) return;
+  $("delayClaimActiveTitle").textContent = claim.title || "";
+  $("delayClaimActiveMeta").textContent = [claim.project_id, claim.description].filter(Boolean).join(" · ");
+  $("delayClaimActiveStatus").textContent = delayStatusLabel(claim.human_status);
+  $("delayClaimActiveStatus").dataset.status = claim.human_status || "candidate";
+  renderDelayAnalyzeStatus();
+  renderDelayPackageStatus();
+  renderDelayEvents();
+  renderDelayEventInspector();
+}
+
+async function runDelayClaimAnalysisFromUi() {
+  const claim = selectedDelayClaim();
+  if (!claim || state.delayAnalyzeRunning) return;
+  const button = $("runDelayClaimAnalysis");
+  state.delayAnalyzeRunning = true;
+  state.lastDelayAnalysis = null;
+  renderDelayAnalyzeStatus("מריץ ניתוח תיק...");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "מנתח...";
+  }
+  try {
+    const result = await api(`/api/delay-claims/${encodeURIComponent(claim.id)}/analyze`, {
+      method: "POST",
+      timeoutMs: 120_000,
+      body: {
+        projectId: claim.project_id || null,
+        focusQuery: $("delayAnalyzeQuery")?.value || "",
+        dateFrom: $("delayAnalyzeFrom")?.value || null,
+        dateTo: $("delayAnalyzeTo")?.value || null,
+        sources: ["hybrid", "timeline", "graph"]
+      }
+    });
+    state.lastDelayAnalysis = result;
+    state.selectedDelayEventId = result.saved?.eventIds?.[0] || state.selectedDelayEventId;
+    showToast("ניתוח תיק הסתיים");
+    await loadDelayEvents(claim.id);
+    renderDelayAnalyzeStatus();
+  } catch (error) {
+    state.lastDelayAnalysis = { ok: false, error: error.message };
+    renderDelayAnalyzeStatus();
+    showToast(`ניתוח תיק נכשל: ${error.message}`, "error");
+  } finally {
+    state.delayAnalyzeRunning = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "נתח תיק";
+    }
+  }
+}
+
+function renderDelayAnalyzeStatus(override = "") {
+  const el = $("delayAnalyzeStatus");
+  if (!el) return;
+  if (override) {
+    el.textContent = override;
+    el.dataset.state = "running";
+    return;
+  }
+  const result = state.lastDelayAnalysis;
+  if (!result) {
+    el.textContent = "טרם הורץ ניתוח.";
+    el.dataset.state = "idle";
+    return;
+  }
+  if (result.ok === false) {
+    el.textContent = `שגיאה: ${result.error || "ניתוח נכשל"}`;
+    el.dataset.state = "error";
+    return;
+  }
+  const saved = result.saved || {};
+  el.innerHTML = `
+    <strong>ניתוח הסתיים</strong>
+    <span>${saved.events || 0} אירועים · ${saved.evidence || 0} ראיות · ${saved.gaps || 0} חוסרים</span>
+    ${result.runId ? `<button type="button" class="delayWorkflowLink" data-tab-target="workflow">פתח Workflow</button>` : ""}
+  `;
+  el.dataset.state = "done";
+  el.querySelector(".delayWorkflowLink")?.addEventListener("click", () => activateTab("workflow"));
+}
+
+async function runDelayClaimPackageFromUi() {
+  const claim = selectedDelayClaim();
+  if (!claim || state.delayPackageRunning) return;
+  const button = $("runDelayClaimPackage");
+  state.delayPackageRunning = true;
+  state.lastDelayPackage = null;
+  renderDelayPackageStatus("מכין חבילת תיק...");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "מכין...";
+  }
+  try {
+    const result = await api(`/api/delay-claims/${encodeURIComponent(claim.id)}/package`, {
+      method: "POST",
+      timeoutMs: 120_000,
+      body: {
+        contractualCompletionDate: $("delayContractualCompletion")?.value || null,
+        actualCompletionDate: $("delayActualCompletion")?.value || null,
+        exportType: $("delayPackageExportType")?.value || "markdown"
+      }
+    });
+    state.lastDelayPackage = result;
+    showToast("חבילת תיק הופקה");
+    renderDelayPackageStatus();
+  } catch (error) {
+    state.lastDelayPackage = { ok: false, error: error.message };
+    renderDelayPackageStatus();
+    showToast(`הפקת חבילת תיק נכשלה: ${error.message}`, "error");
+  } finally {
+    state.delayPackageRunning = false;
+    if (button) {
+      button.disabled = false;
+      button.textContent = "הכן חבילת תיק";
+    }
+  }
+}
+
+function renderDelayPackageStatus(override = "") {
+  const status = $("delayPackageStatus");
+  const dashboard = $("delayPackageDashboard");
+  if (!status) return;
+  if (override) {
+    status.textContent = override;
+    status.dataset.state = "running";
+    if (dashboard) dashboard.innerHTML = "";
+    return;
+  }
+  const result = state.lastDelayPackage;
+  if (!result) {
+    status.textContent = "טרם הופקה חבילת תיק.";
+    status.dataset.state = "idle";
+    if (dashboard) dashboard.innerHTML = "";
+    return;
+  }
+  if (result.ok === false) {
+    status.textContent = result.error || "הפקת חבילת תיק נכשלה.";
+    status.dataset.state = "error";
+    if (dashboard) dashboard.innerHTML = "";
+    return;
+  }
+  const data = result.dashboard || {};
+  status.innerHTML = `
+    <strong>חבילת תיק הופקה</strong>
+    <span>${result.export?.export_type || "markdown"} · ${result.saved?.scheduleActivities || 0} פעילויות · ${result.saved?.costItems || 0} עלויות · ${data.total_delay_days ?? "ללא"} ימי איחור</span>
+    ${result.runId ? `<button type="button" class="delayWorkflowLink" data-tab-target="workflow">פתח Workflow</button>` : ""}
+  `;
+  status.dataset.state = "done";
+  status.querySelector(".delayWorkflowLink")?.addEventListener("click", () => activateTab("workflow"));
+  if (dashboard) dashboard.innerHTML = renderDelayPackageDashboard(data);
+}
+
+function renderDelayPackageDashboard(data = {}) {
+  const actions = Array.isArray(data.recommended_actions) ? data.recommended_actions : [];
+  return `
+    <div class="delayPackageStats">
+      <div><span>אירועים</span><strong>${Number(data.total_events || 0)}</strong></div>
+      <div><span>חזקים</span><strong>${Number(data.strong_events || 0)}</strong></div>
+      <div><span>חלשים</span><strong>${Number(data.weak_events || 0)}</strong></div>
+      <div><span>דורשים בדיקה</span><strong>${Number(data.needs_review_events || 0)}</strong></div>
+      <div><span>מסמכים חסרים</span><strong>${Number(data.missing_documents || 0)}</strong></div>
+      <div><span>מוכנות כללית</span><strong>${Math.round(Number(data.readiness_score || 0) * 100)}%</strong></div>
+    </div>
+    <div class="delayPackageActions">
+      <strong>פעולות מומלצות</strong>
+      ${actions.length ? `<ul>${actions.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "<p>אין פעולות מומלצות נוספות.</p>"}
+    </div>
+  `;
+}
+
+function renderDelayEvents() {
+  const list = $("delayEventsList");
+  if (!list) return;
+  $("delayEventsCount").textContent = `${state.delayEvents.length} אירועים`;
+  if (!state.delayEvents.length) {
+    list.innerHTML = '<div class="delayClaimEmpty">אין אירועים בתיק הזה.</div>';
+    return;
+  }
+  list.innerHTML = "";
+  for (const item of state.delayEvents) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `delayEventItem ${item.id === state.selectedDelayEventId ? "active" : ""}`;
+    button.innerHTML = `
+      <span class="delayStatusBadge" data-status="${escapeHtml(item.human_status || "candidate")}">${delayStatusLabel(item.human_status)}</span>
+      <strong>${escapeHtml(item.title || "אירוע ללא שם")}</strong>
+      <span>${escapeHtml(delayEventDateRange(item))}</span>
+      <small>${formatConfidence(item.confidence)} · ${(item.evidence || []).length} ראיות · ${(item.gaps || []).length} חוסרים</small>
+    `;
+    button.addEventListener("click", () => {
+      state.selectedDelayEventId = item.id;
+      renderDelayEvents();
+      renderDelayEventInspector();
+    });
+    list.append(button);
+  }
+}
+
+function renderDelayEventInspector() {
+  const panel = $("delayEventInspector");
+  const item = selectedDelayEvent();
+  if (!panel) return;
+  if (!item) {
+    panel.innerHTML = '<div class="workflowInspectorEmpty">בחר אירוע כדי לראות פרטים, ראיות וסטטוס.</div>';
+    return;
+  }
+  const findings = item.findings || [];
+  const findingMap = new Map(findings.map((finding) => [finding.metadata?.analysis_key, finding]));
+  const readiness = Number(item.readiness_score ?? findingMap.get("readiness_score")?.metadata?.readiness_score ?? 0);
+  const attackRisk = item.metadata?.stage3_analysis?.attack_risk || findingMap.get("counter_arguments")?.metadata?.attack_risk || "not_analyzed";
+  const professionalReview = item.metadata?.stage3_analysis?.professional_review_required ?? findingMap.get("quality")?.metadata?.professional_review_required;
+  const findingTabs = [
+    ["causality_chain", "שרשרת סיבתיות"],
+    ["notice_status", "הודעות"],
+    ["concurrent_delays", "עיכובים מקבילים"],
+    ["counter_arguments", "טענות נגד"],
+    ["quality", "חוסרים"]
+  ].map(([key, label]) => renderDelayFindingTab(label, findingMap.get(key))).join("");
+  const evidenceRows = (item.evidence || []).map((evidence) => `
+    <div class="delayEvidenceRow">
+      <strong>${escapeHtml(evidence.supports_or_weakens === "weakens" ? "מחליש" : evidence.supports_or_weakens === "neutral" ? "ניטרלי" : "מחזק")}</strong>
+      <p>${escapeHtml(evidence.quote || evidence.excerpt || evidence.what_it_supports || "ראיה ללא טקסט")}</p>
+      <small>${escapeHtml(evidence.source_type || "")} ${formatConfidence(evidence.confidence)}</small>
+    </div>
+  `).join("");
+  panel.innerHTML = `
+    <header class="workflowInspectorHeader">
+      <span class="workflowIcon database">Delay</span>
+      <div>
+        <strong>${escapeHtml(item.title || "")}</strong>
+        <small>${escapeHtml(item.event_key || item.id)}</small>
+      </div>
+    </header>
+    <div class="delayInspectorBody">
+      <div class="delayInspectorMeta">
+        <span class="delayStatusBadge" data-status="${escapeHtml(item.human_status || "candidate")}">${delayStatusLabel(item.human_status)}</span>
+        <span>${formatConfidence(item.confidence)}</span>
+        <span>${escapeHtml(delayEventDateRange(item))}</span>
+      </div>
+      <p>${escapeHtml(item.short_description || item.contractor_claim || "אין תיאור עדיין.")}</p>
+      <div class="delayStatusActions">
+        <button type="button" data-status="approved">אשר</button>
+        <button type="button" data-status="rejected" class="dangerButton">דחה</button>
+        <button type="button" data-status="needs_review">דורש בדיקה</button>
+        <button type="button" data-status="candidate">מועמד</button>
+      </div>
+      <section class="delayDeepAnalysis">
+        <div class="delayClaimSectionHeader">
+          <div>
+            <h3>ניתוח עומק</h3>
+            <p class="hint">שלב 3 מסמן סיכונים, חוסרים ומוכנות. אין כאן קביעה משפטית או לו״זית סופית.</p>
+          </div>
+          <button id="runDelayEventAnalysis" type="button" ${state.delayEventAnalyzeRunning ? "disabled" : ""}>${state.delayEventAnalyzeRunning ? "מנתח..." : "נתח אירוע"}</button>
+        </div>
+        <div class="delayReadinessGrid">
+          <div class="delayReadinessMeter">
+            <span>מוכנות</span>
+            <strong>${Math.round(readiness * 100)}%</strong>
+            <div><i style="width:${Math.round(readiness * 100)}%"></i></div>
+          </div>
+          <div class="delayRiskBox" data-risk="${escapeHtml(String(attackRisk))}">
+            <span>סיכון תקיפה</span>
+            <strong>${escapeHtml(delayAttackRiskLabel(attackRisk))}</strong>
+          </div>
+          <div class="delayRiskBox">
+            <span>בדיקה מקצועית</span>
+            <strong>${professionalReview === false ? "לא סומנה" : "נדרשת"}</strong>
+          </div>
+        </div>
+        <div class="delayFindingTabs">${findingTabs || '<div class="delayClaimEmpty">עוד אין ניתוח עומק לאירוע הזה.</div>'}</div>
+      </section>
+      <form class="delayEvidenceForm" id="delayEvidenceForm">
+        <h3>הוסף ראיה</h3>
+        <label>ציטוט או תקציר
+          <textarea id="delayEvidenceText" rows="3" required></textarea>
+        </label>
+        <label>מה הראיה תומכת או מחלישה
+          <input id="delayEvidenceSupports" />
+        </label>
+        <label>כיוון
+          <select id="delayEvidenceDirection">
+            <option value="supports">מחזק</option>
+            <option value="weakens">מחליש</option>
+            <option value="neutral">ניטרלי</option>
+          </select>
+        </label>
+        <label>רמת ביטחון
+          <input id="delayEvidenceConfidence" type="number" min="0" max="1" step="0.05" value="0" />
+        </label>
+        <button type="submit">שמור ראיה</button>
+      </form>
+      <section class="delayEvidenceList">
+        <h3>ראיות מקושרות</h3>
+        ${evidenceRows || '<div class="delayClaimEmpty">אין ראיות מקושרות עדיין.</div>'}
+      </section>
+    </div>
+  `;
+  panel.querySelectorAll(".delayStatusActions button").forEach((button) => {
+    button.addEventListener("click", () => updateDelayEventStatus(item.id, button.dataset.status));
+  });
+  panel.querySelector("#runDelayEventAnalysis")?.addEventListener("click", () => runDelayEventAnalysisFromUi(item.id));
+  panel.querySelector("#delayEvidenceForm")?.addEventListener("submit", addDelayEvidenceFromForm);
+}
+
+async function runDelayEventAnalysisFromUi(eventId) {
+  if (!eventId || state.delayEventAnalyzeRunning) return;
+  state.delayEventAnalyzeRunning = true;
+  state.lastDelayEventAnalysis = null;
+  renderDelayEventInspector();
+  try {
+    const result = await api(`/api/delay-events/${encodeURIComponent(eventId)}/analyze`, {
+      method: "POST",
+      timeoutMs: 120_000,
+      body: {}
+    });
+    state.lastDelayEventAnalysis = result;
+    showToast("ניתוח אירוע הסתיים");
+    await loadDelayEvents(state.selectedDelayClaimId);
+  } catch (error) {
+    state.lastDelayEventAnalysis = { ok: false, error: error.message };
+    showToast(`ניתוח אירוע נכשל: ${error.message}`, "error");
+  } finally {
+    state.delayEventAnalyzeRunning = false;
+    renderDelayEventInspector();
+  }
+}
+
+function renderDelayFindingTab(label, finding) {
+  if (!finding) {
+    return `
+      <article class="delayFindingTab empty">
+        <strong>${escapeHtml(label)}</strong>
+        <p>טרם נותח.</p>
+      </article>
+    `;
+  }
+  return `
+    <article class="delayFindingTab">
+      <strong>${escapeHtml(label)}</strong>
+      <p>${escapeHtml(finding.explanation || "אין הסבר.")}</p>
+      <small>${escapeHtml(delayFindingTypeLabel(finding.finding_type))} · ${formatConfidence(finding.confidence)}</small>
+    </article>
+  `;
+}
+
+async function updateDelayEventStatus(eventId, status) {
+  try {
+    await api(`/api/delay-events/${encodeURIComponent(eventId)}`, {
+      method: "PATCH",
+      body: { human_status: status, changed_by: "ui" }
+    });
+    showToast("סטטוס האירוע עודכן");
+    await loadDelayEvents(state.selectedDelayClaimId);
+  } catch (error) {
+    showToast(`עדכון סטטוס נכשל: ${error.message}`, "error");
+  }
+}
+
+async function addDelayEvidenceFromForm(event) {
+  event.preventDefault();
+  const delayEvent = selectedDelayEvent();
+  if (!delayEvent) return;
+  const button = event.currentTarget.querySelector("button");
+  button.disabled = true;
+  try {
+    await api(`/api/delay-events/${encodeURIComponent(delayEvent.id)}/evidence`, {
+      method: "POST",
+      body: {
+        quote: $("delayEvidenceText")?.value || "",
+        what_it_supports: $("delayEvidenceSupports")?.value || "",
+        supports_or_weakens: $("delayEvidenceDirection")?.value || "supports",
+        confidence: Number($("delayEvidenceConfidence")?.value || 0),
+        human_status: "candidate"
+      }
+    });
+    showToast("ראיה נוספה לאירוע");
+    await loadDelayEvents(state.selectedDelayClaimId);
+  } catch (error) {
+    showToast(`שמירת ראיה נכשלה: ${error.message}`, "error");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function selectedDelayClaim() {
+  return state.delayClaims.find((claim) => claim.id === state.selectedDelayClaimId) || null;
+}
+
+function selectedDelayEvent() {
+  return state.delayEvents.find((item) => item.id === state.selectedDelayEventId) || null;
+}
+
+function delayStatusLabel(status) {
+  return ({
+    candidate: "מועמד",
+    approved: "מאושר",
+    rejected: "נדחה",
+    needs_review: "דורש בדיקה"
+  })[status] || "מועמד";
+}
+
+function formatConfidence(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "ביטחון לא צוין";
+  return `ביטחון ${Math.round(number * 100)}%`;
+}
+
+function delayEventDateRange(item = {}) {
+  if (item.start_date && item.end_date) return `${item.start_date} - ${item.end_date}`;
+  return item.start_date || item.end_date || "ללא תאריך";
+}
+
+function delayAttackRiskLabel(value) {
+  return ({ high: "גבוה", medium: "בינוני", low: "נמוך", not_analyzed: "לא נותח" })[value] || value || "לא נותח";
+}
+
+function delayFindingTypeLabel(value) {
+  return ({
+    documented_fact: "עובדה מתועדת",
+    calculation: "חישוב",
+    analytical_conclusion: "מסקנה אנליטית",
+    professional_review: "לבדיקה מקצועית"
+  })[value] || value || "ממצא";
 }
 
 function wireProjectGraph() {
@@ -4525,7 +5863,11 @@ function renderRunHistoryStrip(runs) {
     item.dataset.runId = run.id;
     const time = run.created_at ? timeAgo(new Date(run.created_at)) : "";
     const msg = (run.user_message || "").slice(0, 60);
-    const kindLabel = run.kind === "link_agent" ? "סוכן הקשרים" : "צ׳אט";
+    const kindLabel = run.kind === "link_agent"
+      ? "סוכן הקשרים"
+      : run.kind === "project_insights_analysis"
+        ? "דוח תובנות"
+        : "צ׳אט";
     item.innerHTML = `
       <div class="rhTime">${escapeHtml(time)}</div>
       <div class="rhMsg">${escapeHtml(msg)}</div>

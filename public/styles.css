@@ -73,6 +73,7 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 * { margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 html { min-width: 320px; }
 body {
   min-height: 100vh;
@@ -1618,6 +1619,18 @@ label {
   list-style: none;
 }
 .workflowInspector summary::-webkit-details-marker { display: none; }
+.workflowPayloadSource {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 2px 6px;
+  border: 1px solid #35402e;
+  border-radius: var(--r-xs);
+  background: rgb(255 255 255 / 0.04);
+  color: #9ee7d1;
+  direction: ltr;
+  font-size: 10px;
+  font-weight: 900;
+}
 .workflowInspector pre {
   max-height: 190px;
   margin-top: 8px;
@@ -2830,6 +2843,425 @@ label {
   padding: 14px;
   direction: rtl;
   text-align: right;
+}
+
+@media (max-width: 760px) {
+  .delayReadinessGrid,
+  .delayFindingTabs,
+  .delayPackageStats {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Insights / Delay Claims */
+.delayClaimsLayout {
+  display: grid;
+  grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.delayClaimsSidebar,
+.delayClaimWorkspace,
+.delayClaimContent {
+  min-width: 0;
+}
+
+.delayClaimsPanel,
+.delayEventInspector,
+.delayClaimEmpty {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.delayClaimsPanel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.delayClaimsPanel h3,
+.delayEvidenceForm h3,
+.delayEvidenceList h3 {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.delayClaimForm,
+.delayEventForm,
+.delayEvidenceForm {
+  display: grid;
+  gap: 12px;
+}
+
+.delayClaimsList,
+.delayEventsList {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.delayClaimItem,
+.delayEventItem {
+  width: 100%;
+  display: grid;
+  gap: 5px;
+  min-height: 0;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--text-primary);
+  background: var(--surface-2);
+  text-align: right;
+  white-space: normal;
+}
+
+.delayClaimItem:hover,
+.delayEventItem:hover,
+.delayClaimItem.active,
+.delayEventItem.active {
+  border-color: var(--brand-300);
+  background: linear-gradient(180deg, rgba(83,163,128,0.12), rgba(255,255,255,0.86));
+  box-shadow: 0 10px 22px rgba(129, 102, 68, 0.12);
+  transform: none;
+}
+
+.delayClaimItem strong,
+.delayEventItem strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+}
+
+.delayClaimItem span,
+.delayEventItem span,
+.delayClaimItem small,
+.delayEventItem small {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.delayClaimEmpty {
+  padding: 18px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+#delayClaimContent {
+  display: grid;
+  gap: 14px;
+}
+
+.delayClaimCaseHeader,
+.delayClaimSectionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.delayClaimEyebrow {
+  color: var(--brand-600);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.delayStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  width: fit-content;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-full);
+  padding: 3px 10px;
+  color: var(--text-secondary);
+  background: var(--surface-3);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.delayStatusBadge[data-status="approved"] {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-bg);
+}
+
+.delayStatusBadge[data-status="rejected"] {
+  border-color: var(--error-border);
+  color: var(--error-text);
+  background: var(--error-bg);
+}
+
+.delayStatusBadge[data-status="needs_review"] {
+  border-color: var(--warning-border);
+  color: var(--warning-text);
+  background: var(--warning-bg);
+}
+
+.delayClaimBoard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 14px;
+  align-items: start;
+}
+
+.delayEventInspector {
+  overflow: hidden;
+  position: sticky;
+  top: 18px;
+}
+
+.delayInspectorBody {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+.delayInspectorMeta,
+.delayStatusActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.delayInspectorMeta > span:not(.delayStatusBadge) {
+  border: 1px solid var(--line);
+  border-radius: var(--r-full);
+  padding: 3px 10px;
+  color: var(--text-secondary);
+  background: var(--surface-3);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.delayEvidenceForm {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.delayEvidenceList {
+  display: grid;
+  gap: 9px;
+}
+
+.delayEvidenceRow {
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.delayEvidenceRow p {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.delayEvidenceRow small {
+  color: var(--text-muted);
+}
+
+.delayAnalyzePanel .grid {
+  margin-top: 2px;
+}
+
+.delayAnalyzeStatus {
+  min-height: 42px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.delayAnalyzeStatus[data-state="running"] {
+  border-color: var(--cobalt);
+  color: #376b9f;
+  background: var(--cobalt-soft);
+}
+
+.delayAnalyzeStatus[data-state="done"] {
+  border-color: var(--success-border);
+  color: var(--success-text);
+  background: var(--success-bg);
+}
+
+.delayAnalyzeStatus[data-state="error"] {
+  border-color: var(--error-border);
+  color: var(--error-text);
+  background: var(--error-bg);
+}
+
+.delayDeepAnalysis {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: rgba(255,255,255,0.72);
+}
+
+.delayReadinessGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(96px, 0.8fr));
+  gap: 8px;
+}
+
+.delayReadinessMeter,
+.delayRiskBox,
+.delayFindingTab {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+  min-width: 0;
+}
+
+.delayReadinessMeter span,
+.delayRiskBox span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.delayReadinessMeter strong,
+.delayRiskBox strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 16px;
+}
+
+.delayReadinessMeter div {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+  margin-top: 8px;
+}
+
+.delayReadinessMeter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--brand-500), var(--cobalt));
+}
+
+.delayRiskBox[data-risk="high"] strong {
+  color: var(--error-text);
+}
+
+.delayRiskBox[data-risk="medium"] strong {
+  color: #9a6a00;
+}
+
+.delayRiskBox[data-risk="low"] strong {
+  color: var(--success-text);
+}
+
+.delayFindingTabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.delayFindingTab {
+  display: grid;
+  gap: 6px;
+}
+
+.delayFindingTab strong {
+  font-size: 13px;
+}
+
+.delayFindingTab p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.delayFindingTab small {
+  color: var(--muted);
+}
+
+.delayFindingTab.empty {
+  opacity: 0.68;
+}
+
+.delayPackagePanel .grid {
+  align-items: end;
+}
+
+.delayPackageDashboard {
+  display: grid;
+  gap: 10px;
+}
+
+.delayPackageStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.delayPackageStats div,
+.delayPackageActions {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.delayPackageStats span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.delayPackageStats strong {
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.delayPackageActions {
+  display: grid;
+  gap: 8px;
+}
+
+.delayPackageActions ul {
+  margin: 0;
+  padding: 0 18px 0 0;
+  color: var(--text-secondary);
+}
+
+.delayPackageActions p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.delayWorkflowLink {
+  min-height: 30px;
+  padding: 5px 10px;
+  background: var(--brand-600);
 }
 
 /* Project Graph */
@@ -7005,6 +7437,23 @@ body:has(#timeline.active) .sidebar {
 }
 
 @media (max-width: 768px) {
+  .delayClaimsLayout,
+  .delayClaimBoard {
+    grid-template-columns: 1fr;
+  }
+
+  .delayEventInspector {
+    position: static;
+  }
+
+  .delayStatusActions button,
+  .delayClaimForm button,
+  .delayEventForm button,
+  .delayEvidenceForm button {
+    width: 100%;
+    min-height: 44px;
+  }
+
   .settingsPresetActions {
     flex-direction: column;
     align-items: stretch;
@@ -7218,4 +7667,950 @@ body:has(#timeline.active) .sidebar {
 #timeline.active[data-viewport="tablet-stacked"] .tlFieldsBtn {
   display: block !important;
   inline-size: 100% !important;
+}
+
+/* ================================================================
+   INSIGHTS PAGE — Modern Dark SaaS Redesign
+   Aesthetic: Linear / Vercel / PlanetScale — RTL Hebrew
+   ================================================================ */
+
+/* ── Design tokens scoped to insights ── */
+#insights {
+  --i-bg0:       #0d1117;
+  --i-bg1:       #161b22;
+  --i-bg2:       #1c2128;
+  --i-border:    rgba(255,255,255,0.07);
+  --i-border-md: rgba(255,255,255,0.12);
+  --i-green:     #238636;
+  --i-green-hi:  #3fb950;
+  --i-green-glow:rgba(63,185,80,0.15);
+  --i-teal:      #39d353;
+  --i-teal-soft: rgba(57,211,83,0.12);
+  --i-amber:     #d29922;
+  --i-amber-soft:rgba(210,153,34,0.14);
+  --i-red:       #da3633;
+  --i-red-soft:  rgba(218,54,51,0.12);
+  --i-blue:      #388bfd;
+  --i-blue-soft: rgba(56,139,253,0.1);
+  --i-text:      #e6edf3;
+  --i-text-sub:  #8b949e;
+  --i-text-muted:#6e7681;
+  --i-radius:    12px;
+  --i-radius-sm: 8px;
+  --i-shadow:    0 0 0 1px rgba(255,255,255,0.06), 0 4px 16px rgba(0,0,0,0.4);
+  --i-t:         200ms cubic-bezier(0.16,1,0.3,1);
+}
+
+#insights.panel { background: var(--i-bg0); }
+
+/* ── Shared ins-card base ── */
+.insCard {
+  background: var(--i-bg1);
+  border: 1px solid var(--i-border-md);
+  border-radius: var(--i-radius);
+  box-shadow: var(--i-shadow);
+}
+
+/* ── Panel header ── */
+#insights > .panelHeader {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--i-border);
+  margin-bottom: 20px;
+}
+#insights > .panelHeader h2 {
+  color: var(--i-text);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+/* ================================================================
+   HASHTAG CHART CARD
+   ================================================================ */
+.insightsHashtagChart {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 20px 24px;
+  background: var(--i-bg1);
+  border: 1px solid var(--i-border-md);
+  border-top: 3px solid var(--i-blue);
+  border-radius: var(--i-radius);
+  box-shadow: var(--i-shadow);
+}
+.insightsHashtagChartHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.insightsHashtagChartHeader .delayClaimEyebrow {
+  color: var(--i-blue);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.insightsHashtagChartHeader h3 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: 17px;
+  font-weight: 600;
+}
+.insightsHashtagChartHeader button {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--i-bg2);
+  border: 1px solid var(--i-border-md);
+  border-radius: 6px;
+  color: var(--i-text-sub);
+  cursor: pointer;
+  transition: background var(--i-t), color var(--i-t), border-color var(--i-t);
+}
+.insightsHashtagChartHeader button:hover {
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.2);
+  color: var(--i-text);
+}
+.insightsHashtagChartWrap {
+  position: relative;
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 6px;
+  background: rgba(0,0,0,0.2);
+  padding: 8px 0 0;
+}
+#hashtagChartCanvas {
+  display: block;
+  width: 100%;
+  min-width: 320px;
+  height: 230px;
+}
+.insightsHashtagChartEmpty {
+  color: var(--i-text-muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 32px 0;
+}
+
+/* ================================================================
+   AGENT CARD
+   ================================================================ */
+.projectInsightsAgent {
+  display: grid;
+  gap: 0;
+  margin-bottom: 20px;
+  background: var(--i-bg1);
+  border: 1px solid var(--i-border-md);
+  border-top: 3px solid var(--i-green-hi);
+  border-radius: var(--i-radius);
+  box-shadow: var(--i-shadow);
+  overflow: hidden;
+}
+
+/* Intro header strip */
+.projectInsightsIntro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--i-border);
+}
+.projectInsightsIntro .delayClaimEyebrow {
+  color: var(--i-green-hi);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.projectInsightsIntro h3 {
+  margin: 0 0 4px;
+  color: var(--i-text);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.projectInsightsIntro .hint {
+  color: var(--i-text-sub);
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 480px;
+}
+
+/* Controls grid */
+.projectInsightsAgent > .grid {
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--i-border);
+  background: rgba(0,0,0,0.15);
+  gap: 12px;
+}
+.projectInsightsAgent > .grid label {
+  color: var(--i-text-sub);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.projectInsightsAgent > .grid input,
+.projectInsightsAgent > .grid select {
+  background: var(--i-bg2);
+  border: 1px solid var(--i-border-md);
+  border-radius: 8px;
+  color: var(--i-text);
+  font-size: 13px;
+  padding: 7px 12px;
+  transition: border-color var(--i-t), box-shadow var(--i-t);
+  outline: none;
+  font-family: inherit;
+}
+.projectInsightsAgent > .grid input:focus,
+.projectInsightsAgent > .grid select:focus {
+  border-color: var(--i-green-hi);
+  box-shadow: 0 0 0 3px var(--i-green-glow);
+}
+.projectInsightsAgent > .grid input::placeholder { color: var(--i-text-muted); }
+
+/* Action buttons */
+.projectInsightsActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.projectInsightsActions button {
+  min-width: 140px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--i-t), box-shadow var(--i-t), transform var(--i-t);
+}
+/* Primary run button */
+#runProjectInsightsAnalysis {
+  background: var(--i-green);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: #fff;
+}
+#runProjectInsightsAnalysis:hover:not(:disabled) {
+  background: var(--i-green-hi);
+  box-shadow: 0 0 0 3px var(--i-green-glow);
+}
+/* Secondary expand button */
+#expandProjectInsightsAnalysis {
+  background: transparent;
+  border: 1px solid var(--i-border-md);
+  color: var(--i-text-sub);
+}
+#expandProjectInsightsAnalysis:hover:not(:disabled) {
+  background: var(--i-bg2);
+  border-color: rgba(255,255,255,0.22);
+  color: var(--i-text);
+}
+.projectInsightsActions button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  transform: none !important;
+}
+.projectInsightsActions button:active:not(:disabled) { transform: scale(0.97); }
+
+/* ── Status bar ── */
+.projectInsightsStatus {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--i-border);
+  background: rgba(0,0,0,0.12);
+  color: var(--i-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  transition: background var(--i-t), color var(--i-t), border-color var(--i-t);
+}
+.projectInsightsStatus::before {
+  content: '';
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--i-text-muted);
+  transition: background var(--i-t), box-shadow var(--i-t);
+}
+.projectInsightsStatus strong { color: var(--i-text); font-weight: 600; }
+.projectInsightsStatus[data-state="running"] {
+  color: var(--i-amber);
+  border-color: rgba(210,153,34,0.3);
+  background: var(--i-amber-soft);
+}
+.projectInsightsStatus[data-state="running"]::before {
+  background: var(--i-amber);
+  box-shadow: 0 0 6px var(--i-amber);
+  animation: ins-pulse 1.2s ease-in-out infinite;
+}
+.projectInsightsStatus[data-state="done"] {
+  color: var(--i-green-hi);
+  border-color: rgba(63,185,80,0.3);
+  background: var(--i-green-glow);
+}
+.projectInsightsStatus[data-state="done"]::before { background: var(--i-green-hi); }
+.projectInsightsStatus[data-state="error"] {
+  color: #ff7b72;
+  border-color: rgba(218,54,51,0.3);
+  background: var(--i-red-soft);
+}
+.projectInsightsStatus[data-state="error"]::before { background: var(--i-red); }
+@keyframes ins-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--i-amber); }
+  50% { opacity: 0.5; box-shadow: 0 0 2px var(--i-amber); }
+}
+
+/* ── History panel ── */
+.projectInsightsHistoryPanel {
+  display: grid;
+  gap: 14px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--i-border);
+}
+.projectInsightsHistoryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.projectInsightsHistoryHeader h4 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+.projectInsightsHistoryHeader p.hint { font-size: 12px; color: var(--i-text-muted); margin: 2px 0 0; }
+.projectInsightsHistoryHeader button {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--i-bg2);
+  border: 1px solid var(--i-border-md);
+  border-radius: 6px;
+  color: var(--i-text-sub);
+  cursor: pointer;
+  transition: background var(--i-t), color var(--i-t);
+}
+.projectInsightsHistoryHeader button:hover {
+  background: rgba(255,255,255,0.07);
+  color: var(--i-text);
+}
+.projectInsightsHistoryList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+}
+.projectInsightsHistoryItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--i-bg2);
+  border: 1px solid var(--i-border);
+  border-radius: var(--i-radius-sm);
+  color: var(--i-text-sub);
+  text-align: right;
+  white-space: normal;
+  cursor: pointer;
+  transition: background var(--i-t), border-color var(--i-t), box-shadow var(--i-t);
+}
+.projectInsightsHistoryItem:hover:not(:disabled) {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.16);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+}
+.projectInsightsHistoryItem[aria-pressed="true"] {
+  background: var(--i-teal-soft);
+  border-color: rgba(63,185,80,0.4);
+  box-shadow: 0 0 0 1px rgba(63,185,80,0.15);
+}
+.projectInsightsHistoryItem span { min-width: 0; }
+.projectInsightsHistoryItem strong,
+.projectInsightsHistoryItem small { display: block; overflow-wrap: anywhere; }
+.projectInsightsHistoryItem strong {
+  color: var(--i-text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 3px;
+}
+.projectInsightsHistoryItem small { color: var(--i-text-muted); font-size: 11px; line-height: 1.4; }
+.projectInsightsHistoryMeta {
+  flex: 0 0 auto;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--i-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ── Results area ── */
+.projectInsightsResults {
+  display: grid;
+  gap: 16px;
+  padding: 20px 24px;
+}
+.projectInsightsSynthesized,
+.projectFindingsSection {
+  display: grid;
+  gap: 14px;
+}
+.projectInsightsSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--i-border);
+}
+.projectInsightsSectionHeader h3 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+.projectInsightsSectionHeader span {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  background: var(--i-bg2);
+  border: 1px solid var(--i-border-md);
+  border-radius: 999px;
+  color: var(--i-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── Results grid ── */
+.projectInsightsResultsGrid,
+.projectFindingsList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+/* ── Insight card ── */
+.projectInsightCard {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  background: var(--i-bg1);
+  border: 1px solid var(--i-border-md);
+  border-radius: var(--i-radius);
+  box-shadow: var(--i-shadow);
+  overflow: hidden;
+  transition: border-color var(--i-t), box-shadow var(--i-t);
+}
+.projectInsightCard:hover {
+  border-color: rgba(255,255,255,0.16);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 8px 24px rgba(0,0,0,0.5);
+}
+/* Severity left border */
+.projectInsightCard::before {
+  content: '';
+  display: block;
+  height: 3px;
+  background: var(--i-border-md);
+  border-radius: var(--i-radius) var(--i-radius) 0 0;
+}
+.projectInsightCard[data-severity="high"]::before  { background: var(--i-amber); }
+.projectInsightCard[data-severity="medium"]::before{ background: var(--i-blue); }
+.projectInsightCard[data-severity="low"]::before   { background: var(--i-green-hi); }
+
+.projectInsightCard header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 10px;
+}
+.projectInsightCard header span {
+  color: var(--i-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  display: block;
+}
+.projectInsightCard h4 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.1px;
+}
+.projectInsightCard header strong {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--i-amber-soft);
+  border: 1px solid rgba(210,153,34,0.3);
+  border-radius: 999px;
+  color: var(--i-amber);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.projectInsightCard p {
+  margin: 0;
+  padding: 0 18px 14px;
+  color: #c9d1d9;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+/* Sub-sections inside card */
+.projectInsightWhy,
+.projectInsightAction,
+.projectInsightUncertainty,
+.projectInsightSupport,
+.projectInsightStatusControl {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  margin: 0 14px 10px;
+  padding: 10px 12px;
+  background: var(--i-bg2);
+  border: 1px solid var(--i-border);
+  border-radius: var(--i-radius-sm);
+}
+.projectInsightWhy b,
+.projectInsightAction b,
+.projectInsightUncertainty b,
+.projectInsightSupport > b {
+  color: var(--i-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.projectInsightWhy    { border-right: 3px solid rgba(56,139,253,0.5); }
+.projectInsightAction { border-right: 3px solid rgba(63,185,80,0.5); }
+.projectInsightUncertainty { border-right: 3px solid rgba(210,153,34,0.4); }
+.projectInsightWhy span,
+.projectInsightAction span,
+.projectInsightUncertainty span {
+  color: #c9d1d9;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.projectInsightStatusControl {
+  margin-bottom: 14px;
+  border-color: var(--i-border);
+}
+.projectInsightStatusControl select {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--i-bg1);
+  border: 1px solid var(--i-border-md);
+  border-radius: 6px;
+  color: var(--i-text);
+  font-size: 12px;
+  padding: 5px 8px;
+  font-family: inherit;
+}
+
+/* Evidence */
+.projectInsightEvidence {
+  display: grid;
+  gap: 6px;
+  margin: 0 14px 14px;
+}
+.projectInsightEvidence > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 11px;
+  background: rgba(0,0,0,0.22);
+  border: 1px solid var(--i-border);
+  border-radius: 6px;
+}
+.projectInsightEvidence b,
+.projectInsightEvidence small,
+.projectInsightEvidence span,
+.projectInsightEvidence a { overflow-wrap: anywhere; }
+.projectInsightEvidence b    { color: var(--i-text); font-size: 12px; font-weight: 600; }
+.projectInsightEvidence small{ color: var(--i-text-muted); font-size: 11px; }
+.projectInsightEvidence span { color: #8b949e; font-size: 12px; line-height: 1.5; }
+.projectInsightEvidence a    { color: var(--i-blue); font-size: 12px; font-weight: 600; }
+.projectInsightEvidence a:hover { color: #58a6ff; }
+
+/* ── Finding card (smaller, nested) ── */
+.projectFindingCard {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  background: var(--i-bg2);
+  border: 1px solid var(--i-border);
+  border-radius: var(--i-radius-sm);
+  overflow: hidden;
+  transition: border-color var(--i-t);
+}
+.projectFindingCard:hover { border-color: rgba(255,255,255,0.14); }
+.projectFindingCard::before {
+  content: '';
+  display: block;
+  height: 2px;
+  background: var(--i-border-md);
+}
+.projectFindingCard[data-severity="high"]::before  { background: rgba(210,153,34,0.7); }
+.projectFindingCard[data-severity="low"]::before   { background: rgba(63,185,80,0.6); }
+.projectFindingCard[data-compact="true"] { background: rgba(0,0,0,0.18); }
+.projectFindingCard header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px 8px;
+}
+.projectFindingCard header span {
+  color: var(--i-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 3px;
+}
+.projectFindingCard h4 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.projectFindingCard header strong {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  background: var(--i-amber-soft);
+  border: 1px solid rgba(210,153,34,0.25);
+  border-radius: 999px;
+  color: var(--i-amber);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.projectFindingCard p {
+  margin: 0;
+  padding: 0 14px 12px;
+  color: #8b949e;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.projectFindingCard .projectInsightAction {
+  margin: 0 10px 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.projectFindingCard .projectInsightEvidence {
+  margin: 0 10px 10px;
+}
+
+/* ── Empty states ── */
+.projectInsightEmpty {
+  padding: 24px;
+  color: var(--i-text-muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+  text-align: center;
+  border: 1px dashed var(--i-border-md);
+  border-radius: var(--i-radius-sm);
+  background: rgba(255,255,255,0.02);
+}
+
+/* DelayClaimsAdvancedHeader (unchanged section) */
+.delayClaimsAdvancedHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 4px 0 12px;
+  padding: 14px 18px;
+  border: 1px solid var(--i-border-md);
+  border-radius: var(--i-radius-sm);
+  background: rgba(255,255,255,0.03);
+  color: var(--i-text-muted);
+}
+.delayClaimsAdvancedHeader h3 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* ================================================================
+   INSIGHTS UX ENHANCEMENTS
+   ================================================================ */
+
+/* ── Running state — dim controls ── */
+.projectInsightsAgent[data-running="true"] .grid {
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 300ms ease;
+}
+.projectInsightsAgent[data-running="true"] .projectInsightsIntro {
+  opacity: 0.7;
+}
+
+/* ── Skeleton loading cards ── */
+@keyframes ins-skeleton {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.insightSkeleton {
+  height: 160px;
+  border-radius: var(--i-radius);
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.04) 0%,
+    rgba(255,255,255,0.08) 30%,
+    rgba(255,255,255,0.04) 60%
+  );
+  background-size: 200% 100%;
+  animation: ins-skeleton 1.6s ease-in-out infinite;
+  border: 1px solid var(--i-border);
+}
+
+/* ── Collapsible evidence ── */
+.insightEvidenceToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 14px 10px;
+  padding: 7px 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--i-border);
+  border-radius: 6px;
+  color: var(--i-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  width: calc(100% - 28px);
+  text-align: right;
+  transition: background var(--i-t), color var(--i-t);
+}
+.insightEvidenceToggle:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--i-text-sub);
+}
+.insightEvidenceToggle svg {
+  flex-shrink: 0;
+  transition: transform 200ms ease;
+}
+.insightEvidenceToggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.projectInsightEvidence[data-collapsed="true"] { display: none; }
+
+/* ── Chart tooltip ── */
+.insightsChartTooltip {
+  position: fixed;
+  z-index: 200;
+  padding: 6px 10px;
+  background: #1c2128;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 6px;
+  color: #e6edf3;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.insightsChartTooltip.visible { opacity: 1; }
+
+/* ── Insights welcome empty state ── */
+.insightsWelcome {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 40px 24px;
+  text-align: center;
+  border-top: 1px solid var(--i-border);
+}
+.insightsWelcomeIcon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 4px;
+  border-radius: 12px;
+  background: var(--i-green-glow);
+  border: 1px solid rgba(63,185,80,0.25);
+  display: grid;
+  place-items: center;
+}
+.insightsWelcomeIcon svg { color: var(--i-green-hi); }
+.insightsWelcome h4 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: 16px;
+  font-weight: 600;
+}
+.insightsWelcome p {
+  margin: 0;
+  color: var(--i-text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 340px;
+}
+.insightsWelcome button {
+  margin-top: 4px;
+  padding: 9px 22px;
+  background: var(--i-green);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--i-t), box-shadow var(--i-t);
+}
+.insightsWelcome button:hover {
+  background: var(--i-green-hi);
+  box-shadow: 0 0 0 3px var(--i-green-glow);
+}
+
+/* ── Keyboard shortcut hint ── */
+.insightsKbHint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  color: var(--i-text-muted);
+  font-size: 11px;
+}
+.insightsKbHint kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: monospace;
+  color: var(--i-text-sub);
+}
+
+/* ── Chart sort controls ── */
+.insightsChartControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.insightsChartTotalBadge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--i-blue-soft);
+  border: 1px solid rgba(56,139,253,0.2);
+  border-radius: 999px;
+  color: var(--i-blue);
+  font-size: 11px;
+  font-weight: 600;
+}
+.insightsChartSortBtn {
+  padding: 4px 10px;
+  background: var(--i-bg2);
+  border: 1px solid var(--i-border-md);
+  border-radius: 6px;
+  color: var(--i-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--i-t), color var(--i-t);
+}
+.insightsChartSortBtn:hover, .insightsChartSortBtn[aria-pressed="true"] {
+  background: rgba(255,255,255,0.07);
+  color: var(--i-text);
+}
+.insightsChartSourceToggle, .insightsChartSortGroup {
+  display: flex;
+  gap: 4px;
+}
+.insightsChartSourceToggle { margin-right: auto; }
+.insightsChartSourceToggle .insightsChartSortBtn[aria-pressed="true"] {
+  background: var(--i-green-soft);
+  border-color: rgba(63,185,80,0.3);
+  color: var(--i-green-hi);
+}
+
+/* ── Status bar refinements ── */
+.projectInsightsStatus .insightStatusDetails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 4px;
+}
+.projectInsightsStatus .insightStatusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 8px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  color: var(--i-text-sub);
+  font-size: 10px;
+  font-weight: 600;
+}
+.projectInsightsStatus[data-state="done"] .insightStatusPill {
+  background: var(--i-teal-soft);
+  border-color: rgba(57,211,83,0.2);
+  color: var(--i-green-hi);
+}
+
+/* ── Mobile responsive ── */
+@media (max-width: 640px) {
+  .projectInsightsIntro {
+    flex-direction: column;
+    gap: 14px;
+  }
+  .projectInsightsActions {
+    width: 100%;
+  }
+  .projectInsightsActions button {
+    flex: 1;
+    min-width: 0;
+  }
+  .projectInsightsAgent > .grid {
+    grid-template-columns: 1fr !important;
+  }
+  .projectInsightsAgent > .grid .wide { grid-column: 1; }
+  .projectInsightsResultsGrid,
+  .projectFindingsList {
+    grid-template-columns: 1fr;
+  }
+  .insightsHashtagChart { padding: 14px 16px; }
+  .projectInsightsIntro,
+  .projectInsightsResults { padding-inline: 16px; }
+  .projectInsightsStatus { padding-inline: 16px; }
+  .projectInsightsHistoryPanel { padding: 14px 16px; }
+  .insightsKbHint { display: none; }
 }

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project 'C:/Users/dor thalamus/Documents/bidoc agent' && bedrock refresh-system --project 'C:/Users/dor thalamus/Documents/bidoc agent'"
+            "command": "bedrock sync --project C:/Users/DORTHA~1/DOCUME~1/BIDOCA~1 && bedrock refresh-system --project C:/Users/DORTHA~1/DOCUME~1/BIDOCA~1"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project 'C:/Users/dor thalamus/Documents/bidoc agent'"
+            "command": "bedrock sync --project C:/Users/DORTHA~1/DOCUME~1/BIDOCA~1"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bedrock sync --project 'C:/Users/dor thalamus/Documents/bidoc agent'"
+            "command": "bedrock sync --project C:/Users/DORTHA~1/DOCUME~1/BIDOCA~1"
           }
         ]
       }

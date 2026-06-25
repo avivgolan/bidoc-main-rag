@@ -9,8 +9,10 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
+import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
+import { buildDeterministicInsights, buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
-import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, saveMessage, TimelineRequestError } from "../src/supabase.js";
+import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "../src/projectGraph.js";
@@ -391,6 +393,521 @@ test("content source accepts separate Supabase and custom content names", () => 
   assert.equal(output.alertsTable, "content_alerts");
   assert.equal(output.alertsRpcName, "content_alerts_match");
   assert.equal(output.usesAppSupabase, false);
+});
+
+test("delay claim case payload creates a clean DTO", () => {
+  const payload = sanitizeDelayClaimCasePayload({
+    title: "Contractor delay case",
+    project_id: "project-1",
+    description: "Manual case",
+    confidence: "0.45",
+    metadata: { source: "ui" }
+  });
+  assert.equal(payload.title, "Contractor delay case");
+  assert.equal(payload.project_id, "project-1");
+  assert.equal(payload.human_status, "candidate");
+  assert.equal(payload.confidence, 0.45);
+  assert.match(payload.case_key, /^delay_case_/);
+  assert.deepEqual(payload.metadata, { source: "ui" });
+});
+
+test("delay event payload validates dates and status", () => {
+  const payload = sanitizeDelayEventPayload({
+    title: "Late approval",
+    start_date: "2026-06-01",
+    end_date: "2026-06-03",
+    confidence: 0.7,
+    human_status: "needs_review"
+  }, { case_id: "case-1" });
+  assert.equal(payload.case_id, "case-1");
+  assert.equal(payload.human_status, "needs_review");
+  assert.equal(payload.confidence, 0.7);
+  assert.match(payload.event_key, /^delay_event_/);
+  assert.throws(
+    () => sanitizeDelayEventPayload({ title: "Bad", start_date: "2026-06-03", end_date: "2026-06-01" }, { case_id: "case-1" }),
+    /start_date/
+  );
+});
+
+test("delay event update prevents invalid human status", () => {
+  assert.deepEqual(sanitizeDelayEventUpdatePayload({ human_status: "approved" }), { human_status: "approved" });
+  assert.throws(
+    () => sanitizeDelayEventUpdatePayload({ human_status: "done" }),
+    /human_status must be one of/
+  );
+});
+
+test("delay evidence payload normalizes source references and confidence", () => {
+  const payload = sanitizeDelayEvidencePayload({
+    source_type: "email",
+    source_ref_id: "mail-1",
+    quote: "Approval was delayed",
+    supports_or_weakens: "supports",
+    confidence: "0.8"
+  }, { event_id: "event-1", case_id: "case-1" });
+  assert.equal(payload.event_id, "event-1");
+  assert.equal(payload.case_id, "case-1");
+  assert.equal(payload.external_source_id, "mail-1");
+  assert.equal(payload.confidence, 0.8);
+  assert.throws(
+    () => sanitizeDelayEvidencePayload({ supports_or_weakens: "proves" }, { event_id: "event-1", case_id: "case-1" }),
+    /supports_or_weakens/
+  );
+});
+
+test("delay change log payload records status transitions", () => {
+  const payload = sanitizeDelayChangeLogPayload({
+    changed_by: "ui",
+    change_type: "status_change",
+    from_status: "candidate",
+    to_status: "approved",
+    diff: { human_status: { from: "candidate", to: "approved" } }
+  }, { event_id: "event-1", case_id: "case-1" });
+  assert.equal(payload.event_id, "event-1");
+  assert.equal(payload.case_id, "case-1");
+  assert.equal(payload.to_status, "approved");
+  assert.equal(payload.change_type, "status_change");
+  assert.deepEqual(payload.diff.human_status, { from: "candidate", to: "approved" });
+});
+
+test("delay finding payload separates analytical finding types", () => {
+  const payload = sanitizeDelayFindingPayload({
+    finding_type: "professional_review",
+    title: "Needs schedule expert",
+    explanation: "Critical path impact was not established.",
+    confidence: "0.62",
+    evidence_ids: ["00000000-0000-0000-0000-000000000001"],
+    metadata: { analysis_key: "quality" }
+  }, { event_id: "event-1", case_id: "case-1" });
+  assert.equal(payload.finding_type, "professional_review");
+  assert.equal(payload.confidence, 0.62);
+  assert.deepEqual(payload.evidence_ids, ["00000000-0000-0000-0000-000000000001"]);
+  assert.equal(payload.metadata.analysis_key, "quality");
+  assert.throws(
+    () => sanitizeDelayFindingPayload({ finding_type: "legal_ruling", title: "Bad" }, { event_id: "event-1", case_id: "case-1" }),
+    /finding_type/
+  );
+});
+
+test("delay stage 4 schedule cost and export payloads validate DTOs", () => {
+  const version = sanitizeDelayScheduleVersionPayload({
+    title: "Baseline schedule",
+    contractual_completion_date: "2026-06-01",
+    actual_completion_date: "2026-06-10",
+    confidence: "0.5"
+  }, { case_id: "case-1" });
+  assert.equal(version.case_id, "case-1");
+  assert.match(version.version_key, /^delay_schedule_/);
+
+  const activity = sanitizeDelayScheduleActivityPayload({
+    name: "Approval activity",
+    start_date: "2026-06-01",
+    finish_date: "2026-06-03",
+    duration_days: "3"
+  }, { case_id: "case-1", schedule_version_id: "version-1" });
+  assert.equal(activity.duration_days, 3);
+  assert.equal(activity.is_critical, null);
+
+  const link = sanitizeDelayScheduleLinkPayload({
+    link_type: "review_required",
+    explanation: "Needs schedule expert"
+  }, { case_id: "case-1", event_id: "event-1", schedule_activity_id: "activity-1" });
+  assert.equal(link.link_type, "review_required");
+
+  const cost = sanitizeDelayCostItemPayload({
+    title: "Extended supervision",
+    cost_type: "estimate",
+    amount: "1200",
+    currency: "ILS"
+  }, { case_id: "case-1", event_id: "event-1" });
+  assert.equal(cost.amount, 1200);
+  assert.equal(cost.currency, "ILS");
+
+  const claimExport = sanitizeDelayClaimExportPayload({
+    title: "Claim package",
+    export_type: "markdown",
+    content: "# Package"
+  }, { case_id: "case-1" });
+  assert.equal(claimExport.export_type, "markdown");
+  assert.match(claimExport.export_key, /^delay_export_/);
+});
+
+test("delay claim detection creates candidate events with evidence", () => {
+  const records = [
+    {
+      id: "doc-1",
+      source_type: "hybrid",
+      source_table: "data_index",
+      source_id: "doc-1",
+      title: "אישור תוכניות מתעכב",
+      content: "הקבלן ממתין לאישור תוכניות ולכן נוצר עיכוב באתר.",
+      date: "2026-06-10",
+      source_url: "https://example.test/doc-1"
+    },
+    {
+      id: "doc-2",
+      source_type: "hybrid",
+      source_table: "data_index",
+      source_id: "doc-2",
+      title: "דיווח רגיל",
+      content: "עדכון כללי ללא חסמים.",
+      date: "2026-06-11"
+    }
+  ];
+  const chronology = buildDelayChronology(records);
+  const candidates = detectDelayEventCandidates({ records, chronology, focusQuery: "עיכוב אישור" });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].event_type, "approval_delay");
+  assert.equal(candidates[0].human_status, "candidate");
+  assert.ok(candidates[0].evidence.length >= 1);
+  assert.equal(candidates[0].evidence[0].supports_or_weakens, "supports");
+});
+
+test("delay claim merge preserves date contradictions instead of silently merging", () => {
+  const base = {
+    event_key: "delay_event_a",
+    title: "עיכוב אישור תוכניות",
+    short_description: "ממתין לאישור",
+    contractor_claim: "ממתין לאישור",
+    event_type: "approval_delay",
+    confidence: 0.7,
+    readiness_score: 0.4,
+    human_status: "candidate",
+    weak_candidate: false,
+    alleged_responsible_party: null,
+    metadata: {},
+    gaps: [],
+    contradictions: [],
+    evidence: [{ source_type: "hybrid", external_source_id: "a", excerpt: "delay", confidence: 0.7 }],
+    source_records: [{ id: "a", source_table: "data_index", source_id: "a" }]
+  };
+  const merged = mergeDelayEventCandidates([
+    { ...base, start_date: "2026-01-01" },
+    { ...base, event_key: "delay_event_b", start_date: "2026-03-15", evidence: [{ source_type: "hybrid", external_source_id: "b", excerpt: "delay", confidence: 0.7 }], source_records: [{ id: "b", source_table: "data_index", source_id: "b" }] }
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].contradictions.length, 1);
+  assert.equal(merged[0].contradictions[0].type, "date_conflict");
+  assert.equal(merged[0].evidence.length, 2);
+});
+
+test("delay claim gaps mark weak missing date and quote", () => {
+  const withGaps = detectDelayGapsAndContradictions([{
+    event_key: "delay_event_weak",
+    title: "חסם ללא תאריך",
+    confidence: 0.4,
+    start_date: null,
+    alleged_responsible_party: null,
+    evidence: [{ source_type: "hybrid", external_source_id: "x", confidence: 0.4 }],
+    gaps: [],
+    contradictions: []
+  }]);
+  assert.ok(withGaps[0].gaps.some((gap) => gap.missing_item.includes("תאריך")));
+  assert.ok(withGaps[0].gaps.some((gap) => gap.missing_item.includes("ציטוט")));
+});
+
+test("delay claim evidence collection keeps existing evidence without meeting search", async () => {
+  const candidate = {
+    event_key: "delay_event_existing",
+    title: "עיכוב אספקה",
+    short_description: "ספק מאחר",
+    source_records: [{ source_table: "data_index", source_type: "hybrid" }],
+    evidence: [{ source_type: "hybrid", external_source_id: "doc-1", excerpt: "supplier delay", confidence: 0.6 }]
+  };
+  const output = await collectDelayEvidence({ config: {}, candidates: [candidate] });
+  assert.equal(output[0].evidence.length, 1);
+  assert.deepEqual(output[0].meetingEvidence, []);
+});
+
+test("delay claim workflow log exposes required stage 2 nodes", () => {
+  const workflow = buildDelayClaimWorkflowLog({
+    sourceMap: { query: "delay", records: [1, 2], graphContext: [] },
+    chronology: { items: [] },
+    candidates: [],
+    merged: [],
+    withEvidence: [],
+    withGaps: [],
+    saved: { events: 0, evidence: 0, gaps: 0 },
+    trace: []
+  });
+  assert.deepEqual(workflow.nodes.map((node) => node.id), [
+    "source_mapping",
+    "chronology",
+    "delay_detection",
+    "event_merge",
+    "evidence_collection",
+    "gaps_contradictions",
+    "write_results"
+  ]);
+});
+
+test("delay event readiness rewards evidence and penalizes gaps or attack risk", () => {
+  const strong = calculateDelayEventReadiness({
+    event: { start_date: "2026-01-01", end_date: "2026-01-03", alleged_responsible_party: "Owner" },
+    evidence: [
+      { quote: "Approval delay", supports_or_weakens: "supports" },
+      { excerpt: "Notice sent", supports_or_weakens: "supports" }
+    ],
+    gaps: [],
+    attackRisk: "low"
+  });
+  const weak = calculateDelayEventReadiness({
+    event: {},
+    evidence: [{ supports_or_weakens: "weakens" }],
+    gaps: [{ urgency: "high" }, { urgency: "medium" }],
+    attackRisk: "high"
+  });
+  assert.ok(strong > weak);
+  assert.ok(strong <= 1 && strong >= 0);
+  assert.ok(weak <= 1 && weak >= 0);
+});
+
+test("delay event analysis workflow exposes required stage 3 nodes", () => {
+  const workflow = buildDelayEventAnalysisWorkflowLog({
+    event: { id: "event-1" },
+    findings: [
+      { title: "Causality", metadata: { analysis_key: "causality_chain" } },
+      { title: "Readiness", metadata: { analysis_key: "readiness_score" } }
+    ],
+    saved: { findings: 8 }
+  });
+  assert.deepEqual(workflow.nodes.map((node) => node.id), [
+    "causality_agent",
+    "notice_agent",
+    "responsibility_agent",
+    "concurrency_agent",
+    "mitigation_agent",
+    "attack_agent",
+    "readiness_agent",
+    "quality_agent",
+    "write_results"
+  ]);
+});
+
+test("delay claim package dashboard and workflow expose stage 4 outputs", () => {
+  const dashboard = buildDelayClaimDashboard({
+    events: [
+      { human_status: "approved", readiness_score: 0.82, evidence: [{}], gaps: [] },
+      { human_status: "needs_review", readiness_score: 0.32, evidence: [], gaps: [{ urgency: "high" }] }
+    ],
+    schedule: { contractualCompletionDate: "2026-06-01", actualCompletionDate: "2026-06-10", totalDelayDays: 9 },
+    costs: { items: [{ amount: 1000 }], totalKnown: 1000 }
+  });
+  assert.equal(dashboard.total_events, 2);
+  assert.equal(dashboard.strong_events, 1);
+  assert.equal(dashboard.weak_events, 1);
+  assert.equal(dashboard.total_delay_days, 9);
+
+  const workflow = buildDelayClaimPackageWorkflowLog({
+    events: [{ id: "event-1" }],
+    schedule: { summary: { activities: 1 } },
+    costs: { items: [], warnings: [] },
+    output: { dashboard },
+    savedExport: { id: "export-1", export_type: "markdown" }
+  });
+  assert.deepEqual(workflow.nodes.map((node) => node.id), [
+    "schedule_analysis_agent",
+    "cost_damage_agent",
+    "claim_output_agent"
+  ]);
+});
+
+test("delay claim analyze UI is wired to the case analyze endpoint", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(htmlSource, /id="runDelayClaimAnalysis"/);
+  assert.match(htmlSource, /id="delayAnalyzeStatus"/);
+  assert.match(appSource, /runDelayClaimAnalysisFromUi/);
+  assert.match(appSource, /\/api\/delay-claims\/\$\{encodeURIComponent\(claim\.id\)\}\/analyze/);
+  assert.match(appSource, /saved\.events.*saved\.evidence.*saved\.gaps/s);
+});
+
+test("project insights agent detects evidence-backed index signals", () => {
+  const findings = detectProjectFindings([
+    {
+      id: "idx-1",
+      title: "Approval delay",
+      summary: "The electrical approval is pending and causing a delay on site.",
+      source_table: "emails",
+      source_id: "email-1",
+      primary_date: "2026-06-01"
+    },
+    {
+      id: "idx-2",
+      title: "Missing documents",
+      summary: "Missing consultant response and incomplete submittal package.",
+      source_table: "meetings",
+      source_id: "meeting-1",
+      primary_date: "2026-06-02"
+    }
+  ], { focusQuery: "approval" });
+  assert.ok(findings.some((item) => item.id === "finding_blockers"));
+  assert.ok(findings.some((item) => item.id === "finding_missing_info"));
+  assert.ok(findings.every((item) => item.evidence.length >= 1));
+  assert.ok(findings.every((item) => item.statement));
+  assert.ok(findings.every((item) => item.why_it_matters));
+  assert.ok(findings.every((item) => item.recommended_action));
+  assert.ok(findings.every((item) => item.human_status === "new"));
+  assert.deepEqual(detectProjectSignals([], { focusQuery: "" }), detectProjectFindings([], { focusQuery: "" }));
+});
+
+test("project insights focus query boosts related records without exact phrase match", () => {
+  const records = [
+    {
+      id: "idx-1",
+      title: "אישור מזמין פתוח",
+      summary: "המזמין לא אישר תוכניות והדבר גורם לעיכוב באתר.",
+      source_table: "emails",
+      source_id: "email-1"
+    },
+    {
+      id: "idx-2",
+      title: "אישור אחר",
+      summary: "אישור פתוח ללא קשר למזמין.",
+      source_table: "emails",
+      source_id: "email-2"
+    }
+  ];
+  const focused = detectProjectSignals(records, { focusQuery: "המזמין לא אישר דברים וגרם לעיכוב של הפרויקט" });
+  const unfocused = detectProjectSignals(records, { focusQuery: "" });
+  const focusedApprovals = focused.find((item) => item.id === "finding_approvals");
+  const unfocusedApprovals = unfocused.find((item) => item.id === "finding_approvals");
+  assert.ok(focusedApprovals.confidence > unfocusedApprovals.confidence);
+});
+
+test("project insights synthesize only when findings can support an insight", () => {
+  const findings = detectProjectFindings([
+    {
+      id: "idx-1",
+      title: "Approval delay",
+      summary: "The approval is pending and the work is blocked by a delay.",
+      source_table: "emails",
+      source_id: "email-1"
+    },
+    {
+      id: "idx-2",
+      title: "Open approval",
+      summary: "The consultant approval is still waiting for a decision.",
+      source_table: "meetings",
+      source_id: "meeting-1"
+    }
+  ], { focusQuery: "approval delay" });
+  const oneFindingOnly = buildDeterministicInsights({ findings: findings.slice(0, 1) });
+  const insights = buildDeterministicInsights({ findings });
+  assert.equal(oneFindingOnly.length, 0);
+  assert.ok(insights.length >= 1);
+  assert.ok(insights.every((item) => Array.isArray(item.supporting_finding_ids)));
+  assert.ok(insights.every((item) => item.supporting_finding_ids.length >= 1));
+});
+
+test("project insights evidence builder tolerates Array.map index argument", () => {
+  const evidence = toProjectInsightEvidence({
+    id: "idx-1",
+    title: "Open approval",
+    summary: "Approval is pending and blocks execution.",
+    source_table: "emails",
+    source_id: "email-1"
+  }, 0);
+  assert.equal(evidence.source_table, "emails");
+  assert.match(evidence.excerpt, /Approval/);
+});
+
+test("project insights source keys are stable for cumulative scans", () => {
+  const key = projectInsightSourceKey({
+    id: "idx-1",
+    title: "Open approval",
+    source_table: "emails",
+    source_id: "email-1"
+  });
+  assert.equal(key, "emails:email-1:idx-1:Open approval");
+});
+
+test("project insights parses fenced AI JSON output", () => {
+  const parsed = parseInsightJson("```json\n[{\"title\":\"Blocked approval\",\"evidence_indices\":[0]}]\n```");
+  assert.equal(parsed.insights.length, 1);
+  assert.equal(parsed.insights[0].title, "Blocked approval");
+});
+
+test("project insights UI is wired to the index analysis endpoint", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  const supabaseSource = fs.readFileSync(new URL("../src/supabase.js", import.meta.url), "utf8");
+  assert.match(htmlSource, /id="runProjectInsightsAnalysis"/);
+  assert.match(htmlSource, /id="expandProjectInsightsAnalysis"/);
+  assert.match(htmlSource, /id="refreshProjectInsightsHistory"/);
+  assert.match(htmlSource, /id="projectInsightsHistoryList"/);
+  assert.match(htmlSource, /id="projectInsightsFrom" type="date" value="2024-02-01"/);
+  assert.match(htmlSource, /id="projectInsightsTo" type="date" value="2026-01-01"/);
+  assert.match(htmlSource, /id="projectInsightsResults"/);
+  assert.match(htmlSource, /delayClaimsLayout" hidden/);
+  assert.match(appSource, /runProjectInsightsAnalysisFromUi/);
+  assert.match(appSource, /loadProjectInsightHistory/);
+  assert.match(appSource, /selectProjectInsightRun/);
+  assert.match(appSource, /parentRunId/);
+  assert.match(appSource, /initProjectInsightsDefaults/);
+  assert.match(appSource, /\/api\/insights\/analyze/);
+  assert.match(appSource, /\/api\/insights\/runs\?limit=30/);
+  assert.match(appSource, /excludeSourceKeys/);
+  assert.match(appSource, /mergeProjectInsightsResults/);
+  assert.match(appSource, /normalizeProjectFindings/);
+  assert.match(appSource, /renderProjectInsightsEnvelope/);
+  assert.match(appSource, /renderProjectFindingCard/);
+  assert.match(appSource, /supporting_finding_ids/);
+  assert.match(appSource, /why_it_matters/);
+  assert.match(appSource, /recommended_action/);
+  assert.match(appSource, /loadRunHistory\(\)/);
+  assert.match(appSource, /project_insights_analysis/);
+  assert.match(serverSource, /saveProjectInsightRun/);
+  assert.match(serverSource, /metadata:[\s\S]*findings/);
+  assert.match(serverSource, /listProjectInsightRuns/);
+  assert.match(supabaseSource, /PROJECT_INSIGHT_RUNS_TABLE = "project_insight_runs"/);
+});
+
+test("project insights workflow exposes the index-first agent flow", () => {
+  const workflow = buildProjectInsightsWorkflowLog({
+    summary: { totalRecords: 2, focusQuery: "approval" },
+    findings: [{ id: "finding_blockers", evidence: [{}] }],
+    insights: [{ id: "blockers", evidence: [{}] }]
+  });
+  assert.deepEqual(workflow.nodes.map((node) => node.id), [
+    "index_scan",
+    "focus_retrieval",
+    "graph_search",
+    "alert_agent",
+    "n8n_tools",
+    "source_quality",
+    "conflict_detection",
+    "signal_detection",
+    "ai_synthesis",
+    "insight_ranking",
+    "insights_output"
+  ]);
+});
+
+test("AI project insights roadmap replaces claim-file product direction", () => {
+  const roadmap = fs.readFileSync(new URL("../docs/ai-project-insights-roadmap.md", import.meta.url), "utf8");
+  assert.match(roadmap, /AI Project Insights Roadmap/);
+  assert.match(roadmap, /not a claim file/i);
+  assert.match(roadmap, /Stage 1 - Index-First AI Insights MVP/);
+});
+
+test("delay event analysis UI is wired to the event analyze endpoint", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(appSource, /runDelayEventAnalysisFromUi/);
+  assert.match(appSource, /\/api\/delay-events\/\$\{encodeURIComponent\(eventId\)\}\/analyze/);
+  assert.match(appSource, /delayReadinessMeter/);
+  assert.match(appSource, /renderDelayFindingTab/);
+});
+
+test("delay claim package UI is wired to the package endpoint", () => {
+  const htmlSource = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(htmlSource, /id="runDelayClaimPackage"/);
+  assert.match(htmlSource, /id="delayPackageDashboard"/);
+  assert.match(appSource, /runDelayClaimPackageFromUi/);
+  assert.match(appSource, /\/api\/delay-claims\/\$\{encodeURIComponent\(claim\.id\)\}\/package/);
+  assert.match(appSource, /renderDelayPackageDashboard/);
 });
 
 test("settings export includes resolved unmasked secrets", () => {
@@ -844,14 +1361,15 @@ test("chatCompletion forwards advanced model settings to OpenRouter", async () =
       temperature: 0.42,
       maxTokens: 1234,
       timeoutMs: 12_000,
-      topP: 0.8,
-      frequencyPenalty: 0.2,
-      presencePenalty: 0.1,
-      seed: 77,
-      telemetry: {
-        step: "classifier",
-        callId: "classifier_1",
-        record: (entry) => telemetry.push(entry)
+        topP: 0.8,
+        frequencyPenalty: 0.2,
+        presencePenalty: 0.1,
+        seed: 77,
+        responseFormat: { type: "json_object" },
+        telemetry: {
+          step: "classifier",
+          callId: "classifier_1",
+          record: (entry) => telemetry.push(entry)
       }
     });
     assert.equal(answer, "ok");
@@ -859,10 +1377,11 @@ test("chatCompletion forwards advanced model settings to OpenRouter", async () =
     assert.equal(body.temperature, 0.42);
     assert.equal(body.max_tokens, 1234);
     assert.equal(body.top_p, 0.8);
-    assert.equal(body.frequency_penalty, 0.2);
-    assert.equal(body.presence_penalty, 0.1);
-    assert.equal(body.seed, 77);
-    assert.equal(telemetry.length, 1);
+      assert.equal(body.frequency_penalty, 0.2);
+      assert.equal(body.presence_penalty, 0.1);
+      assert.equal(body.seed, 77);
+      assert.deepEqual(body.response_format, { type: "json_object" });
+      assert.equal(telemetry.length, 1);
     assert.equal(telemetry[0].step, "classifier");
     assert.equal(telemetry[0].call_id, "classifier_1");
     assert.equal(telemetry[0].generation_id, "gen-test-123");
@@ -979,6 +1498,10 @@ test("workflow compare runs exposes base compare selection and node diffs", () =
   assert.match(appSource, /function workflowRegressionSummary\(/);
   assert.match(appSource, /function renderWorkflowRegressionSummary\(/);
   assert.match(appSource, /function renderWorkflowRegressionNotice\(/);
+  assert.match(appSource, /function normalizeWorkflowNodePayloads\(/);
+  assert.match(appSource, /function workflowNodeDetailPayload\(/);
+  assert.match(appSource, /workflowPayloadSourceText\(node, "input"\)/);
+  assert.match(appSource, /not_captured/);
   assert.match(appSource, /new_error/);
   assert.match(appSource, /new_fallback/);
   assert.match(appSource, /route_removed/);
@@ -999,6 +1522,7 @@ test("workflow compare runs exposes base compare selection and node diffs", () =
   assert.match(cssSource, /\.workflowPerformanceSummary/);
   assert.match(cssSource, /\.workflowRegressionNotice/);
   assert.match(cssSource, /\.workflowRegressionSummary/);
+  assert.match(cssSource, /\.workflowPayloadSource/);
   assert.match(cssSource, /#workflowRegressionNodes\.active/);
 });
 
@@ -1594,6 +2118,12 @@ test("timeline events query rejects invalid input and cursors", () => {
     (error) => error instanceof TimelineRequestError && error.statusCode === 400,
     "duplicate origins parameter"
   );
+});
+
+test("timeline page fetch decodes encoded cursors for internal pagination", () => {
+  const source = fs.readFileSync(new URL("../src/supabase.js", import.meta.url), "utf8");
+  assert.match(source, /const decodedCursor = typeof cursor === "string"/);
+  assert.match(source, /cursor: decodedCursor/);
 });
 
 test("legacy timeline endpoints and heavy timeline operations keep full-data helpers", () => {

@@ -10,7 +10,25 @@ const TIMELINE_EVENT_ENTITIES_TABLE = "timeline_event_entities";
 const TIMELINE_GRAPH_EDGES_TABLE = "timeline_graph_edges";
 const GRAPH_NODES_TABLE = "graph_nodes";
 const GRAPH_EDGES_TABLE = "graph_edges";
+const DELAY_CLAIM_CASES_TABLE = "delay_claim_cases";
+const DELAY_EVENTS_TABLE = "delay_events";
+const DELAY_EVENT_EVIDENCE_TABLE = "delay_event_evidence";
+const DELAY_EVENT_GAPS_TABLE = "delay_event_gaps";
+const DELAY_EVENT_FINDINGS_TABLE = "delay_event_findings";
+const DELAY_EVENT_CHANGE_LOG_TABLE = "delay_event_change_log";
+const DELAY_SCHEDULE_VERSIONS_TABLE = "delay_schedule_versions";
+const DELAY_SCHEDULE_ACTIVITIES_TABLE = "delay_schedule_activities";
+const DELAY_EVENT_SCHEDULE_LINKS_TABLE = "delay_event_schedule_links";
+const DELAY_COST_ITEMS_TABLE = "delay_cost_items";
+const DELAY_CLAIM_EXPORTS_TABLE = "delay_claim_exports";
+const PROJECT_INSIGHT_RUNS_TABLE = "project_insight_runs";
 const GRAPH_UPSERT_BATCH_SIZE = 300;
+export const DELAY_HUMAN_STATUSES = ["candidate", "approved", "rejected", "needs_review"];
+const DELAY_EVIDENCE_DIRECTIONS = ["supports", "weakens", "neutral"];
+const DELAY_GAP_URGENCIES = ["low", "medium", "high"];
+const DELAY_SCHEDULE_LINK_TYPES = ["possibly_related", "claimed_impact", "weakening_context", "review_required"];
+const DELAY_COST_TYPES = ["direct", "indirect", "estimate", "review_required"];
+const DELAY_EXPORT_TYPES = ["markdown", "json"];
 const GRAPH_NODE_TYPES = new Set(["event", "alert", "supplier", "person", "company", "document", "topic", "risk", "invoice", "quote", "source"]);
 const GRAPH_EDGE_TYPES = new Set(["mentions", "caused_by", "blocks", "approved_by", "related_to", "same_topic", "from_document", "has_status", "has_risk"]);
 const TIMELINE_PAGE_DEFAULT_LIMIT = 200;
@@ -117,6 +135,399 @@ export async function getLatestQaReport({ config, messageId }) {
   return rows?.[0] || null;
 }
 
+export function sanitizeDelayClaimCasePayload(input = {}) {
+  const title = requiredString(input.title, "title");
+  return {
+    case_key: nullableString(input.case_key) || stableKey("delay_case", title),
+    title,
+    project_id: nullableString(input.project_id),
+    description: nullableString(input.description),
+    human_status: normalizeDelayStatus(input.human_status),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayEventPayload(input = {}, defaults = {}) {
+  const title = requiredString(input.title, "title");
+  const caseId = requiredString(input.case_id || defaults.case_id, "case_id");
+  const startDate = nullableDate(input.start_date, "start_date");
+  const endDate = nullableDate(input.end_date, "end_date");
+  if (startDate && endDate && Date.parse(startDate) > Date.parse(endDate)) {
+    throw new Error("start_date must not be later than end_date");
+  }
+  return {
+    event_key: nullableString(input.event_key) || stableKey("delay_event", `${caseId}:${title}:${startDate || ""}`),
+    case_id: caseId,
+    title,
+    short_description: nullableString(input.short_description),
+    contractor_claim: nullableString(input.contractor_claim),
+    event_type: nullableString(input.event_type),
+    start_date: startDate,
+    end_date: endDate,
+    alleged_responsible_party: nullableString(input.alleged_responsible_party),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    readiness_score: input.readiness_score == null || input.readiness_score === "" ? null : boundedNumber(input.readiness_score, 0, 0, 1),
+    human_status: normalizeDelayStatus(input.human_status),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayEventUpdatePayload(input = {}) {
+  const payload = {};
+  for (const field of ["title", "short_description", "contractor_claim", "event_type", "alleged_responsible_party"]) {
+    if (Object.hasOwn(input, field)) payload[field] = field === "title" ? requiredString(input[field], field) : nullableString(input[field]);
+  }
+  if (Object.hasOwn(input, "start_date")) payload.start_date = nullableDate(input.start_date, "start_date");
+  if (Object.hasOwn(input, "end_date")) payload.end_date = nullableDate(input.end_date, "end_date");
+  if (payload.start_date && payload.end_date && Date.parse(payload.start_date) > Date.parse(payload.end_date)) {
+    throw new Error("start_date must not be later than end_date");
+  }
+  if (Object.hasOwn(input, "confidence")) payload.confidence = boundedNumber(input.confidence, 0, 0, 1);
+  if (Object.hasOwn(input, "readiness_score")) payload.readiness_score = input.readiness_score == null || input.readiness_score === "" ? null : boundedNumber(input.readiness_score, 0, 0, 1);
+  if (Object.hasOwn(input, "human_status")) payload.human_status = normalizeDelayStatus(input.human_status);
+  if (Object.hasOwn(input, "metadata")) payload.metadata = plainObject(input.metadata);
+  return payload;
+}
+
+export function sanitizeDelayEvidencePayload(input = {}, defaults = {}) {
+  return {
+    event_id: requiredString(input.event_id || defaults.event_id, "event_id"),
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    source_id: nullableString(input.source_id),
+    source_type: nullableString(input.source_type),
+    external_source_id: nullableString(input.external_source_id || input.source_ref_id),
+    source_url: nullableString(input.source_url),
+    quote: nullableString(input.quote),
+    excerpt: nullableString(input.excerpt),
+    what_it_supports: nullableString(input.what_it_supports),
+    supports_or_weakens: enumValue(input.supports_or_weakens, DELAY_EVIDENCE_DIRECTIONS, "supports_or_weakens", "supports"),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    human_status: normalizeDelayStatus(input.human_status),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayGapPayload(input = {}, defaults = {}) {
+  return {
+    event_id: requiredString(input.event_id || defaults.event_id, "event_id"),
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    missing_item: requiredString(input.missing_item, "missing_item"),
+    why_it_matters: nullableString(input.why_it_matters),
+    urgency: enumValue(input.urgency, DELAY_GAP_URGENCIES, "urgency", "medium"),
+    human_status: normalizeDelayStatus(input.human_status),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayChangeLogPayload(input = {}, defaults = {}) {
+  return {
+    event_id: requiredString(input.event_id || defaults.event_id, "event_id"),
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    changed_by: nullableString(input.changed_by),
+    change_type: nullableString(input.change_type) || "manual_update",
+    from_status: nullableString(input.from_status),
+    to_status: input.to_status == null || input.to_status === "" ? null : normalizeDelayStatus(input.to_status),
+    note: nullableString(input.note),
+    diff: plainObject(input.diff),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayFindingPayload(input = {}, defaults = {}) {
+  return {
+    event_id: requiredString(input.event_id || defaults.event_id, "event_id"),
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    finding_type: enumValue(input.finding_type, ["documented_fact", "calculation", "analytical_conclusion", "professional_review"], "finding_type", "analytical_conclusion"),
+    title: requiredString(input.title, "title"),
+    explanation: nullableString(input.explanation),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    evidence_ids: Array.isArray(input.evidence_ids) ? input.evidence_ids.map((item) => String(item)).filter(Boolean) : [],
+    human_status: normalizeDelayStatus(input.human_status),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayScheduleVersionPayload(input = {}, defaults = {}) {
+  const title = requiredString(input.title, "title");
+  return {
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    version_key: nullableString(input.version_key) || stableKey("delay_schedule", `${defaults.case_id || input.case_id}:${title}`),
+    title,
+    source_type: nullableString(input.source_type),
+    source_id: nullableString(input.source_id),
+    source_url: nullableString(input.source_url),
+    schedule_date: nullableDate(input.schedule_date, "schedule_date"),
+    contractual_completion_date: nullableDate(input.contractual_completion_date, "contractual_completion_date"),
+    actual_completion_date: nullableDate(input.actual_completion_date, "actual_completion_date"),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    human_status: normalizeDelayStatus(input.human_status),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayScheduleActivityPayload(input = {}, defaults = {}) {
+  const startDate = nullableDate(input.start_date, "start_date");
+  const finishDate = nullableDate(input.finish_date, "finish_date");
+  if (startDate && finishDate && Date.parse(startDate) > Date.parse(finishDate)) {
+    throw new Error("start_date must not be later than finish_date");
+  }
+  const name = requiredString(input.name, "name");
+  return {
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    schedule_version_id: requiredString(input.schedule_version_id || defaults.schedule_version_id, "schedule_version_id"),
+    activity_key: nullableString(input.activity_key) || stableKey("delay_activity", `${defaults.schedule_version_id || input.schedule_version_id}:${name}:${startDate || ""}`),
+    name,
+    start_date: startDate,
+    finish_date: finishDate,
+    duration_days: input.duration_days == null || input.duration_days === "" ? null : boundedNumber(input.duration_days, 0, 0, Number.MAX_SAFE_INTEGER),
+    float_days: input.float_days == null || input.float_days === "" ? null : Number(input.float_days),
+    is_critical: input.is_critical == null ? null : Boolean(input.is_critical),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    human_status: normalizeDelayStatus(input.human_status),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayScheduleLinkPayload(input = {}, defaults = {}) {
+  return {
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    event_id: requiredString(input.event_id || defaults.event_id, "event_id"),
+    schedule_activity_id: requiredString(input.schedule_activity_id || defaults.schedule_activity_id, "schedule_activity_id"),
+    link_type: enumValue(input.link_type, DELAY_SCHEDULE_LINK_TYPES, "link_type", "possibly_related"),
+    explanation: nullableString(input.explanation),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    human_status: normalizeDelayStatus(input.human_status),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayCostItemPayload(input = {}, defaults = {}) {
+  const title = requiredString(input.title, "title");
+  return {
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    event_id: nullableString(input.event_id || defaults.event_id),
+    cost_key: nullableString(input.cost_key) || stableKey("delay_cost", `${defaults.case_id || input.case_id}:${title}:${input.amount || ""}`),
+    title,
+    cost_type: enumValue(input.cost_type, DELAY_COST_TYPES, "cost_type", "estimate"),
+    amount: input.amount == null || input.amount === "" ? null : boundedNumber(input.amount, 0, 0, Number.MAX_SAFE_INTEGER),
+    currency: nullableString(input.currency),
+    source_type: nullableString(input.source_type),
+    source_id: nullableString(input.source_id),
+    source_url: nullableString(input.source_url),
+    explanation: nullableString(input.explanation),
+    duplicate_risk: Boolean(input.duplicate_risk),
+    confidence: boundedNumber(input.confidence, 0, 0, 1),
+    human_status: normalizeDelayStatus(input.human_status),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export function sanitizeDelayClaimExportPayload(input = {}, defaults = {}) {
+  const title = requiredString(input.title, "title");
+  return {
+    case_id: requiredString(input.case_id || defaults.case_id, "case_id"),
+    export_key: nullableString(input.export_key) || stableKey("delay_export", `${defaults.case_id || input.case_id}:${title}:${input.export_type || "markdown"}`),
+    export_type: enumValue(input.export_type, DELAY_EXPORT_TYPES, "export_type", "markdown"),
+    title,
+    content: nullableString(input.content),
+    payload: plainObject(input.payload),
+    human_status: normalizeDelayStatus(input.human_status),
+    metadata: plainObject(input.metadata)
+  };
+}
+
+export async function listDelayClaims({ config, limit = 50 } = {}) {
+  if (!isConfigured(config)) return [];
+  const max = Math.min(Math.max(Number(limit || 50), 1), 200);
+  return supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=*&order=updated_at.desc&limit=${max}`);
+}
+
+export async function createDelayClaim({ config, claim }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const payload = sanitizeDelayClaimCasePayload(claim);
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function listDelayEvents({ config, caseId, limit = 200 }) {
+  if (!isConfigured(config)) return [];
+  const max = Math.min(Math.max(Number(limit || 200), 1), 500);
+  const select = "*,evidence:delay_event_evidence(*),gaps:delay_event_gaps(*),findings:delay_event_findings(*),change_log:delay_event_change_log(*)";
+  const params = new URLSearchParams({
+    select,
+    case_id: `eq.${caseId}`,
+    order: "created_at.desc",
+    limit: String(max)
+  });
+  return supabaseFetch(config, `/rest/v1/${DELAY_EVENTS_TABLE}?${params.toString()}`);
+}
+
+export async function createDelayEvent({ config, caseId, event }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const payload = sanitizeDelayEventPayload(event, { case_id: caseId });
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENTS_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function updateDelayEvent({ config, eventId, patch, changedBy = null }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const event = await getDelayEvent({ config, eventId });
+  if (!event) throw new Error("Delay event not found");
+  const payload = sanitizeDelayEventUpdatePayload(patch);
+  if (!Object.keys(payload).length) return event;
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENTS_TABLE}?id=eq.${encodeURIComponent(eventId)}`, {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  const updated = rows?.[0] || { ...event, ...payload };
+  if (payload.human_status && payload.human_status !== event.human_status) {
+    await addDelayEventChangeLog({
+      config,
+      eventId,
+      change: {
+        case_id: updated.case_id,
+        changed_by: changedBy,
+        change_type: "status_change",
+        from_status: event.human_status,
+        to_status: payload.human_status,
+        note: patch.status_note || patch.note || null,
+        diff: { human_status: { from: event.human_status, to: payload.human_status } }
+      }
+    }).catch(() => null);
+  }
+  return updated;
+}
+
+export async function addDelayEventEvidence({ config, eventId, evidence }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const event = await getDelayEvent({ config, eventId });
+  if (!event) throw new Error("Delay event not found");
+  const payload = sanitizeDelayEvidencePayload(evidence, { event_id: eventId, case_id: event.case_id });
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENT_EVIDENCE_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function addDelayEventGap({ config, eventId, gap }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const event = await getDelayEvent({ config, eventId });
+  if (!event) throw new Error("Delay event not found");
+  const payload = sanitizeDelayGapPayload(gap, { event_id: eventId, case_id: event.case_id });
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENT_GAPS_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function addDelayEventChangeLog({ config, eventId, change }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const event = change?.case_id ? { case_id: change.case_id } : await getDelayEvent({ config, eventId });
+  if (!event) throw new Error("Delay event not found");
+  const payload = sanitizeDelayChangeLogPayload(change, { event_id: eventId, case_id: event.case_id });
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENT_CHANGE_LOG_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function addDelayEventFinding({ config, eventId, finding }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const event = finding?.case_id ? { case_id: finding.case_id } : await getDelayEvent({ config, eventId });
+  if (!event) throw new Error("Delay event not found");
+  const payload = sanitizeDelayFindingPayload(finding, { event_id: eventId, case_id: event.case_id });
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENT_FINDINGS_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function getDelayEvent({ config, eventId }) {
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENTS_TABLE}?id=eq.${encodeURIComponent(eventId)}&select=*&limit=1`);
+  return rows?.[0] || null;
+}
+
+export async function getDelayEventDetails({ config, eventId }) {
+  if (!isConfigured(config)) return null;
+  const select = "*,evidence:delay_event_evidence(*),gaps:delay_event_gaps(*),findings:delay_event_findings(*),change_log:delay_event_change_log(*)";
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENTS_TABLE}?id=eq.${encodeURIComponent(eventId)}&select=${encodeURIComponent(select)}&limit=1`);
+  return rows?.[0] || null;
+}
+
+export async function createDelayScheduleVersion({ config, caseId, version }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const payload = sanitizeDelayScheduleVersionPayload(version, { case_id: caseId });
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_SCHEDULE_VERSIONS_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function addDelayScheduleActivity({ config, scheduleVersionId, activity }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const payload = sanitizeDelayScheduleActivityPayload(activity, { schedule_version_id: scheduleVersionId });
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_SCHEDULE_ACTIVITIES_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function linkDelayEventScheduleActivity({ config, link }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const payload = sanitizeDelayScheduleLinkPayload(link);
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENT_SCHEDULE_LINKS_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function addDelayCostItem({ config, cost }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const payload = sanitizeDelayCostItemPayload(cost);
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_COST_ITEMS_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function createDelayClaimExport({ config, claimExport }) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const payload = sanitizeDelayClaimExportPayload(claimExport);
+  const rows = await supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_EXPORTS_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
 export async function listQaReports({ config, limit = 200 }) {
   if (!isConfigured(config)) return [];
   return supabaseFetch(config,
@@ -148,6 +559,72 @@ export async function listRunHistory({ config, limit = 30 }) {
   if (!isConfigured(config)) return [];
   const query = `/rest/v1/${MESSAGES_TABLE}?select=id,created_at,user_message,workflow_log,run_events&workflow_log=not.is.null&status=eq.done&order=created_at.desc&limit=${limit}`;
   return supabaseFetch(config, query);
+}
+
+export async function saveProjectInsightRun({ config, run }) {
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig)) return null;
+  const payload = sanitizeProjectInsightRunPayload(run);
+  const rows = await supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?on_conflict=run_id`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(payload)
+  });
+  return rows?.[0] || payload;
+}
+
+export async function listProjectInsightRuns({ config, limit = 30 }) {
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig)) return [];
+  const max = Math.min(Math.max(Number(limit || 30), 1), 100);
+  const select = [
+    "id", "run_id", "parent_run_id", "project_id", "focus_query", "date_from", "date_to",
+    "source_limit", "is_expansion", "excluded_source_keys", "scanned_source_keys", "summary",
+    "insights", "tool_context", "workflow_log", "run_events", "status", "error", "metadata",
+    "created_at", "updated_at"
+  ].join(",");
+  return supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?select=${select}&order=created_at.desc&limit=${max}`);
+}
+
+export async function getProjectInsightRun({ config, runId }) {
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig) || !runId) return null;
+  const rows = await supabaseFetch(contentConfig,
+    `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?run_id=eq.${encodeURIComponent(runId)}&select=*&limit=1`
+  );
+  return rows?.[0] || null;
+}
+
+function sanitizeProjectInsightRunPayload(input = {}) {
+  const runId = requiredString(input.run_id || input.runId, "run_id");
+  const summary = plainObject(input.summary);
+  return {
+    run_id: runId,
+    parent_run_id: nullableString(input.parent_run_id || input.parentRunId),
+    project_id: nullableString(input.project_id || input.projectId),
+    focus_query: nullableString(input.focus_query || input.focusQuery || summary.focusQuery),
+    date_from: nullableDate(cleanProjectInsightDate(input.date_from || input.dateFrom || summary.dateFrom), "date_from"),
+    date_to: nullableDate(cleanProjectInsightDate(input.date_to || input.dateTo || summary.dateTo), "date_to"),
+    source_limit: Math.min(Math.max(Number(input.source_limit || input.limit || 350), 1), 2000),
+    is_expansion: Boolean(input.is_expansion || input.expansion),
+    excluded_source_keys: Array.isArray(input.excluded_source_keys) ? input.excluded_source_keys : Array.isArray(input.excludedSourceKeys) ? input.excludedSourceKeys : [],
+    scanned_source_keys: Array.isArray(input.scanned_source_keys) ? input.scanned_source_keys : Array.isArray(input.scannedSourceKeys) ? input.scannedSourceKeys : [],
+    summary,
+    insights: Array.isArray(input.insights) ? input.insights : [],
+    tool_context: plainObject(input.tool_context || input.toolContext),
+    workflow_log: input.workflow_log || input.workflowLog || null,
+    run_events: Array.isArray(input.run_events) ? input.run_events : Array.isArray(input.runEvents) ? input.runEvents : [],
+    status: nullableString(input.status) || "done",
+    error: nullableString(input.error),
+    metadata: plainObject(input.metadata),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function cleanProjectInsightDate(value) {
+  const text = String(value || "").trim();
+  if (!text || text === "undefined" || text === "null" || text === "Invalid Date") return null;
+  return text.slice(0, 10);
 }
 
 export async function listMessages({ config, sessionId }) {
@@ -315,12 +792,15 @@ export async function fetchTimelineEventPage({ config, source = "index", sort = 
   const primaryDateField = source === "alerts" ? "data_date" : "primary_date";
   const table = source === "alerts" ? contentConfig.alertsTable : contentConfig.indexTable;
   const direction = sort === "asc" ? "asc" : "desc";
+  const decodedCursor = typeof cursor === "string"
+    ? decodeTimelineCursor(cursor, { source, sort, origins })
+    : cursor;
   const params = new URLSearchParams({
     select: TIMELINE_PAGE_FIELDS[source].join(","),
     order: `${primaryDateField}.${direction}.nullslast,created_at.${direction},id.${direction}`,
     limit: String(limit + 1)
   });
-  const filters = buildTimelinePageFilters({ primaryDateField, from, to, cursor, sort, origins });
+  const filters = buildTimelinePageFilters({ primaryDateField, from, to, cursor: decodedCursor, sort, origins });
   if (filters.length) params.set("and", `(${filters.join(",")})`);
 
   const rows = await supabaseFetch(contentConfig, `/rest/v1/${table}?${params.toString()}`);
@@ -983,6 +1463,49 @@ function requiredString(value, label) {
 function nullableString(value) {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function nullableDate(value, label) {
+  const text = nullableString(value);
+  if (!text) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || !validIsoCalendarDate(text)) {
+    throw new Error(`${label} must be a valid ISO date`);
+  }
+  return text;
+}
+
+function normalizeDelayStatus(value) {
+  return enumValue(value, DELAY_HUMAN_STATUSES, "human_status", "candidate");
+}
+
+function enumValue(value, allowed, label, fallback = null) {
+  const text = nullableString(value);
+  if (!text) return fallback;
+  if (!allowed.includes(text)) throw new Error(`${label} must be one of: ${allowed.join(", ")}`);
+  return text;
+}
+
+function boundedNumber(value, fallback, min, max) {
+  if (value == null || value === "") return fallback;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < min || number > max) {
+    throw new Error(`value must be a number between ${min} and ${max}`);
+  }
+  return number;
+}
+
+function plainObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function stableKey(prefix, value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+  return `${prefix}_${normalized || Date.now()}`;
 }
 
 function sanitizeTimelineEntity(entity = {}) {

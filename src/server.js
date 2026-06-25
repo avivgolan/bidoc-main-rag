@@ -7,12 +7,14 @@ import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSe
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { annotateMessage, contentSupabaseConfig, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, getMessage, getLatestQaReport, graphSearch, hybridSearch, listDislikedMessages, listMessages, listProjectGraph, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, parseTimelineEventsQuery, saveQaReport, TimelineRequestError, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
+import { addDelayEventChangeLog, addDelayEventEvidence, addDelayEventGap, annotateMessage, contentSupabaseConfig, createDelayClaim, createDelayEvent, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, getMessage, getLatestQaReport, getProjectInsightRun, graphSearch, hybridSearch, listDelayClaims, listDelayEvents, listDislikedMessages, listMessages, listProjectGraph, listProjectInsightRuns, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, parseTimelineEventsQuery, saveProjectInsightRun, saveQaReport, TimelineRequestError, updateDelayEvent, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
+import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
+import { runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
@@ -162,6 +164,295 @@ async function handleApi(req, res, url) {
       query: url.searchParams.get("q") || ""
     });
     return sendJson(res, 200, graph);
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/insights/runs") {
+    const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
+    const runs = await listProjectInsightRuns({ config: config(), limit });
+    return sendJson(res, 200, { runs });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/insights/hashtags") {
+    try {
+      const dateFrom = url.searchParams.get("date_from") || null;
+      const dateTo = url.searchParams.get("date_to") || null;
+      const source = url.searchParams.get("source") || "alerts";
+      const fetcher = source === "index"
+        ? fetchTimelineEvents({ config: config() }).catch(() => [])
+        : fetchAlertsTimelineEvents({ config: config() }).catch(() => []);
+      const allEvents = await fetcher;
+      const events = allEvents.filter((ev) => {
+        if (!ev.date) return true;
+        if (dateFrom && ev.date < dateFrom) return false;
+        if (dateTo && ev.date > dateTo) return false;
+        return true;
+      });
+      const counts = {};
+      for (const ev of events) {
+        for (const tag of (ev.tags || [])) {
+          const t = String(tag || "").trim().replace(/^#+/, "");
+          if (t) counts[t] = (counts[t] || 0) + 1;
+        }
+      }
+      const hashtags = Object.entries(counts)
+        .map(([tag, count]) => ({ tag, count }))
+        .sort((a, b) => b.count - a.count);
+      return sendJson(res, 200, { hashtags, total: events.length });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/insights/analyze") {
+    const body = await readJson(req).catch(() => ({}));
+    const runId = body.runId || `project_insights_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    const excludedSourceKeys = Array.isArray(body.excludeSourceKeys) ? body.excludeSourceKeys : [];
+    const parentRunId = body.parentRunId || body.parent_run_id || null;
+    try {
+      const result = await runProjectInsightsAnalysis({
+        config: config(),
+        focusQuery: body.focusQuery || body.query || "",
+          dateFrom: body.dateFrom || body.date_from || null,
+          dateTo: body.dateTo || body.date_to || null,
+          limit: body.limit || 350,
+          excludeSourceKeys: excludedSourceKeys,
+          expansion: Boolean(body.expansion),
+          runId,
+          emit: emitRunEvent
+        });
+      completeRun(runId, {
+        insights: result.insights.length,
+        findings: Array.isArray(result.findings) ? result.findings.length : 0,
+        records: result.summary.totalRecords
+      });
+      const runEvents = getRunEvents(runId);
+      recordRunHistory({
+        id: runId,
+        title: `תובנות פרויקט · ${result.summary.focusQuery || "סריקת אינדקס"}`,
+        workflowLog: result.workflowLog,
+        runEvents,
+        kind: "project_insights_analysis"
+      });
+      const parentRun = parentRunId ? await getProjectInsightRun({ config: config(), runId: parentRunId }).catch(() => null) : null;
+      const persistedResult = parentRun ? mergePersistedProjectInsightRun(parentRun, result) : result;
+      await saveProjectInsightRun({
+        config: config(),
+        run: {
+          runId,
+          parentRunId,
+          projectId: body.projectId || body.project_id || null,
+          focusQuery: persistedResult.summary.focusQuery || body.focusQuery || body.query || "",
+          dateFrom: persistedResult.summary.dateFrom || body.dateFrom || body.date_from || null,
+          dateTo: persistedResult.summary.dateTo || body.dateTo || body.date_to || null,
+          limit: body.limit || 350,
+          expansion: Boolean(body.expansion),
+          excludedSourceKeys,
+          scannedSourceKeys: persistedResult.scannedSourceKeys || [],
+          summary: persistedResult.summary || {},
+          insights: persistedResult.insights || [],
+          toolContext: persistedResult.toolContext || {},
+          workflowLog: persistedResult.workflowLog || null,
+          runEvents,
+          status: "done",
+          metadata: {
+            hasMore: Boolean(persistedResult.hasMore),
+            findings: Array.isArray(persistedResult.findings) ? persistedResult.findings : [],
+            recordsSample: Array.isArray(persistedResult.recordsSample) ? persistedResult.recordsSample.slice(0, 24) : [],
+            expansionRuns: Array.isArray(result.expansionRuns) ? result.expansionRuns.map((item) => item.runId).filter(Boolean) : []
+          }
+        }
+      }).catch((error) => {
+        emitRunEvent(runId, "persistence_warning", "Insight run persistence failed", { error: error.message, status: "warning" });
+      });
+      return sendJson(res, 200, { ...result, runId });
+    } catch (error) {
+      failRun(runId, error);
+      await saveProjectInsightRun({
+        config: config(),
+        run: {
+          runId,
+          parentRunId: body.parentRunId || body.parent_run_id || null,
+          projectId: body.projectId || body.project_id || null,
+          focusQuery: body.focusQuery || body.query || "",
+          dateFrom: body.dateFrom || body.date_from || null,
+          dateTo: body.dateTo || body.date_to || null,
+          limit: body.limit || 350,
+          expansion: Boolean(body.expansion),
+          excludedSourceKeys,
+          scannedSourceKeys: [],
+          summary: {},
+          insights: [],
+          toolContext: {},
+          workflowLog: null,
+          runEvents: getRunEvents(runId),
+          status: "error",
+          error: error.message
+        }
+      }).catch(() => {});
+      return sendJson(res, 500, { ok: false, error: error.message, runId });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/delay-claims") {
+    const claims = await listDelayClaims({
+      config: config(),
+      limit: Number(url.searchParams.get("limit") || 50)
+    });
+    return sendJson(res, 200, { claims });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/delay-claims") {
+    const body = await readJson(req);
+    const claim = await createDelayClaim({ config: config(), claim: body });
+    return sendJson(res, 200, { claim });
+  }
+
+  const delayClaimEventsMatch = url.pathname.match(/^\/api\/delay-claims\/([^/]+)\/events$/);
+  if (delayClaimEventsMatch) {
+    const caseId = decodeURIComponent(delayClaimEventsMatch[1]);
+    if (req.method === "GET") {
+      const events = await listDelayEvents({
+        config: config(),
+        caseId,
+        limit: Number(url.searchParams.get("limit") || 200)
+      });
+      return sendJson(res, 200, { events });
+    }
+    if (req.method === "POST") {
+      const body = await readJson(req);
+      const event = await createDelayEvent({ config: config(), caseId, event: body });
+      return sendJson(res, 200, { event });
+    }
+  }
+
+  const delayClaimAnalyzeMatch = url.pathname.match(/^\/api\/delay-claims\/([^/]+)\/analyze$/);
+  if (req.method === "POST" && delayClaimAnalyzeMatch) {
+    const caseId = decodeURIComponent(delayClaimAnalyzeMatch[1]);
+    const body = await readJson(req).catch(() => ({}));
+    const runId = body.runId || `delay_claim_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    try {
+      const result = await runDelayClaimAnalysis({
+        config: config(),
+        caseId,
+        projectId: body.projectId || body.project_id || null,
+        dateFrom: body.dateFrom || body.date_from || null,
+        dateTo: body.dateTo || body.date_to || null,
+        focusQuery: body.focusQuery || body.query || "",
+        sources: body.sources || [],
+        runId,
+        emit: emitRunEvent
+      });
+      completeRun(runId, result.saved);
+      recordRunHistory({
+        id: runId,
+        title: `תיק עיכוב · ${caseId}`,
+        workflowLog: result.workflowLog,
+        runEvents: getRunEvents(runId),
+        kind: "delay_claim_analysis"
+      });
+      return sendJson(res, 200, { ...result, runId });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { ok: false, error: error.message, runId });
+    }
+  }
+
+  const delayClaimPackageMatch = url.pathname.match(/^\/api\/delay-claims\/([^/]+)\/package$/);
+  if (req.method === "POST" && delayClaimPackageMatch) {
+    const caseId = decodeURIComponent(delayClaimPackageMatch[1]);
+    const body = await readJson(req).catch(() => ({}));
+    const runId = body.runId || `delay_package_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    try {
+      const result = await runDelayClaimPackageAnalysis({
+        config: config(),
+        caseId,
+        contractualCompletionDate: body.contractualCompletionDate || body.contractual_completion_date || null,
+        actualCompletionDate: body.actualCompletionDate || body.actual_completion_date || null,
+        exportType: body.exportType || body.export_type || "markdown",
+        runId,
+        emit: emitRunEvent
+      });
+      completeRun(runId, result.saved);
+      recordRunHistory({
+        id: runId,
+        title: `חבילת תיק עיכוב · ${caseId}`,
+        workflowLog: result.workflowLog,
+        runEvents: getRunEvents(runId),
+        kind: "delay_claim_package"
+      });
+      return sendJson(res, 200, { ...result, runId });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { ok: false, error: error.message, runId });
+    }
+  }
+
+  const delayEventMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)$/);
+  if (req.method === "PATCH" && delayEventMatch) {
+    const eventId = decodeURIComponent(delayEventMatch[1]);
+    const body = await readJson(req);
+    const event = await updateDelayEvent({
+      config: config(),
+      eventId,
+      patch: body,
+      changedBy: body.changed_by || "ui"
+    });
+    return sendJson(res, 200, { event });
+  }
+
+  const delayEventAnalyzeMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)\/analyze$/);
+  if (req.method === "POST" && delayEventAnalyzeMatch) {
+    const eventId = decodeURIComponent(delayEventAnalyzeMatch[1]);
+    const body = await readJson(req).catch(() => ({}));
+    const runId = body.runId || `delay_event_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    try {
+      const result = await runDelayEventDeepAnalysis({
+        config: config(),
+        eventId,
+        runId,
+        emit: emitRunEvent
+      });
+      completeRun(runId, result.saved);
+      recordRunHistory({
+        id: runId,
+        title: `ניתוח אירוע עיכוב · ${eventId}`,
+        workflowLog: result.workflowLog,
+        runEvents: getRunEvents(runId),
+        kind: "delay_event_analysis"
+      });
+      return sendJson(res, 200, { ...result, runId });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { ok: false, error: error.message, runId });
+    }
+  }
+
+  const delayEventEvidenceMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)\/evidence$/);
+  if (req.method === "POST" && delayEventEvidenceMatch) {
+    const eventId = decodeURIComponent(delayEventEvidenceMatch[1]);
+    const body = await readJson(req);
+    const evidence = await addDelayEventEvidence({ config: config(), eventId, evidence: body });
+    return sendJson(res, 200, { evidence });
+  }
+
+  const delayEventGapsMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)\/gaps$/);
+  if (req.method === "POST" && delayEventGapsMatch) {
+    const eventId = decodeURIComponent(delayEventGapsMatch[1]);
+    const body = await readJson(req);
+    const gap = await addDelayEventGap({ config: config(), eventId, gap: body });
+    return sendJson(res, 200, { gap });
+  }
+
+  const delayEventChangeLogMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)\/change-log$/);
+  if (req.method === "POST" && delayEventChangeLogMatch) {
+    const eventId = decodeURIComponent(delayEventChangeLogMatch[1]);
+    const body = await readJson(req);
+    const change = await addDelayEventChangeLog({ config: config(), eventId, change: body });
+    return sendJson(res, 200, { change });
   }
 
   const messagesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/);
@@ -1168,6 +1459,97 @@ function compactWorkflowLog(value) {
 
 function latestTrace(trace, step) {
   return [...(trace || [])].reverse().find((item) => item.step === step) || null;
+}
+
+function mergePersistedProjectInsightRun(parentRun = {}, next = {}) {
+  const parentSummary = parentRun.summary && typeof parentRun.summary === "object" ? parentRun.summary : {};
+  const nextSummary = next.summary && typeof next.summary === "object" ? next.summary : {};
+  const parentFindings = normalizePersistedProjectFindings(parentRun);
+  const nextFindings = Array.isArray(next.findings) ? next.findings : [];
+  const parentInsights = normalizePersistedProjectInsights(parentRun);
+  const nextInsights = Array.isArray(next.insights) ? next.insights : [];
+  const parentKeys = Array.isArray(parentRun.scanned_source_keys) ? parentRun.scanned_source_keys : [];
+  const nextKeys = Array.isArray(next.scannedSourceKeys) ? next.scannedSourceKeys : [];
+  return {
+    ...next,
+    summary: {
+      ...nextSummary,
+      focusQuery: nextSummary.focusQuery || parentSummary.focusQuery || parentRun.focus_query || "",
+      dateFrom: nextSummary.dateFrom || parentSummary.dateFrom || parentRun.date_from || null,
+      dateTo: nextSummary.dateTo || parentSummary.dateTo || parentRun.date_to || null,
+      totalRecords: Number(parentSummary.totalRecords || 0) + Number(nextSummary.totalRecords || 0),
+      sourceCounts: mergeCountObjects(parentSummary.sourceCounts, nextSummary.sourceCounts),
+      expandedRuns: Number(parentSummary.expandedRuns || 1) + 1
+    },
+    findings: dedupeProjectFindings([...parentFindings, ...nextFindings]),
+    insights: dedupeInsightCards([...parentInsights, ...nextInsights]),
+    recordsSample: [
+      ...(Array.isArray(parentRun.metadata?.recordsSample) ? parentRun.metadata.recordsSample : []),
+      ...(Array.isArray(next.recordsSample) ? next.recordsSample : [])
+    ].slice(0, 24),
+    scannedSourceKeys: [...new Set([...parentKeys, ...nextKeys].map((item) => String(item || "").trim()).filter(Boolean))],
+    toolContext: next.toolContext || parentRun.tool_context || {},
+    workflowLog: next.workflowLog || parentRun.workflow_log || null,
+    hasMore: Boolean(next.hasMore)
+  };
+}
+
+function normalizePersistedProjectFindings(run = {}) {
+  if (Array.isArray(run.metadata?.findings)) return run.metadata.findings;
+  if (Array.isArray(run.findings)) return run.findings;
+  const legacyCards = Array.isArray(run.insights) ? run.insights : [];
+  if (legacyCards.some((item) => Array.isArray(item?.supporting_finding_ids) && item.supporting_finding_ids.length)) return [];
+  return legacyCards.map((item, index) => ({
+    ...item,
+    id: item?.id && String(item.id).startsWith("finding_") ? item.id : `legacy_finding_${index + 1}`,
+    finding: item?.finding || item?.insight || "",
+    statement: item?.statement || item?.finding || item?.insight || "",
+    human_status: item?.human_status || "new",
+    legacy: true
+  }));
+}
+
+function normalizePersistedProjectInsights(run = {}) {
+  const cards = Array.isArray(run.insights) ? run.insights : [];
+  return cards.filter((item) => Array.isArray(item?.supporting_finding_ids) && item.supporting_finding_ids.length);
+}
+
+function mergeCountObjects(first = {}, second = {}) {
+  const merged = { ...(first || {}) };
+  for (const [key, value] of Object.entries(second || {})) {
+    merged[key] = Number(merged[key] || 0) + Number(value || 0);
+  }
+  return merged;
+}
+
+function dedupeInsightCards(insights = []) {
+  const seen = new Set();
+  const output = [];
+  for (const insight of insights || []) {
+    const evidenceKey = (insight?.evidence || [])
+      .map((item) => [item.source_table, item.source_id, item.id].filter(Boolean).join(":"))
+      .join("|");
+    const key = [insight?.category, insight?.title, evidenceKey || insight?.finding].filter(Boolean).join("::");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(insight);
+  }
+  return output;
+}
+
+function dedupeProjectFindings(findings = []) {
+  const seen = new Set();
+  const output = [];
+  for (const finding of findings || []) {
+    const evidenceKey = (finding?.evidence || [])
+      .map((item) => [item.source_table, item.source_id, item.id].filter(Boolean).join(":"))
+      .join("|");
+    const key = [finding?.id, finding?.category, finding?.title, evidenceKey || finding?.finding || finding?.statement].filter(Boolean).join("::");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(finding);
+  }
+  return output;
 }
 
 function sendJson(res, status, value) {

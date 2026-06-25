@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BiDoc — AI Document Intelligence</title>
-    <link rel="stylesheet" href="/styles.css?v=20260621-openrouter-telemetry1" />
+    <link rel="stylesheet" href="/styles.css?v=20260625-insights-ux" />
   </head>
   <body>
     <a class="skipLink" href="#chatMain">דלג לתוכן הצ׳אט</a>
@@ -58,6 +58,12 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
             </span>
             <span class="tabLabel">Knowledge Base</span>
+          </button>
+          <button class="tab" data-tab="insights">
+            <span class="tabIcon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 14 3-3 4 4 5-8"/><path d="M18 7h1v1"/></svg>
+            </span>
+            <span class="tabLabel">תובנות</span>
           </button>
           <button class="tab" data-tab="workflow">
             <span class="tabIcon">
@@ -234,6 +240,217 @@
       </section>
 
       <!-- ======================================================
+           INSIGHTS
+           ====================================================== -->
+      <section class="panel" id="insights">
+        <header class="panelHeader">
+          <div>
+            <h2>תובנות</h2>
+            <p class="hint">סוכן תובנות פרויקט שרץ על נתוני האינדקס, מזהה אותות חשובים ומציג כל תובנה עם ראיות מהמקור.</p>
+          </div>
+          <div class="headerActions" hidden>
+            <button id="refreshDelayClaims" type="button">רענן אזור מתקדם</button>
+          </div>
+        </header>
+
+        <section class="insightsHashtagChart">
+          <div class="insightsHashtagChartHeader">
+            <div>
+              <p class="delayClaimEyebrow">Alert Analytics</p>
+              <h3>התפלגות האשטגים ב-Alerts</h3>
+            </div>
+            <button id="refreshHashtagChart" type="button">רענן</button>
+          </div>
+          <div class="insightsHashtagChartWrap">
+            <canvas id="hashtagChartCanvas"></canvas>
+            <p id="hashtagChartEmpty" class="insightsHashtagChartEmpty" hidden>אין נתוני האשטגים.</p>
+          </div>
+        </section>
+
+        <section class="projectInsightsAgent">
+          <div class="projectInsightsIntro">
+            <div>
+              <p class="delayClaimEyebrow">Index Agent</p>
+              <h3>סוכן תובנות פרויקט</h3>
+              <p class="hint">ניתוח AI על נתוני האינדקס: מה תקוע, מה חוזר על עצמו, אילו החלטות פתוחות, איפה חסר מידע ומה כדאי לבדוק עכשיו.</p>
+            </div>
+            <div>
+              <div class="projectInsightsActions">
+                <button id="runProjectInsightsAnalysis" type="button">נתח את הפרויקט</button>
+                <button id="expandProjectInsightsAnalysis" type="button" disabled>הרחב תשובה</button>
+              </div>
+              <p class="insightsKbHint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> להרצה · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> להרחבה</p>
+            </div>
+          </div>
+          <div class="grid">
+            <label class="wide">מיקוד אופציונלי
+              <input id="projectInsightsQuery" placeholder="לדוגמה: חסמים בפרויקט, אישורים פתוחים, עלויות חריגות" />
+            </label>
+            <label>מתאריך
+              <input id="projectInsightsFrom" type="date" value="2024-02-01" />
+            </label>
+            <label>עד תאריך
+              <input id="projectInsightsTo" type="date" value="2026-01-01" />
+            </label>
+            <label>כמות מקורות
+              <select id="projectInsightsLimit">
+                <option value="200">200</option>
+                <option value="350" selected>350</option>
+                <option value="700">700</option>
+              </select>
+            </label>
+          </div>
+          <div id="projectInsightsStatus" class="projectInsightsStatus">טרם הורץ ניתוח אינדקס.</div>
+          <section class="projectInsightsHistoryPanel" aria-label="Insight run history">
+            <div class="projectInsightsHistoryHeader">
+              <div>
+                <h4>היסטוריית תובנות</h4>
+                <p class="hint">בחר דוח קודם כדי להציג אותו ולהמשיך להרחיב מהנקודה שבה הוא עצר.</p>
+              </div>
+              <button id="refreshProjectInsightsHistory" type="button">רענן</button>
+            </div>
+            <div id="projectInsightsHistoryList" class="projectInsightsHistoryList">טוען היסטוריה...</div>
+          </section>
+          <div id="projectInsightsResults" class="projectInsightsResults"></div>
+        </section>
+
+        <div class="delayClaimsAdvancedHeader" hidden>
+          <div>
+            <h3>תיקי עיכוב - אזור מתקדם</h3>
+            <p class="hint">החלק הזה מיועד להמשך טיפול בתביעת עיכוב אחרי שיש תובנות ומועמדים לבדיקה.</p>
+          </div>
+        </div>
+
+        <div class="delayClaimsLayout" hidden>
+          <aside class="delayClaimsSidebar">
+            <section class="delayClaimsPanel">
+              <h3>תיקי עיכוב</h3>
+              <form id="delayClaimForm" class="delayClaimForm">
+                <label>שם תיק
+                  <input id="delayClaimTitle" required placeholder="לדוגמה: תיק עיכובי קבלן - שלד" />
+                </label>
+                <label>Project ID
+                  <input id="delayClaimProjectId" placeholder="אופציונלי" />
+                </label>
+                <label>תיאור
+                  <textarea id="delayClaimDescription" rows="3" placeholder="היקף התיק והגבולות הידניים"></textarea>
+                </label>
+                <button type="submit">צור תיק</button>
+              </form>
+            </section>
+            <div id="delayClaimsList" class="delayClaimsList"></div>
+          </aside>
+
+          <section class="delayClaimWorkspace">
+            <div id="delayClaimEmpty" class="delayClaimEmpty">בחר תיק עיכוב או צור תיק חדש כדי להתחיל לנהל אירועים.</div>
+            <div id="delayClaimContent" hidden>
+              <section class="delayClaimsPanel">
+                <header class="delayClaimCaseHeader">
+                  <div>
+                    <p class="delayClaimEyebrow">תיק עיכוב</p>
+                    <h3 id="delayClaimActiveTitle"></h3>
+                    <p id="delayClaimActiveMeta" class="hint"></p>
+                  </div>
+                  <span id="delayClaimActiveStatus" class="delayStatusBadge"></span>
+                </header>
+              </section>
+
+              <section class="delayClaimsPanel delayAnalyzePanel">
+                <div class="delayClaimSectionHeader">
+                  <div>
+                    <h3>ניתוח תיק</h3>
+                    <p class="hint">שלב 2 מאתר מועמדים לאירועי עיכוב מתוך Content Supabase, Timeline, Project Graph וסוכן הישיבות. התוצרים נשמרים כמועמדים בלבד.</p>
+                  </div>
+                  <button id="runDelayClaimAnalysis" type="button">נתח תיק</button>
+                </div>
+                <div class="grid">
+                  <label class="wide">מיקוד ניתוח
+                    <input id="delayAnalyzeQuery" placeholder="לדוגמה: עיכוב אישורים, חסמים, ספקים, מידע חסר" />
+                  </label>
+                  <label>מתאריך
+                    <input id="delayAnalyzeFrom" type="date" />
+                  </label>
+                  <label>עד תאריך
+                    <input id="delayAnalyzeTo" type="date" />
+                  </label>
+                </div>
+                <div id="delayAnalyzeStatus" class="delayAnalyzeStatus">טרם הורץ ניתוח.</div>
+              </section>
+
+              <section class="delayClaimsPanel delayPackagePanel">
+                <div class="delayClaimSectionHeader">
+                  <div>
+                    <h3>Dashboard ותוצרי תיק</h3>
+                    <p class="hint">שלב 4 מכין תמונת מצב, קישורי לו״ז, אותות עלות ו-export לבדיקה. אין כאן קביעת זכאות כספית או השפעת נתיב קריטי סופית.</p>
+                  </div>
+                  <button id="runDelayClaimPackage" type="button">הכן חבילת תיק</button>
+                </div>
+                <div class="grid">
+                  <label>מסירה חוזית
+                    <input id="delayContractualCompletion" type="date" />
+                  </label>
+                  <label>מסירה בפועל
+                    <input id="delayActualCompletion" type="date" />
+                  </label>
+                  <label>סוג תוצר
+                    <select id="delayPackageExportType">
+                      <option value="markdown">Markdown</option>
+                      <option value="json">JSON</option>
+                    </select>
+                  </label>
+                </div>
+                <div id="delayPackageStatus" class="delayAnalyzeStatus">טרם הופקה חבילת תיק.</div>
+                <div id="delayPackageDashboard" class="delayPackageDashboard"></div>
+              </section>
+
+              <section class="delayClaimsPanel">
+                <h3>אירוע חדש</h3>
+                <form id="delayEventForm" class="delayEventForm">
+                  <div class="grid">
+                    <label class="wide">כותרת אירוע
+                      <input id="delayEventTitle" required placeholder="לדוגמה: עיכוב באישור תוכניות ביצוע" />
+                    </label>
+                    <label>מתאריך
+                      <input id="delayEventStart" type="date" />
+                    </label>
+                    <label>עד תאריך
+                      <input id="delayEventEnd" type="date" />
+                    </label>
+                    <label>סוג אירוע
+                      <input id="delayEventType" placeholder="approval_delay / missing_info" />
+                    </label>
+                    <label>רמת ביטחון
+                      <input id="delayEventConfidence" type="number" min="0" max="1" step="0.05" value="0" />
+                    </label>
+                    <label class="wide">טענת הקבלן
+                      <textarea id="delayEventClaim" rows="3"></textarea>
+                    </label>
+                    <label class="wide">תיאור קצר
+                      <textarea id="delayEventDescription" rows="3"></textarea>
+                    </label>
+                  </div>
+                  <button type="submit">הוסף אירוע</button>
+                </form>
+              </section>
+
+              <div class="delayClaimBoard">
+                <section class="delayClaimsPanel">
+                  <div class="delayClaimSectionHeader">
+                    <h3>אירועי עיכוב</h3>
+                    <span id="delayEventsCount" class="hint"></span>
+                  </div>
+                  <div id="delayEventsList" class="delayEventsList"></div>
+                </section>
+                <aside class="delayEventInspector" id="delayEventInspector">
+                  <div class="workflowInspectorEmpty">בחר אירוע כדי לראות פרטים, ראיות וסטטוס.</div>
+                </aside>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ======================================================
            WORKFLOW
            ====================================================== -->
       <section class="panel" id="workflow">
@@ -316,6 +533,13 @@
                   <span class="metricSub" id="wfMetricSub_successRate">—</span>
                 </div>
               </div>
+            </section>
+            <section class="openRouterMetrics" id="openRouterMetrics" hidden aria-hidden="true">
+              <span id="openRouterCalls">0</span>
+              <span id="openRouterInputTokens">0</span>
+              <span id="openRouterOutputTokens">0</span>
+              <span id="openRouterCost">$0.0000</span>
+              <span id="openRouterSpeed">—</span>
             </section>
 
             <div class="workflowHint" id="workflowHint">
@@ -1264,6 +1488,6 @@
     <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
-    <script src="/app.js?v=20260621-openrouter-telemetry1" type="module"></script>
+    <script src="/app.js?v=20260624-insights6" type="module"></script>
   </body>
 </html>
