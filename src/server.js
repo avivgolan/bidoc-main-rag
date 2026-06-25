@@ -13,6 +13,7 @@ import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimel
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
+import { runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
@@ -600,6 +601,29 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, result);
     } catch (error) {
       return sendJson(res, 200, { ok: false, error: error.message, answer: null });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/subagents/data-query") {
+    const body = await readJson(req).catch(() => ({}));
+    try {
+      const result = await runDataQueryAgent({
+        config: config(),
+        question: body.question || body.query || "",
+        context: {
+          ...(body.context && typeof body.context === "object" ? body.context : {}),
+          dateFrom: body.dateFrom || body.date_from || body.context?.dateFrom || body.context?.date_from || null,
+          dateTo: body.dateTo || body.date_to || body.context?.dateTo || body.context?.date_to || null,
+          source: body.source || body.context?.source || "api"
+        },
+        requestedMetrics: body.requestedMetrics || body.requested_metrics || [],
+        maxPlans: body.maxPlans,
+        queryPlan: body.queryPlan || body.query_plan || null
+      });
+      const status = result.status === "error" && !result.plans?.some((plan) => plan.status === "ok") ? 400 : 200;
+      return sendJson(res, status, result);
+    } catch (error) {
+      return sendJson(res, 500, { status: "error", error: error.message, answer: null, metrics: [], plans: [], tablesUsed: [], confidence: 0, warnings: [error.message] });
     }
   }
 

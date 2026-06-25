@@ -35,6 +35,7 @@ tags:
 - Stage 3 route diff now tracks added and removed workflow edges, summarizes route changes in the Compare banner, styles added/removed routes on the graph when both endpoints are visible, and shows route details in the Edge inspector.
 - Stage 3 performance diff now compares duration, token totals, and known cost between Base and Compare at the run summary level and in each comparable node inspector.
 - Stage 3 regression indicators flag new errors, new fallback usage, slower/costlier/token-heavy nodes, removed nodes, removed routes, and run-level slowdown; regressions can be filtered from the toolbar and are surfaced in the Compare banner and node inspector.
+- Workflow node cards now label Input/Output payload provenance as captured, details, or not captured; nodeDetails are used when a workflow node lacks direct input/output fields.
 - Preview text masks obvious sensitive keys, bearer tokens, secrets, passwords, and authorization values before rendering.
 - The side inspector still shows full Input/Output details and per-node OpenRouter call details for the selected node.
 
@@ -49,9 +50,11 @@ tags:
 - 2026-06-23 -- Added Stage 3 route diff with added/removed edge tracking, Compare banner route snippets, graph styling for changed routes, and Edge inspector route diff details.
 - 2026-06-23 -- Added Stage 3 performance diff with run-level duration/tokens/cost deltas and per-node Base-to-Compare metric details.
 - 2026-06-23 -- Completed Stage 3 regression indicators with regression counting, toolbar filtering, graph highlighting, Compare banner chips, and node inspector explanations.
+- 2026-06-24 -- Fixed Workflow Input/Output display provenance: removed misleading fallback payloads, hydrate missing node payloads from nodeDetails/run events, and show whether payloads are captured/details/not captured.
 
 ## Gotchas
 
 - Non-AI nodes generally do not have per-node duration telemetry yet; the UI intentionally displays `Duration —` for those nodes.
+- Workflow Input/Output is a QA log payload, not always a full automatic runtime capture; if a node lacks direct input/output, the UI now shows nodeDetails-derived data or `not captured`.
 - The local dev server starts with empty in-memory run history unless a chat/link-agent run has happened in that server session or persisted rows are available.
 - Existing full Node test runs currently fail on unrelated Timeline mobile assertions that expect `wireTimelineGraphTouch`, `wireTimelineDetailSwipe`, and phone-narrow compact graph behavior; the Workflow MVP regression itself passes before those failures.

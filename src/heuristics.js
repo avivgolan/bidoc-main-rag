@@ -6,6 +6,7 @@ export function heuristicClassification(message) {
   }
 
   const rules = [
+    [/כמה|ספור|ספירה|פילוח|ממוצע|מגמה|לפי סטטוס|לפי תאריך|לפי חומרה|תמונת מצב|kpi|count|how many|breakdown|average|trend|by status|by date|by severity/, "data_query,alert", "GENERAL"],
     [/חשבונית|תשלום|קבלה|invoice|payment|receipt/, "financial_transactions", "SPECIFIC"],
     [/בטיחות|תאונה|דליפה|נזילה|סיכון|safety|accident|leak/, "safety_report,alert", "GENERAL", "HIGH"],
     [/פגם|ליקוי|qc|quality|defect/, "quality_control", "SPECIFIC"],

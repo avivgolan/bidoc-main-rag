@@ -5,6 +5,7 @@ import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.j
 import { graphSearch, hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
+import { runDataQueryAgent } from "./subagents/dataQuery.js";
 import { formatMeetingCitation, runMeetingEvidenceAgent } from "./subagents/meeting.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
 import { completeRun, emitRunEvent, getRunEvents } from "./runLog.js";
@@ -424,11 +425,13 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     Boolean(classification.investigation)
   );
   const meetingsEvidenceTool = shouldRunMeetingEvidence ? ["meeting_evidence_search"] : [];
-  const tools = buildToolOrder(classification, [...hintedTools(classification), ...plannerTools, ...meetingsEvidenceTool])
+  const dataQueryTool = shouldRunDataQuery({ message, classification, config }) ? ["data_query"] : [];
+  const tools = buildToolOrder(classification, [...hintedTools(classification), ...plannerTools, ...meetingsEvidenceTool, ...dataQueryTool])
     .filter((toolName) => !safetyPrecheckTools.includes(toolName))
     .filter((toolName) => toolsRuntime.enabled !== false)
     .filter((toolName) => toolsRuntime.alertAgentEnabled !== false || toolName !== "alert")
     .filter((toolName) => toolName !== "meeting_evidence_search" || shouldRunMeetingEvidence)
+    .filter((toolName) => toolName !== "data_query" || config.dataQuery?.enabled !== false)
     .slice(0, Number(toolsRuntime.parallelLimit || 6));
   emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools in parallel", { tools });
   const toolResults = await Promise.all(
@@ -442,6 +445,16 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
             evidenceCount: result.data?.evidence?.length || 0,
             conflictsCount: result.data?.conflicts?.length || 0,
             error: result.error || result.data?.error || null
+          });
+        } else if (toolName === "data_query") {
+          emitRunEvent(runId, "data_query", "Data Query Agent completed", {
+            ok: result.ok,
+            skipped: result.skipped || false,
+            status: result.data?.status || null,
+            plans: result.data?.plans?.length || 0,
+            metrics: result.data?.metrics?.length || 0,
+            warnings: result.data?.warnings || [],
+            error: result.error || null
           });
         } else {
           emitRunEvent(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, skipped: result.skipped || false, error: result.error || null });
@@ -591,6 +604,31 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
 }
 
 async function callProjectTool({ toolName, message, classification, sessionId, config, cacheContext = null, telemetryFor }) {
+  if (toolName === "data_query") {
+    try {
+      const result = await runDataQueryAgent({
+        config,
+        question: message,
+        context: {
+          dateFrom: classification?.date_from || null,
+          dateTo: classification?.date_to || null,
+          sessionId,
+          source: "main_agent"
+        },
+        telemetry: telemetryFor("data_query")
+      });
+      return {
+        toolName,
+        ok: ["ok", "partial"].includes(result.status),
+        skipped: ["skipped", "needs_clarification"].includes(result.status),
+        data: result,
+        answer: result.answer,
+        sources: []
+      };
+    } catch (error) {
+      return { toolName, ok: false, error: error.message, data: null, sources: [] };
+    }
+  }
   if (toolName === "meeting_evidence_search") {
     try {
       const result = await runMeetingEvidenceAgent({
@@ -646,6 +684,13 @@ async function callProjectTool({ toolName, message, classification, sessionId, c
     sessionId,
     config
   });
+}
+
+function shouldRunDataQuery({ message, classification, config }) {
+  if (config.dataQuery?.enabled === false || classification?.type === "CHAT") return false;
+  const hint = String(classification?.tool_hint || "");
+  if (hint.split(",").map((item) => item.trim()).includes("data_query")) return true;
+  return /כמה|ספור|ספירה|פילוח|ממוצע|מגמה|לפי סטטוס|לפי תאריך|לפי חומרה|מה הכי הרבה|השוואה בין|תמונת מצב|kpi|count|how many|breakdown|average|trend|by status|by date|by severity|top|compare/i.test(String(message || ""));
 }
 
 export function buildAlertAgentRequest({ message, classification }) {
@@ -1239,6 +1284,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
   const graphCall = toolCalls.find((call) => call.toolName === "graph_search");
   const rerankerCall = toolCalls.find((call) => call.toolName === "reranker");
   const alertCall = toolCalls.find((call) => call.toolName === "alert");
+  const dataQueryCall = toolCalls.find((call) => call.toolName === "data_query");
   const retrievalToolNames = ["hybrid_search", "hybrid_search_plan", "graph_search", "reranker"];
   const safetyPrecheckCalls = classification.urgency === "HIGH"
     ? toolCalls.filter((call) => ["safety_report", "alert"].includes(call.toolName))
@@ -1246,7 +1292,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
   const safetyReportPrecheckCalls = safetyPrecheckCalls.filter((call) => call.toolName !== "alert");
   const alertRanInSafetyPrecheck = Boolean(alertCall && safetyPrecheckCalls.includes(alertCall));
   const safetyPrecheckNames = new Set(safetyPrecheckCalls.map((call) => call.toolName));
-  const n8nCalls = toolCalls.filter((call) => call.toolName !== "alert" && !retrievalToolNames.includes(call.toolName) && !safetyPrecheckNames.has(call.toolName));
+  const n8nCalls = toolCalls.filter((call) => !["alert", "data_query"].includes(call.toolName) && !retrievalToolNames.includes(call.toolName) && !safetyPrecheckNames.has(call.toolName));
   const isChat = classification.type === "CHAT";
   const knowledgePlan = result.knowledgePlan || null;
   const nodes = [
@@ -1319,6 +1365,23 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
           error: alertCall.error || null,
           answer: summarizeData(alertCall.data),
           sources: alertCall.sources || []
+        })
+      );
+    }
+    if (dataQueryCall) {
+      nodes.push(
+        workflowNode("data_query", "Data Query Agent", "database", dataQueryCall.ok ? "done" : dataQueryCall.skipped ? "skipped" : "error", {
+          question: sanitized,
+          requested_plans: dataQueryCall.data?.queryPlan?.plans?.map((plan) => plan.id) || [],
+          allowed_tables: config.dataQuery?.allowedTables || []
+        }, {
+          status: dataQueryCall.data?.status || null,
+          plans_executed: dataQueryCall.data?.plans || [],
+          rows_returned: (dataQueryCall.data?.plans || []).reduce((sum, plan) => sum + Number(plan.rows || 0), 0),
+          metrics: dataQueryCall.data?.metrics || [],
+          tables_used: dataQueryCall.data?.tablesUsed || [],
+          warnings: dataQueryCall.data?.warnings || [],
+          error: dataQueryCall.error || null
         })
       );
     }
@@ -1466,11 +1529,12 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         ...(config.graph?.enabled === false
           ? [["hybrid_search", "reranker"]]
           : [["hybrid_search", "graph_search"], ["graph_search", "reranker"]]),
+        ...(dataQueryCall ? [["reranker", "data_query"]] : []),
         ...(alertCall && !alertRanInSafetyPrecheck
           ? n8nCalls.length
-            ? [["reranker", "alert_agent"], ["alert_agent", "n8n_tools"], ["n8n_tools", "source_quality"]]
-            : [["reranker", "alert_agent"], ["alert_agent", "source_quality"]]
-          : [["reranker", "n8n_tools"], ["n8n_tools", "source_quality"]]),
+            ? [[dataQueryCall ? "data_query" : "reranker", "alert_agent"], ["alert_agent", "n8n_tools"], ["n8n_tools", "source_quality"]]
+            : [[dataQueryCall ? "data_query" : "reranker", "alert_agent"], ["alert_agent", "source_quality"]]
+          : [[dataQueryCall ? "data_query" : "reranker", "n8n_tools"], ["n8n_tools", "source_quality"]]),
         ["source_quality", "conflict_detection"],
         ["conflict_detection", "main_agent"],
         ["main_agent", "update_message"]

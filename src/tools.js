@@ -1,5 +1,8 @@
 import { resolveToolUrl, TOOL_NAMES } from "./config.js";
 
+export const INTERNAL_PROJECT_TOOLS = ["data_query"];
+const ALL_PROJECT_TOOLS = [...TOOL_NAMES, ...INTERNAL_PROJECT_TOOLS];
+
 export function extractLinks(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value || {});
   const urls = text.match(/https?:\/\/[^\s)"'<>\]]+/g) || [];
@@ -49,7 +52,7 @@ export async function callN8nTool({ toolName, query, dateFilter = "", dateFrom =
 export function buildToolOrder(classification, hintedTools) {
   const ordered = [];
   const add = (tool) => {
-    if (TOOL_NAMES.includes(tool) && !ordered.includes(tool)) ordered.push(tool);
+    if (ALL_PROJECT_TOOLS.includes(tool) && !ordered.includes(tool)) ordered.push(tool);
   };
 
   if (classification.urgency === "HIGH") {

@@ -408,6 +408,23 @@ export const DEFAULT_MEETINGS_EVIDENCE_SETTINGS = {
   timeoutMs: 10000
 };
 
+const DEFAULT_DATA_QUERY_SETTINGS = {
+  enabled: true,
+  maxPlans: 5,
+  maxRowsPerPlan: 200,
+  timeoutMsPerPlan: 8000,
+  totalTimeoutMs: 20000,
+  allowedTables: [],
+  allowedSchemas: ["app", "content"],
+  allowRawSql: false,
+  allowJoins: false,
+  allowAggregations: true,
+  requireHumanApprovalForRawSql: true,
+  plannerEnabled: true,
+  plannerModel: "",
+  plannerTimeoutMs: 30000
+};
+
 export function getConfig(settingsOverride = null) {
   const settings = settingsOverride && typeof settingsOverride === "object"
     ? settingsOverride
@@ -467,6 +484,7 @@ export function getConfig(settingsOverride = null) {
     },
     timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks),
     meetingsEvidence: normalizeMeetingsEvidenceSettings(settings.subagents?.meetingsEvidence),
+    dataQuery: normalizeDataQuerySettings(settings.subagents?.dataQuery),
     n8n: {
       baseUrl: trimSlash(settings.n8nBaseUrl || process.env.N8N_BASE_URL || ""),
       runtime: normalizeToolRuntimeSettings(settings.toolsRuntime || settings.toolRuntime),
@@ -531,7 +549,7 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
       })
     ),
     agents: buildAgentList(config),
-    subagents: { ...(settings.subagents || {}), meetingsEvidence: config.meetingsEvidence },
+    subagents: { ...(settings.subagents || {}), meetingsEvidence: config.meetingsEvidence, dataQuery: config.dataQuery },
     presets: mergeSettingsPresets(settings.presets || [])
   };
 }
@@ -762,6 +780,27 @@ function normalizeMeetingsEvidenceSettings(value = {}) {
     adjacentChunks: clampNumber(raw.adjacentChunks, 0, 3, d.adjacentChunks),
     requireQuote: raw.requireQuote !== false,
     timeoutMs: clampNumber(raw.timeoutMs, 1000, 60000, d.timeoutMs)
+  };
+}
+
+function normalizeDataQuerySettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const d = DEFAULT_DATA_QUERY_SETTINGS;
+  return {
+    enabled: raw.enabled !== false,
+    maxPlans: clampNumber(raw.maxPlans, 1, 10, d.maxPlans),
+    maxRowsPerPlan: clampNumber(raw.maxRowsPerPlan, 1, 1000, d.maxRowsPerPlan),
+    timeoutMsPerPlan: clampNumber(raw.timeoutMsPerPlan, 1000, 60000, d.timeoutMsPerPlan),
+    totalTimeoutMs: clampNumber(raw.totalTimeoutMs, 1000, 120000, d.totalTimeoutMs),
+    allowedTables: normalizeStringList(raw.allowedTables, d.allowedTables),
+    allowedSchemas: normalizeStringList(raw.allowedSchemas, d.allowedSchemas),
+    allowRawSql: raw.allowRawSql === true,
+    allowJoins: raw.allowJoins === true,
+    allowAggregations: raw.allowAggregations !== false,
+    requireHumanApprovalForRawSql: raw.requireHumanApprovalForRawSql !== false,
+    plannerEnabled: raw.plannerEnabled !== false,
+    plannerModel: String(raw.plannerModel || "").trim(),
+    plannerTimeoutMs: clampNumber(raw.plannerTimeoutMs, 5000, 90000, d.plannerTimeoutMs)
   };
 }
 

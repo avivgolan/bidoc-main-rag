@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: chat
-last_updated: 2026-06-20
+last_updated: 2026-06-26
 tags:
   - chat
   - rag
@@ -19,6 +19,9 @@ tags:
 - Tool ordering comes from `buildToolOrder` in `src/tools.js`; high urgency forces `safety_report` then `alert`.
 - Main RAG calls project tools through `callProjectTool` in `src/agent.js`.
 - Workflow logs include a dedicated `alert_agent` node when the Alert subagent is called.
+- Quantitative RAG questions can trigger the internal `data_query` project tool; it runs through `callProjectTool`, not through an n8n webhook.
+- Workflow logs include a dedicated `data_query` database node when the Data Query Agent is called.
+- Data Query Agent planner OpenRouter telemetry is recorded under the `data_query` workflow node when the LLM planner is used.
 - The chat page is a project workspace with a welcome state, suggested prompts, searchable recent-conversation drawer, hidden technical session ID, and a responsive floating composer.
 - Mobile chat now includes an app-level navigation drawer for the main sidebar, a compact mobile shell header, and a denser composer layout that keeps chat tools visible without horizontal overflow.
 - The chat workspace visual language now uses a darker editorial control-room style with layered glass surfaces, stronger display typography, upgraded sidebar hierarchy, and richer prompt/composer cards.
@@ -66,8 +69,10 @@ tags:
 - 2026-06-20 -- Moved `שיחה חדשה` into the chat drawer and collapsed mobile composer tools behind a `+` menu so the main input row stays smaller on narrow screens.
 - 2026-06-20 -- Restyled the mobile composer toward a lighter native-chat feel with a softer capsule shell, subtler `+` affordance, rounder send action, and pill-shaped tool chips inspired by modern messaging apps.
 - 2026-06-20 -- Removed a legacy wide `.composer button` treatment from the mobile composer controls so the `+` action stays transparent and proportionate instead of expanding into a large green button.
+- 2026-06-26 -- Added internal `data_query` routing for count/breakdown/trend/KPI-style questions and surfaced Data Query Agent runs in chat workflow logs.
+- 2026-06-26 -- Connected Data Query Agent LLM planner telemetry to the chat workflow log while keeping execution behind server-side validation.
 
 ## Related
 
-- See [subagents](subagents.md) for Alert agent behavior.
+- See [subagents](subagents.md) for Alert and Data Query agent behavior.
 - See [stack](stack.md) for runtime and test commands.

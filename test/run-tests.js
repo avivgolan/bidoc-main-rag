@@ -9,6 +9,7 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
+import { buildDataQueryManifest, executeQueryPlans, planDataQueryWithLlm, runDataQueryAgent, validateQueryPlan } from "../src/subagents/dataQuery.js";
 import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
 import { buildDeterministicInsights, buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
@@ -296,6 +297,207 @@ test("general fallback uses alert and whatsapp_messages", () => {
     buildToolOrder({ urgency: "NORMAL", complexity: "GENERAL" }, []),
     ["alert", "whatsapp_messages"]
   );
+});
+
+function dataQueryTestSettings(overrides = {}) {
+  const config = {
+    contentSource: {
+      indexTable: "data_index",
+      alertsTable: "alerts",
+      supabaseUrl: "https://content.example",
+      supabaseServiceRoleKey: "key"
+    },
+    retrieval: {}
+  };
+  return {
+    enabled: true,
+    maxPlans: 2,
+    maxRowsPerPlan: 2,
+    timeoutMsPerPlan: 8000,
+    totalTimeoutMs: 20000,
+    allowedTables: [],
+    allowedSchemas: ["app", "content"],
+    allowRawSql: false,
+    allowJoins: false,
+    allowAggregations: true,
+    requireHumanApprovalForRawSql: true,
+    manifest: buildDataQueryManifest(config),
+    ...overrides
+  };
+}
+
+test("data query validator rejects unapproved table", () => {
+  const result = validateQueryPlan({
+    plans: [{ id: "bad", schema: "app", table: "not_allowed", operation: "count", limit: 10 }]
+  }, dataQueryTestSettings());
+  assert.equal(result.ok, false);
+  assert.match(result.warnings.join(" "), /table not_allowed/);
+});
+
+test("data query validator rejects unapproved field", () => {
+  const result = validateQueryPlan({
+    plans: [{
+      id: "bad_field",
+      schema: "app",
+      table: "delay_events",
+      operation: "group_count",
+      groupBy: ["not_a_field"],
+      limit: 10
+    }]
+  }, dataQueryTestSettings());
+  assert.equal(result.ok, false);
+  assert.match(result.warnings.join(" "), /not_a_field/);
+});
+
+test("data query validator rejects dangerous operations and raw SQL", () => {
+  const result = validateQueryPlan({
+    plans: [{ id: "drop_it", schema: "app", table: "delay_events", operation: "delete", rawSql: "delete from delay_events", limit: 10 }]
+  }, dataQueryTestSettings());
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /forbidden SQL/);
+});
+
+test("data query validator requires limit and clamps plans and rows", () => {
+  const settings = dataQueryTestSettings({ maxPlans: 1, maxRowsPerPlan: 2 });
+  const result = validateQueryPlan({
+    plans: [
+      { id: "ok", schema: "app", table: "delay_events", operation: "select", limit: 100 },
+      { id: "extra", schema: "app", table: "delay_event_gaps", operation: "count", limit: 10 }
+    ]
+  }, settings);
+  assert.equal(result.ok, true);
+  assert.equal(result.plans.length, 1);
+  assert.equal(result.plans[0].limit, 2);
+  assert.match(result.warnings.join(" "), /maxPlans exceeded/);
+
+  const missing = validateQueryPlan({
+    plans: [{ id: "missing_limit", schema: "app", table: "delay_events", operation: "select", limit: 0 }]
+  }, settings);
+  assert.equal(missing.ok, false);
+  assert.match(missing.warnings.join(" "), /limit is required/);
+});
+
+test("data query executor groups counts from mock rows", async () => {
+  const [plan] = validateQueryPlan({
+    plans: [{ id: "by_status", schema: "app", table: "delay_events", operation: "group_count", groupBy: ["human_status"], limit: 10 }]
+  }, dataQueryTestSettings({ maxRowsPerPlan: 10 })).plans;
+  const result = await executeQueryPlans({
+    plans: [plan],
+    fetchRows: async () => [
+      { human_status: "candidate" },
+      { human_status: "candidate" },
+      { human_status: "approved" }
+    ]
+  });
+  assert.equal(result.plans[0].status, "ok");
+  assert.deepEqual(result.plans[0].rows.sort((a, b) => a.human_status.localeCompare(b.human_status)), [
+    { human_status: "approved", count: 1 },
+    { human_status: "candidate", count: 2 }
+  ]);
+});
+
+test("data query executor aggregates count avg min max sum and preserves partial failure", async () => {
+  const settings = dataQueryTestSettings({ maxPlans: 2, maxRowsPerPlan: 10 });
+  const validation = validateQueryPlan({
+    plans: [
+      {
+        id: "aggregate_readiness",
+        schema: "app",
+        table: "delay_events",
+        operation: "aggregate",
+        metrics: [
+          { type: "count", as: "events_count" },
+          { type: "avg", field: "readiness_score", as: "avg_readiness" },
+          { type: "min", field: "readiness_score", as: "min_readiness" },
+          { type: "max", field: "readiness_score", as: "max_readiness" },
+          { type: "sum", field: "readiness_score", as: "sum_readiness" }
+        ],
+        limit: 10
+      },
+      { id: "will_fail", schema: "app", table: "delay_events", operation: "count", limit: 10 }
+    ]
+  }, settings);
+  const result = await executeQueryPlans({
+    plans: validation.plans,
+    fetchRows: async (plan) => {
+      if (plan.id === "will_fail") throw new Error("mock failure");
+      return [{ readiness_score: 0.5 }, { readiness_score: 1 }];
+    }
+  });
+  assert.equal(result.plans[0].status, "ok");
+  assert.deepEqual(result.plans[0].rows[0], {
+    events_count: 2,
+    avg_readiness: 0.75,
+    min_readiness: 0.5,
+    max_readiness: 1,
+    sum_readiness: 1.5
+  });
+  assert.equal(result.plans[1].status, "error");
+  assert.match(result.warnings.join(" "), /mock failure/);
+});
+
+test("data query LLM planner requests JSON and normalizes safe plans", async () => {
+  let captured = null;
+  const settings = dataQueryTestSettings({ maxPlans: 3, maxRowsPerPlan: 50, plannerModel: "openai/gpt-4o-mini" });
+  const plan = await planDataQueryWithLlm({
+    config: {
+      openRouterApiKey: "test-key",
+      models: { knowledgePlanner: "fallback-model", main: "main-model" },
+      contentSource: { indexTable: "data_index", alertsTable: "alerts" },
+      retrieval: {}
+    },
+    settings,
+    question: "כמה אירועי עיכוב יש לפי סטטוס?",
+    context: { dateFrom: "2026-06-01" },
+    chatComplete: async (payload) => {
+      captured = payload;
+      return JSON.stringify({
+        question: "כמה אירועי עיכוב יש לפי סטטוס?",
+        intent: "status_breakdown",
+        plans: [{
+          id: "delay_events_by_status",
+          schema: "app",
+          table: "delay_events",
+          operation: "group_count",
+          filters: [{ field: "created_at", op: "gte", value: "2026-06-01" }],
+          groupBy: ["human_status"],
+          limit: 50,
+          reason: "Count delay events by status."
+        }],
+        confidence: 0.84,
+        warnings: []
+      });
+    }
+  });
+  assert.equal(captured.model, "openai/gpt-4o-mini");
+  assert.deepEqual(captured.responseFormat, { type: "json_object" });
+  assert.equal(plan.plans[0].table, "delay_events");
+  assert.equal(plan.confidence, 0.84);
+});
+
+test("data query LLM planner output still passes validator before execution", async () => {
+  const settings = dataQueryTestSettings({ maxPlans: 2, maxRowsPerPlan: 10 });
+  const result = await runDataQueryAgent({
+    config: {
+      openRouterApiKey: "test-key",
+      models: { knowledgePlanner: "model", main: "model" },
+      contentSource: { indexTable: "data_index", alertsTable: "alerts" },
+      retrieval: {}
+    },
+    settings,
+    question: "כמה אירועי עיכוב יש לפי סטטוס?",
+    planWithLlm: async () => ({
+      question: "bad",
+      intent: "unsafe",
+      plans: [{ id: "unsafe", schema: "app", table: "delay_events", operation: "select", rawSql: "drop table delay_events", limit: 10 }],
+      confidence: 0.9,
+      warnings: []
+    }),
+    fetchRows: async () => [{ human_status: "candidate" }]
+  });
+  assert.equal(result.planner, "heuristic_fallback");
+  assert.ok(result.warnings.includes("llm_plan_rejected_fallback_used"));
+  assert.ok(result.warnings.some((warning) => /forbidden SQL|raw SQL/i.test(warning)));
 });
 
 test("alert agent request carries structured date range", () => {

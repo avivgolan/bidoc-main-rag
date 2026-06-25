@@ -72,12 +72,14 @@ Return a valid JSON object with exactly these keys:
 - quality_control: defects, inspections, quality findings, or corrective actions.
 - safety_report: safety observations, incidents, violations, or risk levels.
 - submittals: material approvals, technical submissions, procurement tracking, or delivery dates.
+- data_query: read-only table metrics such as counts, breakdowns, averages, trends, KPI-style summaries, or comparisons by status/date/severity.
 
 # Tool Selection
 
 - Select only tools that are reasonably likely to contain relevant evidence.
 - Use "none" when type is CHAT.
 - For broad status requests, prefer alert and add another tool only when the request clearly calls for it.
+- For quantitative requests ("how many", counts, breakdowns, averages, trends, KPI, by status/date/severity), include data_query.
 - For safety emergencies, use "safety_report,alert".
 - For approvals or deadlines, use meetings and add submittals only when the request concerns materials or technical submissions.
 - Do not select every tool as a precaution.

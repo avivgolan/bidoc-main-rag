@@ -53,6 +53,23 @@ const MEETINGS_EVIDENCE_DEFAULTS = {
   timeoutMs: 10000
 };
 
+const DATA_QUERY_DEFAULTS = {
+  enabled: true,
+  maxPlans: 5,
+  maxRowsPerPlan: 200,
+  timeoutMsPerPlan: 8000,
+  totalTimeoutMs: 20000,
+  allowedTables: [],
+  allowedSchemas: ["app", "content"],
+  allowRawSql: false,
+  allowJoins: false,
+  allowAggregations: true,
+  requireHumanApprovalForRawSql: true,
+  plannerEnabled: true,
+  plannerModel: "",
+  plannerTimeoutMs: 30000
+};
+
 const n8nTools = [
   "alert",
   "meetings",
@@ -201,11 +218,12 @@ const WORKFLOW_TEMPLATE_NODES = [
   { id: "graph_search", label: "Project Graph Search", kind: "database", x: 2450, y: 176, description: "Finds project graph relationships around retrieved records." },
   { id: "reranker", label: "OpenRouter Reranker", kind: "ai", x: 2666, y: 176, description: "Reorders retrieved records by relevance to the user question." },
   { id: "alert_agent", label: "Alert Agent", kind: "ai", x: 2882, y: 176, description: "Runs the local Alert subagent with the query and structured date range." },
-  { id: "n8n_tools", label: "n8n Tool Adapters", kind: "tool", x: 3098, y: 176, description: "Calls configured external n8n tool webhooks." },
-  { id: "source_quality", label: "Source Quality", kind: "router", x: 3314, y: 176, description: "Scores the reliability and freshness of retrieved/tool sources." },
-  { id: "conflict_detection", label: "Conflict Detection", kind: "router", x: 3530, y: 176, description: "Highlights possible contradictions across sources before synthesis." },
-  { id: "main_agent", label: "Main RAG Agent", kind: "ai", x: 3746, y: 176, description: "Synthesizes the final grounded answer from retrieval, tools and plans." },
-  { id: "update_message", label: "Update DB", kind: "database", x: 3962, y: 92, description: "Updates chat_messages_gf with the final answer and status." },
+  { id: "data_query", label: "Data Query Agent", kind: "database", x: 3098, y: 176, description: "Runs approved read-only Query Plans against allowlisted Supabase tables." },
+  { id: "n8n_tools", label: "n8n Tool Adapters", kind: "tool", x: 3314, y: 176, description: "Calls configured external n8n tool webhooks." },
+  { id: "source_quality", label: "Source Quality", kind: "router", x: 3530, y: 176, description: "Scores the reliability and freshness of retrieved/tool sources." },
+  { id: "conflict_detection", label: "Conflict Detection", kind: "router", x: 3746, y: 176, description: "Highlights possible contradictions across sources before synthesis." },
+  { id: "main_agent", label: "Main RAG Agent", kind: "ai", x: 3962, y: 176, description: "Synthesizes the final grounded answer from retrieval, tools and plans." },
+  { id: "update_message", label: "Update DB", kind: "database", x: 4178, y: 92, description: "Updates chat_messages_gf with the final answer and status." },
 
   { id: "settings", label: "Settings", kind: "database", x: 70, y: 438, disconnected: true, description: "Configuration screen. Not part of a chat run." },
   { id: "knowledge_manager", label: "Knowledge Manager", kind: "database", x: 286, y: 438, disconnected: true, description: "Uploads and manages KB documents. Not part of a chat run unless the planner reads KB data." },
@@ -240,6 +258,9 @@ const WORKFLOW_TEMPLATE_EDGES = [
   ["hybrid_search", "graph_search"],
   ["graph_search", "reranker"],
   ["reranker", "alert_agent"],
+  ["reranker", "data_query"],
+  ["data_query", "alert_agent"],
+  ["data_query", "n8n_tools"],
   ["alert_agent", "n8n_tools"],
   ["alert_agent", "source_quality"],
   ["reranker", "n8n_tools"],
@@ -250,6 +271,12 @@ const WORKFLOW_TEMPLATE_EDGES = [
 ].map(([from, to]) => ({ from, to }));
 
 const $ = (id) => document.getElementById(id);
+function splitCsv(value) {
+  return String(value || "")
+    .split(/[,\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 const TIMELINE_UI_VERSION = "V1.6";
 const MOBILE_SHELL_QUERY = "(max-width: 980px)";
 
@@ -585,6 +612,116 @@ function loadSubAgents() {
     setTimeout(() => { meCard.querySelector("#meSaveStatus").textContent = ""; }, 2500);
   });
   list.append(meCard);
+
+  const dqCfg = { ...DATA_QUERY_DEFAULTS, ...(state.settings?.subagents?.dataQuery || {}) };
+  const dqCard = document.createElement("div");
+  dqCard.className = "subagent-card";
+  dqCard.innerHTML = `
+    <div class="subagent-header">
+      <span class="subagent-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></span>
+      <span class="subagent-name">Data Query Agent</span>
+      <span class="subagent-status ${dqCfg.enabled ? "status-ok" : "status-warn"}">${dqCfg.enabled ? "פעיל" : "כבוי"}</span>
+    </div>
+    <p class="subagent-desc">Read-only metrics agent for safe table counts, breakdowns, simple aggregations and KPI-style summaries. Uses an allowlisted Query Plan and never runs free raw SQL.</p>
+    <div class="subagent-config">
+      <label class="subagent-config-label">
+        <input type="checkbox" id="dqEnabled" ${dqCfg.enabled ? "checked" : ""} /> הפעל סוכן
+      </label>
+      <label class="subagent-config-label">
+        <input type="checkbox" id="dqPlannerEnabled" ${dqCfg.plannerEnabled !== false ? "checked" : ""} /> LLM planner
+      </label>
+      <label class="subagent-config-label">Planner model
+        <select id="dqPlannerModel"><option value="">— Knowledge/Main model —</option>${models.map((m) => `<option value="${m.id}" ${m.id === (dqCfg.plannerModel || "") ? "selected" : ""}>${m.id}</option>`).join("")}</select>
+      </label>
+      <label class="subagent-config-label">Planner timeout (ms)
+        <input type="number" id="dqPlannerTimeoutMs" value="${dqCfg.plannerTimeoutMs || DATA_QUERY_DEFAULTS.plannerTimeoutMs}" min="5000" max="90000" step="1000" />
+      </label>
+      <label class="subagent-config-label">Max plans
+        <input type="number" id="dqMaxPlans" value="${dqCfg.maxPlans}" min="1" max="10" />
+      </label>
+      <label class="subagent-config-label">Max rows per plan
+        <input type="number" id="dqMaxRowsPerPlan" value="${dqCfg.maxRowsPerPlan}" min="1" max="1000" />
+      </label>
+      <label class="subagent-config-label">Plan timeout (ms)
+        <input type="number" id="dqTimeoutMsPerPlan" value="${dqCfg.timeoutMsPerPlan}" min="1000" max="60000" step="1000" />
+      </label>
+      <label class="subagent-config-label">Total timeout (ms)
+        <input type="number" id="dqTotalTimeoutMs" value="${dqCfg.totalTimeoutMs}" min="1000" max="120000" step="1000" />
+      </label>
+      <label class="subagent-config-label wide">Allowed tables override (optional, comma separated)
+        <textarea id="dqAllowedTables" rows="3" spellcheck="false">${(dqCfg.allowedTables || []).join(", ")}</textarea>
+      </label>
+      <label class="subagent-config-label">Allowed schemas
+        <input id="dqAllowedSchemas" value="${(dqCfg.allowedSchemas || ["app", "content"]).join(", ")}" />
+      </label>
+      <label class="subagent-config-label">
+        <input type="checkbox" id="dqAllowAggregations" ${dqCfg.allowAggregations !== false ? "checked" : ""} /> Allow aggregations
+      </label>
+      <label class="subagent-config-label">
+        <input type="checkbox" id="dqAllowRawSql" ${dqCfg.allowRawSql ? "checked" : ""} disabled /> Raw SQL disabled
+      </label>
+      <label class="subagent-config-label">
+        <input type="checkbox" id="dqAllowJoins" ${dqCfg.allowJoins ? "checked" : ""} disabled /> Joins disabled in v1
+      </label>
+      <button id="dqSaveBtn">שמור הגדרות</button>
+      <span id="dqSaveStatus"></span>
+    </div>
+    <div class="subagent-test">
+      <textarea class="subagent-query" id="dqTestQuestion" rows="3" placeholder="כמה אירועי עיכוב יש לפי סטטוס?"></textarea>
+      <input class="subagent-date" id="dqDateFrom" placeholder="date_from YYYY-MM-DD" />
+      <input class="subagent-date" id="dqDateTo" placeholder="date_to YYYY-MM-DD" />
+      <button id="dqRunBtn">הרץ בדיקה</button>
+    </div>
+    <pre class="subagent-result" id="dqResult">אין תוצאה עדיין.</pre>
+  `;
+  dqCard.querySelector("#dqSaveBtn").addEventListener("click", () => {
+    const updated = {
+      enabled: dqCard.querySelector("#dqEnabled").checked,
+      plannerEnabled: dqCard.querySelector("#dqPlannerEnabled").checked,
+      plannerModel: dqCard.querySelector("#dqPlannerModel").value || "",
+      plannerTimeoutMs: Number(dqCard.querySelector("#dqPlannerTimeoutMs").value) || DATA_QUERY_DEFAULTS.plannerTimeoutMs,
+      maxPlans: Number(dqCard.querySelector("#dqMaxPlans").value) || DATA_QUERY_DEFAULTS.maxPlans,
+      maxRowsPerPlan: Number(dqCard.querySelector("#dqMaxRowsPerPlan").value) || DATA_QUERY_DEFAULTS.maxRowsPerPlan,
+      timeoutMsPerPlan: Number(dqCard.querySelector("#dqTimeoutMsPerPlan").value) || DATA_QUERY_DEFAULTS.timeoutMsPerPlan,
+      totalTimeoutMs: Number(dqCard.querySelector("#dqTotalTimeoutMs").value) || DATA_QUERY_DEFAULTS.totalTimeoutMs,
+      allowedTables: splitCsv(dqCard.querySelector("#dqAllowedTables").value),
+      allowedSchemas: splitCsv(dqCard.querySelector("#dqAllowedSchemas").value),
+      allowRawSql: false,
+      allowJoins: false,
+      allowAggregations: dqCard.querySelector("#dqAllowAggregations").checked,
+      requireHumanApprovalForRawSql: true
+    };
+    state.settings = {
+      ...(state.settings || {}),
+      subagents: { ...(state.settings?.subagents || {}), dataQuery: updated }
+    };
+    state.settingsDirty = true;
+    setSettingsSaveState("יש שינויים בטופס שטרם נשמרו ב-Supabase.", "dirty");
+    dqCard.querySelector("#dqSaveStatus").textContent = "✓ עודכן בטופס";
+    showToast("Data Query Agent settings were loaded into the draft. Save Settings to persist.");
+    setTimeout(() => { dqCard.querySelector("#dqSaveStatus").textContent = ""; }, 2500);
+  });
+  dqCard.querySelector("#dqRunBtn").addEventListener("click", async () => {
+    const resultEl = dqCard.querySelector("#dqResult");
+    resultEl.textContent = "מריץ...";
+    try {
+      const result = await api("/api/subagents/data-query", {
+        method: "POST",
+        body: {
+          question: dqCard.querySelector("#dqTestQuestion").value,
+          context: {
+            dateFrom: dqCard.querySelector("#dqDateFrom").value || null,
+            dateTo: dqCard.querySelector("#dqDateTo").value || null,
+            source: "subagents_ui"
+          }
+        }
+      });
+      resultEl.textContent = JSON.stringify(result, null, 2);
+    } catch (error) {
+      resultEl.textContent = `Error: ${error.message}`;
+    }
+  });
+  list.append(dqCard);
 }
 
 async function refreshAgentsFromApi() {
