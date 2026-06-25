@@ -8,7 +8,7 @@ import { runAlertAgent } from "./subagents/alert.js";
 import { formatMeetingCitation, runMeetingEvidenceAgent } from "./subagents/meeting.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
 import { completeRun, emitRunEvent, getRunEvents } from "./runLog.js";
-import { renderPrompt } from "./prompts.js";
+import { renderPrompt, defaultPrompts } from "./prompts.js";
 import { getProjectDateTime } from "./clock.js";
 import { routeKnowledgeAgents, searchKnowledgeBase } from "./knowledge.js";
 import { TOOL_NAMES } from "./config.js";
@@ -752,31 +752,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
 }
 
 function mainSystemPrompt(classification, config) {
-  const fallback = `You are RAG-PM, the Primary Project Intelligence Agent for the JFrog construction project.
-Default language: Hebrew. If the user writes in English, respond in English.
-
-SYSTEM HINT: ${classification.tool_hint}
-COMPLEXITY: ${classification.complexity}
-URGENCY: ${classification.urgency}
-
-Answer only from supplied vector/tool results. Do not fabricate.
-Use retrieval_context as the primary source when it contains items.
-Do not say "no relevant information found" if retrieval_context or retrieval_results contains records.
-If optional n8n tools are skipped because they are not configured, mention that only under missing info and still answer from vector results.
-If knowledge_plan is supplied, use it only as professional planning guidance. Do not treat it as project evidence.
-If graph_context is supplied, use it as supporting project relationship evidence between retrieved records, alerts, entities, suppliers, risks, documents, and topics. Do not invent facts beyond connected retrieval/tool records.
-Response format:
-**תשובה:**
-- Detailed bullets with names, dates, amounts
-
-**פרטים לפי מקור:**
-- Per tool breakdown
-
-**מה לא נמצא:**
-- Missing info
-
-**מקורות:**
-- ALL links returned by tools.`;
+  const fallback = defaultPrompts().main;
   const rendered = renderPrompt(config.prompts?.main || fallback, {
     tool_hint: classification.tool_hint,
     complexity: classification.complexity,

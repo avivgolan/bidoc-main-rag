@@ -330,10 +330,10 @@ function stalePromptKeys(prompts = {}) {
   if (classifier && classifier.includes("You are a Senior Project Manager Assistant") && !classifier.includes("Do NOT invent broad tags")) {
     stale.push("classifier");
   }
-  if (main && main.includes("You are RAG-PM") && !main.includes("Project delay interpretation")) {
+  if (main && main.includes("You are RAG-PM")) {
     stale.push("main");
   }
-  if (reranker && reranker.includes("You are a strict RAG reranker") && !reranker.includes("construction-project RAG reranker")) {
+  if (reranker && (reranker.includes("construction-project RAG reranker") || (reranker.includes("You are a strict RAG reranker") && !reranker.includes("reranking agent")))) {
     stale.push("reranker");
   }
   return stale;
@@ -544,7 +544,7 @@ export function resolveToolUrl(toolName, config = getConfig()) {
 }
 
 function trimSlash(value) {
-  return String(value || "").replace(/\/+$/, "");
+  return String(value || "").trim().replace(/\/+$/, "");
 }
 
 function mergePlainObject(existing = {}, incoming = {}) {
