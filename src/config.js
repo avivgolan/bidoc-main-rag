@@ -15,7 +15,7 @@ const DEFAULT_AI_SETTINGS = {
   lite: { temperature: 0.3, maxTokens: 1800, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
   reranker: { temperature: 0, maxTokens: 4096, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
   alert: { temperature: 0.1, maxTokens: 2200, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
-  qa: { temperature: 0.1, maxTokens: 3000, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null }
+  qa: { temperature: 0.1, maxTokens: 6000, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null }
 };
 const DEFAULT_RAG_SETTINGS = {
   contextRecordsLimit: 12,
@@ -60,7 +60,8 @@ const BUILT_IN_SETTINGS_PRESETS = [
         knowledgePlanner: { maxTokens: 2200 },
         main: { maxTokens: 4096 },
         reranker: { maxTokens: 1200 },
-        alert: { maxTokens: 1200 }
+        alert: { maxTokens: 1200 },
+        qa: { maxTokens: 6000 }
       },
       rag: {
         contextRecordsLimit: 10,
@@ -98,7 +99,8 @@ const BUILT_IN_SETTINGS_PRESETS = [
         knowledgePlanner: { maxTokens: 1500 },
         main: { maxTokens: 3000 },
         reranker: { maxTokens: 1200 },
-        alert: { maxTokens: 1000 }
+        alert: { maxTokens: 1000 },
+        qa: { maxTokens: 6000 }
       },
       rag: {
         contextRecordsLimit: 10,
@@ -136,7 +138,8 @@ const BUILT_IN_SETTINGS_PRESETS = [
         knowledgePlanner: { maxTokens: 1000 },
         main: { maxTokens: 2000 },
         reranker: { maxTokens: 800 },
-        alert: { maxTokens: 800 }
+        alert: { maxTokens: 800 },
+        qa: { maxTokens: 6000 }
       },
       rag: {
         contextRecordsLimit: 6,

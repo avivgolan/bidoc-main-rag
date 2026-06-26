@@ -19,7 +19,8 @@ import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimeline
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "../src/projectGraph.js";
 import { chatCompletion } from "../src/openrouter.js";
 import { cachedOperation, cacheKey, createCacheContext, finalizeCacheMetrics, MemoryCacheProvider } from "../src/cache.js";
-import { QA_SYSTEM_PROMPT } from "../src/qaAgent.js";
+import { QA_FULL_AUDIT_MIN_TOKENS, QA_SYSTEM_PROMPT } from "../src/qaAgent.js";
+import { buildQaRunSummary } from "../src/qaSummary.js";
 import { defaultPrompts } from "../src/prompts.js";
 import { adjacentTimelineRange, buildTimelineEventsUrl, canCommitTimelineRequest, initialTimelineRange, isTimelineAbortError, isTimelineRangeCovered, isTimelineTimeoutError, mergeTimelineEvents, mergeTimelineRanges, normalizeTimelineOrigins, timelineMonthRange, timelineOriginSignature, timelineRangeKey, toggleTimelineOriginSelection } from "../public/timelineData.js";
 import { buildTimelineSearchText, createTimelineSearchController, timelineEventMatchesQuery } from "../public/timelineSearch.js";
@@ -1393,9 +1394,216 @@ test("retrieval row limits are bounded for safe runtime use", () => {
 test("QA prompts require Hebrew reports and evidence-based optional tool diagnosis", () => {
   for (const prompt of [QA_SYSTEM_PROMPT, defaultPrompts().qa]) {
     assert.match(prompt, /human-readable JSON value in Hebrew/);
-    assert.match(prompt, /skipped optional n8n tool is not automatically a failure/);
+    assert.match(prompt, /skipped optional tool is not automatically a failure/);
     assert.match(prompt, /Separate retrieval failure from answer behavior/);
   }
+});
+
+test("QA prompts require structured full-run audit contract", () => {
+  const requiredTerms = [
+    "qa_run_summary",
+    "agent_audit",
+    "pipeline_timeline",
+    "retrieval_review",
+    "grounding_review",
+    "cost_review",
+    "decision_quality",
+    "internal/admin-only",
+    "customer-facing chat",
+    "Do not copy raw JSON"
+  ];
+
+  for (const prompt of [QA_SYSTEM_PROMPT, defaultPrompts().qa]) {
+    for (const term of requiredTerms) {
+      assert.ok(prompt.includes(term), `QA prompt missing ${term}`);
+    }
+    assert.match(prompt, /Audit every meaningful item in qa_run_summary\.agent_steps/);
+    assert.match(prompt, /"done" \| "skipped" \| "error"/);
+    assert.match(prompt, /"good" \| "questionable" \| "bad" \| "not_applicable"/);
+    assert.match(prompt, /"good" \| "partial" \| "poor" \| "not_applicable"/);
+  }
+});
+
+test("QA agent uses a full-audit output token floor", () => {
+  const qaAgentSource = fs.readFileSync(new URL("../src/qaAgent.js", import.meta.url), "utf8");
+  const configSource = fs.readFileSync(new URL("../src/config.js", import.meta.url), "utf8");
+  assert.equal(QA_FULL_AUDIT_MIN_TOKENS, 6000);
+  assert.match(qaAgentSource, /Math\.max\(config\.ai\?\.qa\?\.maxTokens \?\? QA_FULL_AUDIT_MIN_TOKENS, QA_FULL_AUDIT_MIN_TOKENS\)/);
+  assert.match(configSource, /qa: \{ temperature: 0\.1, maxTokens: 6000/);
+});
+
+test("QA UI renders full audit fields alongside compact report", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const cssSource = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+  assert.match(appSource, /reportEl\.innerHTML = qaReportHtmlFull\(normalizedReport\)/);
+  assert.match(appSource, /body\.innerHTML = qaReportHtmlFull\(report\)/);
+  assert.match(appSource, /function qaReportHtmlFull\(report = \{\}\)/);
+  assert.match(appSource, /function qaFullAuditHtml\(report = \{\}\)/);
+  for (const marker of [
+    "Full QA Audit",
+    "Agent Audit",
+    "Pipeline Timeline",
+    "Retrieval Review",
+    "Grounding Review",
+    "Cost Review",
+    "Raw QA JSON",
+    "agent_audit",
+    "pipeline_timeline",
+    "retrieval_review",
+    "grounding_review",
+    "cost_review"
+  ]) {
+    assert.match(appSource, new RegExp(marker));
+  }
+  assert.match(cssSource, /\.qaFullAudit/);
+  assert.match(cssSource, /\.qaAgentAuditItem/);
+  assert.match(cssSource, /\.qaRawReport pre/);
+});
+
+test("QA run summary includes nodes metrics retrieval evidence and masks secrets", () => {
+  const longText = "important evidence ".repeat(120);
+  const workflowLog = {
+    nodes: [
+      {
+        id: "classifier",
+        label: "Smart Classifier",
+        kind: "ai",
+        status: "done",
+        input: { sanitized: "show delays", authorization: "Bearer abc.def.ghi" },
+        output: { type: "RAG", professional: true },
+        openrouter: [{
+          step: "classifier",
+          call_id: "classifier_1",
+          status: "done",
+          requested_model: "openai/gpt-4o-mini",
+          actual_model: "openai/gpt-4o-mini",
+          generation_id: "gen-classifier",
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+          cost: 0.00001,
+          duration_ms: 200
+        }]
+      },
+      {
+        id: "hybrid_search",
+        label: "Hybrid Search",
+        kind: "vector",
+        status: "done",
+        input: { candidates: 40, api_key: "sk-should-not-leak" },
+        output: {
+          records_returned: 2,
+          sample: [{ score: 0.91, text: longText, metadata: { source_url: "https://source.test/1" } }]
+        }
+      },
+      {
+        id: "reranker",
+        label: "OpenRouter Reranker",
+        kind: "ai",
+        status: "done",
+        input: { model: "openai/gpt-4o-mini", candidates: 2 },
+        output: {
+          records_returned: 1,
+          top_chunks: [{
+            rank: 1,
+            hybrid_score: 0.91,
+            rerank_score: 88,
+            rerank_reason: "Direct delay evidence",
+            text: longText,
+            url: "https://source.test/1",
+            metadata: { title: "Delay source" }
+          }]
+        },
+        openrouter: [{
+          step: "reranker",
+          call_id: "reranker_1",
+          status: "done",
+          actual_model: "openai/gpt-4o-mini",
+          prompt_tokens: 100,
+          completion_tokens: 20,
+          total_tokens: 120,
+          cost: 0.0002,
+          duration_ms: 1200
+        }]
+      },
+      {
+        id: "main_agent",
+        label: "Main RAG Agent",
+        kind: "ai",
+        status: "done",
+        input: { answer_mode: "standard_grounded_answer", retrieval_records: 1, graph_relationships: 0, tool_calls: 0 },
+        output: { answer: "Supported answer [source](https://source.test/1)", sources: [{ title: "Delay source", url: "https://source.test/1" }] },
+        openrouter: [{
+          step: "main_agent",
+          call_id: "main_1",
+          status: "done",
+          actual_model: "openai/gpt-4o",
+          generation_id: "gen-main",
+          prompt_tokens: 1000,
+          completion_tokens: 200,
+          total_tokens: 1200,
+          cost: 0.01,
+          duration_ms: 5000
+        }]
+      }
+    ],
+    activePrompts: {
+      classifier: "classifier prompt " + "x".repeat(1000),
+      main: "main prompt"
+    },
+    trace: [{ step: "mainAgent", fallback: true, error: "fallback used" }],
+    openRouterUsage: {
+      totals: {
+        calls: 3,
+        successful_calls: 3,
+        failed_calls: 0,
+        prompt_tokens: 1110,
+        completion_tokens: 225,
+        total_tokens: 1335,
+        cost: 0.01021,
+        duration_ms: 6400
+      },
+      calls: []
+    }
+  };
+
+  const summary = buildQaRunSummary({
+    userMessage: "show delays",
+    aiResponse: "Supported answer [source](https://source.test/1)",
+    workflowLog,
+    userFeedback: "answer was too short"
+  });
+
+  assert.equal(summary.schema_version, 1);
+  assert.equal(summary.run_overview.workflow_node_count, 4);
+  assert.equal(summary.run_overview.user_feedback, "answer was too short");
+  assert.equal(summary.agent_steps.length, 4);
+  assert.ok(summary.agent_steps.some((step) => step.step === "classifier"));
+  assert.match(summary.agent_steps.find((step) => step.step === "classifier").input_summary, /^keys:/);
+  assert.doesNotMatch(summary.agent_steps.find((step) => step.step === "classifier").input_summary, /\{"sanitized"/);
+  assert.equal(summary.agent_steps.find((step) => step.step === "main_agent").metrics.total_tokens, 1200);
+  assert.equal(summary.retrieval_evidence.top_chunks[0].rerank_reason, "Direct delay evidence");
+  assert.equal(summary.retrieval_evidence.top_chunks[0].url, "https://source.test/1");
+  assert.ok(summary.retrieval_evidence.top_chunks[0].text.length < longText.length);
+  assert.equal(summary.openrouter_usage.totals.total_tokens, 1335);
+  assert.equal(summary.source_and_citation_signals.answer_markdown_link_count, 1);
+  assert.ok(summary.errors_and_fallbacks.some((item) => item.step === "mainAgent"));
+  assert.equal(summary.prompt_inventory.classifier.chars, workflowLog.activePrompts.classifier.length);
+  assert.ok(summary.prompt_inventory.classifier.preview.length < workflowLog.activePrompts.classifier.length);
+  assert.doesNotMatch(JSON.stringify(summary), /sk-should-not-leak|Bearer abc/);
+  assert.match(JSON.stringify(summary), /\[REDACTED\]/);
+});
+
+test("QA run summary handles missing workflow nodes", () => {
+  const summary = buildQaRunSummary({
+    userMessage: "hello",
+    aiResponse: "hi",
+    workflowLog: null
+  });
+  assert.equal(summary.run_overview.workflow_node_count, 0);
+  assert.deepEqual(summary.agent_steps, []);
+  assert.deepEqual(summary.retrieval_evidence.top_chunks, []);
+  assert.equal(summary.openrouter_usage.totals.calls, 0);
 });
 
 test("chat UI preserves successful answers when workflow rendering fails", () => {

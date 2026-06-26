@@ -41,6 +41,12 @@ tags:
 
 ## Recent Changes
 
+- 2026-06-25 -- Captured QA Agent Phase 0 baseline in `docs/qa-agent-full-run-audit-plan.md` using disliked message `1255`; current QA report identifies incomplete Main output but lacks full per-agent audit, telemetry use, and pipeline timeline.
+- 2026-06-25 -- Approved QA Agent Phase 1 report contract: keep compact QA fields, add `agent_audit`, `pipeline_timeline`, retrieval/grounding/cost reviews, bounded evidence, internal-only telemetry, and per-agent decision quality.
+- 2026-06-25 -- Implemented QA Agent Phase 2 deterministic `qa_run_summary` builder in `src/qaSummary.js`, wired it into `runQaAgent()`, and added tests for node coverage, metrics, retrieval evidence, truncation, missing logs, and secret masking.
+- 2026-06-25 -- Tightened QA Agent phase-gate rule: every remaining phase must record explicit tests or measurements, pass/fail results, known unrelated failures, and a proceed/repeat/fix decision before moving on.
+- 2026-06-25 -- Completed QA Agent Phase 3 prompt/runtime update: full-audit prompt now uses `qa_run_summary`, compact step summaries avoid raw JSON copying, QA full-audit output enforces a 6000-token floor, and live message `1255` returned valid JSON with 17 `agent_audit` and 17 timeline entries.
+- 2026-06-25 -- Added early QA UI rendering slice: QA cards now use `qaReportHtmlFull()` to show compact fields plus `Full QA Audit`, `Agent Audit`, `Pipeline Timeline`, retrieval/grounding/cost reviews, and bounded `Raw QA JSON` when those fields exist.
 - 2026-06-23 -- Implemented Workflow QA MVP node-card canvas display with Input/Output previews, OpenRouter-derived metrics, error preview, fit-to-screen, collapse/expand control, and a focused Node regression test.
 - 2026-06-23 -- Adjusted Workflow MVP canvas readability after browser review: larger cards/text, start-of-run focus on render, and minimum readable zoom for Fit.
 - 2026-06-23 -- Added Stage 2 QA Inspector basics: toolbar search/status/errors/slow/cost filters, edge payload inspector, node logs, source rendering, masked Raw JSON, and regression coverage.
