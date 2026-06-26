@@ -4646,7 +4646,7 @@ function renderWorkflowAiReport(reportEnvelope) {
   status.textContent = reportEnvelope.generated_at
     ? `נוצר ${new Date(reportEnvelope.generated_at).toLocaleString("he-IL")}`
     : "דוח שמור";
-  body.innerHTML = qaReportHtml(report);
+  body.innerHTML = qaReportHtmlFull(report);
 }
 
 function timeAgo(date) {
@@ -8166,7 +8166,7 @@ function renderQaReport(report, messageId, card) {
   const reportEl = card.querySelector(`#qaReport_${messageId}`);
   if (!report || !reportEl) return;
   const normalizedReport = report.report || report;
-  reportEl.innerHTML = qaReportHtml(normalizedReport);
+  reportEl.innerHTML = qaReportHtmlFull(normalizedReport);
   const copyButton = reportEl.querySelector(".qaCopyReport");
   copyButton?.addEventListener("click", async () => {
     copyButton.disabled = true;
@@ -8218,6 +8218,234 @@ function qaReportHtml(report) {
       ${recs ? `<div class="qaSection"><strong>המלצות:</strong><ul class="qaRecs">${recs}</ul></div>` : ""}
     </div>
   `;
+}
+
+function qaReportHtmlFull(report = {}) {
+  const sevClass = { high: "qaHigh", medium: "qaMedium", low: "qaLow" };
+  const stepRows = (report.step_issues || []).map((issue) => `
+    <div class="qaStepIssue ${sevClass[issue.severity] || ""}">
+      <div class="qaStepIssueHeader">
+        <strong>${escapeHtml(issue.label || issue.step || "Step")}</strong>
+        <span class="qaStepSeverity">${escapeHtml(issue.severity || "")}</span>
+      </div>
+      <p>${escapeHtml(issue.issue || "")}</p>
+    </div>
+  `).join("");
+  const recs = (report.recommendations || []).map((rec) => `<li>${escapeHtml(rec)}</li>`).join("");
+  const rootCauses = (report.root_cause_steps || []).map((s) => `<code>${escapeHtml(s)}</code>`).join(", ");
+  const fullAudit = qaFullAuditHtml(report);
+
+  return `
+    <div class="qaReportBox">
+      <div class="qaReportActions">
+        <button class="qaCopyReport" type="button" title="Copy the QA report as text">Copy report</button>
+      </div>
+      <div class="qaReportHeader">
+        <span class="qaOverallSeverity ${sevClass[report.overall_severity] || ""}">severity: ${escapeHtml(report.overall_severity || "")}</span>
+        <span class="qaAnswerQuality">quality: ${escapeHtml(report.answer_quality || "")}</span>
+        <span class="qaConfidence">confidence: ${escapeHtml(report.confidence || "")}</span>
+      </div>
+      <p class="qaSummary">${escapeHtml(report.summary || "")}</p>
+      ${rootCauses ? `<div class="qaSection"><strong>Root cause steps:</strong> ${rootCauses}</div>` : ""}
+      ${stepRows ? `<div class="qaSection"><strong>Step findings:</strong><div class="qaStepList">${stepRows}</div></div>` : ""}
+      ${recs ? `<div class="qaSection"><strong>Recommendations:</strong><ul class="qaRecs">${recs}</ul></div>` : ""}
+      ${fullAudit}
+    </div>
+  `;
+}
+
+function qaFullAuditHtml(report = {}) {
+  const hasFullAudit = [
+    "agent_audit",
+    "pipeline_timeline",
+    "retrieval_review",
+    "grounding_review",
+    "cost_review"
+  ].some((key) => report[key] !== undefined && report[key] !== null);
+  if (!hasFullAudit) return "";
+
+  const agentAudit = Array.isArray(report.agent_audit) ? report.agent_audit : [];
+  const timeline = Array.isArray(report.pipeline_timeline) ? report.pipeline_timeline : [];
+  const retrieval = report.retrieval_review || {};
+  const grounding = report.grounding_review || {};
+  const cost = report.cost_review || {};
+  const stats = [
+    ["agent_audit", `${agentAudit.length} steps`],
+    ["pipeline_timeline", `${timeline.length} events`],
+    ["retrieval_review.coverage", retrieval.coverage || "not available"],
+    ["grounding_review.faithfulness", grounding.faithfulness || "not available"],
+    ["cost_review.total_tokens", qaDisplayValue(cost.total_tokens)],
+    ["cost_review.total_cost_usd", qaCostValue(cost.total_cost_usd)]
+  ];
+
+  return `
+    <section class="qaFullAudit" data-qa-full-audit>
+      <div class="qaFullAuditHeader">
+        <div>
+          <h4>Full QA Audit</h4>
+          <p>All compact report fields plus the structured Phase 3 audit variables.</p>
+        </div>
+      </div>
+      <div class="qaAuditStats">
+        ${stats.map(([label, value]) => `
+          <div class="qaAuditStat">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+          </div>
+        `).join("")}
+      </div>
+      ${qaAgentAuditHtml(agentAudit)}
+      ${qaPipelineTimelineHtml(timeline)}
+      ${qaReviewHtml("Retrieval Review", "retrieval_review", [
+        ["coverage", retrieval.coverage],
+        ["evidence_found", retrieval.evidence_found],
+        ["evidence_missing", retrieval.evidence_missing],
+        ["ranking_notes", retrieval.ranking_notes],
+        ["source_notes", retrieval.source_notes]
+      ])}
+      ${qaReviewHtml("Grounding Review", "grounding_review", [
+        ["faithfulness", grounding.faithfulness],
+        ["supported_claims", grounding.supported_claims],
+        ["unsupported_or_weak_claims", grounding.unsupported_or_weak_claims],
+        ["citation_issues", grounding.citation_issues],
+        ["internal_exposure_risks", grounding.internal_exposure_risks]
+      ])}
+      ${qaReviewHtml("Cost Review", "cost_review", [
+        ["total_tokens", cost.total_tokens],
+        ["total_cost_usd", cost.total_cost_usd],
+        ["highest_cost_steps", cost.highest_cost_steps],
+        ["context_size_risks", cost.context_size_risks],
+        ["cost_recommendations", cost.cost_recommendations]
+      ])}
+      <details class="qaRawReport">
+        <summary>Raw QA JSON</summary>
+        <pre>${escapeHtml(JSON.stringify(report, null, 2))}</pre>
+      </details>
+    </section>
+  `;
+}
+
+function qaAgentAuditHtml(agentAudit = []) {
+  if (!agentAudit.length) return "";
+  return `
+    <section class="qaAuditSection">
+      <h5>Agent Audit</h5>
+      <div class="qaAgentAuditList">
+        ${agentAudit.map((item) => `
+          <article class="qaAgentAuditItem">
+            <div class="qaAgentAuditHeader">
+              <div>
+                <strong>${escapeHtml(item.label || item.step || "Unknown step")}</strong>
+                <code>${escapeHtml(item.step || "")}</code>
+              </div>
+              <div class="qaAuditBadges">
+                ${qaBadge("status", item.status)}
+                ${qaBadge("decision", item.decision_quality)}
+              </div>
+            </div>
+            ${item.mission ? `<p class="qaAuditText"><b>Mission:</b> ${escapeHtml(item.mission)}</p>` : ""}
+            ${item.what_happened ? `<p class="qaAuditText"><b>What happened:</b> ${escapeHtml(item.what_happened)}</p>` : ""}
+            <div class="qaAuditGrid">
+              ${qaAuditField("input_summary", item.input_summary)}
+              ${qaAuditField("output_summary", item.output_summary)}
+              ${qaAuditField("metrics", qaMetricsText(item.metrics))}
+            </div>
+            ${qaInlineList("evidence_used", item.evidence_used)}
+            ${qaInlineList("issues", item.issues)}
+          </article>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function qaPipelineTimelineHtml(timeline = []) {
+  if (!timeline.length) return "";
+  return `
+    <section class="qaAuditSection">
+      <h5>Pipeline Timeline</h5>
+      <ol class="qaTimelineList">
+        ${timeline.map((item) => `
+          <li>
+            <span class="qaTimelineStep">${escapeHtml(item.step || "")}</span>
+            ${qaBadge("status", item.status)}
+            <span>${escapeHtml(item.result || "")}</span>
+            ${item.duration_ms !== null && item.duration_ms !== undefined ? `<small>${escapeHtml(`${item.duration_ms} ms`)}</small>` : ""}
+          </li>
+        `).join("")}
+      </ol>
+    </section>
+  `;
+}
+
+function qaReviewHtml(title, key, fields = []) {
+  const hasContent = fields.some(([, value]) => Array.isArray(value) ? value.length : value !== undefined && value !== null && value !== "");
+  if (!hasContent) return "";
+  return `
+    <section class="qaAuditSection" data-qa-review="${escapeHtml(key)}">
+      <h5>${escapeHtml(title)}</h5>
+      <div class="qaReviewGrid">
+        ${fields.map(([label, value]) => `
+          <div class="qaReviewRow">
+            <span>${escapeHtml(label)}</span>
+            <div>${qaReviewValue(value)}</div>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function qaReviewValue(value) {
+  if (Array.isArray(value)) return value.length ? `<ul>${value.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : "<em>None</em>";
+  return `<strong>${escapeHtml(qaDisplayValue(value))}</strong>`;
+}
+
+function qaAuditField(label, value) {
+  if (!value) return "";
+  return `
+    <div class="qaAuditField">
+      <span>${escapeHtml(label)}</span>
+      <p>${escapeHtml(value)}</p>
+    </div>
+  `;
+}
+
+function qaInlineList(label, items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  return `
+    <div class="qaAuditInlineList">
+      <span>${escapeHtml(label)}</span>
+      ${items.map((item) => `<code>${escapeHtml(item)}</code>`).join("")}
+    </div>
+  `;
+}
+
+function qaBadge(label, value) {
+  if (!value) return "";
+  return `<span class="qaAuditBadge">${escapeHtml(label)}: ${escapeHtml(value)}</span>`;
+}
+
+function qaMetricsText(metrics = {}) {
+  if (!metrics || typeof metrics !== "object") return "";
+  return [
+    metrics.model ? `model ${metrics.model}` : "",
+    metrics.tokens !== null && metrics.tokens !== undefined ? `tokens ${metrics.tokens}` : "",
+    metrics.cost_usd !== null && metrics.cost_usd !== undefined ? `cost ${qaCostValue(metrics.cost_usd)}` : "",
+    metrics.latency_ms !== null && metrics.latency_ms !== undefined ? `latency ${metrics.latency_ms} ms` : ""
+  ].filter(Boolean).join(" | ");
+}
+
+function qaDisplayValue(value) {
+  if (value === null || value === undefined || value === "") return "not available";
+  if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(8)));
+  return String(value);
+}
+
+function qaCostValue(value) {
+  if (value === null || value === undefined || value === "") return "not available";
+  const number = Number(value);
+  return Number.isFinite(number) ? `$${number.toFixed(8)}` : String(value);
 }
 
 function formatQaReportText(report = {}) {
