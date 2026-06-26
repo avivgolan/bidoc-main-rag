@@ -1,4 +1,4 @@
-import { chatCompletion, extractJsonObject } from "../openrouter.js";
+import { chatCompletion, extractJsonObject, summarizeOpenRouterUsage } from "../openrouter.js";
 import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig } from "../supabase.js";
 
@@ -10,6 +10,7 @@ export const DATA_QUERY_DEFAULTS = {
   totalTimeoutMs: 20000,
   allowedTables: [],
   allowedSchemas: ["app", "content"],
+  tables: [],
   allowRawSql: false,
   allowJoins: false,
   allowAggregations: true,
@@ -26,14 +27,28 @@ const DANGEROUS_SQL = /\b(insert|update|delete|drop|alter|create|truncate|grant|
 export function dataQuerySettings(config = getConfig()) {
   const saved = readLocalSettings().subagents?.dataQuery || {};
   const raw = { ...DATA_QUERY_DEFAULTS, ...saved };
+  // When the user has scanned the real DB and picked tables, the manifest and
+  // allowlists are derived from that selection; otherwise fall back to the
+  // legacy hardcoded manifest so existing behavior is preserved.
+  const selectionTables = normalizeSelectionTables(raw.tables);
+  const hasSelection = selectionTables.length > 0;
+  const manifest = hasSelection ? buildDataQueryManifestFromSelection(selectionTables) : buildDataQueryManifest(config);
+  const allowedTables = hasSelection
+    ? [...new Set(selectionTables.map((item) => item.table))]
+    : normalizeStringList(raw.allowedTables);
+  const allowedSchemas = hasSelection
+    ? [...new Set(selectionTables.map((item) => item.connection))]
+    : (normalizeStringList(raw.allowedSchemas).length ? normalizeStringList(raw.allowedSchemas) : DATA_QUERY_DEFAULTS.allowedSchemas);
   return {
     enabled: raw.enabled !== false,
     maxPlans: clampNumber(raw.maxPlans, 1, 10, DATA_QUERY_DEFAULTS.maxPlans),
     maxRowsPerPlan: clampNumber(raw.maxRowsPerPlan, 1, 1000, DATA_QUERY_DEFAULTS.maxRowsPerPlan),
     timeoutMsPerPlan: clampNumber(raw.timeoutMsPerPlan, 1000, 60000, DATA_QUERY_DEFAULTS.timeoutMsPerPlan),
     totalTimeoutMs: clampNumber(raw.totalTimeoutMs, 1000, 120000, DATA_QUERY_DEFAULTS.totalTimeoutMs),
-    allowedTables: normalizeStringList(raw.allowedTables),
-    allowedSchemas: normalizeStringList(raw.allowedSchemas).length ? normalizeStringList(raw.allowedSchemas) : DATA_QUERY_DEFAULTS.allowedSchemas,
+    allowedTables,
+    allowedSchemas,
+    tables: selectionTables,
+    usingSelection: hasSelection,
     allowRawSql: raw.allowRawSql === true,
     allowJoins: raw.allowJoins === true,
     allowAggregations: raw.allowAggregations !== false,
@@ -41,8 +56,73 @@ export function dataQuerySettings(config = getConfig()) {
     plannerEnabled: raw.plannerEnabled !== false,
     plannerModel: String(raw.plannerModel || "").trim(),
     plannerTimeoutMs: clampNumber(raw.plannerTimeoutMs, 5000, 90000, DATA_QUERY_DEFAULTS.plannerTimeoutMs),
-    manifest: buildDataQueryManifest(config)
+    manifest
   };
+}
+
+// Normalizes the user's saved table picks: [{ connection, schema, table, columns[] }].
+export function normalizeSelectionTables(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of value) {
+    const table = String(item?.table || item?.name || "").trim();
+    if (!table) continue;
+    const connection = String(item?.connection || item?.schema || "app").trim() || "app";
+    const key = `${connection}.${table}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      connection,
+      schema: String(item?.schema || "public").trim() || "public",
+      table,
+      columns: Array.isArray(item?.columns) ? [...new Set(item.columns.map((col) => String(col).trim()).filter(Boolean))] : []
+    });
+  }
+  return out;
+}
+
+// Builds manifest entries from the user's real-table selection, reusing tableDef
+// so date/numeric/groupable heuristics are derived from the real column names.
+export function buildDataQueryManifestFromSelection(tables = []) {
+  return normalizeSelectionTables(tables).map((item) =>
+    tableDef(item.connection, item.table, item.description || `Selected table ${item.schema}.${item.table}`, item.columns)
+  );
+}
+
+// Introspects a Supabase connection through the PostgREST OpenAPI root (no SQL,
+// no migration) and returns the real tables and their columns.
+export async function introspectSupabaseTables(connection, { fetchImpl = fetch, timeoutMs = 15000 } = {}) {
+  if (!connection?.supabaseUrl || !connection?.supabaseServiceRoleKey) {
+    throw new Error("Supabase connection is not configured");
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let data;
+  try {
+    const response = await fetchImpl(`${connection.supabaseUrl}/rest/v1/`, {
+      signal: controller.signal,
+      headers: { ...supabaseHeaders(connection.supabaseServiceRoleKey), Accept: "application/openapi+json" }
+    });
+    const text = await response.text();
+    data = text ? JSON.parse(text) : {};
+    if (!response.ok) throw new Error(data?.message || `Introspection failed: ${response.status}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+  return parseOpenApiTables(data);
+}
+
+// Parses a PostgREST OpenAPI/Swagger document into [{ name, columns[] }].
+export function parseOpenApiTables(doc = {}) {
+  const defs = doc.definitions || doc.components?.schemas || {};
+  const tables = [];
+  for (const [name, schema] of Object.entries(defs)) {
+    const columns = Object.keys(schema?.properties || {});
+    if (!columns.length) continue;
+    tables.push({ name, columns });
+  }
+  return tables.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function buildDataQueryManifest(config = getConfig()) {
@@ -675,6 +755,106 @@ function summarizePlanResult(plan, rows) {
 
 function dataQueryResponse({ status, answer, metrics = [], plans = [], tablesUsed = [], confidence = 0, warnings = [], rawResultsPreview = {}, queryPlan = null, planner = null }) {
   return { status, answer, metrics, plans, tablesUsed, confidence, warnings, rawResultsPreview, queryPlan, planner };
+}
+
+// Builds a workflow-graph log from a Data Query Agent response so a direct
+// subagent test renders the same way a chat-invoked run does in the Workflow tab.
+export function buildDataQueryWorkflowLog(result = {}, { question = "", context = {}, openRouterCalls = [] } = {}) {
+  const queryPlan = result.queryPlan && typeof result.queryPlan === "object" ? result.queryPlan : {};
+  const plannedPlans = Array.isArray(queryPlan.plans) ? queryPlan.plans : [];
+  const executedPlans = Array.isArray(result.plans) ? result.plans : [];
+  const planner = result.planner || "unknown";
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  const previews = result.rawResultsPreview && typeof result.rawResultsPreview === "object" ? result.rawResultsPreview : {};
+  const usedFallback = warnings.includes("llm_plan_rejected_fallback_used") || planner === "heuristic_fallback";
+  const errored = result.status === "error";
+
+  const nodes = [
+    { id: "dq_input", label: "Question Input", kind: "trigger", status: "done" },
+    {
+      id: "dq_planner",
+      label: planner === "llm" ? "LLM Query Planner" : "Heuristic Planner",
+      kind: planner === "llm" ? "ai" : "router",
+      status: plannedPlans.length ? "done" : "error",
+      ...(usedFallback ? { fallback: true } : {})
+    },
+    { id: "dq_validation", label: "Plan Validation", kind: "router", status: executedPlans.length ? "done" : "error" }
+  ];
+  const edges = [
+    { from: "dq_input", to: "dq_planner" },
+    { from: "dq_planner", to: "dq_validation" }
+  ];
+
+  for (const plan of executedPlans) {
+    const nodeId = `dq_exec_${plan.id}`;
+    nodes.push({
+      id: nodeId,
+      label: `Execute · ${plan.table}`,
+      kind: "database",
+      status: plan.status === "ok" ? "done" : "error"
+    });
+    edges.push({ from: "dq_validation", to: nodeId });
+    edges.push({ from: nodeId, to: "dq_synthesis" });
+  }
+  if (!executedPlans.length) edges.push({ from: "dq_validation", to: "dq_synthesis" });
+
+  nodes.push({ id: "dq_synthesis", label: "Answer Synthesis", kind: "router", status: errored ? "error" : "done" });
+  nodes.push({ id: "dq_output", label: "Data Query Output", kind: "output", status: errored ? "error" : "done" });
+  edges.push({ from: "dq_synthesis", to: "dq_output" });
+
+  const nodeDetails = {
+    dq_input: {
+      summary: question || "(no question)",
+      input: { question, context },
+      output: { intent: queryPlan.intent || null }
+    },
+    dq_planner: {
+      summary: `Planner: ${planner}; ${plannedPlans.length} plan(s) proposed${usedFallback ? " (fallback used)" : ""}`,
+      output: queryPlan,
+      logs: warnings.filter((w) => /planner|llm|heuristic|fallback|plan_rejected/i.test(w)).map((message) => ({ step: "dq_planner", message }))
+    },
+    dq_validation: {
+      summary: `${executedPlans.length} plan(s) accepted for execution`,
+      output: { acceptedPlans: executedPlans.map((p) => ({ id: p.id, table: p.table, status: p.status, rows: p.rows })) },
+      logs: warnings.filter((w) => /reject|exceeded|limit|not allowed|forbidden/i.test(w)).map((message) => ({ step: "dq_validation", message }))
+    },
+    dq_synthesis: {
+      summary: result.answer || "",
+      output: { metrics: result.metrics || [], tablesUsed: result.tablesUsed || [], confidence: result.confidence }
+    },
+    dq_output: {
+      summary: `status: ${result.status}; ${(result.metrics || []).length} metric(s); ${(result.tablesUsed || []).length} table(s)`,
+      output: { status: result.status, warnings, metrics: result.metrics || [] }
+    }
+  };
+  for (const plan of executedPlans) {
+    nodeDetails[`dq_exec_${plan.id}`] = {
+      summary: plan.summary || `Read from ${plan.table}`,
+      input: plannedPlans.find((p) => p.id === plan.id) || { id: plan.id, table: plan.table },
+      output: { rows: plan.rows, status: plan.status, error: plan.error || null, preview: previews[plan.id] || [] }
+    };
+  }
+
+  const calls = Array.isArray(openRouterCalls) ? openRouterCalls : [];
+  for (const node of nodes) {
+    const nodeCalls = calls.filter((call) => call.step === node.id);
+    if (nodeCalls.length) node.openrouter = nodeCalls;
+  }
+
+  return {
+    nodes,
+    edges,
+    nodeDetails,
+    openRouterUsage: summarizeOpenRouterUsage(calls),
+    summary: {
+      planner,
+      status: result.status,
+      tablesUsed: result.tablesUsed || [],
+      metrics: (result.metrics || []).length,
+      warnings: warnings.length,
+      fallback: usedFallback
+    }
+  };
 }
 
 function containsDangerousSql(value) {

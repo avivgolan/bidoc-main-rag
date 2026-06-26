@@ -13,7 +13,7 @@ import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimel
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
-import { runDataQueryAgent } from "./subagents/dataQuery.js";
+import { buildDataQueryWorkflowLog, introspectSupabaseTables, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
@@ -604,26 +604,87 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === "GET" && url.pathname === "/api/subagents/data-query/schema") {
+    const cfg = config();
+    const contentConn = contentSupabaseConfig(cfg);
+    const targets = [
+      { key: "app", label: "מאגר ראשי", supabaseUrl: cfg.supabaseUrl, supabaseServiceRoleKey: cfg.supabaseServiceRoleKey },
+      { key: "content", label: "מאגר תוכן", supabaseUrl: contentConn.supabaseUrl, supabaseServiceRoleKey: contentConn.supabaseServiceRoleKey }
+    ];
+    const connections = [];
+    const warnings = [];
+    const seenUrls = new Set();
+    for (const target of targets) {
+      if (!target.supabaseUrl || !target.supabaseServiceRoleKey) {
+        warnings.push(`${target.key}: Supabase לא מוגדר`);
+        continue;
+      }
+      if (seenUrls.has(target.supabaseUrl)) continue;
+      seenUrls.add(target.supabaseUrl);
+      try {
+        const tables = await introspectSupabaseTables({ supabaseUrl: target.supabaseUrl, supabaseServiceRoleKey: target.supabaseServiceRoleKey });
+        connections.push({ key: target.key, label: target.label, schema: "public", tables });
+      } catch (error) {
+        warnings.push(`${target.key}: ${error.message}`);
+      }
+    }
+    return sendJson(res, connections.length ? 200 : 502, { connections, warnings });
+  }
+
   if (req.method === "POST" && url.pathname === "/api/subagents/data-query") {
     const body = await readJson(req).catch(() => ({}));
+    const question = body.question || body.query || "";
+    const dqContext = {
+      ...(body.context && typeof body.context === "object" ? body.context : {}),
+      dateFrom: body.dateFrom || body.date_from || body.context?.dateFrom || body.context?.date_from || null,
+      dateTo: body.dateTo || body.date_to || body.context?.dateTo || body.context?.date_to || null,
+      source: body.source || body.context?.source || "api"
+    };
+    const runId = String(body.runId || body.run_id || `dq_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+    createRun(runId);
+    emitRunEvent(runId, "chat_input", "שאלת בדיקה התקבלה", { question, context: dqContext });
+    const dqOpenRouterCalls = [];
+    const dqTelemetry = {
+      step: "dq_planner",
+      callId: "dq_planner_1",
+      record: (entry) => {
+        dqOpenRouterCalls.push(entry);
+        emitRunEvent(runId, "dq_planner", entry.status === "error" ? "OpenRouter call failed" : "OpenRouter usage recorded", { openrouter: entry });
+      }
+    };
     try {
       const result = await runDataQueryAgent({
         config: config(),
-        question: body.question || body.query || "",
-        context: {
-          ...(body.context && typeof body.context === "object" ? body.context : {}),
-          dateFrom: body.dateFrom || body.date_from || body.context?.dateFrom || body.context?.date_from || null,
-          dateTo: body.dateTo || body.date_to || body.context?.dateTo || body.context?.date_to || null,
-          source: body.source || body.context?.source || "api"
-        },
+        question,
+        context: dqContext,
         requestedMetrics: body.requestedMetrics || body.requested_metrics || [],
         maxPlans: body.maxPlans,
-        queryPlan: body.queryPlan || body.query_plan || null
+        queryPlan: body.queryPlan || body.query_plan || null,
+        telemetry: dqTelemetry
+      });
+      emitRunEvent(runId, "data_query", `תכנון באמצעות ${result.planner || "unknown"}`, {
+        planner: result.planner || "unknown",
+        plansProposed: (result.queryPlan?.plans || []).length
+      });
+      emitRunEvent(runId, "data_query", "אימות תוכניות שאילתה", { accepted: result.plans?.length || 0 });
+      for (const plan of result.plans || []) {
+        emitRunEvent(runId, "data_query", `הרצת ${plan.table}`, { id: plan.id, table: plan.table, status: plan.status, rows: plan.rows });
+      }
+      emitRunEvent(runId, "data_query", "סינתוז תשובה", { metrics: (result.metrics || []).length, status: result.status });
+      const workflowLog = buildDataQueryWorkflowLog(result, { question, context: dqContext, openRouterCalls: dqOpenRouterCalls });
+      completeRun(runId, { status: result.status, workflowLog });
+      recordRunHistory({
+        id: runId,
+        title: `סוכן שאילתות · ${(question || "בדיקה").slice(0, 40)}`,
+        workflowLog,
+        runEvents: getRunEvents(runId),
+        kind: "data_query"
       });
       const status = result.status === "error" && !result.plans?.some((plan) => plan.status === "ok") ? 400 : 200;
-      return sendJson(res, status, result);
+      return sendJson(res, status, { ...result, workflowLog, runId });
     } catch (error) {
-      return sendJson(res, 500, { status: "error", error: error.message, answer: null, metrics: [], plans: [], tablesUsed: [], confidence: 0, warnings: [error.message] });
+      failRun(runId, error);
+      return sendJson(res, 500, { status: "error", error: error.message, answer: null, metrics: [], plans: [], tablesUsed: [], confidence: 0, warnings: [error.message], runId });
     }
   }
 

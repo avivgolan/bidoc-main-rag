@@ -9,10 +9,10 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
-import { buildDataQueryManifest, executeQueryPlans, planDataQueryWithLlm, runDataQueryAgent, validateQueryPlan } from "../src/subagents/dataQuery.js";
+import { buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryWorkflowLog, executeQueryPlans, introspectSupabaseTables, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, validateQueryPlan } from "../src/subagents/dataQuery.js";
 import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
 import { buildDeterministicInsights, buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
-import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
+import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
@@ -434,6 +434,121 @@ test("data query executor aggregates count avg min max sum and preserves partial
   });
   assert.equal(result.plans[1].status, "error");
   assert.match(result.warnings.join(" "), /mock failure/);
+});
+
+test("data query workflow log exposes planner, validation and per-plan execution nodes", () => {
+  const result = {
+    status: "ok",
+    answer: "executed 2 plans",
+    planner: "llm",
+    metrics: [{ id: "m1", label: "delay_claim_cases", value: 1 }],
+    tablesUsed: ["delay_events", "delay_claim_cases"],
+    warnings: [],
+    rawResultsPreview: {
+      a: [],
+      b: [{ human_status: "candidate", count: 1 }]
+    },
+    plans: [
+      { id: "a", table: "delay_events", status: "ok", rows: 0, summary: "Grouped delay_events." },
+      { id: "b", table: "delay_claim_cases", status: "ok", rows: 1, summary: "Grouped delay_claim_cases." }
+    ],
+    queryPlan: {
+      intent: "count_by_status",
+      plans: [
+        { id: "a", schema: "app", table: "delay_events", operation: "group_count", groupBy: ["human_status"], limit: 200 },
+        { id: "b", schema: "app", table: "delay_claim_cases", operation: "group_count", groupBy: ["human_status"], limit: 200 }
+      ]
+    }
+  };
+  const openRouterCalls = [
+    { step: "dq_planner", status: "done", prompt_tokens: 4751, completion_tokens: 499, total_tokens: 5250, cost: 0.00101205, duration_ms: 5516 }
+  ];
+  const log = buildDataQueryWorkflowLog(result, { question: "כמה עיכובים יש לפי סטטוס?", context: { dateFrom: "2026-06-01" }, openRouterCalls });
+  const ids = log.nodes.map((node) => node.id);
+  assert.ok(ids.includes("dq_input") && ids.includes("dq_planner") && ids.includes("dq_validation") && ids.includes("dq_synthesis") && ids.includes("dq_output"));
+  assert.ok(ids.includes("dq_exec_a") && ids.includes("dq_exec_b"));
+  assert.equal(log.nodes.find((node) => node.id === "dq_planner").kind, "ai");
+  assert.ok(log.edges.some((edge) => edge.from === "dq_validation" && edge.to === "dq_exec_b"));
+  assert.ok(log.edges.some((edge) => edge.from === "dq_exec_b" && edge.to === "dq_synthesis"));
+  assert.deepEqual(log.nodeDetails.dq_exec_b.output.preview, [{ human_status: "candidate", count: 1 }]);
+  assert.equal(log.summary.planner, "llm");
+  // OpenRouter telemetry is attached to the planner node and aggregated for the workflow totals.
+  assert.equal(log.nodes.find((node) => node.id === "dq_planner").openrouter.length, 1);
+  assert.equal(log.openRouterUsage.totals.total_tokens, 5250);
+  assert.equal(log.openRouterUsage.totals.prompt_tokens, 4751);
+  assert.equal(log.openRouterUsage.totals.cost, 0.00101205);
+});
+
+test("data query settings normalization preserves the real-table selection", () => {
+  const normalized = normalizeDataQuerySettings({
+    enabled: true,
+    tables: [
+      { connection: "app", schema: "public", table: "emails_gf", columns: ["mail_id", "subject"] },
+      { connection: "content", schema: "public", table: "data_index_embeddings_gf_dor_agent", columns: ["id", "primary_date"] },
+      { table: "" }, // dropped
+      { connection: "app", table: "emails_gf", columns: ["mail_id"] } // duplicate dropped
+    ]
+  });
+  assert.equal(normalized.tables.length, 2);
+  assert.deepEqual(normalized.tables.map((t) => t.table), ["emails_gf", "data_index_embeddings_gf_dor_agent"]);
+  // allowlists are derived from the selection, not the legacy defaults
+  assert.deepEqual(normalized.allowedTables, ["emails_gf", "data_index_embeddings_gf_dor_agent"]);
+  assert.deepEqual(normalized.allowedSchemas.sort(), ["app", "content"]);
+  // empty selection falls back to the legacy allowlist behavior
+  const empty = normalizeDataQuerySettings({ tables: [] });
+  assert.deepEqual(empty.tables, []);
+  assert.deepEqual(empty.allowedSchemas, ["app", "content"]);
+});
+
+test("data query introspection parses PostgREST OpenAPI into tables and columns", async () => {
+  const doc = {
+    definitions: {
+      delay_events: { properties: { id: {}, human_status: {}, created_at: {} } },
+      alerts_gf: { properties: { id: {}, severity_level: {} } },
+      empty_view: { properties: {} }
+    }
+  };
+  const parsed = parseOpenApiTables(doc);
+  assert.deepEqual(parsed.map((t) => t.name), ["alerts_gf", "delay_events"]); // sorted; empty dropped
+  assert.deepEqual(parsed.find((t) => t.name === "delay_events").columns, ["id", "human_status", "created_at"]);
+
+  const viaFetch = await introspectSupabaseTables(
+    { supabaseUrl: "https://x.supabase.co", supabaseServiceRoleKey: "k" },
+    { fetchImpl: async () => ({ ok: true, text: async () => JSON.stringify(doc) }) }
+  );
+  assert.equal(viaFetch.length, 2);
+});
+
+test("data query manifest from real-table selection drives the allowlist", () => {
+  const selection = [
+    { connection: "app", schema: "public", table: "emails_gf", columns: ["mail_id", "subject", "received_date", "sender_name"] }
+  ];
+  const manifest = buildDataQueryManifestFromSelection(selection);
+  assert.equal(manifest.length, 1);
+  assert.equal(manifest[0].tableName, "emails_gf");
+  assert.ok(manifest[0].allowedFields.includes("subject"));
+
+  const settings = dataQueryTestSettings({ manifest, allowedTables: ["emails_gf"], allowedSchemas: ["app"] });
+  const accepted = validateQueryPlan({ plans: [{ id: "p1", schema: "app", table: "emails_gf", operation: "select", select: ["subject"], limit: 10 }] }, settings);
+  assert.equal(accepted.ok, true);
+  const rejected = validateQueryPlan({ plans: [{ id: "p2", schema: "app", table: "delay_events", operation: "count", limit: 10 }] }, settings);
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.warnings.join(" "), /delay_events/);
+});
+
+test("data query workflow log flags planner fallback and errored runs", () => {
+  const log = buildDataQueryWorkflowLog({
+    status: "error",
+    planner: "heuristic_fallback",
+    warnings: ["llm_plan_rejected_fallback_used"],
+    plans: [],
+    queryPlan: { intent: "needs_clarification", plans: [] }
+  }, { question: "?" });
+  assert.equal(log.summary.fallback, true);
+  assert.equal(log.nodes.find((node) => node.id === "dq_planner").fallback, true);
+  assert.equal(log.nodes.find((node) => node.id === "dq_validation").status, "error");
+  assert.equal(log.nodes.find((node) => node.id === "dq_output").status, "error");
+  assert.ok(log.edges.some((edge) => edge.from === "dq_validation" && edge.to === "dq_synthesis"));
 });
 
 test("data query LLM planner requests JSON and normalizes safe plans", async () => {

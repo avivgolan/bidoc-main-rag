@@ -416,6 +416,7 @@ const DEFAULT_DATA_QUERY_SETTINGS = {
   totalTimeoutMs: 20000,
   allowedTables: [],
   allowedSchemas: ["app", "content"],
+  tables: [],
   allowRawSql: false,
   allowJoins: false,
   allowAggregations: true,
@@ -783,17 +784,43 @@ function normalizeMeetingsEvidenceSettings(value = {}) {
   };
 }
 
-function normalizeDataQuerySettings(value = {}) {
+function normalizeDataQueryTables(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const item of value) {
+    const table = String(item?.table || item?.name || "").trim();
+    if (!table) continue;
+    const connection = String(item?.connection || item?.schema || "app").trim() || "app";
+    const key = `${connection}.${table}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      connection,
+      schema: String(item?.schema || "public").trim() || "public",
+      table,
+      columns: Array.isArray(item?.columns) ? [...new Set(item.columns.map((col) => String(col).trim()).filter(Boolean))] : []
+    });
+  }
+  return out;
+}
+
+export function normalizeDataQuerySettings(value = {}) {
   const raw = value && typeof value === "object" ? value : {};
   const d = DEFAULT_DATA_QUERY_SETTINGS;
+  // The user's real-DB table picks are the source of truth. They MUST be
+  // preserved through normalization (this is what getConfig/publicSettings
+  // expose), otherwise the selection silently disappears on every reload.
+  const tables = normalizeDataQueryTables(raw.tables);
   return {
     enabled: raw.enabled !== false,
     maxPlans: clampNumber(raw.maxPlans, 1, 10, d.maxPlans),
     maxRowsPerPlan: clampNumber(raw.maxRowsPerPlan, 1, 1000, d.maxRowsPerPlan),
     timeoutMsPerPlan: clampNumber(raw.timeoutMsPerPlan, 1000, 60000, d.timeoutMsPerPlan),
     totalTimeoutMs: clampNumber(raw.totalTimeoutMs, 1000, 120000, d.totalTimeoutMs),
-    allowedTables: normalizeStringList(raw.allowedTables, d.allowedTables),
-    allowedSchemas: normalizeStringList(raw.allowedSchemas, d.allowedSchemas),
+    allowedTables: tables.length ? tables.map((item) => item.table) : normalizeStringList(raw.allowedTables, d.allowedTables),
+    allowedSchemas: tables.length ? [...new Set(tables.map((item) => item.connection))] : normalizeStringList(raw.allowedSchemas, d.allowedSchemas),
+    tables,
     allowRawSql: raw.allowRawSql === true,
     allowJoins: raw.allowJoins === true,
     allowAggregations: raw.allowAggregations !== false,

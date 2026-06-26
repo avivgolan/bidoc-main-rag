@@ -615,7 +615,7 @@ function loadSubAgents() {
 
   const dqCfg = { ...DATA_QUERY_DEFAULTS, ...(state.settings?.subagents?.dataQuery || {}) };
   const dqCard = document.createElement("div");
-  dqCard.className = "subagent-card";
+  dqCard.className = "subagent-card dataQueryInfoCard";
   dqCard.innerHTML = `
     <div class="subagent-header">
       <span class="subagent-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></span>
@@ -624,10 +624,10 @@ function loadSubAgents() {
     </div>
     <p class="subagent-desc">Read-only metrics agent for safe table counts, breakdowns, simple aggregations and KPI-style summaries. Uses an allowlisted Query Plan and never runs free raw SQL.</p>
     <div class="subagent-config">
-      <label class="subagent-config-label">
+      <label class="subagent-config-label toggleLabel">
         <input type="checkbox" id="dqEnabled" ${dqCfg.enabled ? "checked" : ""} /> הפעל סוכן
       </label>
-      <label class="subagent-config-label">
+      <label class="subagent-config-label toggleLabel">
         <input type="checkbox" id="dqPlannerEnabled" ${dqCfg.plannerEnabled !== false ? "checked" : ""} /> LLM planner
       </label>
       <label class="subagent-config-label">Planner model
@@ -648,19 +648,22 @@ function loadSubAgents() {
       <label class="subagent-config-label">Total timeout (ms)
         <input type="number" id="dqTotalTimeoutMs" value="${dqCfg.totalTimeoutMs}" min="1000" max="120000" step="1000" />
       </label>
-      <label class="subagent-config-label wide">Allowed tables override (optional, comma separated)
-        <textarea id="dqAllowedTables" rows="3" spellcheck="false">${(dqCfg.allowedTables || []).join(", ")}</textarea>
-      </label>
-      <label class="subagent-config-label">Allowed schemas
-        <input id="dqAllowedSchemas" value="${(dqCfg.allowedSchemas || ["app", "content"]).join(", ")}" />
-      </label>
-      <label class="subagent-config-label">
+      <div class="dqTablesPicker">
+        <div class="dqTablesHeader">
+          <span>טבלאות מורשות — נבחרות מסריקת ה-DB האמיתי. הסוכן ישתמש רק במה שמסומן.</span>
+          <button type="button" id="dqScanBtn">סרוק את ה-DB</button>
+        </div>
+        <input type="search" id="dqTableSearch" placeholder="חיפוש טבלה..." autocomplete="off" />
+        <div id="dqTablesStatus" class="dqTablesStatus"></div>
+        <div id="dqTablesList" class="dqTablesList"></div>
+      </div>
+      <label class="subagent-config-label toggleLabel">
         <input type="checkbox" id="dqAllowAggregations" ${dqCfg.allowAggregations !== false ? "checked" : ""} /> Allow aggregations
       </label>
-      <label class="subagent-config-label">
+      <label class="subagent-config-label toggleLabel">
         <input type="checkbox" id="dqAllowRawSql" ${dqCfg.allowRawSql ? "checked" : ""} disabled /> Raw SQL disabled
       </label>
-      <label class="subagent-config-label">
+      <label class="subagent-config-label toggleLabel">
         <input type="checkbox" id="dqAllowJoins" ${dqCfg.allowJoins ? "checked" : ""} disabled /> Joins disabled in v1
       </label>
       <button id="dqSaveBtn">שמור הגדרות</button>
@@ -674,6 +677,96 @@ function loadSubAgents() {
     </div>
     <pre class="subagent-result" id="dqResult">אין תוצאה עדיין.</pre>
   `;
+  // --- DB table picker state & rendering ---
+  const dqSavedSelection = (Array.isArray(dqCfg.tables) ? dqCfg.tables : [])
+    .map((t) => ({
+      connection: String(t.connection || t.schema || "app"),
+      schema: String(t.schema || "public"),
+      table: String(t.table || t.name || ""),
+      columns: Array.isArray(t.columns) ? t.columns.map(String) : []
+    }))
+    .filter((t) => t.table);
+  const dqCheckedKeys = new Set(dqSavedSelection.map((t) => `${t.connection}.${t.table}`));
+  const dqColumnsByKey = new Map(dqSavedSelection.map((t) => [`${t.connection}.${t.table}`, t.columns]));
+  let dqScan = { connections: [] };
+  const dqConnLabel = (key) => (key === "content" ? "מאגר תוכן" : "מאגר ראשי");
+  function dqDisplayConnections() {
+    if (dqScan.connections.length) return dqScan.connections;
+    const byConn = {};
+    for (const t of dqSavedSelection) (byConn[t.connection] ||= []).push({ name: t.table, columns: t.columns });
+    return Object.entries(byConn).map(([key, tables]) => ({ key, label: dqConnLabel(key), schema: "public", tables }));
+  }
+  function dqCollectSelectedTables() {
+    return [...dqCheckedKeys].map((key) => {
+      const idx = key.indexOf(".");
+      return { connection: key.slice(0, idx), schema: "public", table: key.slice(idx + 1), columns: dqColumnsByKey.get(key) || [] };
+    }).filter((t) => t.table);
+  }
+  function dqUpdateStatus() {
+    const statusEl = dqCard.querySelector("#dqTablesStatus");
+    const total = dqDisplayConnections().reduce((sum, c) => sum + c.tables.length, 0);
+    statusEl.textContent = dqScan.connections.length
+      ? `נמצאו ${total} טבלאות · נבחרו ${dqCheckedKeys.size}`
+      : (dqSavedSelection.length ? `נבחרו ${dqCheckedKeys.size} טבלאות (לחץ "סרוק את ה-DB" לעדכון הרשימה)` : 'לא נסרק עדיין — לחץ "סרוק את ה-DB" כדי לבחור טבלאות.');
+  }
+  function dqRenderTablesList() {
+    const listEl = dqCard.querySelector("#dqTablesList");
+    const filter = (dqCard.querySelector("#dqTableSearch").value || "").trim().toLowerCase();
+    listEl.innerHTML = "";
+    for (const conn of dqDisplayConnections()) {
+      const tables = conn.tables.filter((t) => !filter || t.name.toLowerCase().includes(filter));
+      if (!tables.length) continue;
+      const group = document.createElement("div");
+      group.className = "dqTableGroup";
+      const head = document.createElement("div");
+      head.className = "dqTableGroupHead";
+      head.innerHTML = `<strong>${escapeHtml(conn.label)}</strong> <small>(${tables.length})</small>`;
+      const allBtn = document.createElement("button");
+      allBtn.type = "button"; allBtn.textContent = "בחר הכל";
+      allBtn.addEventListener("click", () => { for (const t of tables) { const k = `${conn.key}.${t.name}`; dqCheckedKeys.add(k); dqColumnsByKey.set(k, t.columns || []); } dqRenderTablesList(); dqUpdateStatus(); });
+      const noneBtn = document.createElement("button");
+      noneBtn.type = "button"; noneBtn.textContent = "נקה";
+      noneBtn.addEventListener("click", () => { for (const t of tables) dqCheckedKeys.delete(`${conn.key}.${t.name}`); dqRenderTablesList(); dqUpdateStatus(); });
+      head.append(allBtn, noneBtn);
+      group.append(head);
+      for (const t of tables) {
+        const key = `${conn.key}.${t.name}`;
+        if (!dqColumnsByKey.has(key)) dqColumnsByKey.set(key, t.columns || []);
+        const row = document.createElement("label");
+        row.className = "dqTableRow";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.checked = dqCheckedKeys.has(key);
+        cb.addEventListener("change", () => { if (cb.checked) dqCheckedKeys.add(key); else dqCheckedKeys.delete(key); dqUpdateStatus(); });
+        const name = document.createElement("span"); name.className = "dqTableName"; name.textContent = t.name;
+        const cols = document.createElement("small"); cols.textContent = `${(t.columns || []).length} עמודות`;
+        row.append(cb, name, cols);
+        group.append(row);
+      }
+      listEl.append(group);
+    }
+    if (!listEl.children.length) listEl.innerHTML = '<div class="dqTablesEmpty">אין טבלאות להצגה.</div>';
+  }
+  dqCard.querySelector("#dqTableSearch").addEventListener("input", dqRenderTablesList);
+  dqCard.querySelector("#dqScanBtn").addEventListener("click", async () => {
+    const btn = dqCard.querySelector("#dqScanBtn");
+    const statusEl = dqCard.querySelector("#dqTablesStatus");
+    btn.disabled = true; statusEl.textContent = "סורק...";
+    try {
+      const result = await api("/api/subagents/data-query/schema");
+      dqScan = { connections: Array.isArray(result.connections) ? result.connections : [] };
+      for (const c of dqScan.connections) for (const t of c.tables) dqColumnsByKey.set(`${c.key}.${t.name}`, t.columns || []);
+      dqRenderTablesList();
+      dqUpdateStatus();
+      if (result.warnings?.length) showToast(`סריקה הושלמה עם אזהרות: ${result.warnings.join("; ")}`);
+    } catch (error) {
+      statusEl.textContent = `שגיאת סריקה: ${error.message}`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  dqRenderTablesList();
+  dqUpdateStatus();
+
   dqCard.querySelector("#dqSaveBtn").addEventListener("click", () => {
     const updated = {
       enabled: dqCard.querySelector("#dqEnabled").checked,
@@ -684,8 +777,9 @@ function loadSubAgents() {
       maxRowsPerPlan: Number(dqCard.querySelector("#dqMaxRowsPerPlan").value) || DATA_QUERY_DEFAULTS.maxRowsPerPlan,
       timeoutMsPerPlan: Number(dqCard.querySelector("#dqTimeoutMsPerPlan").value) || DATA_QUERY_DEFAULTS.timeoutMsPerPlan,
       totalTimeoutMs: Number(dqCard.querySelector("#dqTotalTimeoutMs").value) || DATA_QUERY_DEFAULTS.totalTimeoutMs,
-      allowedTables: splitCsv(dqCard.querySelector("#dqAllowedTables").value),
-      allowedSchemas: splitCsv(dqCard.querySelector("#dqAllowedSchemas").value),
+      tables: dqCollectSelectedTables(),
+      allowedTables: dqCollectSelectedTables().map((item) => item.table),
+      allowedSchemas: [...new Set(dqCollectSelectedTables().map((item) => item.connection))],
       allowRawSql: false,
       allowJoins: false,
       allowAggregations: dqCard.querySelector("#dqAllowAggregations").checked,
@@ -717,11 +811,17 @@ function loadSubAgents() {
         }
       });
       resultEl.textContent = JSON.stringify(result, null, 2);
+      if (result.workflowLog) {
+        state.lastWorkflow = result.workflowLog;
+        if (state.runHistory) loadRunHistory();
+        showToast("הריצה נוספה לזרימת העבודה — פתח את הטאב 'זרימת עבודה' כדי לראות את הרכיבים.");
+      }
     } catch (error) {
       resultEl.textContent = `Error: ${error.message}`;
     }
   });
   list.append(dqCard);
+  enhanceParameterInfoControls();
 }
 
 async function refreshAgentsFromApi() {
@@ -5765,7 +5865,7 @@ function advancedNumberLabel(text, id, attrs = {}) {
 }
 
 function enhanceParameterInfoControls() {
-  document.querySelectorAll(".advancedSettings .compactSettingsGrid label, .retrievalSettingsCard .compactSettingsGrid label").forEach((label) => {
+  document.querySelectorAll(".advancedSettings .compactSettingsGrid label, .retrievalSettingsCard .compactSettingsGrid label, .dataQueryInfoCard .subagent-config-label").forEach((label) => {
     if (label.dataset.infoEnhanced === "true") return;
     const control = label.querySelector("input, select, textarea");
     if (!control?.id) return;
@@ -5859,7 +5959,18 @@ function parameterExplanation(id, title) {
     toolsParallelLimit: "כמה כלי N8N אפשר להריץ במקביל באותה שאלה.",
     toolsEnabled: "כאשר כבוי, הצ׳אט לא יקרא לכלי N8N חיצוניים, אבל RAG ו-Graph עדיין יכולים לעבוד.",
     toolsAlertAgentEnabled: "כאשר פעיל, סוכן ההתראות יכול למשוך ולסכם נתונים מטבלת alerts.",
-    toolsSafetyPrecheckEnabled: "כאשר פעיל, שאלות דחופות או בטיחותיות מפעילות בדיקה מוקדמת לפני שאר הכלים."
+    toolsSafetyPrecheckEnabled: "כאשר פעיל, שאלות דחופות או בטיחותיות מפעילות בדיקה מוקדמת לפני שאר הכלים.",
+    dqEnabled: "מפעיל או מכבה את סוכן השאילתות. כשכבוי הסוכן לא ירוץ כלל ולא יחזיר מדדים.",
+    dqPlannerEnabled: "כשפעיל, מודל שפה (LLM) מתכנן את שאילתת הנתונים. כשכבוי נעשה שימוש במתכנן היוריסטי דטרמיניסטי בלבד, ללא קריאת מודל.",
+    dqPlannerModel: "המודל שמתכנן את השאילתה. ברירת המחדל משתמשת במודל ה-Knowledge/Main של המערכת.",
+    dqPlannerTimeoutMs: "כמה זמן לחכות לתשובת מתכנן ה-LLM לפני נפילה למתכנן ההיוריסטי. נמדד במילישניות.",
+    dqMaxPlans: "מספר תוכניות השאילתה המקסימלי שהסוכן רשאי להריץ בשאלה אחת. מגביל עומס ועלות.",
+    dqMaxRowsPerPlan: "מספר השורות המקסימלי שכל תוכנית שאילתה תמשוך מ-Supabase לפני חישוב מקומי.",
+    dqTimeoutMsPerPlan: "כמה זמן לחכות לכל שאילתת Supabase בודדת לפני שמחשיבים אותה ככושלת. נמדד במילישניות.",
+    dqTotalTimeoutMs: "תקרת זמן כוללת לכל תוכניות השאילתה יחד באותה ריצה. נמדד במילישניות.",
+    dqAllowAggregations: "כשפעיל, הסוכן רשאי לחשב מדדים מצרפיים (count, avg, min, max, sum) ולא רק לשלוף שורות.",
+    dqAllowRawSql: "מושבת בכוונה: הסוכן לעולם לא מריץ SQL גולמי חופשי, אלא רק תוכניות שאילתה מאושרות מרשימה לבנה. זו שכבת בטיחות.",
+    dqAllowJoins: "מושבת בגרסה הנוכחית: הסוכן לא מבצע JOIN בין טבלאות. שאלות שדורשות חיבור מפוצלות לתוכניות נפרדות."
   };
   return explanations[id] || `הגדרה מתקדמת עבור ${title}.`;
 }
@@ -6004,7 +6115,9 @@ function renderRunHistoryStrip(runs) {
       ? "סוכן הקשרים"
       : run.kind === "project_insights_analysis"
         ? "דוח תובנות"
-        : "צ׳אט";
+        : run.kind === "data_query"
+          ? "סוכן שאילתות"
+          : "צ׳אט";
     item.innerHTML = `
       <div class="rhTime">${escapeHtml(time)}</div>
       <div class="rhMsg">${escapeHtml(msg)}</div>

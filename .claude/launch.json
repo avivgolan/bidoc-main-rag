@@ -3,9 +3,9 @@
   "configurations": [
     {
       "name": "bidoc",
-      "runtimeExecutable": "node",
-      "runtimeArgs": ["src/server.js"],
-      "port": 4000,
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "set PORT=4071&& node src/server.js"],
+      "port": 4071,
       "autoPort": false
     }
   ]

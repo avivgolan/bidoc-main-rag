@@ -291,6 +291,35 @@ function recordTelemetry(telemetry, entry) {
   }
 }
 
+// Aggregates per-call OpenRouter telemetry into a workflow-level usage summary
+// (used by both the chat pipeline and standalone subagent runs).
+export function summarizeOpenRouterUsage(calls = []) {
+  const completed = calls.filter((call) => call.status === "done");
+  const totalDurationMs = completed.reduce((sum, call) => sum + Number(call.duration_ms || 0), 0);
+  const completionTokens = completed.reduce((sum, call) => sum + Number(call.completion_tokens || 0), 0);
+  const knownCosts = completed.filter((call) => call.cost !== null && call.cost !== undefined && Number.isFinite(Number(call.cost)));
+  return {
+    calls,
+    totals: {
+      calls: calls.length,
+      successful_calls: completed.length,
+      failed_calls: calls.length - completed.length,
+      prompt_tokens: completed.reduce((sum, call) => sum + Number(call.prompt_tokens || 0), 0),
+      completion_tokens: completionTokens,
+      total_tokens: completed.reduce((sum, call) => sum + Number(call.total_tokens || 0), 0),
+      cached_tokens: completed.reduce((sum, call) => sum + Number(call.cached_tokens || 0), 0),
+      reasoning_tokens: completed.reduce((sum, call) => sum + Number(call.reasoning_tokens || 0), 0),
+      cost: knownCosts.length
+        ? Number(knownCosts.reduce((sum, call) => sum + Number(call.cost || 0), 0).toFixed(8))
+        : null,
+      duration_ms: totalDurationMs,
+      output_tokens_per_second: completionTokens > 0 && totalDurationMs > 0
+        ? Number((completionTokens / (totalDurationMs / 1000)).toFixed(2))
+        : null
+    }
+  };
+}
+
 function numberOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
