@@ -7,7 +7,7 @@ import { buildToolOrder } from "../src/tools.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, parseKnowledgeAgentMarkdown, readKnowledgeDocument, routeKnowledgeAgents, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
 import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality.js";
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
-import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode } from "../src/agent.js";
+import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode, KNOWLEDGE_PLANNER_RESPONSE_FORMAT } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryWorkflowLog, executeQueryPlans, introspectSupabaseTables, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, validateQueryPlan } from "../src/subagents/dataQuery.js";
 import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
@@ -170,6 +170,14 @@ test("professional enforcement matches Hebrew vocabulary inflections", () => {
   assert.equal(output.professional, true);
   assert.equal(output.knowledge_vocabulary_match, "עיכוב");
   assert.ok(output.knowledge_tags.includes("אוצר_מילים"));
+});
+
+test("knowledge planner enforces JSON response format and repair before fallback", () => {
+  const agentSource = fs.readFileSync(new URL("../src/agent.js", import.meta.url), "utf8");
+  assert.deepEqual(KNOWLEDGE_PLANNER_RESPONSE_FORMAT, { type: "json_object" });
+  assert.match(agentSource, /responseFormat:\s*KNOWLEDGE_PLANNER_RESPONSE_FORMAT/);
+  assert.match(agentSource, /Knowledge Planner returned invalid JSON, retrying repair/);
+  assert.match(agentSource, /planner_json_repaired/);
 });
 
 test("professional enforcement ignores tiny Hebrew stems", () => {

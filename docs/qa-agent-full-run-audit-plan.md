@@ -1180,3 +1180,135 @@ Completed: 2026-06-25.
 The current QA Agent is useful as a compact failure report, but it is not sufficient as a full internal run auditor.
 
 The next phase should focus on approving the richer QA report contract. The main missing capability is not only prompt wording or model choice; the QA Agent needs a structured per-agent audit output and, later, a deterministic `qa_run_summary` input.
+
+## Planner JSON Contract Hotfix
+
+Completed: 2026-06-27.
+
+Reason: during Planner retesting with `google/gemini-2.5-pro`, the methodology question `How do we decide whether a blocker is a real project delay?` produced useful planning content but QA flagged `knowledge_planner` as questionable because the model did not return parseable JSON. That makes downstream reranker/Main testing noisy, because the system falls back to a deterministic planner shape instead of using the model's intended structured plan.
+
+### Change
+
+- Added a runtime JSON contract for the Professional Knowledge Planner OpenRouter call using `responseFormat: { type: "json_object" }`.
+- Added one repair attempt before fallback when the Planner content cannot be parsed as JSON.
+- The repair call uses the same Planner model, temperature `0`, the same JSON response format, and a compact schema-only prompt.
+- If repair succeeds, the plan includes `planner_json_repaired: true` so the QA Full Audit can expose that the contract was recovered.
+
+### Tests And Measurements
+
+| Check | Result |
+| --- | --- |
+| `node --check src\agent.js` | Pass |
+| `node --check test\run-tests.js` | Pass |
+| `npm.cmd test` Planner contract regression | Pass: `knowledge planner enforces JSON response format and repair before fallback` |
+| `npm.cmd test` full suite | Non-zero because of unrelated existing prompt/timeline assertions outside this Planner hotfix |
+
+### Manual UI Gate Before Reranker Testing
+
+Re-run:
+
+```text
+How do we decide whether a blocker is a real project delay?
+```
+
+Pass criteria:
+
+- `knowledge_planner` appears in the Full QA Audit.
+- The Planner decision is `good`, or at least no longer fails with `Model did not return JSON`.
+- Output summary includes `domain_summary`, `relevant_terms`, `decision_criteria`, `rag_queries`, `recommended_tools`, and `risks_or_cautions`.
+- If `planner_json_repaired: true` appears, mark the run as acceptable but note that Gemini still needed JSON repair.
+- The final answer should explain methodology/criteria and must not invent project-specific delay facts.
+
+Proceed decision: move to reranker testing only after this manual UI gate passes.
+
+## Planner Phase Completion
+
+Completed: 2026-06-27.
+
+After the JSON-contract hotfix, the Planner was retested with the required routing cases before moving to reranker work.
+
+### Manual UI Evidence
+
+| Test | Expected Planner behavior | Result |
+| --- | --- | --- |
+| `What were the significant delays in March?` | Planner runs for a professional delay question and returns structured planning fields. | Pass |
+| `How do we decide whether a blocker is a real project delay?` | Planner runs for methodology/criteria, returns valid JSON, and does not invent project facts. | Pass |
+| `Hello, how are you?` | Planner does not run for normal chat. | Pass |
+| `What is the status of the latest invoice?` | Planner does not run for a non-professional invoice/status question. | Pass |
+
+### Invoice/Status Evidence
+
+The fourth test produced:
+
+- Classifier: `type: RAG`, `tool_hint: financial_transactions,meetings`, `professional: false`.
+- Knowledge vocabulary: checked, no match.
+- `knowledge_planner`: did not run.
+- Hybrid search: `plannedQueries: 0`.
+- This confirms the Planner did not add unnecessary cost or professional methodology to an invoice/status workflow.
+
+### Planner Decision
+
+Planner phase is complete. Proceed to reranker prompt/testing.
+
+Known downstream issues discovered while closing the Planner phase:
+
+- Main can still receive very large context and become expensive.
+- Main can hit output length limits.
+- Conflict detection or QA may become the reported root cause after the Planner is no longer failing.
+- These are not Planner blockers; they belong to the reranker/Main stabilization phases.
+
+## Reranker Prompt Validation Gate
+
+Purpose: verify whether the reranker selects the best evidence before changing Main. The reranker should improve evidence quality, not merely compress many candidates into fewer records.
+
+### Before/After Method
+
+For each test below, capture the run before the reranker prompt change if possible, then repeat the same prompt after the change.
+
+Record:
+
+- `hybrid_search.records`
+- `reranker.candidates`
+- `reranker.records`
+- reranker model
+- reranker prompt tokens, completion tokens, total tokens, cost, and latency
+- QA Full Audit decision for `reranker`
+- whether Main answer improved, degraded, or stayed the same
+
+### Reranker Test Set
+
+| Test | User question | What the reranker should prioritize |
+| --- | --- | --- |
+| R1 | `What were the significant delays in March?` | Actual March schedule blockers/delays with project impact. |
+| R2 | `Who caused the significant delays in March?` | Records that connect a delay to a responsible party or dependency, without inventing blame. |
+| R3 | `Which blockers delayed work, and which were only risks?` | Evidence separating realized delays from potential schedule risks. |
+| R4 | `What is the status of the latest invoice?` | Latest invoice/payment-status records, not generic delay or meeting records. |
+| R5 | `What project issues still require immediate action?` | Open/high-priority records, recent unresolved issues, and direct action requirements. |
+
+### Reranker Pass Criteria
+
+Pass only if all are true:
+
+- Reranker returns valid structured ranking output.
+- QA marks `reranker` as `good` or does not name it as a root cause.
+- Top selected records are directly relevant to the user's question.
+- Irrelevant records do not dominate the top results.
+- For delay questions, meeting lateness or generic scheduling text does not outrank actual project-impact delay evidence.
+- For responsibility questions, reranker prefers records with explicit actors, causes, or dependencies.
+- For invoice/status questions, reranker prefers invoice/payment evidence and recent dated records.
+- Token/cost stays reasonable relative to the candidate count. A high token run is acceptable only if the selected evidence clearly improves.
+
+### Reranker Fail Signals
+
+Treat as fail or needs prompt revision if any appear:
+
+- QA says reranker missed important evidence.
+- Top records are semantically related but not answer-bearing.
+- Reranker favors generic Knowledge Base/planning text over project records.
+- Reranker keeps duplicate records while discarding distinct evidence.
+- Reranker ranks records with no dates above dated records for time-sensitive questions.
+- Reranker causes Main to answer from weak/irrelevant evidence.
+
+### Proceed Decision
+
+Move to Main prompt/context stabilization only after R1-R5 are checked and the reranker is no longer a likely source of bad evidence selection.

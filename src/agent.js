@@ -17,6 +17,8 @@ import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./
 import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, hashValue } from "./cache.js";
 
+export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
+
 export async function runChatPipeline({ message, sessionId, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [] }) {
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
   const openRouterCalls = [];
@@ -572,6 +574,7 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
       maxTokens: config.ai?.knowledgePlanner?.maxTokens ?? 2200,
       timeoutMs: config.ai?.knowledgePlanner?.timeoutMs ?? 90_000,
       ...samplingSettings(config, "knowledgePlanner"),
+      responseFormat: KNOWLEDGE_PLANNER_RESPONSE_FORMAT,
       telemetry: telemetryFor("knowledge_planner"),
       messages: [
         { role: "system", content: config.prompts?.knowledge_planner || "" },
@@ -593,13 +596,72 @@ async function runKnowledgePlanner({ message, classification, config, trace, run
         }
       ]
     });
-    const plan = normalizeKnowledgePlan(extractJsonObject(content), search.matches, search.agents);
+    const plan = await parseOrRepairKnowledgePlan({
+      content,
+      message,
+      classification,
+      config,
+      search,
+      trace,
+      runId,
+      telemetryFor
+    });
     emitRunEvent(runId, "knowledge_planner", "Knowledge Planner completed", plan);
     return plan;
   } catch (error) {
     trace.push({ step: "knowledgePlanner", ok: false, fallback: true, error: error.message });
     emitRunEvent(runId, "knowledge_planner", "Knowledge Planner failed, using fallback", { error: error.message });
     return fallback;
+  }
+}
+
+async function parseOrRepairKnowledgePlan({ content, message, classification, config, search, trace, runId, telemetryFor }) {
+  try {
+    return normalizeKnowledgePlan(extractJsonObject(content), search.matches, search.agents);
+  } catch (error) {
+    trace.push({ step: "knowledgePlanner", ok: false, recoverable: true, error: error.message });
+    emitRunEvent(runId, "knowledge_planner", "Knowledge Planner returned invalid JSON, retrying repair", {
+      error: error.message,
+      content_preview: String(content || "").slice(0, 600)
+    });
+    const repaired = await chatCompletion({
+      apiKey: config.openRouterApiKey,
+      model: config.models.knowledgePlanner,
+      temperature: 0,
+      maxTokens: Math.max(1200, Math.min(Number(config.ai?.knowledgePlanner?.maxTokens ?? 2200), 3000)),
+      timeoutMs: config.ai?.knowledgePlanner?.timeoutMs ?? 90_000,
+      ...samplingSettings(config, "knowledgePlanner"),
+      responseFormat: KNOWLEDGE_PLANNER_RESPONSE_FORMAT,
+      telemetry: telemetryFor("knowledge_planner"),
+      messages: [
+        {
+          role: "system",
+          content: `You repair Professional Knowledge Planner output.
+Return only one valid JSON object.
+Do not include Markdown, explanations, or extra text.
+Use this exact schema:
+{
+  "domain_summary": "concise professional guidance",
+  "relevant_terms": ["term"],
+  "decision_criteria": ["criterion"],
+  "rag_queries": ["concrete search query"],
+  "recommended_tools": ["valid tool name"],
+  "risks_or_cautions": ["caution or limitation"]
+}`
+        },
+        {
+          role: "user",
+          content: JSON.stringify({
+            user_message: message,
+            classification,
+            selected_knowledge_agents: search.agents,
+            invalid_model_output: String(content || "").slice(0, 5000)
+          }, null, 2)
+        }
+      ]
+    });
+    const plan = normalizeKnowledgePlan(extractJsonObject(repaired), search.matches, search.agents);
+    return { ...plan, planner_json_repaired: true };
   }
 }
 
