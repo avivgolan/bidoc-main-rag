@@ -1794,6 +1794,9 @@ test("main agent requires inline source links instead of a consolidated footer",
   assert.match(agentSource, /uniqueByUrl\(call\.sources \|\| \[\]\)/);
   assert.match(mainPrompt, /End each factual bullet with its directly matching Markdown source link/);
   assert.match(mainPrompt, /Do not create a separate sources section at the bottom/);
+  assert.match(mainPrompt, /identify the single latest dated supported record first/);
+  assert.match(mainPrompt, /strongest 5-7 supported findings/);
+  assert.match(mainPrompt, /use "caused by" only when the project record explicitly links/);
 });
 
 test("settings save fails without shared App Supabase persistence", async () => {

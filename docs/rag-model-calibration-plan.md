@@ -444,3 +444,168 @@ Run the same questions before/after prompt changes when possible:
 ### Proceed Decision
 
 Do not move to Main prompt/context stabilization until the reranker test set is checked and the reranker is no longer a likely source of poor evidence selection.
+
+## 2026-06-29: Main Agent Prompt Calibration
+
+### Agent
+
+| Field | Value |
+| --- | --- |
+| Agent | Main RAG Agent |
+| Runtime step | `main_agent` |
+| Main backend path | `src/agent.js` |
+| Prompt source | `prompts.main` / `src/prompts.js` |
+| Current tested model | `google/gemini-2.5-pro` |
+| Main mission | Synthesize the final grounded answer from retrieval, graph, tool results, Knowledge Planner guidance, and conversation context |
+
+### Why We Calibrated It
+
+Reranker tests showed acceptable reranker behavior, but Main remained the largest risk:
+
+- Very high input-token usage in several runs.
+- Occasional `MAX_TOKENS` truncation.
+- QA sometimes flagged missing citations or unsupported claims.
+- "Latest" questions sometimes produced a useful list, but did not always identify the single latest dated record first.
+
+### Prompt Change Made
+
+This was a targeted prompt tightening, not a full rewrite.
+
+Added `Answer Precision Rules`:
+
+- For `latest/current/recent/last` questions, identify the single latest dated supported record first.
+- Sort multiple relevant records by support and recency.
+- Cap normal list answers to the strongest `5-7` supported findings unless the user explicitly asks for a full list.
+- Every factual bullet must have a directly matching citation when a source URL is available.
+- Claims without direct support or citation should move to uncertainty/missing information instead of being presented as fact.
+- For cause/blame/accountability/responsibility questions, use `caused by` only when a project record explicitly links the actor or dependency to the delay, issue, or outcome.
+- Prefer a short complete answer over a long answer that risks unsupported claims or missing citations.
+
+Also made the citation rule explicit:
+
+- Do not create a separate sources section at the bottom.
+
+### Automated Checks
+
+Added prompt regression assertions in `test/run-tests.js` for:
+
+- Latest-record-first behavior.
+- Strongest `5-7` finding cap.
+- Explicit `caused by` restriction.
+- Inline source-link rule.
+- No separate sources section at the bottom.
+
+### Manual Main Agent Validation Gate
+
+Run these after the prompt is active in the UI/runtime:
+
+1. `What is the status of the latest invoice?`
+2. `Who caused the significant delays in March?`
+3. `Which blockers delayed work, and which were only risks?`
+4. `What were the significant delays in March?`
+5. `What project issues still require immediate action?`
+
+Record detailed Main validation results in:
+
+- `docs/main-agent-calibration-results.md`
+
+### Main Pass Criteria
+
+- QA marks `main_agent` as `good` or at least does not name it as root cause.
+- No `MAX_TOKENS` truncation.
+- Every factual bullet has a direct source link when a source URL exists.
+- Latest invoice answer starts with the single latest dated supported invoice/payment record and its status.
+- Responsibility answers do not claim a party "caused" a delay unless the source explicitly supports causation.
+- Blocker/risk answers separate realized blockers from possible risks.
+- Broad answers are capped and do not over-expand into weak or duplicate records.
+
+### Known Remaining Non-Prompt Issue
+
+The Main prompt is now more precise, but the largest remaining improvement is probably payload/context reduction:
+
+- `retrieval_results` and `retrieval_context` may duplicate evidence.
+- Graph, tool, source, and reranker payloads can make Main input very large.
+- Prompt changes can improve answer discipline, but code-level context compaction will likely be needed for major cost reduction.
+
+### Early Main Validation Signal
+
+The first five Hebrew Main validation runs support the non-prompt diagnosis:
+
+- M1 latest invoice: partial answer behavior, but raw URL leakage and `MAX_TOKENS`.
+- M2 March delay responsibility: QA named `main_agent` as root cause for missing direct citations and incomplete evidence use, with `180280` total Main tokens and `MAX_TOKENS`.
+- M3 blockers vs risks: QA marked Main `good`, but Main still hit `MAX_TOKENS`, raw URL leakage persisted, and Knowledge Planner fell back after JSON repair failed.
+- M4 significant March delays: Main answer behavior passed and finished with `STOP`, but still used `175380` Main tokens and cost `$0.2388775`.
+- M5 immediate action topics: answer was useful but QA named `main_agent` as root cause, quality was `incomplete`, direct source links were missing for most claims, raw URL leakage persisted, and Main used `162849` total tokens with `MAX_TOKENS`.
+
+Current conclusion: the Main prompt is now tight enough to expose the real bottleneck. Further prompt tightening alone is unlikely to fix the dominant failures. The next implementation phase should be Main payload/context compaction and source-link normalization.
+
+## 2026-06-29: Main Agent Validation Summary
+
+### What We Changed
+
+- Kept `google/gemini-2.5-pro` for Main because the successful runs show strong synthesis quality.
+- Tightened Main prompt rules for:
+  - latest/current questions,
+  - broad list answers,
+  - direct citations per factual bullet,
+  - unsupported or uncited claims,
+  - cautious responsibility/causation language.
+- Added prompt regression assertions so these precision rules stay present.
+- Created the manual validation log:
+  - `docs/main-agent-calibration-results.md`
+
+### Manual Tests Completed
+
+| Test | Question type | Main behavior | Runtime/cost result | Decision |
+| --- | --- | --- | --- | --- |
+| M1 | latest invoice/status | Mostly useful, latest item surfaced first, but raw URL leakage | `117119` tokens, `$0.18220375`, `MAX_TOKENS` | Partial/fail |
+| M2 | delay responsibility | Useful but citation failure; QA root cause `main_agent` | `180280` tokens, `$0.261155`, `MAX_TOKENS` | Fail |
+| M3 | blockers vs risks | QA marked Main `good`, but raw URL leakage and Planner fallback | `130515` tokens, `$0.19894875`, `MAX_TOKENS` | Partial |
+| M4 | significant March delays | Best answer behavior; focused and completed | `175380` tokens, `$0.2388775`, `STOP` | Answer pass, cost fail/watch |
+| M5 | immediate action topics | Useful list but QA root cause `main_agent`; missing source links | `162849` tokens, `$0.23936625`, `MAX_TOKENS` | Partial/fail |
+
+### Main Agent Decision
+
+The Main model choice is acceptable for now. The bigger issue is not model intelligence.
+
+Main failures are dominated by:
+
+- oversized context,
+- duplicated retrieval/tool/source payloads,
+- inconsistent citation mapping,
+- raw URL leakage,
+- output truncation,
+- noisy conflict detection feedback.
+
+### Next Required Phase
+
+Implement Main context compaction before further prompt/model changes.
+
+Detailed implementation plan:
+
+- `docs/main-agent-context-compaction-plan.md`
+
+Target changes:
+
+1. Build a compact `evidence_records` payload for Main.
+2. Deduplicate retrieval records before Main by URL/title/date/text fingerprint.
+3. Cap default Main evidence to the strongest `8-12` records unless the answer mode explicitly needs a larger list.
+4. Send structured source IDs and metadata to Main instead of encouraging raw URLs in generated text.
+5. Move URL rendering to the UI/source renderer wherever possible.
+6. Summarize graph relationships before Main when graph result count is high.
+7. Add answer-mode templates for latest status, responsibility, blockers-vs-risks, delay lists, and immediate actions.
+
+### Next Phase Tests
+
+Retest M1-M5 after context compaction and compare:
+
+- Main prompt tokens,
+- Main completion tokens,
+- Main total cost,
+- finish reason (`STOP` vs `MAX_TOKENS`),
+- QA root cause step,
+- direct source-link coverage,
+- raw URL leakage,
+- answer usefulness in the chat UI.
+
+Proceed only if Main token use drops materially and M1-M5 no longer repeatedly hit `MAX_TOKENS`.
