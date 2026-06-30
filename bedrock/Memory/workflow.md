@@ -38,6 +38,7 @@ tags:
 - Workflow node cards now label Input/Output payload provenance as captured, details, or not captured; nodeDetails are used when a workflow node lacks direct input/output fields.
 - Preview text masks obvious sensitive keys, bearer tokens, secrets, passwords, and authorization values before rendering.
 - The side inspector still shows full Input/Output details and per-node OpenRouter call details for the selected node.
+- Expanded SVG workflow cards draw Log/Copy buttons inside each node; Cytoscape handles those as coordinate hitboxes, so Log opens that node's inspector log section and Copy copies only that node's masked input/output/metrics/log payload.
 
 ## Recent Changes
 
@@ -63,6 +64,7 @@ tags:
 - 2026-06-23 -- Added Stage 3 performance diff with run-level duration/tokens/cost deltas and per-node Base-to-Compare metric details.
 - 2026-06-23 -- Completed Stage 3 regression indicators with regression counting, toolbar filtering, graph highlighting, Compare banner chips, and node inspector explanations.
 - 2026-06-24 -- Fixed Workflow Input/Output display provenance: removed misleading fallback payloads, hydrate missing node payloads from nodeDetails/run events, and show whether payloads are captured/details/not captured.
+- 2026-06-26 -- Wired expanded workflow card Log/Copy actions: Log focuses the selected node's log section in the inspector, and Copy copies only that node's masked payload rather than the whole run schema.
 
 ## Gotchas
 

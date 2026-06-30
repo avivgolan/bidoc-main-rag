@@ -1,0 +1,2478 @@
+{
+  "schema": "bidoc-app-architecture/v1",
+  "generated": "2026-06-26T13:12:38.799Z",
+  "nodes": [
+    {
+      "id": "api:* /api/ai-report/",
+      "label": "* /api/ai-report/",
+      "type": "api-route",
+      "route": "/api/ai-report/"
+    },
+    {
+      "id": "api:* /api/delay-events/",
+      "label": "* /api/delay-events/",
+      "type": "api-route",
+      "route": "/api/delay-events/"
+    },
+    {
+      "id": "api:* /api/messages/",
+      "label": "* /api/messages/",
+      "type": "api-route",
+      "route": "/api/messages/"
+    },
+    {
+      "id": "api:* /api/qa/",
+      "label": "* /api/qa/",
+      "type": "api-route",
+      "route": "/api/qa/"
+    },
+    {
+      "id": "api:* /api/tools/",
+      "label": "* /api/tools/",
+      "type": "api-route",
+      "route": "/api/tools/"
+    },
+    {
+      "id": "api:GET /api/agents",
+      "label": "GET /api/agents",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/agents"
+    },
+    {
+      "id": "api:GET /api/delay-claims",
+      "label": "GET /api/delay-claims",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/delay-claims"
+    },
+    {
+      "id": "api:GET /api/graph",
+      "label": "GET /api/graph",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/graph"
+    },
+    {
+      "id": "api:GET /api/insights/hashtags",
+      "label": "GET /api/insights/hashtags",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/insights/hashtags"
+    },
+    {
+      "id": "api:GET /api/insights/runs",
+      "label": "GET /api/insights/runs",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/insights/runs"
+    },
+    {
+      "id": "api:GET /api/knowledge/agents",
+      "label": "GET /api/knowledge/agents",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/knowledge/agents"
+    },
+    {
+      "id": "api:GET /api/knowledge/documents",
+      "label": "GET /api/knowledge/documents",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/knowledge/documents"
+    },
+    {
+      "id": "api:GET /api/openrouter/models",
+      "label": "GET /api/openrouter/models",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/openrouter/models"
+    },
+    {
+      "id": "api:GET /api/qa/dislikes",
+      "label": "GET /api/qa/dislikes",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/qa/dislikes"
+    },
+    {
+      "id": "api:GET /api/qa/messages",
+      "label": "GET /api/qa/messages",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/qa/messages"
+    },
+    {
+      "id": "api:GET /api/run-history",
+      "label": "GET /api/run-history",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/run-history"
+    },
+    {
+      "id": "api:GET /api/runs/",
+      "label": "GET /api/runs/",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/runs/"
+    },
+    {
+      "id": "api:GET /api/sessions",
+      "label": "GET /api/sessions",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/sessions"
+    },
+    {
+      "id": "api:GET /api/settings",
+      "label": "GET /api/settings",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/settings"
+    },
+    {
+      "id": "api:GET /api/settings/export",
+      "label": "GET /api/settings/export",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/settings/export"
+    },
+    {
+      "id": "api:GET /api/subagents/data-query/schema",
+      "label": "GET /api/subagents/data-query/schema",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/subagents/data-query/schema"
+    },
+    {
+      "id": "api:GET /api/timeline",
+      "label": "GET /api/timeline",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/timeline"
+    },
+    {
+      "id": "api:GET /api/timeline/alerts",
+      "label": "GET /api/timeline/alerts",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/timeline/alerts"
+    },
+    {
+      "id": "api:GET /api/timeline/events",
+      "label": "GET /api/timeline/events",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/timeline/events"
+    },
+    {
+      "id": "api:GET /api/timeline/link-suggestions",
+      "label": "GET /api/timeline/link-suggestions",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/timeline/link-suggestions"
+    },
+    {
+      "id": "api:GET /api/timeline/links",
+      "label": "GET /api/timeline/links",
+      "type": "api-route",
+      "method": "GET",
+      "route": "/api/timeline/links"
+    },
+    {
+      "id": "api:POST /api/chat",
+      "label": "POST /api/chat",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/chat"
+    },
+    {
+      "id": "api:POST /api/delay-claims",
+      "label": "POST /api/delay-claims",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/delay-claims"
+    },
+    {
+      "id": "api:POST /api/diagnostics/connections",
+      "label": "POST /api/diagnostics/connections",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/diagnostics/connections"
+    },
+    {
+      "id": "api:POST /api/evaluations/run",
+      "label": "POST /api/evaluations/run",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/evaluations/run"
+    },
+    {
+      "id": "api:POST /api/insights/analyze",
+      "label": "POST /api/insights/analyze",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/insights/analyze"
+    },
+    {
+      "id": "api:POST /api/knowledge/documents",
+      "label": "POST /api/knowledge/documents",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/knowledge/documents"
+    },
+    {
+      "id": "api:POST /api/knowledge/search",
+      "label": "POST /api/knowledge/search",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/knowledge/search"
+    },
+    {
+      "id": "api:POST /api/qa/trends",
+      "label": "POST /api/qa/trends",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/qa/trends"
+    },
+    {
+      "id": "api:POST /api/settings/import",
+      "label": "POST /api/settings/import",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/settings/import"
+    },
+    {
+      "id": "api:POST /api/settings/reload",
+      "label": "POST /api/settings/reload",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/settings/reload"
+    },
+    {
+      "id": "api:POST /api/subagents/alert",
+      "label": "POST /api/subagents/alert",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/subagents/alert"
+    },
+    {
+      "id": "api:POST /api/subagents/data-query",
+      "label": "POST /api/subagents/data-query",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/subagents/data-query"
+    },
+    {
+      "id": "api:POST /api/system/restart",
+      "label": "POST /api/system/restart",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/system/restart"
+    },
+    {
+      "id": "api:POST /api/timeline/graph/rebuild",
+      "label": "POST /api/timeline/graph/rebuild",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/timeline/graph/rebuild"
+    },
+    {
+      "id": "api:POST /api/timeline/links",
+      "label": "POST /api/timeline/links",
+      "type": "api-route",
+      "method": "POST",
+      "route": "/api/timeline/links"
+    },
+    {
+      "id": "api:PUT /api/agents",
+      "label": "PUT /api/agents",
+      "type": "api-route",
+      "method": "PUT",
+      "route": "/api/agents"
+    },
+    {
+      "id": "api:PUT /api/settings",
+      "label": "PUT /api/settings",
+      "type": "api-route",
+      "method": "PUT",
+      "route": "/api/settings"
+    },
+    {
+      "id": "domain:Chat Pipeline",
+      "label": "Chat Pipeline",
+      "type": "domain",
+      "summary": "Sanitize, classify, retrieve, tool-call, synthesize, persist."
+    },
+    {
+      "id": "domain:Delay Claims",
+      "label": "Delay Claims",
+      "type": "domain",
+      "summary": "Delay claim cases, events, analysis and packages."
+    },
+    {
+      "id": "domain:Insights",
+      "label": "Insights",
+      "type": "domain",
+      "summary": "Index-first project insight analysis and history."
+    },
+    {
+      "id": "domain:Knowledge Base",
+      "label": "Knowledge Base",
+      "type": "domain",
+      "summary": "Local agent knowledge documents and search."
+    },
+    {
+      "id": "domain:Project Graph",
+      "label": "Project Graph",
+      "type": "domain",
+      "summary": "Semantic entity graph over project data."
+    },
+    {
+      "id": "domain:Settings",
+      "label": "Settings",
+      "type": "domain",
+      "summary": "Runtime config, model prompts, presets, diagnostics."
+    },
+    {
+      "id": "domain:Subagents",
+      "label": "Subagents",
+      "type": "domain",
+      "summary": "Alert, Data Query, Meeting Evidence, Delay Claim, Project Insights agents."
+    },
+    {
+      "id": "domain:Timeline",
+      "label": "Timeline",
+      "type": "domain",
+      "summary": "Timeline events, links, graph rebuild and UI browsing."
+    },
+    {
+      "id": "domain:Workflow QA",
+      "label": "Workflow QA",
+      "type": "domain",
+      "summary": "Run history, Cytoscape workflow canvas, QA reports and comparisons."
+    },
+    {
+      "id": "external:App Supabase",
+      "label": "App Supabase",
+      "type": "external",
+      "summary": "Settings, messages, run history, QA, graph tables."
+    },
+    {
+      "id": "external:Browser",
+      "label": "Browser",
+      "type": "external",
+      "summary": "Plain SPA runtime."
+    },
+    {
+      "id": "external:Content Supabase",
+      "label": "Content Supabase",
+      "type": "external",
+      "summary": "RAG index, alerts, timeline events, content RPCs."
+    },
+    {
+      "id": "external:n8n",
+      "label": "n8n webhooks",
+      "type": "external",
+      "summary": "Optional external tools such as meetings, emails, safety and quality reports."
+    },
+    {
+      "id": "external:node:child_process",
+      "label": "node:child_process",
+      "type": "external"
+    },
+    {
+      "id": "external:node:crypto",
+      "label": "node:crypto",
+      "type": "external"
+    },
+    {
+      "id": "external:node:fs",
+      "label": "node:fs",
+      "type": "external"
+    },
+    {
+      "id": "external:node:http",
+      "label": "node:http",
+      "type": "external"
+    },
+    {
+      "id": "external:node:net",
+      "label": "node:net",
+      "type": "external"
+    },
+    {
+      "id": "external:node:path",
+      "label": "node:path",
+      "type": "external"
+    },
+    {
+      "id": "external:node:tls",
+      "label": "node:tls",
+      "type": "external"
+    },
+    {
+      "id": "external:node:url",
+      "label": "node:url",
+      "type": "external"
+    },
+    {
+      "id": "external:OpenRouter",
+      "label": "OpenRouter",
+      "type": "external",
+      "summary": "Chat, embeddings, reranking, models list."
+    },
+    {
+      "id": "file:public/app.js",
+      "label": "public/app.js",
+      "type": "frontend-file",
+      "path": "public/app.js",
+      "lines": 10208,
+      "summary": ""
+    },
+    {
+      "id": "file:public/calendarHelpers.js",
+      "label": "public/calendarHelpers.js",
+      "type": "frontend-file",
+      "path": "public/calendarHelpers.js",
+      "lines": 34,
+      "summary": ""
+    },
+    {
+      "id": "file:public/index.html",
+      "label": "public/index.html",
+      "type": "frontend-file",
+      "path": "public/index.html",
+      "lines": 1494,
+      "summary": ""
+    },
+    {
+      "id": "file:public/styles.css",
+      "label": "public/styles.css",
+      "type": "frontend-file",
+      "path": "public/styles.css",
+      "lines": 8993,
+      "summary": ""
+    },
+    {
+      "id": "file:public/timelineData.js",
+      "label": "public/timelineData.js",
+      "type": "frontend-file",
+      "path": "public/timelineData.js",
+      "lines": 148,
+      "summary": ""
+    },
+    {
+      "id": "file:public/timelineSearch.js",
+      "label": "public/timelineSearch.js",
+      "type": "frontend-file",
+      "path": "public/timelineSearch.js",
+      "lines": 115,
+      "summary": ""
+    },
+    {
+      "id": "file:src/agent.js",
+      "label": "src/agent.js",
+      "type": "backend-file",
+      "path": "src/agent.js",
+      "lines": 1630,
+      "summary": ""
+    },
+    {
+      "id": "file:src/cache.js",
+      "label": "src/cache.js",
+      "type": "backend-file",
+      "path": "src/cache.js",
+      "lines": 314,
+      "summary": ""
+    },
+    {
+      "id": "file:src/classifier.js",
+      "label": "src/classifier.js",
+      "type": "backend-file",
+      "path": "src/classifier.js",
+      "lines": 69,
+      "summary": ""
+    },
+    {
+      "id": "file:src/clock.js",
+      "label": "src/clock.js",
+      "type": "backend-file",
+      "path": "src/clock.js",
+      "lines": 51,
+      "summary": ""
+    },
+    {
+      "id": "file:src/config.js",
+      "label": "src/config.js",
+      "type": "backend-file",
+      "path": "src/config.js",
+      "lines": 1106,
+      "summary": ""
+    },
+    {
+      "id": "file:src/heuristics.js",
+      "label": "src/heuristics.js",
+      "type": "backend-file",
+      "path": "src/heuristics.js",
+      "lines": 87,
+      "summary": ""
+    },
+    {
+      "id": "file:src/knowledge.js",
+      "label": "src/knowledge.js",
+      "type": "backend-file",
+      "path": "src/knowledge.js",
+      "lines": 463,
+      "summary": ""
+    },
+    {
+      "id": "file:src/memory.js",
+      "label": "src/memory.js",
+      "type": "backend-file",
+      "path": "src/memory.js",
+      "lines": 117,
+      "summary": ""
+    },
+    {
+      "id": "file:src/openrouter.js",
+      "label": "src/openrouter.js",
+      "type": "backend-file",
+      "path": "src/openrouter.js",
+      "lines": 345,
+      "summary": ""
+    },
+    {
+      "id": "file:src/projectGraph.js",
+      "label": "src/projectGraph.js",
+      "type": "backend-file",
+      "path": "src/projectGraph.js",
+      "lines": 333,
+      "summary": ""
+    },
+    {
+      "id": "file:src/prompts.js",
+      "label": "src/prompts.js",
+      "type": "backend-file",
+      "path": "src/prompts.js",
+      "lines": 567,
+      "summary": "Core Rules"
+    },
+    {
+      "id": "file:src/qaAgent.js",
+      "label": "src/qaAgent.js",
+      "type": "backend-file",
+      "path": "src/qaAgent.js",
+      "lines": 202,
+      "summary": ""
+    },
+    {
+      "id": "file:src/qaSummary.js",
+      "label": "src/qaSummary.js",
+      "type": "backend-file",
+      "path": "src/qaSummary.js",
+      "lines": 442,
+      "summary": ""
+    },
+    {
+      "id": "file:src/runLog.js",
+      "label": "src/runLog.js",
+      "type": "backend-file",
+      "path": "src/runLog.js",
+      "lines": 80,
+      "summary": ""
+    },
+    {
+      "id": "file:src/sanitize.js",
+      "label": "src/sanitize.js",
+      "type": "backend-file",
+      "path": "src/sanitize.js",
+      "lines": 26,
+      "summary": ""
+    },
+    {
+      "id": "file:src/server.js",
+      "label": "src/server.js",
+      "type": "backend-file",
+      "path": "src/server.js",
+      "lines": 1965,
+      "summary": ""
+    },
+    {
+      "id": "file:src/sourceQuality.js",
+      "label": "src/sourceQuality.js",
+      "type": "backend-file",
+      "path": "src/sourceQuality.js",
+      "lines": 91,
+      "summary": ""
+    },
+    {
+      "id": "file:src/subagents/alert.js",
+      "label": "src/subagents/alert.js",
+      "type": "backend-file",
+      "path": "src/subagents/alert.js",
+      "lines": 132,
+      "summary": ""
+    },
+    {
+      "id": "file:src/subagents/dataQuery.js",
+      "label": "src/subagents/dataQuery.js",
+      "type": "backend-file",
+      "path": "src/subagents/dataQuery.js",
+      "lines": 875,
+      "summary": ""
+    },
+    {
+      "id": "file:src/subagents/delayClaim.js",
+      "label": "src/subagents/delayClaim.js",
+      "type": "backend-file",
+      "path": "src/subagents/delayClaim.js",
+      "lines": 1102,
+      "summary": ""
+    },
+    {
+      "id": "file:src/subagents/meeting.js",
+      "label": "src/subagents/meeting.js",
+      "type": "backend-file",
+      "path": "src/subagents/meeting.js",
+      "lines": 196,
+      "summary": ""
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js",
+      "label": "src/subagents/projectInsights.js",
+      "type": "backend-file",
+      "path": "src/subagents/projectInsights.js",
+      "lines": 819,
+      "summary": ""
+    },
+    {
+      "id": "file:src/supabase.js",
+      "label": "src/supabase.js",
+      "type": "backend-file",
+      "path": "src/supabase.js",
+      "lines": 1592,
+      "summary": ""
+    },
+    {
+      "id": "file:src/timelineGraph.js",
+      "label": "src/timelineGraph.js",
+      "type": "backend-file",
+      "path": "src/timelineGraph.js",
+      "lines": 274,
+      "summary": ""
+    },
+    {
+      "id": "file:src/timelineLinks.js",
+      "label": "src/timelineLinks.js",
+      "type": "backend-file",
+      "path": "src/timelineLinks.js",
+      "lines": 175,
+      "summary": ""
+    },
+    {
+      "id": "file:src/tools.js",
+      "label": "src/tools.js",
+      "type": "backend-file",
+      "path": "src/tools.js",
+      "lines": 81,
+      "summary": ""
+    },
+    {
+      "id": "file:src/types.js",
+      "label": "src/types.js",
+      "type": "backend-file",
+      "path": "src/types.js",
+      "lines": 15,
+      "summary": ""
+    },
+    {
+      "id": "panel:agents",
+      "label": "#agents",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:chat",
+      "label": "#chat",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:graph",
+      "label": "#graph",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:history",
+      "label": "#history",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:insights",
+      "label": "#insights",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:knowledge",
+      "label": "#knowledge",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:linkAgent",
+      "label": "#linkAgent",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:qa",
+      "label": "#qa",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:reset",
+      "label": "#reset",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:settings",
+      "label": "#settings",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:subagents",
+      "label": "#subagents",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:timeline",
+      "label": "#timeline",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:tools",
+      "label": "#tools",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    },
+    {
+      "id": "panel:workflow",
+      "label": "#workflow",
+      "type": "frontend-panel",
+      "summary": "SPA navigation panel."
+    }
+  ],
+  "edges": [
+    {
+      "id": "api:* /api/ai-report/->domain:Workflow QA:serves",
+      "source": "api:* /api/ai-report/",
+      "target": "domain:Workflow QA",
+      "type": "serves"
+    },
+    {
+      "id": "api:* /api/delay-events/->domain:Delay Claims:serves",
+      "source": "api:* /api/delay-events/",
+      "target": "domain:Delay Claims",
+      "type": "serves"
+    },
+    {
+      "id": "api:* /api/messages/->domain:Chat Pipeline:serves",
+      "source": "api:* /api/messages/",
+      "target": "domain:Chat Pipeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:* /api/qa/->domain:Workflow QA:serves",
+      "source": "api:* /api/qa/",
+      "target": "domain:Workflow QA",
+      "type": "serves"
+    },
+    {
+      "id": "api:* /api/tools/->domain:Settings:serves",
+      "source": "api:* /api/tools/",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/agents->domain:Settings:serves",
+      "source": "api:GET /api/agents",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/delay-claims->domain:Delay Claims:serves",
+      "source": "api:GET /api/delay-claims",
+      "target": "domain:Delay Claims",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/graph->domain:Project Graph:serves",
+      "source": "api:GET /api/graph",
+      "target": "domain:Project Graph",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/insights/hashtags->domain:Insights:serves",
+      "source": "api:GET /api/insights/hashtags",
+      "target": "domain:Insights",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/insights/runs->domain:Insights:serves",
+      "source": "api:GET /api/insights/runs",
+      "target": "domain:Insights",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/knowledge/agents->domain:Knowledge Base:serves",
+      "source": "api:GET /api/knowledge/agents",
+      "target": "domain:Knowledge Base",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/knowledge/documents->domain:Knowledge Base:serves",
+      "source": "api:GET /api/knowledge/documents",
+      "target": "domain:Knowledge Base",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/openrouter/models->domain:Settings:serves",
+      "source": "api:GET /api/openrouter/models",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/qa/dislikes->domain:Workflow QA:serves",
+      "source": "api:GET /api/qa/dislikes",
+      "target": "domain:Workflow QA",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/qa/messages->domain:Workflow QA:serves",
+      "source": "api:GET /api/qa/messages",
+      "target": "domain:Workflow QA",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/run-history->domain:Workflow QA:serves",
+      "source": "api:GET /api/run-history",
+      "target": "domain:Workflow QA",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/runs/->domain:Workflow QA:serves",
+      "source": "api:GET /api/runs/",
+      "target": "domain:Workflow QA",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/sessions->domain:Chat Pipeline:serves",
+      "source": "api:GET /api/sessions",
+      "target": "domain:Chat Pipeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/settings->domain:Settings:serves",
+      "source": "api:GET /api/settings",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/settings/export->domain:Settings:serves",
+      "source": "api:GET /api/settings/export",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/subagents/data-query/schema->domain:Subagents:serves",
+      "source": "api:GET /api/subagents/data-query/schema",
+      "target": "domain:Subagents",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/timeline->domain:Timeline:serves",
+      "source": "api:GET /api/timeline",
+      "target": "domain:Timeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/timeline/alerts->domain:Timeline:serves",
+      "source": "api:GET /api/timeline/alerts",
+      "target": "domain:Timeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/timeline/events->domain:Timeline:serves",
+      "source": "api:GET /api/timeline/events",
+      "target": "domain:Timeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/timeline/link-suggestions->domain:Timeline:serves",
+      "source": "api:GET /api/timeline/link-suggestions",
+      "target": "domain:Timeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:GET /api/timeline/links->domain:Timeline:serves",
+      "source": "api:GET /api/timeline/links",
+      "target": "domain:Timeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/chat->domain:Chat Pipeline:serves",
+      "source": "api:POST /api/chat",
+      "target": "domain:Chat Pipeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/delay-claims->domain:Delay Claims:serves",
+      "source": "api:POST /api/delay-claims",
+      "target": "domain:Delay Claims",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/diagnostics/connections->domain:Settings:serves",
+      "source": "api:POST /api/diagnostics/connections",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/insights/analyze->domain:Insights:serves",
+      "source": "api:POST /api/insights/analyze",
+      "target": "domain:Insights",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/knowledge/documents->domain:Knowledge Base:serves",
+      "source": "api:POST /api/knowledge/documents",
+      "target": "domain:Knowledge Base",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/knowledge/search->domain:Knowledge Base:serves",
+      "source": "api:POST /api/knowledge/search",
+      "target": "domain:Knowledge Base",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/qa/trends->domain:Workflow QA:serves",
+      "source": "api:POST /api/qa/trends",
+      "target": "domain:Workflow QA",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/settings/import->domain:Settings:serves",
+      "source": "api:POST /api/settings/import",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/settings/reload->domain:Settings:serves",
+      "source": "api:POST /api/settings/reload",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/subagents/alert->domain:Subagents:serves",
+      "source": "api:POST /api/subagents/alert",
+      "target": "domain:Subagents",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/subagents/data-query->domain:Subagents:serves",
+      "source": "api:POST /api/subagents/data-query",
+      "target": "domain:Subagents",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/system/restart->domain:Settings:serves",
+      "source": "api:POST /api/system/restart",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/timeline/graph/rebuild->domain:Timeline:serves",
+      "source": "api:POST /api/timeline/graph/rebuild",
+      "target": "domain:Timeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:POST /api/timeline/links->domain:Timeline:serves",
+      "source": "api:POST /api/timeline/links",
+      "target": "domain:Timeline",
+      "type": "serves"
+    },
+    {
+      "id": "api:PUT /api/agents->domain:Settings:serves",
+      "source": "api:PUT /api/agents",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "api:PUT /api/settings->domain:Settings:serves",
+      "source": "api:PUT /api/settings",
+      "target": "domain:Settings",
+      "type": "serves"
+    },
+    {
+      "id": "external:Browser->file:public/index.html:loads",
+      "source": "external:Browser",
+      "target": "file:public/index.html",
+      "type": "loads"
+    },
+    {
+      "id": "external:Browser->panel:agents:renders",
+      "source": "external:Browser",
+      "target": "panel:agents",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:chat:renders",
+      "source": "external:Browser",
+      "target": "panel:chat",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:graph:renders",
+      "source": "external:Browser",
+      "target": "panel:graph",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:history:renders",
+      "source": "external:Browser",
+      "target": "panel:history",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:insights:renders",
+      "source": "external:Browser",
+      "target": "panel:insights",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:knowledge:renders",
+      "source": "external:Browser",
+      "target": "panel:knowledge",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:linkAgent:renders",
+      "source": "external:Browser",
+      "target": "panel:linkAgent",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:qa:renders",
+      "source": "external:Browser",
+      "target": "panel:qa",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:reset:renders",
+      "source": "external:Browser",
+      "target": "panel:reset",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:settings:renders",
+      "source": "external:Browser",
+      "target": "panel:settings",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:subagents:renders",
+      "source": "external:Browser",
+      "target": "panel:subagents",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:timeline:renders",
+      "source": "external:Browser",
+      "target": "panel:timeline",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:tools:renders",
+      "source": "external:Browser",
+      "target": "panel:tools",
+      "type": "renders"
+    },
+    {
+      "id": "external:Browser->panel:workflow:renders",
+      "source": "external:Browser",
+      "target": "panel:workflow",
+      "type": "renders"
+    },
+    {
+      "id": "file:public/app.js->api:* /api/ai-report/:calls",
+      "source": "file:public/app.js",
+      "target": "api:* /api/ai-report/",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:* /api/delay-events/:calls",
+      "source": "file:public/app.js",
+      "target": "api:* /api/delay-events/",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:* /api/messages/:calls",
+      "source": "file:public/app.js",
+      "target": "api:* /api/messages/",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:* /api/qa/:calls",
+      "source": "file:public/app.js",
+      "target": "api:* /api/qa/",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:* /api/tools/:calls",
+      "source": "file:public/app.js",
+      "target": "api:* /api/tools/",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/agents:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/agents",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/delay-claims:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/delay-claims",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/graph:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/graph",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/insights/hashtags:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/insights/hashtags",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/insights/runs:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/insights/runs",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/knowledge/agents:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/knowledge/agents",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/knowledge/documents:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/knowledge/documents",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/openrouter/models:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/openrouter/models",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/qa/messages:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/qa/messages",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/run-history:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/run-history",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/runs/:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/runs/",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/sessions:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/sessions",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/settings:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/settings",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/settings/export:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/settings/export",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/subagents/data-query/schema:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/subagents/data-query/schema",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/timeline/link-suggestions:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/timeline/link-suggestions",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:GET /api/timeline/links:calls",
+      "source": "file:public/app.js",
+      "target": "api:GET /api/timeline/links",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/chat:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/chat",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/diagnostics/connections:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/diagnostics/connections",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/evaluations/run:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/evaluations/run",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/insights/analyze:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/insights/analyze",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/knowledge/search:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/knowledge/search",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/qa/trends:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/qa/trends",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/settings/import:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/settings/import",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/settings/reload:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/settings/reload",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/subagents/data-query:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/subagents/data-query",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->api:POST /api/system/restart:calls",
+      "source": "file:public/app.js",
+      "target": "api:POST /api/system/restart",
+      "type": "calls"
+    },
+    {
+      "id": "file:public/app.js->domain:Workflow QA:renders",
+      "source": "file:public/app.js",
+      "target": "domain:Workflow QA",
+      "type": "renders"
+    },
+    {
+      "id": "file:public/app.js->file:public/calendarHelpers.js:imports",
+      "source": "file:public/app.js",
+      "target": "file:public/calendarHelpers.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:public/app.js->file:public/styles.css:styles",
+      "source": "file:public/app.js",
+      "target": "file:public/styles.css",
+      "type": "styles"
+    },
+    {
+      "id": "file:public/app.js->file:public/timelineData.js:imports",
+      "source": "file:public/app.js",
+      "target": "file:public/timelineData.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:public/app.js->file:public/timelineSearch.js:imports",
+      "source": "file:public/app.js",
+      "target": "file:public/timelineSearch.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:public/app.js->panel:agents:controls",
+      "source": "file:public/app.js",
+      "target": "panel:agents",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:chat:controls",
+      "source": "file:public/app.js",
+      "target": "panel:chat",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:graph:controls",
+      "source": "file:public/app.js",
+      "target": "panel:graph",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:history:controls",
+      "source": "file:public/app.js",
+      "target": "panel:history",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:insights:controls",
+      "source": "file:public/app.js",
+      "target": "panel:insights",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:knowledge:controls",
+      "source": "file:public/app.js",
+      "target": "panel:knowledge",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:linkAgent:controls",
+      "source": "file:public/app.js",
+      "target": "panel:linkAgent",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:qa:controls",
+      "source": "file:public/app.js",
+      "target": "panel:qa",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:reset:controls",
+      "source": "file:public/app.js",
+      "target": "panel:reset",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:settings:controls",
+      "source": "file:public/app.js",
+      "target": "panel:settings",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:subagents:controls",
+      "source": "file:public/app.js",
+      "target": "panel:subagents",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:timeline:controls",
+      "source": "file:public/app.js",
+      "target": "panel:timeline",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:tools:controls",
+      "source": "file:public/app.js",
+      "target": "panel:tools",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/app.js->panel:workflow:controls",
+      "source": "file:public/app.js",
+      "target": "panel:workflow",
+      "type": "controls"
+    },
+    {
+      "id": "file:public/index.html->file:public/app.js:loads",
+      "source": "file:public/index.html",
+      "target": "file:public/app.js",
+      "type": "loads"
+    },
+    {
+      "id": "file:public/index.html->panel:agents:declares",
+      "source": "file:public/index.html",
+      "target": "panel:agents",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:chat:declares",
+      "source": "file:public/index.html",
+      "target": "panel:chat",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:graph:declares",
+      "source": "file:public/index.html",
+      "target": "panel:graph",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:history:declares",
+      "source": "file:public/index.html",
+      "target": "panel:history",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:insights:declares",
+      "source": "file:public/index.html",
+      "target": "panel:insights",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:knowledge:declares",
+      "source": "file:public/index.html",
+      "target": "panel:knowledge",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:linkAgent:declares",
+      "source": "file:public/index.html",
+      "target": "panel:linkAgent",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:qa:declares",
+      "source": "file:public/index.html",
+      "target": "panel:qa",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:reset:declares",
+      "source": "file:public/index.html",
+      "target": "panel:reset",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:settings:declares",
+      "source": "file:public/index.html",
+      "target": "panel:settings",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:subagents:declares",
+      "source": "file:public/index.html",
+      "target": "panel:subagents",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:timeline:declares",
+      "source": "file:public/index.html",
+      "target": "panel:timeline",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:tools:declares",
+      "source": "file:public/index.html",
+      "target": "panel:tools",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/index.html->panel:workflow:declares",
+      "source": "file:public/index.html",
+      "target": "panel:workflow",
+      "type": "declares"
+    },
+    {
+      "id": "file:public/timelineData.js->domain:Timeline:supports",
+      "source": "file:public/timelineData.js",
+      "target": "domain:Timeline",
+      "type": "supports"
+    },
+    {
+      "id": "file:public/timelineSearch.js->domain:Timeline:supports",
+      "source": "file:public/timelineSearch.js",
+      "target": "domain:Timeline",
+      "type": "supports"
+    },
+    {
+      "id": "file:src/agent.js->domain:Chat Pipeline:implements",
+      "source": "file:src/agent.js",
+      "target": "domain:Chat Pipeline",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/agent.js->file:src/cache.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/cache.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/classifier.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/classifier.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/clock.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/clock.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/config.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/config.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/heuristics.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/heuristics.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/knowledge.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/knowledge.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/memory.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/memory.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/openrouter.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/projectGraph.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/projectGraph.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/prompts.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/prompts.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/runLog.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/runLog.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/sanitize.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/sanitize.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/sourceQuality.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/sourceQuality.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/subagents/alert.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/subagents/alert.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/subagents/dataQuery.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/subagents/dataQuery.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/subagents/meeting.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/subagents/meeting.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/supabase.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/supabase.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/agent.js->file:src/tools.js:imports",
+      "source": "file:src/agent.js",
+      "target": "file:src/tools.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/cache.js->domain:Chat Pipeline:supports",
+      "source": "file:src/cache.js",
+      "target": "domain:Chat Pipeline",
+      "type": "supports"
+    },
+    {
+      "id": "file:src/cache.js->external:node:crypto:imports",
+      "source": "file:src/cache.js",
+      "target": "external:node:crypto",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/cache.js->external:node:net:imports",
+      "source": "file:src/cache.js",
+      "target": "external:node:net",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/cache.js->external:node:tls:imports",
+      "source": "file:src/cache.js",
+      "target": "external:node:tls",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/classifier.js->domain:Chat Pipeline:supports",
+      "source": "file:src/classifier.js",
+      "target": "domain:Chat Pipeline",
+      "type": "supports"
+    },
+    {
+      "id": "file:src/classifier.js->file:src/clock.js:imports",
+      "source": "file:src/classifier.js",
+      "target": "file:src/clock.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/classifier.js->file:src/openrouter.js:imports",
+      "source": "file:src/classifier.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/classifier.js->file:src/prompts.js:imports",
+      "source": "file:src/classifier.js",
+      "target": "file:src/prompts.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/config.js->domain:Settings:implements",
+      "source": "file:src/config.js",
+      "target": "domain:Settings",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/config.js->external:node:fs:imports",
+      "source": "file:src/config.js",
+      "target": "external:node:fs",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/config.js->external:node:path:imports",
+      "source": "file:src/config.js",
+      "target": "external:node:path",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/config.js->external:node:url:imports",
+      "source": "file:src/config.js",
+      "target": "external:node:url",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/config.js->file:src/prompts.js:imports",
+      "source": "file:src/config.js",
+      "target": "file:src/prompts.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/knowledge.js->domain:Knowledge Base:implements",
+      "source": "file:src/knowledge.js",
+      "target": "domain:Knowledge Base",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/knowledge.js->external:node:fs:imports",
+      "source": "file:src/knowledge.js",
+      "target": "external:node:fs",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/knowledge.js->external:node:path:imports",
+      "source": "file:src/knowledge.js",
+      "target": "external:node:path",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/openrouter.js->external:OpenRouter:calls",
+      "source": "file:src/openrouter.js",
+      "target": "external:OpenRouter",
+      "type": "calls"
+    },
+    {
+      "id": "file:src/openrouter.js->file:src/cache.js:imports",
+      "source": "file:src/openrouter.js",
+      "target": "file:src/cache.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/projectGraph.js->domain:Project Graph:implements",
+      "source": "file:src/projectGraph.js",
+      "target": "domain:Project Graph",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/qaAgent.js->domain:Workflow QA:implements",
+      "source": "file:src/qaAgent.js",
+      "target": "domain:Workflow QA",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/qaAgent.js->file:src/openrouter.js:imports",
+      "source": "file:src/qaAgent.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/qaAgent.js->file:src/qaSummary.js:imports",
+      "source": "file:src/qaAgent.js",
+      "target": "file:src/qaSummary.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/qaSummary.js->domain:Workflow QA:supports",
+      "source": "file:src/qaSummary.js",
+      "target": "domain:Workflow QA",
+      "type": "supports"
+    },
+    {
+      "id": "file:src/qaSummary.js->external:node:crypto:imports",
+      "source": "file:src/qaSummary.js",
+      "target": "external:node:crypto",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/runLog.js->domain:Workflow QA:feeds",
+      "source": "file:src/runLog.js",
+      "target": "domain:Workflow QA",
+      "type": "feeds"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/agents:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/agents",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/delay-claims:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/delay-claims",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/graph:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/graph",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/insights/hashtags:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/insights/hashtags",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/insights/runs:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/insights/runs",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/knowledge/agents:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/knowledge/agents",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/knowledge/documents:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/knowledge/documents",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/openrouter/models:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/openrouter/models",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/qa/dislikes:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/qa/dislikes",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/qa/messages:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/qa/messages",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/run-history:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/run-history",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/runs/:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/runs/",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/sessions:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/sessions",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/settings:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/settings",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/settings/export:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/settings/export",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/subagents/data-query/schema:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/subagents/data-query/schema",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/timeline:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/timeline",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/timeline/alerts:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/timeline/alerts",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/timeline/events:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/timeline/events",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/timeline/link-suggestions:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/timeline/link-suggestions",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:GET /api/timeline/links:handles",
+      "source": "file:src/server.js",
+      "target": "api:GET /api/timeline/links",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/chat:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/chat",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/delay-claims:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/delay-claims",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/diagnostics/connections:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/diagnostics/connections",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/evaluations/run:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/evaluations/run",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/insights/analyze:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/insights/analyze",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/knowledge/documents:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/knowledge/documents",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/knowledge/search:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/knowledge/search",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/qa/trends:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/qa/trends",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/settings/import:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/settings/import",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/settings/reload:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/settings/reload",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/subagents/alert:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/subagents/alert",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/subagents/data-query:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/subagents/data-query",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/system/restart:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/system/restart",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/timeline/graph/rebuild:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/timeline/graph/rebuild",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:POST /api/timeline/links:handles",
+      "source": "file:src/server.js",
+      "target": "api:POST /api/timeline/links",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:PUT /api/agents:handles",
+      "source": "file:src/server.js",
+      "target": "api:PUT /api/agents",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->api:PUT /api/settings:handles",
+      "source": "file:src/server.js",
+      "target": "api:PUT /api/settings",
+      "type": "handles"
+    },
+    {
+      "id": "file:src/server.js->domain:Chat Pipeline:orchestrates",
+      "source": "file:src/server.js",
+      "target": "domain:Chat Pipeline",
+      "type": "orchestrates"
+    },
+    {
+      "id": "file:src/server.js->external:node:child_process:imports",
+      "source": "file:src/server.js",
+      "target": "external:node:child_process",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->external:node:fs:imports",
+      "source": "file:src/server.js",
+      "target": "external:node:fs",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->external:node:http:imports",
+      "source": "file:src/server.js",
+      "target": "external:node:http",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->external:node:path:imports",
+      "source": "file:src/server.js",
+      "target": "external:node:path",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->external:node:url:imports",
+      "source": "file:src/server.js",
+      "target": "external:node:url",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/agent.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/agent.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/config.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/config.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/knowledge.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/knowledge.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/openrouter.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/projectGraph.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/projectGraph.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/prompts.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/prompts.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/qaAgent.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/qaAgent.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/runLog.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/runLog.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/subagents/alert.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/subagents/alert.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/subagents/dataQuery.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/subagents/dataQuery.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/subagents/delayClaim.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/subagents/delayClaim.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/subagents/projectInsights.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/subagents/projectInsights.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/supabase.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/supabase.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/timelineGraph.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/timelineGraph.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/timelineLinks.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/timelineLinks.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/server.js->file:src/tools.js:imports",
+      "source": "file:src/server.js",
+      "target": "file:src/tools.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/sourceQuality.js->domain:Chat Pipeline:supports",
+      "source": "file:src/sourceQuality.js",
+      "target": "domain:Chat Pipeline",
+      "type": "supports"
+    },
+    {
+      "id": "file:src/subagents/alert.js->domain:Subagents:implements",
+      "source": "file:src/subagents/alert.js",
+      "target": "domain:Subagents",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/subagents/alert.js->external:Content Supabase:calls",
+      "source": "file:src/subagents/alert.js",
+      "target": "external:Content Supabase",
+      "type": "calls"
+    },
+    {
+      "id": "file:src/subagents/alert.js->file:src/config.js:imports",
+      "source": "file:src/subagents/alert.js",
+      "target": "file:src/config.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/alert.js->file:src/openrouter.js:imports",
+      "source": "file:src/subagents/alert.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/alert.js->file:src/supabase.js:imports",
+      "source": "file:src/subagents/alert.js",
+      "target": "file:src/supabase.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/dataQuery.js->domain:Subagents:implements",
+      "source": "file:src/subagents/dataQuery.js",
+      "target": "domain:Subagents",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/subagents/dataQuery.js->external:Content Supabase:calls",
+      "source": "file:src/subagents/dataQuery.js",
+      "target": "external:Content Supabase",
+      "type": "calls"
+    },
+    {
+      "id": "file:src/subagents/dataQuery.js->file:src/config.js:imports",
+      "source": "file:src/subagents/dataQuery.js",
+      "target": "file:src/config.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/dataQuery.js->file:src/openrouter.js:imports",
+      "source": "file:src/subagents/dataQuery.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/dataQuery.js->file:src/supabase.js:imports",
+      "source": "file:src/subagents/dataQuery.js",
+      "target": "file:src/supabase.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/delayClaim.js->domain:Delay Claims:implements",
+      "source": "file:src/subagents/delayClaim.js",
+      "target": "domain:Delay Claims",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/subagents/delayClaim.js->domain:Subagents:implements",
+      "source": "file:src/subagents/delayClaim.js",
+      "target": "domain:Subagents",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/subagents/delayClaim.js->file:src/projectGraph.js:imports",
+      "source": "file:src/subagents/delayClaim.js",
+      "target": "file:src/projectGraph.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/delayClaim.js->file:src/subagents/meeting.js:imports",
+      "source": "file:src/subagents/delayClaim.js",
+      "target": "file:src/subagents/meeting.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/delayClaim.js->file:src/supabase.js:imports",
+      "source": "file:src/subagents/delayClaim.js",
+      "target": "file:src/supabase.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/meeting.js->domain:Subagents:implements",
+      "source": "file:src/subagents/meeting.js",
+      "target": "domain:Subagents",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/subagents/meeting.js->external:Content Supabase:calls",
+      "source": "file:src/subagents/meeting.js",
+      "target": "external:Content Supabase",
+      "type": "calls"
+    },
+    {
+      "id": "file:src/subagents/meeting.js->file:src/config.js:imports",
+      "source": "file:src/subagents/meeting.js",
+      "target": "file:src/config.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/meeting.js->file:src/openrouter.js:imports",
+      "source": "file:src/subagents/meeting.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/meeting.js->file:src/supabase.js:imports",
+      "source": "file:src/subagents/meeting.js",
+      "target": "file:src/supabase.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->domain:Insights:implements",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "domain:Insights",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->domain:Subagents:implements",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "domain:Subagents",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->external:n8n:calls",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "external:n8n",
+      "type": "calls"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->file:src/config.js:imports",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "file:src/config.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->file:src/openrouter.js:imports",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->file:src/projectGraph.js:imports",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "file:src/projectGraph.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->file:src/sourceQuality.js:imports",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "file:src/sourceQuality.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->file:src/subagents/alert.js:imports",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "file:src/subagents/alert.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->file:src/supabase.js:imports",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "file:src/supabase.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/subagents/projectInsights.js->file:src/tools.js:imports",
+      "source": "file:src/subagents/projectInsights.js",
+      "target": "file:src/tools.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/supabase.js->domain:Project Graph:persists",
+      "source": "file:src/supabase.js",
+      "target": "domain:Project Graph",
+      "type": "persists"
+    },
+    {
+      "id": "file:src/supabase.js->external:App Supabase:calls",
+      "source": "file:src/supabase.js",
+      "target": "external:App Supabase",
+      "type": "calls"
+    },
+    {
+      "id": "file:src/supabase.js->external:Content Supabase:calls",
+      "source": "file:src/supabase.js",
+      "target": "external:Content Supabase",
+      "type": "calls"
+    },
+    {
+      "id": "file:src/supabase.js->file:src/cache.js:imports",
+      "source": "file:src/supabase.js",
+      "target": "file:src/cache.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/supabase.js->file:src/config.js:imports",
+      "source": "file:src/supabase.js",
+      "target": "file:src/config.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/supabase.js->file:src/openrouter.js:imports",
+      "source": "file:src/supabase.js",
+      "target": "file:src/openrouter.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/supabase.js->file:src/timelineLinks.js:imports",
+      "source": "file:src/supabase.js",
+      "target": "file:src/timelineLinks.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/timelineGraph.js->domain:Timeline:implements",
+      "source": "file:src/timelineGraph.js",
+      "target": "domain:Timeline",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/timelineGraph.js->file:src/timelineLinks.js:imports",
+      "source": "file:src/timelineGraph.js",
+      "target": "file:src/timelineLinks.js",
+      "type": "imports"
+    },
+    {
+      "id": "file:src/timelineLinks.js->domain:Timeline:implements",
+      "source": "file:src/timelineLinks.js",
+      "target": "domain:Timeline",
+      "type": "implements"
+    },
+    {
+      "id": "file:src/tools.js->domain:Chat Pipeline:supports",
+      "source": "file:src/tools.js",
+      "target": "domain:Chat Pipeline",
+      "type": "supports"
+    },
+    {
+      "id": "file:src/tools.js->external:n8n:calls",
+      "source": "file:src/tools.js",
+      "target": "external:n8n",
+      "type": "calls"
+    },
+    {
+      "id": "file:src/tools.js->file:src/config.js:imports",
+      "source": "file:src/tools.js",
+      "target": "file:src/config.js",
+      "type": "imports"
+    },
+    {
+      "id": "panel:chat->domain:Chat Pipeline:surfaces",
+      "source": "panel:chat",
+      "target": "domain:Chat Pipeline",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:graph->domain:Project Graph:surfaces",
+      "source": "panel:graph",
+      "target": "domain:Project Graph",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:insights->domain:Insights:surfaces",
+      "source": "panel:insights",
+      "target": "domain:Insights",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:knowledge->domain:Knowledge Base:surfaces",
+      "source": "panel:knowledge",
+      "target": "domain:Knowledge Base",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:qa->domain:Workflow QA:surfaces",
+      "source": "panel:qa",
+      "target": "domain:Workflow QA",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:settings->domain:Settings:surfaces",
+      "source": "panel:settings",
+      "target": "domain:Settings",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:subagents->domain:Subagents:surfaces",
+      "source": "panel:subagents",
+      "target": "domain:Subagents",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:timeline->domain:Timeline:surfaces",
+      "source": "panel:timeline",
+      "target": "domain:Timeline",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:tools->domain:Settings:surfaces",
+      "source": "panel:tools",
+      "target": "domain:Settings",
+      "type": "surfaces"
+    },
+    {
+      "id": "panel:workflow->domain:Workflow QA:surfaces",
+      "source": "panel:workflow",
+      "target": "domain:Workflow QA",
+      "type": "surfaces"
+    }
+  ],
+  "stats": {
+    "node_count": 112,
+    "edge_count": 283
+  }
+}

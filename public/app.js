@@ -676,7 +676,75 @@ function loadSubAgents() {
       <button id="dqRunBtn">הרץ בדיקה</button>
     </div>
     <pre class="subagent-result" id="dqResult">אין תוצאה עדיין.</pre>
+    <div class="dqPipeline">
+      <div class="dqPipelineHeader">
+        <span>פייפליין SQL — הרצה שלב אחר שלב</span>
+        <button type="button" id="dqPipelineRunAll">הרץ הכל</button>
+        <button type="button" id="dqPipelineReset">איפוס</button>
+      </div>
+      <div id="dqPipelineSteps"></div>
+    </div>
   `;
+  // --- SQL pipeline (step-by-step runner) ---
+  const DQ_PIPELINE_STEPS = [
+    { id: "user_question", label: "User Question", desc: "קבלת שאלה חופשית בטקסט" },
+    { id: "schema_inspection", label: "Schema Inspection", desc: "בדיקת טבלאות ושדות זמינים" },
+    { id: "field_selection", label: "Field & Table Selection", desc: "בחירת מקורות הנתונים הרלוונטיים" },
+    { id: "sql_generation", label: "SQL Generation", desc: "יצירת שאילתת SQL לפי הבקשה והשדות" },
+    { id: "sql_execution", label: "SQL Execution", desc: "הרצת השאילתה מול בסיס הנתונים" },
+    { id: "calculation", label: "Server-side Calculation", desc: "חישובים כמותיים: ספירה, סכימה, ממוצעים, חריגות" },
+    { id: "result", label: "Quantitative Result", desc: "החזרת נתונים מספריים מסודרים" }
+  ];
+  let dqPipeState = {};
+  function dqRenderPipeline() {
+    const host = dqCard.querySelector("#dqPipelineSteps");
+    host.innerHTML = "";
+    DQ_PIPELINE_STEPS.forEach((stepDef, index) => {
+      const card = document.createElement("div");
+      card.className = "dqStepCard";
+      card.dataset.step = stepDef.id;
+      card.innerHTML = `
+        <div class="dqStepHead">
+          <button type="button" class="dqStepPlay" title="הרץ שלב זה" aria-label="הרץ ${escapeHtml(stepDef.label)}">▶</button>
+          <div class="dqStepTitle"><span class="dqStepNum">${index + 1}</span> ${escapeHtml(stepDef.label)}<small>${escapeHtml(stepDef.desc)}</small></div>
+          <span class="dqStepStatus"></span>
+        </div>
+        <pre class="dqStepOutput" hidden></pre>`;
+      card.querySelector(".dqStepPlay").addEventListener("click", () => dqRunStep(stepDef.id, card));
+      host.append(card);
+    });
+  }
+  async function dqRunStep(step, card) {
+    const statusEl = card.querySelector(".dqStepStatus");
+    const outEl = card.querySelector(".dqStepOutput");
+    statusEl.textContent = "מריץ...";
+    statusEl.className = "dqStepStatus running";
+    try {
+      const result = await api("/api/subagents/data-query/step", {
+        method: "POST",
+        body: {
+          step,
+          state: dqPipeState,
+          question: dqCard.querySelector("#dqTestQuestion").value,
+          context: { dateFrom: dqCard.querySelector("#dqDateFrom").value || null, dateTo: dqCard.querySelector("#dqDateTo").value || null, source: "subagents_ui" }
+        }
+      });
+      if (result.state) dqPipeState = result.state;
+      const failed = result.status === "error";
+      statusEl.textContent = failed ? "✗ שגיאה" : "✓ בוצע";
+      statusEl.className = `dqStepStatus ${failed ? "err" : "ok"}`;
+      const tok = result.openRouterUsage?.totals?.total_tokens;
+      outEl.hidden = false;
+      outEl.textContent = failed
+        ? (result.error || "שגיאה")
+        : JSON.stringify(result.output, null, 2) + (tok ? `\n\n— ${tok} tokens, $${result.openRouterUsage.totals.cost ?? 0}` : "");
+    } catch (error) {
+      statusEl.textContent = "✗ שגיאה";
+      statusEl.className = "dqStepStatus err";
+      outEl.hidden = false;
+      outEl.textContent = `Error: ${error.message}`;
+    }
+  }
   // --- DB table picker state & rendering ---
   const dqSavedSelection = (Array.isArray(dqCfg.tables) ? dqCfg.tables : [])
     .map((t) => ({
@@ -766,6 +834,17 @@ function loadSubAgents() {
   });
   dqRenderTablesList();
   dqUpdateStatus();
+
+  dqRenderPipeline();
+  dqCard.querySelector("#dqPipelineReset").addEventListener("click", () => { dqPipeState = {}; dqRenderPipeline(); });
+  dqCard.querySelector("#dqPipelineRunAll").addEventListener("click", async () => {
+    const cards = [...dqCard.querySelectorAll(".dqStepCard")];
+    dqPipeState = {};
+    for (const card of cards) {
+      await dqRunStep(card.dataset.step, card);
+      if (card.querySelector(".dqStepStatus").classList.contains("err")) break;
+    }
+  });
 
   dqCard.querySelector("#dqSaveBtn").addEventListener("click", () => {
     const updated = {
@@ -1783,12 +1862,19 @@ async function runKnowledgeSearch() {
   }
 }
 
+let _workflowWired = false;
 function wireWorkflow() {
+  // The workflow page is rendered by a React island that may mount after init().
+  // Guard so this binds exactly once, and only after the DOM actually exists.
+  if (_workflowWired) return;
+  if (!$("clearWorkflow")) return;
+  _workflowWired = true;
+
   $("liveRunHeader")?.addEventListener("click", () => {
     $("liveRun")?.classList.toggle("collapsed");
   });
 
-  $("clearWorkflow").addEventListener("click", () => {
+  $("clearWorkflow")?.addEventListener("click", () => {
     state.lastWorkflow = null;
     state.currentWorkflowMessageId = null;
     state.runEvents = [];
@@ -1802,7 +1888,7 @@ function wireWorkflow() {
     renderWorkflow(null);
   });
 
-  $("toggleFullLog").addEventListener("click", () => {
+  $("toggleFullLog")?.addEventListener("click", () => {
     state.fullLogVisible = !state.fullLogVisible;
     const listEl = $("liveRunList");
     const logEl  = $("fullLogView");
@@ -1819,7 +1905,7 @@ function wireWorkflow() {
     }
   });
 
-  $("copyLog").addEventListener("click", async () => {
+  $("copyLog")?.addEventListener("click", async () => {
     const text = buildFullLogText();
     if (!text) return;
     try {
@@ -1876,6 +1962,14 @@ function wireWorkflow() {
     renderWorkflow(state.lastWorkflow);
   });
 }
+
+// Called by the React WorkflowPage island after it mounts, so wiring + rendering
+// happen regardless of whether init() ran before or after the island mounted.
+window.__bidocInitWorkflow = () => {
+  wireWorkflow();
+  if (state?.runHistory?.length) renderRunHistoryStrip(state.runHistory);
+  if (state?.lastWorkflow) renderWorkflow(state.lastWorkflow);
+};
 
 function renderWorkflow(workflow) {
   const inspector = $("workflowInspector");
@@ -1976,7 +2070,19 @@ function renderWorkflow(workflow) {
   }
 
   _cy.on("tap", "node", (evt) => {
-    renderWorkflowInspector(evt.target.data("nodeData"));
+    const node = evt.target.data("nodeData");
+    const action = workflowNodeCardActionAt(evt.target, evt.position);
+    if (action === "log") {
+      renderWorkflowInspector(node, { focus: "logs" });
+      const count = workflowLogsForNode(node.id).length;
+      showToast(count ? `מוצגים ${count} לוגים לרכיב` : "אין לוגים שמורים לרכיב הזה", count ? "success" : "error");
+      return;
+    }
+    if (action === "copy") {
+      copyWorkflowNodePayload(node);
+      return;
+    }
+    renderWorkflowInspector(node);
   });
   _cy.on("tap", "edge", (evt) => {
     renderWorkflowEdgeInspector(evt.target.data("edgeData"), view);
@@ -2462,6 +2568,55 @@ function getNodeCardAccentColor(node, compareState, regression) {
   if (workflowNodeHasFallback(node)) return "#e08a20";
   if (node.status === "done") return "#22c27a";
   return nodeIconMeta(node.kind, node.label).color;
+}
+
+function workflowNodeCardActionAt(cyNode, position) {
+  if (!state.workflowCardsExpanded || !cyNode || !position) return "";
+  const width = Number(cyNode.data("cardWidth") || 430);
+  const height = Number(cyNode.data("cardHeight") || 310);
+  const center = cyNode.position();
+  const x = position.x - (center.x - width / 2);
+  const y = position.y - (center.y - height / 2);
+  if (x < 0 || y < 0 || x > width || y > height) return "";
+
+  const padL = 14;
+  const buttonY = 50;
+  const buttonH = 20;
+  if (y < buttonY || y > buttonY + buttonH) return "";
+  if (x >= padL && x <= padL + 46) return "log";
+  if (x >= padL + 54 && x <= padL + 106) return "copy";
+  return "";
+}
+
+async function copyWorkflowNodePayload(node) {
+  if (!node) return;
+  try {
+    await copyTextToClipboard(workflowNodeCopyText(node));
+    showToast("נתוני הרכיב הועתקו ללוח");
+  } catch (error) {
+    console.warn("Workflow node copy failed", error);
+    showToast("לא ניתן להעתיק את נתוני הרכיב", "error");
+  }
+}
+
+function workflowNodeCopyText(node) {
+  const metrics = workflowNodeMetrics(node);
+  return safeWorkflowJson({
+    id: node.id,
+    label: node.label,
+    kind: node.kind,
+    status: node.status,
+    metrics: {
+      duration: metrics.duration,
+      tokens: metrics.tokens,
+      cost: metrics.cost,
+      calls: metrics.calls
+    },
+    input: node.input ?? null,
+    output: node.output ?? null,
+    openrouter: Array.isArray(node.openrouter) ? node.openrouter : [],
+    logs: workflowLogsForNode(node.id)
+  });
 }
 
 function generateNodeCardSvg(node, expanded, compareState = "", regression = false) {
@@ -3168,12 +3323,13 @@ function workflowNodeDetailPayload(details, direction) {
   };
 }
 
-function renderWorkflowInspector(node) {
+function renderWorkflowInspector(node, options = {}) {
   const inspector = $("workflowInspector");
   if (!inspector) return;
   const openRouterCalls = Array.isArray(node.openrouter) ? node.openrouter : [];
   const metrics = workflowNodeMetrics(node);
   const compareState = state.workflowCompare?.summary?.nodeStates?.get(node.id) || "";
+  const focusLogs = options.focus === "logs";
   inspector.innerHTML = `
     <header class="workflowInspectorHeader">
       <span class="workflowIcon ${escapeHtml(node.kind)}">${iconForNode(node.kind)}</span>
@@ -3204,12 +3360,13 @@ function renderWorkflowInspector(node) {
       <pre>${escapeHtml(safeWorkflowJson(node.output))}</pre>
     </details>
     ${renderWorkflowSources(node)}
-    ${renderWorkflowLogsForNode(node.id)}
+    ${renderWorkflowLogsForNode(node.id, { open: focusLogs })}
     <details>
       <summary>Raw JSON</summary>
       <pre>${escapeHtml(safeWorkflowJson(node))}</pre>
     </details>
   `;
+  if (focusLogs) inspector.querySelector(".workflowNodeLogsDetails")?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 function renderWorkflowCompareNotice(node, compareState) {
@@ -3463,14 +3620,18 @@ function workflowMappingSummary(sourceOutput, targetInput) {
   return `${sourceKeys.join(", ") || "output"} -> ${targetKeys.join(", ") || "input"}`;
 }
 
-function renderWorkflowLogsForNode(nodeId) {
-  const entries = [
+function workflowLogsForNode(nodeId) {
+  return [
     ...(state.lastWorkflow?.trace || []),
     ...(state.runEvents || [])
   ].filter((entry) => entry?.step === nodeId || entry?.node_id === nodeId || entry?.data?.node_id === nodeId);
+}
+
+function renderWorkflowLogsForNode(nodeId, options = {}) {
+  const entries = workflowLogsForNode(nodeId);
   if (!entries.length) return "";
   return `
-    <details open>
+    <details class="workflowNodeLogsDetails" ${options.open ? "open" : ""}>
       <summary>Logs for node (${entries.length})</summary>
       <div class="workflowNodeLogs">
         ${entries.slice(-12).map((entry) => `
@@ -5177,9 +5338,9 @@ function wireSettings() {
     if (event.target?.id !== "settingsImportFile") markSettingsDraftChanged();
   });
 
-  $("saveSettings").addEventListener("click", async () => {
+  $("saveSettings")?.addEventListener("click", async () => {
     const body = readSettingsForm();
-    $("saveSettings").disabled = true;
+    if ($("saveSettings")) $("saveSettings").disabled = true;
     setSettingsSaveState("שומר את כל ההגדרות ב-Supabase...", "saving");
     try {
       const result = await api("/api/settings", { method: "PUT", body });
@@ -5191,7 +5352,7 @@ function wireSettings() {
       setSettingsSaveState("השמירה נכשלה. השינויים עדיין נמצאים בטופס ולא נמחקו.", "error");
       showToast(`שגיאה בשמירה: ${error.message}`, "error");
     } finally {
-      $("saveSettings").disabled = false;
+      if ($("saveSettings")) $("saveSettings").disabled = false;
     }
   });
 

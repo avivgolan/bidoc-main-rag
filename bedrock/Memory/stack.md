@@ -15,7 +15,9 @@ tags:
 - The app is a Node.js >=20 ESM project with no npm dependencies.
 - `package.json` exposes `dev`, `start`, and `test`; all run Node directly.
 - The HTTP server is implemented with `node:http` in `src/server.js`.
-- The frontend is a plain HTML/CSS/JS single-page app in `public/`.
+- The frontend is still primarily a plain HTML/CSS/JS single-page app in `public/`, with a progressive React island bridge for staged screen migration.
+- React 19, ReactDOM, Vite, and `@vitejs/plugin-react` are installed; `npm run react:build` builds the React bridge into `public/react/bidoc-react.js`.
+- `public/index.html` loads a tiny `public/react-loader.js` module that imports the React bridge only when `[data-react-island]` elements exist, so current screens do not pay the React bundle cost until migrated.
 - Deployment routes all requests through `src/server.js` using `vercel.json`.
 - Persistent mutable state is expected to live in Supabase, not local data files.
 - Runtime config separates App Supabase from optional Content Supabase: App DB stores settings, chat history, QA, timeline links, and graph tables; Content DB serves RAG, timeline event, and alert retrieval.
@@ -84,6 +86,7 @@ tags:
 - 2026-06-08 -- Added bounded, configurable retrieval row limits beside the Embedding model for primary Hybrid Search, Knowledge Planner queries, Alert retrieval, reranking, and Main Agent context.
 - 2026-06-17 -- Added top-of-page Settings presets with 3 built-in calibration profiles (Conservative, Balanced, Cheap Test) plus persisted custom presets saved inside the shared `agent_settings` record.
 - 2026-06-20 -- Locked `agent_settings` persistence to the main Settings save route only; import, subagent saves, link-agent saves, preset saves, and startup prompt migration are all draft-only or non-persistent.
+- 2026-06-26 -- Added a progressive React/Vite frontend bridge with lazy island loading so individual screens can migrate from vanilla JS without replacing the existing SPA shell.
 
 ## Recent Changes (continued)
 

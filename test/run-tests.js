@@ -9,7 +9,7 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode, KNOWLEDGE_PLANNER_RESPONSE_FORMAT } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
-import { buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryWorkflowLog, executeQueryPlans, introspectSupabaseTables, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, validateQueryPlan } from "../src/subagents/dataQuery.js";
+import { buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryWorkflowLog, executeQueryPlans, introspectSupabaseTables, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, runDataQueryPipeline, validateQueryPlan, validateReadOnlySql } from "../src/subagents/dataQuery.js";
 import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
 import { buildDeterministicInsights, buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
@@ -28,6 +28,27 @@ import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigate
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
+
+test("React bridge is installed for progressive frontend migration", () => {
+  const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const viteConfig = fs.readFileSync(new URL("../vite.config.js", import.meta.url), "utf8");
+  const reactEntry = fs.readFileSync(new URL("../src/react/main.jsx", import.meta.url), "utf8");
+  const reactLoader = fs.readFileSync(new URL("../public/react-loader.js", import.meta.url), "utf8");
+  const indexHtml = fs.readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+
+  assert.equal(typeof packageJson.dependencies.react, "string");
+  assert.equal(typeof packageJson.dependencies["react-dom"], "string");
+  assert.equal(typeof packageJson.devDependencies.vite, "string");
+  assert.equal(typeof packageJson.devDependencies["@vitejs/plugin-react"], "string");
+  assert.equal(packageJson.scripts["react:build"], "vite build");
+  assert.match(viteConfig, /publicDir:\s*false/);
+  assert.match(viteConfig, /outDir:\s*"public\/react"/);
+  assert.match(reactEntry, /createRoot/);
+  assert.match(reactEntry, /window\.BiDocReact/);
+  assert.match(reactLoader, /document\.querySelector\("\[data-react-island\]"\)/);
+  assert.match(reactLoader, /\/react\/bidoc-react\.js\?v=20260626-react-bridge/);
+  assert.match(indexHtml, /\/react-loader\.js\?v=20260626-react-bridge/);
+});
 
 function withContentEnvCleared(fn) {
   const saved = {
@@ -488,6 +509,45 @@ test("data query workflow log exposes planner, validation and per-plan execution
   assert.equal(log.openRouterUsage.totals.cost, 0.00101205);
 });
 
+test("data query SQL guard accepts read-only selects and rejects unsafe statements", () => {
+  assert.equal(validateReadOnlySql("select count(*) from emails_gf", { allowedTables: ["emails_gf"] }).ok, true);
+  assert.equal(validateReadOnlySql("with x as (select 1) select * from x").ok, true);
+  assert.equal(validateReadOnlySql("delete from emails_gf").ok, false);
+  assert.equal(validateReadOnlySql("select 1; drop table x").ok, false);
+  assert.equal(validateReadOnlySql("select * from emails_gf -- c").ok, false);
+  const blocked = validateReadOnlySql("select * from secret_table", { allowedTables: ["emails_gf"] });
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.errors.join(" "), /secret_table/);
+});
+
+test("data query SQL pipeline runs stage-by-stage with mocked LLM and DB", async () => {
+  const config = { openRouterApiKey: "k", models: { knowledgePlanner: "m", main: "m" }, supabaseUrl: "https://x.supabase.co", supabaseServiceRoleKey: "key", contentSource: {} };
+  const settings = {
+    plannerModel: "m", plannerTimeoutMs: 30000, maxRowsPerPlan: 200, timeoutMsPerPlan: 8000,
+    tables: [{ connection: "app", schema: "public", table: "delay_events", columns: ["id", "human_status"] }]
+  };
+  const chatComplete = async ({ messages }) => {
+    if (String(messages[0].content).includes("select the data sources")) {
+      return JSON.stringify({ connection: "app", tables: [{ table: "delay_events", columns: ["human_status"] }], reason: "delays" });
+    }
+    return JSON.stringify({ sql: "select human_status, count(*) from delay_events group by human_status limit 200", reason: "count by status" });
+  };
+  const fetchImpl = async (url) => {
+    if (String(url).includes("/rpc/exec_read_sql")) {
+      return { ok: true, text: async () => JSON.stringify([{ human_status: "candidate", count: 3 }, { human_status: "approved", count: 1 }]) };
+    }
+    return { ok: true, text: async () => "[]" };
+  };
+  const result = await runDataQueryPipeline({ question: "כמה עיכובים לפי סטטוס", config, settings, chatComplete, fetchImpl });
+  assert.equal(result.status, "ok");
+  assert.deepEqual(result.steps.map((s) => s.id), ["user_question", "schema_inspection", "field_selection", "sql_generation", "sql_execution", "calculation", "result"]);
+  const sqlStep = result.steps.find((s) => s.id === "sql_generation");
+  assert.equal(sqlStep.output.valid, true);
+  assert.match(sqlStep.output.sql, /select human_status/i);
+  assert.equal(result.steps.find((s) => s.id === "sql_execution").output.rowCount, 2);
+  assert.equal(result.steps.find((s) => s.id === "calculation").output.metrics.find((m) => m.id === "row_count").value, 2);
+});
+
 test("data query settings normalization preserves the real-table selection", () => {
   const normalized = normalizeDataQuerySettings({
     enabled: true,
@@ -503,10 +563,10 @@ test("data query settings normalization preserves the real-table selection", () 
   // allowlists are derived from the selection, not the legacy defaults
   assert.deepEqual(normalized.allowedTables, ["emails_gf", "data_index_embeddings_gf_dor_agent"]);
   assert.deepEqual(normalized.allowedSchemas.sort(), ["app", "content"]);
-  // empty selection falls back to the legacy allowlist behavior
+  // empty selection falls back to the default allowlist (content-only — the agent has no main/app access)
   const empty = normalizeDataQuerySettings({ tables: [] });
   assert.deepEqual(empty.tables, []);
-  assert.deepEqual(empty.allowedSchemas, ["app", "content"]);
+  assert.deepEqual(empty.allowedSchemas, ["content"]);
 });
 
 test("data query introspection parses PostgREST OpenAPI into tables and columns", async () => {

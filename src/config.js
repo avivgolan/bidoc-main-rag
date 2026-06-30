@@ -418,7 +418,7 @@ const DEFAULT_DATA_QUERY_SETTINGS = {
   timeoutMsPerPlan: 8000,
   totalTimeoutMs: 20000,
   allowedTables: [],
-  allowedSchemas: ["app", "content"],
+  allowedSchemas: ["content"],
   tables: [],
   allowRawSql: false,
   allowJoins: false,
@@ -794,7 +794,7 @@ function normalizeDataQueryTables(value) {
   for (const item of value) {
     const table = String(item?.table || item?.name || "").trim();
     if (!table) continue;
-    const connection = String(item?.connection || item?.schema || "app").trim() || "app";
+    const connection = String(item?.connection || item?.schema || "content").trim() || "content";
     const key = `${connection}.${table}`;
     if (seen.has(key)) continue;
     seen.add(key);

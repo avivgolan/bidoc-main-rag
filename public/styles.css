@@ -5583,6 +5583,111 @@ body:has(#timeline.active) .sidebar {
   text-align: center;
 }
 
+/* ---- SQL pipeline step runner ---- */
+.dqPipeline { margin-top: .75rem; }
+
+.dqPipelineHeader {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-bottom: .5rem;
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.dqPipelineHeader button {
+  padding: .3rem .7rem;
+  font-size: .76rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.dqPipelineHeader button:first-of-type {
+  margin-inline-start: auto;
+  border-color: var(--brand-500);
+  background: var(--brand-50);
+  color: var(--brand-500);
+  font-weight: 700;
+}
+
+.dqStepCard {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  margin-bottom: .4rem;
+  overflow: hidden;
+}
+
+.dqStepHead {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .5rem .6rem;
+}
+
+.dqStepPlay {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--brand-500);
+  border-radius: var(--r-full);
+  background: var(--brand-50);
+  color: var(--brand-500);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dqStepPlay:hover { background: var(--brand-500); color: #fff; }
+
+.dqStepTitle {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  font-size: .84rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.dqStepTitle small { font-weight: 400; color: var(--text-secondary); font-size: .72rem; }
+
+.dqStepNum {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-inline-end: .35rem;
+  border-radius: var(--r-full);
+  background: var(--surface-3, rgba(127,127,127,.15));
+  font-size: .7rem;
+  font-weight: 700;
+}
+
+.dqStepStatus { flex: 0 0 auto; font-size: .76rem; font-weight: 700; color: var(--text-secondary); }
+.dqStepStatus.ok { color: #22c27a; }
+.dqStepStatus.err { color: #e05555; }
+.dqStepStatus.running { color: var(--brand-500); }
+
+.dqStepOutput {
+  margin: 0;
+  padding: .55rem .65rem;
+  border-top: 1px solid var(--line);
+  background: rgba(127,127,127,.05);
+  font-size: .74rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow: auto;
+}
+
 /* ---- save footer ---- */
 .subagent-config > button {
   grid-column: 1 / -1;
@@ -8989,4 +9094,93 @@ body:has(#timeline.active) .sidebar {
   .projectInsightsStatus { padding-inline: 16px; }
   .projectInsightsHistoryPanel { padding: 14px 16px; }
   .insightsKbHint { display: none; }
+}
+
+/* ======================================================
+   Workflow page — React hybrid shell (improved layout)
+   ====================================================== */
+.wfShell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.wfHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.wfHeaderTitle h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.wfHeaderSub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.wfHeaderActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.wfBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--r);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-3);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .15s, box-shadow .15s;
+}
+.wfBtn:hover {
+  background: var(--surface-2);
+  border-color: var(--brand-500);
+  transform: translateY(-1px);
+}
+.wfBtnPrimary {
+  background: var(--brand-500);
+  border-color: var(--brand-500);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(63, 141, 104, .25);
+}
+.wfBtnPrimary:hover {
+  background: var(--brand-600, #2f7355);
+  border-color: var(--brand-600, #2f7355);
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(63, 141, 104, .32);
+}
+.wfBtnDanger:hover {
+  border-color: var(--danger, #ef4444);
+  color: var(--danger, #ef4444);
+  background: var(--surface-2);
+}
+
+/* Responsive metric cards: wrap instead of forcing 6 cramped columns */
+.wfShell .workflowMetricCards {
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  margin-bottom: 0;
+}
+
+/* Tighten the board so the graph gets more vertical room within the shell */
+.wfShell .workflowBoard {
+  border-radius: var(--r-lg, 12px);
+}
+
+@media (max-width: 760px) {
+  .wfShell .workflowLayout { flex-direction: column; }
+  .wfShell .runHistoryStrip { width: 100%; }
 }

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
-import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels } from "./openrouter.js";
+import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels, summarizeOpenRouterUsage } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
 import { addDelayEventChangeLog, addDelayEventEvidence, addDelayEventGap, annotateMessage, contentSupabaseConfig, createDelayClaim, createDelayEvent, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, getMessage, getLatestQaReport, getProjectInsightRun, graphSearch, hybridSearch, listDelayClaims, listDelayEvents, listDislikedMessages, listMessages, listProjectGraph, listProjectInsightRuns, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, parseTimelineEventsQuery, saveProjectInsightRun, saveQaReport, TimelineRequestError, updateDelayEvent, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
@@ -13,7 +13,7 @@ import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimel
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
-import { buildDataQueryWorkflowLog, introspectSupabaseTables, runDataQueryAgent } from "./subagents/dataQuery.js";
+import { buildDataQueryWorkflowLog, DATA_QUERY_PIPELINE_STEPS, introspectSupabaseTables, runDataQueryAgent, runDataQueryPipeline, runDataQueryStep } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
@@ -604,11 +604,60 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === "POST" && url.pathname === "/api/subagents/data-query/step") {
+    const body = await readJson(req).catch(() => ({}));
+    const step = String(body.step || "").trim();
+    if (!DATA_QUERY_PIPELINE_STEPS.some((s) => s.id === step)) {
+      return sendJson(res, 400, { error: `unknown step "${step}"`, steps: DATA_QUERY_PIPELINE_STEPS });
+    }
+    const state = {
+      ...(body.state && typeof body.state === "object" ? body.state : {}),
+      question: body.question ?? body.state?.question ?? "",
+      context: body.context ?? body.state?.context ?? {}
+    };
+    const calls = [];
+    const telemetry = { step: "data_query", callId: `dq_${step}`, record: (entry) => calls.push(entry) };
+    try {
+      const result = await runDataQueryStep({ step, state, config: config(), telemetry });
+      return sendJson(res, 200, { step, output: result.output, state: result.state, openRouterUsage: summarizeOpenRouterUsage(calls) });
+    } catch (error) {
+      return sendJson(res, 200, { step, status: "error", error: error.message, state, openRouterUsage: summarizeOpenRouterUsage(calls) });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/subagents/data-query/pipeline") {
+    const body = await readJson(req).catch(() => ({}));
+    const question = String(body.question || body.query || "").trim();
+    const context = {
+      ...(body.context && typeof body.context === "object" ? body.context : {}),
+      dateFrom: body.dateFrom || body.date_from || body.context?.dateFrom || null,
+      dateTo: body.dateTo || body.date_to || body.context?.dateTo || null,
+      source: body.source || body.context?.source || "api"
+    };
+    const runId = String(body.runId || `dqp_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+    createRun(runId);
+    emitRunEvent(runId, "chat_input", "שאלת בדיקה התקבלה", { question, context });
+    const calls = [];
+    const telemetry = { step: "data_query", callId: "dqp", record: (entry) => { calls.push(entry); emitRunEvent(runId, "data_query", "OpenRouter usage recorded", { openrouter: entry }); } };
+    try {
+      const result = await runDataQueryPipeline({
+        question, context, config: config(), telemetry,
+        onStep: (entry) => emitRunEvent(runId, "data_query", `${entry.label}: ${entry.status}`, { step: entry.id, status: entry.status, error: entry.error || null })
+      });
+      completeRun(runId, { status: result.status });
+      recordRunHistory({ id: runId, title: `סוכן שאילתות (SQL) · ${(question || "בדיקה").slice(0, 40)}`, runEvents: getRunEvents(runId), kind: "data_query" });
+      return sendJson(res, result.status === "error" ? 200 : 200, { ...result, runId, openRouterUsage: summarizeOpenRouterUsage(calls) });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { status: "error", error: error.message, steps: [], runId });
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/api/subagents/data-query/schema") {
     const cfg = config();
     const contentConn = contentSupabaseConfig(cfg);
+    // The Data Query Agent is restricted to the content connection only.
     const targets = [
-      { key: "app", label: "מאגר ראשי", supabaseUrl: cfg.supabaseUrl, supabaseServiceRoleKey: cfg.supabaseServiceRoleKey },
       { key: "content", label: "מאגר תוכן", supabaseUrl: contentConn.supabaseUrl, supabaseServiceRoleKey: contentConn.supabaseServiceRoleKey }
     ];
     const connections = [];
@@ -1027,7 +1076,13 @@ function serveStatic(res, pathname) {
     ".js": "text/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8"
   }[ext] || "application/octet-stream";
-  res.writeHead(200, { "Content-Type": contentType });
+  // The HTML shell references versioned assets (?v=...). If the browser caches the
+  // HTML, those version bumps never take effect and stale bundles keep loading.
+  // Force the document (and JS/CSS, which use query-string busting) to revalidate.
+  const noCache = ext === ".html" || ext === ".js" || ext === ".css";
+  const headers = { "Content-Type": contentType };
+  if (noCache) headers["Cache-Control"] = "no-cache, must-revalidate";
+  res.writeHead(200, headers);
   fs.createReadStream(fullPath).pipe(res);
 }
 

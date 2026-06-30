@@ -9,7 +9,7 @@ export const DATA_QUERY_DEFAULTS = {
   timeoutMsPerPlan: 8000,
   totalTimeoutMs: 20000,
   allowedTables: [],
-  allowedSchemas: ["app", "content"],
+  allowedSchemas: ["content"],
   tables: [],
   allowRawSql: false,
   allowJoins: false,
@@ -30,15 +30,17 @@ export function dataQuerySettings(config = getConfig()) {
   // When the user has scanned the real DB and picked tables, the manifest and
   // allowlists are derived from that selection; otherwise fall back to the
   // legacy hardcoded manifest so existing behavior is preserved.
-  const selectionTables = normalizeSelectionTables(raw.tables);
+  // This agent is restricted to the CONTENT connection only — it must never touch
+  // the main/app Supabase. Any "app" selection is dropped and the manifest is
+  // filtered to content tables.
+  const selectionTables = normalizeSelectionTables(raw.tables).filter((item) => item.connection === "content");
   const hasSelection = selectionTables.length > 0;
-  const manifest = hasSelection ? buildDataQueryManifestFromSelection(selectionTables) : buildDataQueryManifest(config);
+  const manifest = (hasSelection ? buildDataQueryManifestFromSelection(selectionTables) : buildDataQueryManifest(config))
+    .filter((table) => table.schemaAlias === "content");
   const allowedTables = hasSelection
     ? [...new Set(selectionTables.map((item) => item.table))]
-    : normalizeStringList(raw.allowedTables);
-  const allowedSchemas = hasSelection
-    ? [...new Set(selectionTables.map((item) => item.connection))]
-    : (normalizeStringList(raw.allowedSchemas).length ? normalizeStringList(raw.allowedSchemas) : DATA_QUERY_DEFAULTS.allowedSchemas);
+    : [...new Set(manifest.map((table) => table.tableName))];
+  const allowedSchemas = ["content"];
   return {
     enabled: raw.enabled !== false,
     maxPlans: clampNumber(raw.maxPlans, 1, 10, DATA_QUERY_DEFAULTS.maxPlans),
@@ -68,7 +70,7 @@ export function normalizeSelectionTables(value) {
   for (const item of value) {
     const table = String(item?.table || item?.name || "").trim();
     if (!table) continue;
-    const connection = String(item?.connection || item?.schema || "app").trim() || "app";
+    const connection = String(item?.connection || item?.schema || "content").trim() || "content";
     const key = `${connection}.${table}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -871,4 +873,311 @@ function clampNumber(value, min, max, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, number));
+}
+
+// ============================================================================
+// SQL Pipeline — 7 discrete, individually-runnable stages.
+// Each stage takes the accumulated `state` and returns { step, output, state }.
+// ============================================================================
+
+export const DATA_QUERY_PIPELINE_STEPS = [
+  { id: "user_question", label: "User Question" },
+  { id: "schema_inspection", label: "Schema Inspection" },
+  { id: "field_selection", label: "Field & Table Selection" },
+  { id: "sql_generation", label: "SQL Generation" },
+  { id: "sql_execution", label: "SQL Execution" },
+  { id: "calculation", label: "Server-side Calculation" },
+  { id: "result", label: "Quantitative Result" }
+];
+
+const SQL_FORBIDDEN = /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|do|merge|comment|vacuum|analyze|reindex|cluster|lock|listen|notify|set|reset|begin|commit|rollback|savepoint|prepare|execute|deallocate|refresh)\b/i;
+
+// Defense-in-depth SQL guard (the DB read-only role is the primary guarantee).
+export function validateReadOnlySql(sql, { allowedTables = [] } = {}) {
+  const errors = [];
+  const text = String(sql || "").trim().replace(/;\s*$/, "");
+  if (!text) return { ok: false, errors: ["empty sql"], sql: "", tables: [] };
+  if (/;/.test(text)) errors.push("multiple statements are not allowed");
+  if (!/^(select|with)\b/i.test(text)) errors.push("only SELECT/WITH queries are allowed");
+  if (SQL_FORBIDDEN.test(text)) errors.push("write/DDL keywords are not allowed");
+  if (/--|\/\*/.test(text)) errors.push("SQL comments are not allowed");
+  const refs = [...text.matchAll(/\b(?:from|join)\s+("?[A-Za-z_][\w.]*"?)/gi)]
+    .map((m) => m[1].replace(/"/g, "").split(".").pop());
+  if (allowedTables.length) {
+    const blocked = [...new Set(refs.filter((r) => !allowedTables.includes(r)))];
+    if (blocked.length) errors.push(`tables not in your selection: ${blocked.join(", ")}`);
+  }
+  return { ok: errors.length === 0, errors, sql: text, tables: [...new Set(refs)] };
+}
+
+function pipelineConnection(_connKey, config) {
+  // The Data Query Agent is restricted to the content connection only — never the main/app DB.
+  const c = contentSupabaseConfig(config);
+  return { schema: "content", supabaseUrl: c.supabaseUrl, supabaseServiceRoleKey: c.supabaseServiceRoleKey };
+}
+
+// Runs read-only SQL through the exec_read_sql Postgres RPC (created via migration).
+export async function execReadSql({ connection, sql, maxRows = 200, timeoutMs = 8000, fetchImpl = fetch }) {
+  if (!connection?.supabaseUrl || !connection?.supabaseServiceRoleKey) {
+    throw new Error("Supabase connection is not configured");
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`${connection.supabaseUrl}/rest/v1/rpc/exec_read_sql`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: { ...supabaseHeaders(connection.supabaseServiceRoleKey), "Content-Type": "application/json" },
+      body: JSON.stringify({ q: sql, max_rows: maxRows })
+    });
+    const txt = await response.text();
+    const data = txt ? JSON.parse(txt) : null;
+    if (!response.ok) {
+      const msg = data?.message || data?.hint || data?.error || `exec_read_sql failed: ${response.status}`;
+      if (response.status === 404 || /could not find|exec_read_sql|schema cache/i.test(String(msg))) {
+        throw new Error("exec_read_sql RPC is missing — run the Supabase migration first");
+      }
+      throw new Error(msg);
+    }
+    return Array.isArray(data) ? data : (data == null ? [] : [data]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function truncateSampleValue(value) {
+  if (typeof value === "string") return value.length > 140 ? `${value.slice(0, 140)}…` : value;
+  if (value && typeof value === "object") return JSON.stringify(value).slice(0, 140);
+  return value;
+}
+
+// Fetches a few real rows so the LLM can ground SQL in actual column contents
+// (e.g. discover that a `hashtags` column holds Hebrew tags). Read-only REST, no migration.
+async function fetchTableSamples({ connection, table, limit = 3, timeoutMs = 6000, fetchImpl = fetch }) {
+  if (!connection?.supabaseUrl || !connection?.supabaseServiceRoleKey) return [];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(`${connection.supabaseUrl}/rest/v1/${encodeURIComponent(table)}?select=*&limit=${limit}`, {
+      signal: controller.signal,
+      headers: supabaseHeaders(connection.supabaseServiceRoleKey)
+    });
+    const txt = await response.text();
+    const data = txt ? JSON.parse(txt) : [];
+    if (!response.ok || !Array.isArray(data)) return [];
+    return data.map((row) => Object.fromEntries(Object.entries(row || {}).map(([k, v]) => [k, truncateSampleValue(v)])));
+  } catch (_) {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const FIELD_SELECTION_PROMPT = `You select the data sources for a read-only analytics agent.
+Given a user question and the availableSchema (tables with their columns), choose the MINIMAL set of tables and columns needed to answer it.
+Return ONLY one JSON object: {"connection":"app|content","tables":[{"table":"name","columns":["col"]}],"reason":"short"}.
+Rules: use only tables and columns that appear in availableSchema; all chosen tables must belong to the SAME connection.
+Choose the table whose columns and sample values ACTUALLY contain what the question needs — not the one whose name merely sounds related. Inspect each table's sample rows.
+If the question is about hashtags, tags, topics, or labels, pick a table that has a hashtags/tags/keywords/category column (confirm it exists in the samples); do not pick a table that lacks such a column. Include that column among the chosen columns.`;
+
+const SQL_GENERATION_PROMPT = `You write ONE read-only PostgreSQL query for an analytics agent.
+Return ONLY one JSON object: {"sql":"...","reason":"short"}.
+Hard rules: a single statement; it MUST start with SELECT or WITH; no semicolons; no comments; never use INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/TRUNCATE/GRANT/REVOKE or any write/DDL.
+Use only the provided tables and columns. For quantitative questions prefer aggregates (count, sum, avg, min, max, group by). Always include an explicit LIMIT no larger than maxRows. PostgreSQL dialect only.
+
+Ground your query in the provided sample rows — they show the REAL format and values of each column. Do not invent enum values or assume a column means what its name suggests; check the samples.
+When the question is about a topic, subject, label, or tag (e.g. counting items "about delays"), find the column that actually holds tags/hashtags/keywords/categories from the samples and filter it with case-insensitive text matching (e.g. col ILIKE '%term%'); if that column is a Postgres array use term = ANY(col); if it is JSON/JSONB use the appropriate containment. Prefer this over guessing a status/type enum column.`;
+
+function normalizeFieldSelection(parsed = {}, schema = {}) {
+  const available = new Map();
+  for (const conn of schema.connections || []) {
+    for (const t of conn.tables || []) available.set(`${conn.key}.${t.name}`, { connection: conn.key, columns: t.columns || [] });
+  }
+  let connection = String(parsed.connection || "").trim();
+  const tables = [];
+  for (const t of Array.isArray(parsed.tables) ? parsed.tables : []) {
+    const name = String(t.table || t.name || "").trim();
+    if (!name) continue;
+    const conn = connection || (schema.connections?.[0]?.key) || "app";
+    const meta = available.get(`${conn}.${name}`) || [...available.entries()].find(([k]) => k.endsWith(`.${name}`))?.[1];
+    if (!meta) continue;
+    if (!connection) connection = meta.connection;
+    const cols = (Array.isArray(t.columns) ? t.columns : []).map(String).filter((c) => meta.columns.includes(c));
+    tables.push({ table: name, columns: cols.length ? cols : meta.columns.slice(0, 12) });
+  }
+  return { connection: connection || "app", tables, reason: String(parsed.reason || "") };
+}
+
+function computeQuantitativeMetrics(rows = []) {
+  const metrics = [{ id: "row_count", label: "row count", value: rows.length }];
+  if (!rows.length) return metrics;
+  const keys = Object.keys(rows[0] || {});
+  for (const key of keys) {
+    const values = rows.map((r) => r[key]);
+    const numeric = values.map(Number).filter(Number.isFinite);
+    if (numeric.length === values.length && numeric.length) {
+      const sum = numeric.reduce((s, v) => s + v, 0);
+      metrics.push({ id: `${key}_sum`, label: `${key} sum`, value: Number(sum.toFixed(4)) });
+      metrics.push({ id: `${key}_avg`, label: `${key} avg`, value: Number((sum / numeric.length).toFixed(4)) });
+      metrics.push({ id: `${key}_min`, label: `${key} min`, value: Math.min(...numeric) });
+      metrics.push({ id: `${key}_max`, label: `${key} max`, value: Math.max(...numeric) });
+    } else {
+      const distinct = new Set(values.map((v) => String(v ?? "null")));
+      if (distinct.size > 1 && distinct.size <= Math.min(20, rows.length)) {
+        const groups = {};
+        for (const v of values) groups[String(v ?? "null")] = (groups[String(v ?? "null")] || 0) + 1;
+        metrics.push({ id: `${key}_breakdown`, label: `${key} breakdown`, value: groups });
+      }
+    }
+  }
+  return metrics;
+}
+
+function buildQuantitativeAnswer({ rowCount = 0, metrics = [] }) {
+  const parts = [`התקבלו ${rowCount} שורות.`];
+  for (const m of metrics) {
+    if (m.id === "row_count") continue;
+    if (m.value && typeof m.value === "object") {
+      parts.push(`${m.label}: ${Object.entries(m.value).map(([k, v]) => `${k}=${v}`).join(", ")}`);
+    } else {
+      parts.push(`${m.label}: ${m.value}`);
+    }
+  }
+  return parts.join(" ");
+}
+
+function stepUserQuestion(state) {
+  const question = String(state.question || "").trim();
+  const context = state.context && typeof state.context === "object" ? state.context : {};
+  return { step: "user_question", output: { question, context }, state: { ...state, question, context } };
+}
+
+async function stepSchemaInspection({ state, config, settings, fetchImpl }) {
+  let connections = [];
+  if (settings.tables?.length) {
+    const byConn = {};
+    for (const t of settings.tables) (byConn[t.connection] ||= []).push({ name: t.table, columns: t.columns || [] });
+    connections = Object.entries(byConn).map(([key, tables]) => ({ key, tables }));
+    // The selection is bounded, so sample each table now — this makes Field & Table
+    // Selection data-aware (e.g. it can tell which table actually has a hashtags column).
+    for (const conn of connections) {
+      const c = pipelineConnection(conn.key, config);
+      for (const t of conn.tables.slice(0, 15)) {
+        t.samples = await fetchTableSamples({ connection: c, table: t.name, limit: 2, fetchImpl });
+      }
+    }
+  } else {
+    const seen = new Set();
+    for (const key of ["content"]) {
+      const conn = pipelineConnection(key, config);
+      if (!conn.supabaseUrl || !conn.supabaseServiceRoleKey || seen.has(conn.supabaseUrl)) continue;
+      seen.add(conn.supabaseUrl);
+      try { connections.push({ key, tables: await introspectSupabaseTables(conn, { fetchImpl }) }); } catch (_) { /* skip */ }
+    }
+  }
+  const output = { connections, tableCount: connections.reduce((s, c) => s + c.tables.length, 0), source: settings.tables?.length ? "selection" : "live_scan" };
+  return { step: "schema_inspection", output, state: { ...state, schema: output } };
+}
+
+async function stepFieldSelection({ state, config, settings, telemetry, chatComplete, fetchImpl }) {
+  if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+  const schema = state.schema || (await stepSchemaInspection({ state, config, settings, fetchImpl })).output;
+  const manifest = (schema.connections || []).map((c) => ({ connection: c.key, tables: c.tables.map((t) => ({ table: t.name, columns: t.columns, samples: (t.samples || []).slice(0, 2) })) }));
+  const model = settings.plannerModel || config.models.knowledgePlanner || config.models.main;
+  const content = await chatComplete({
+    apiKey: config.openRouterApiKey, model, temperature: 0, maxTokens: 1200,
+    timeoutMs: settings.plannerTimeoutMs, responseFormat: { type: "json_object" }, telemetry,
+    messages: [
+      { role: "system", content: FIELD_SELECTION_PROMPT },
+      { role: "user", content: JSON.stringify({ question: state.question, context: state.context || {}, availableSchema: manifest }) }
+    ]
+  });
+  const selection = normalizeFieldSelection(extractJsonObject(content), schema);
+  if (!selection.tables.length) throw new Error("no relevant tables were selected for this question");
+  // Ground the next step in real data: pull a few sample rows for the chosen tables
+  // so SQL Generation can see actual values (e.g. how a hashtags column is formatted).
+  const conn = pipelineConnection(selection.connection, config);
+  for (const t of selection.tables) {
+    t.samples = await fetchTableSamples({ connection: conn, table: t.table, limit: 3, fetchImpl });
+  }
+  return { step: "field_selection", output: selection, state: { ...state, schema, selection } };
+}
+
+async function stepSqlGeneration({ state, config, settings, telemetry, chatComplete }) {
+  if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+  const selection = state.selection;
+  if (!selection?.tables?.length) throw new Error("run Field & Table Selection first");
+  const model = settings.plannerModel || config.models.knowledgePlanner || config.models.main;
+  const content = await chatComplete({
+    apiKey: config.openRouterApiKey, model, temperature: 0, maxTokens: 900,
+    timeoutMs: settings.plannerTimeoutMs, responseFormat: { type: "json_object" }, telemetry,
+    messages: [
+      { role: "system", content: SQL_GENERATION_PROMPT },
+      { role: "user", content: JSON.stringify({ question: state.question, context: state.context || {}, connection: selection.connection, tables: selection.tables, maxRows: settings.maxRowsPerPlan }) }
+    ]
+  });
+  const parsed = extractJsonObject(content);
+  const validation = validateReadOnlySql(parsed.sql || "", { allowedTables: selection.tables.map((t) => t.table) });
+  const output = { sql: validation.sql, reason: String(parsed.reason || ""), valid: validation.ok, errors: validation.errors, connection: selection.connection };
+  return { step: "sql_generation", output, state: { ...state, sql: output } };
+}
+
+async function stepSqlExecution({ state, config, settings, fetchImpl }) {
+  const sqlInfo = state.sql;
+  if (!sqlInfo?.sql) throw new Error("run SQL Generation first");
+  const allowedTables = (state.selection?.tables || []).map((t) => t.table);
+  const validation = validateReadOnlySql(sqlInfo.sql, { allowedTables });
+  if (!validation.ok) throw new Error(`unsafe SQL rejected: ${validation.errors.join("; ")}`);
+  const connection = pipelineConnection(sqlInfo.connection || state.selection?.connection || "app", config);
+  const rows = await execReadSql({ connection, sql: validation.sql, maxRows: settings.maxRowsPerPlan, timeoutMs: settings.timeoutMsPerPlan, fetchImpl });
+  const output = { rowCount: rows.length, rows: rows.slice(0, settings.maxRowsPerPlan), preview: rows.slice(0, 5) };
+  return { step: "sql_execution", output, state: { ...state, execution: output } };
+}
+
+function stepCalculation({ state }) {
+  const rows = state.execution?.rows || [];
+  const metrics = computeQuantitativeMetrics(rows);
+  const output = { rowCount: rows.length, metrics };
+  return { step: "calculation", output, state: { ...state, calculation: output } };
+}
+
+function stepResult({ state }) {
+  const metrics = state.calculation?.metrics || computeQuantitativeMetrics(state.execution?.rows || []);
+  const rowCount = state.execution?.rowCount ?? 0;
+  const answer = buildQuantitativeAnswer({ rowCount, metrics });
+  const output = { answer, metrics, rowCount };
+  return { step: "result", output, state: { ...state, result: output } };
+}
+
+export async function runDataQueryStep({ step, state = {}, config = getConfig(), settings = dataQuerySettings(config), telemetry = null, chatComplete = chatCompletion, fetchImpl = fetch } = {}) {
+  switch (step) {
+    case "user_question": return stepUserQuestion(state);
+    case "schema_inspection": return stepSchemaInspection({ state, config, settings, fetchImpl });
+    case "field_selection": return stepFieldSelection({ state, config, settings, telemetry, chatComplete, fetchImpl });
+    case "sql_generation": return stepSqlGeneration({ state, config, settings, telemetry, chatComplete });
+    case "sql_execution": return stepSqlExecution({ state, config, settings, fetchImpl });
+    case "calculation": return stepCalculation({ state });
+    case "result": return stepResult({ state });
+    default: throw new Error(`unknown step: ${step}`);
+  }
+}
+
+export async function runDataQueryPipeline({ question, context = {}, config = getConfig(), settings = dataQuerySettings(config), telemetry = null, onStep = null, chatComplete = chatCompletion, fetchImpl = fetch } = {}) {
+  let state = { question: String(question || "").trim(), context: context || {} };
+  const steps = [];
+  for (const def of DATA_QUERY_PIPELINE_STEPS) {
+    try {
+      const res = await runDataQueryStep({ step: def.id, state, config, settings, telemetry, chatComplete, fetchImpl });
+      state = res.state;
+      const entry = { id: def.id, label: def.label, status: "ok", output: res.output };
+      steps.push(entry);
+      if (typeof onStep === "function") onStep(entry);
+    } catch (error) {
+      const entry = { id: def.id, label: def.label, status: "error", error: error.message };
+      steps.push(entry);
+      if (typeof onStep === "function") onStep(entry);
+      break;
+    }
+  }
+  return { steps, state, status: steps.some((s) => s.status === "error") ? "error" : "ok" };
 }
