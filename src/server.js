@@ -26,6 +26,44 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const config = () => getConfig();
 
+// ─── Multi-tenant helpers ─────────────────────────────────────────────────────
+
+/**
+ * Validates the X-Bidoc-Api-Secret header when BIDOC_API_SECRET is set.
+ * If no secret is configured, all requests are allowed (backward compat).
+ */
+function checkBidocSecret(req) {
+  const secret = process.env.BIDOC_API_SECRET;
+  if (!secret) return true;
+  return req.headers["x-bidoc-api-secret"] === secret;
+}
+
+/**
+ * Builds a config with contentSource overridden by per-request credentials.
+ * Credentials are read from request headers first, then from body fields.
+ * Falls back to the global config values when not provided.
+ */
+function buildRequestConfig(req, body = {}) {
+  const base = getConfig();
+  const url  = req.headers["x-content-supabase-url"]  || body.contentSupabaseUrl  || null;
+  const key  = req.headers["x-content-supabase-key"]  || body.contentSupabaseKey  || null;
+  const rpc  = req.headers["x-hybrid-rpc-name"]       || body.hybridRpcName        || null;
+  const idx  = req.headers["x-index-table"]            || body.indexTable           || null;
+  const alt  = req.headers["x-alerts-table"]           || body.alertsTable          || null;
+  if (!url && !key) return base;
+  return {
+    ...base,
+    contentSource: {
+      ...base.contentSource,
+      ...(url ? { supabaseUrl: url }                     : {}),
+      ...(key ? { supabaseServiceRoleKey: key }          : {}),
+      ...(rpc ? { hybridRpcName: rpc }                   : {}),
+      ...(idx ? { indexTable: idx }                      : {}),
+      ...(alt ? { alertsTable: alt }                     : {}),
+    },
+  };
+}
+
 // Load persisted settings from Supabase before handling any requests.
 const ready = initSettings().catch(() => {});
 
@@ -168,19 +206,23 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/insights/runs") {
+    if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
-    const runs = await listProjectInsightRuns({ config: config(), limit });
+    const cfg = buildRequestConfig(req, {});
+    const runs = await listProjectInsightRuns({ config: cfg, limit });
     return sendJson(res, 200, { runs });
   }
 
   if (req.method === "GET" && url.pathname === "/api/insights/hashtags") {
+    if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
     try {
       const dateFrom = url.searchParams.get("date_from") || null;
       const dateTo = url.searchParams.get("date_to") || null;
       const source = url.searchParams.get("source") || "alerts";
+      const cfg = buildRequestConfig(req, {});
       const fetcher = source === "index"
-        ? fetchTimelineEvents({ config: config() }).catch(() => [])
-        : fetchAlertsTimelineEvents({ config: config() }).catch(() => []);
+        ? fetchTimelineEvents({ config: cfg }).catch(() => [])
+        : fetchAlertsTimelineEvents({ config: cfg }).catch(() => []);
       const allEvents = await fetcher;
       const events = allEvents.filter((ev) => {
         if (!ev.date) return true;
@@ -205,14 +247,16 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/insights/analyze") {
+    if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
+    const cfg = buildRequestConfig(req, body);
     const runId = body.runId || `project_insights_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     createRun(runId);
     const excludedSourceKeys = Array.isArray(body.excludeSourceKeys) ? body.excludeSourceKeys : [];
     const parentRunId = body.parentRunId || body.parent_run_id || null;
     try {
       const result = await runProjectInsightsAnalysis({
-        config: config(),
+        config: cfg,
         focusQuery: body.focusQuery || body.query || "",
           dateFrom: body.dateFrom || body.date_from || null,
           dateTo: body.dateTo || body.date_to || null,
@@ -235,10 +279,10 @@ async function handleApi(req, res, url) {
         runEvents,
         kind: "project_insights_analysis"
       });
-      const parentRun = parentRunId ? await getProjectInsightRun({ config: config(), runId: parentRunId }).catch(() => null) : null;
+      const parentRun = parentRunId ? await getProjectInsightRun({ config: cfg, runId: parentRunId }).catch(() => null) : null;
       const persistedResult = parentRun ? mergePersistedProjectInsightRun(parentRun, result) : result;
       await saveProjectInsightRun({
-        config: config(),
+        config: cfg,
         run: {
           runId,
           parentRunId,
@@ -270,7 +314,7 @@ async function handleApi(req, res, url) {
     } catch (error) {
       failRun(runId, error);
       await saveProjectInsightRun({
-        config: config(),
+        config: cfg,
         run: {
           runId,
           parentRunId: body.parentRunId || body.parent_run_id || null,
