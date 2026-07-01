@@ -39,6 +39,18 @@ function checkBidocSecret(req) {
 }
 
 /**
+ * For read-only GET endpoints: only enforce the secret when the request
+ * carries cross-tenant headers (i.e. it's coming from an external proxy).
+ * Same-origin UI requests (no x-content-supabase-url) are allowed through
+ * so the app's own interface can still load history/hashtags.
+ */
+function checkBidocSecretForRead(req) {
+  const isCrossTenant = Boolean(req.headers["x-content-supabase-url"]);
+  if (!isCrossTenant) return true;
+  return checkBidocSecret(req);
+}
+
+/**
  * Builds a config with contentSource overridden by per-request credentials.
  * Credentials are read from request headers first, then from body fields.
  * Falls back to the global config values when not provided.
@@ -206,7 +218,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/insights/runs") {
-    if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
     const cfg = buildRequestConfig(req, {});
     const runs = await listProjectInsightRuns({ config: cfg, limit });
@@ -214,7 +226,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/insights/hashtags") {
-    if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     try {
       const dateFrom = url.searchParams.get("date_from") || null;
       const dateTo = url.searchParams.get("date_to") || null;
