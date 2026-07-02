@@ -444,7 +444,7 @@ export function getConfig(settingsOverride = null) {
   });
   return {
     port: Number(process.env.PORT || 4000),
-    openRouterApiKey: resolveSecret(secrets.openRouterApiKey, process.env.OPENROUTER_API_KEY),
+    openRouterApiKey: resolveOpenRouterKey(secrets.openRouterApiKey, process.env.OPENROUTER_API_KEY),
     openAiApiKey: "",
     supabaseUrl: appSupabaseUrl,
     supabaseServiceRoleKey: appSupabaseServiceRoleKey,
@@ -1002,6 +1002,15 @@ export function isMaskedSecret(value = "") {
 export function resolveSecret(settingsValue = "", envValue = "") {
   if (settingsValue && !isMaskedSecret(settingsValue)) return settingsValue;
   return envValue || "";
+}
+
+// OpenRouter keys look like "sk-or-...". Ignore a settings value that is clearly
+// something else (e.g. a Supabase "sb_..." or JWT "eyJ..." key pasted into the wrong
+// field) so a mis-entered key never silently overrides a valid env OPENROUTER_API_KEY.
+export function resolveOpenRouterKey(settingsValue = "", envValue = "") {
+  const fromSettings = resolveSecret(settingsValue, "");
+  if (fromSettings && /^sk-/i.test(fromSettings.trim())) return fromSettings.trim();
+  return String(envValue || "").trim();
 }
 
 export function mergeSecret(existing = "", incoming = "") {
