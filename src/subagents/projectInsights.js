@@ -2,7 +2,7 @@ import { TOOL_NAMES } from "../config.js";
 import { chatCompletion, extractJsonObject } from "../openrouter.js";
 import { buildGraphSearchPayload, summarizeGraphContext } from "../projectGraph.js";
 import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "../sourceQuality.js";
-import { fetchTimelineEventPage, graphSearch, hybridSearch } from "../supabase.js";
+import { fetchAlertsTimelineEvents, fetchTimelineEventPage, graphSearch, hybridSearch } from "../supabase.js";
 import { callN8nTool } from "../tools.js";
 import { runAlertAgent } from "./alert.js";
 
@@ -55,6 +55,8 @@ export async function runProjectInsightsAnalysis({
   dateTo = null,
   limit = 350,
   excludeSourceKeys = [],
+  selectedHashtags = [],
+  hashtagMode = "boost",
   expansion = false,
   runId = null,
   emit = null
@@ -71,6 +73,23 @@ export async function runProjectInsightsAnalysis({
 
   const boundedLimit = Math.max(25, Math.min(Number(limit) || 350, 1000));
   const excludedKeys = normalizeSourceKeySet(excludeSourceKeys);
+
+  const primeEnabled = config?.insights?.primeFromAlerts !== false;
+  const userFocusQuery = String(focusQuery || "").trim();
+  const alertDirection = primeEnabled
+    ? await primeFromAlerts({ config, dateFrom: safeDateFrom, dateTo: safeDateTo, userFocusQuery })
+    : { alertCount: 0, hashtags: [], terms: [], derivedQuery: "", refinedQuery: "", refined: "disabled" };
+  step("alerts_priming", alertDirection.alertCount ? "Alerts analyzed for search direction" : "No alerts to prime from", {
+    alertCount: alertDirection.alertCount,
+    hashtags: alertDirection.hashtags,
+    terms: alertDirection.terms,
+    refined: alertDirection.refined,
+    focusQuery: alertDirection.refinedQuery || alertDirection.derivedQuery || null
+  });
+
+  // Alerts give direction on what to search for in the index; the user's own focus query wins.
+  const effectiveFocusQuery = userFocusQuery || alertDirection.refinedQuery || alertDirection.derivedQuery || "";
+
   const indexScan = await collectIndexRecords({ config, dateFrom: safeDateFrom, dateTo: safeDateTo, limit: boundedLimit, excludedKeys });
   step("index_scan", "Content index scanned", {
     records: indexScan.records.length,
@@ -81,21 +100,33 @@ export async function runProjectInsightsAnalysis({
     expansion: Boolean(expansion)
   });
 
-  const hybridRecords = await searchFocusRecords({ config, focusQuery, dateFrom: safeDateFrom, dateTo: safeDateTo, runId, emit });
+  const hashtagContext = buildHashtagContext(indexScan.records, { selectedHashtags, mode: hashtagMode, alertHashtags: alertDirection.hashtags });
+  step("hashtag_analysis", "Hashtag context prepared", {
+    selected: hashtagContext.selected,
+    active: hashtagContext.active,
+    top: hashtagContext.top.slice(0, 8),
+    fromAlerts: hashtagContext.fromAlerts || [],
+    mode: hashtagContext.mode
+  });
+
+  const hybridRecords = await searchFocusRecords({ config, focusQuery: effectiveFocusQuery, dateFrom: safeDateFrom, dateTo: safeDateTo, activeHashtags: hashtagContext.active, runId, emit });
   const filteredHybridRecords = filterExcludedRecords(hybridRecords, excludedKeys);
   step("focus_retrieval", "Focus retrieval completed", {
-    focusQuery: focusQuery || null,
+    focusQuery: effectiveFocusQuery || null,
+    focusSource: userFocusQuery ? "user" : (alertDirection.alertCount ? "alerts" : "none"),
+    activeHashtags: hashtagContext.active,
     records: filteredHybridRecords.length,
     skipped: hybridRecords.length - filteredHybridRecords.length
   });
 
-  const records = dedupeRecords([...filteredHybridRecords, ...indexScan.records])
-    .filter((record) => !excludedKeys.has(sourceKey(record)))
+  const candidateRecords = dedupeRecords([...filteredHybridRecords, ...indexScan.records])
+    .filter((record) => !excludedKeys.has(sourceKey(record)));
+  const records = sortRecordsByHashtagBoost(candidateRecords, hashtagContext.active)
     .slice(0, boundedLimit);
 
   const toolContext = await runExistingProjectTools({
     config,
-    query: String(focusQuery || "").trim() || DEFAULT_INSIGHTS_QUERY,
+    query: effectiveFocusQuery || DEFAULT_INSIGHTS_QUERY,
     records,
     dateFrom: safeDateFrom,
     dateTo: safeDateTo,
@@ -103,18 +134,21 @@ export async function runProjectInsightsAnalysis({
     emit
   });
 
-  const findings = detectProjectFindings(records, { focusQuery });
+  const findings = detectProjectFindings(records, { focusQuery: effectiveFocusQuery, activeHashtags: hashtagContext.active });
   step("signal_detection", "Project findings detected", {
     findings: findings.length,
+    activeHashtags: hashtagContext.active,
     evidence: findings.reduce((sum, item) => sum + item.evidence.length, 0)
   });
 
-  const summary = summarizeProjectRecords(records, { focusQuery, dateFrom: safeDateFrom, dateTo: safeDateTo });
+  const summary = summarizeProjectRecords(records, { focusQuery: effectiveFocusQuery, dateFrom: safeDateFrom, dateTo: safeDateTo });
+  summary.hashtagContext = hashtagContext;
+  summary.alertDirection = alertDirection;
   summary.excludedRecords = excludedKeys.size;
   summary.skippedRecords = indexScan.skipped + (hybridRecords.length - filteredHybridRecords.length);
   summary.expansion = Boolean(expansion);
 
-  const insights = await synthesizeInsights({ config, records, findings, summary, focusQuery, toolContext, runId, emit });
+  const insights = await synthesizeInsights({ config, records, findings, summary, focusQuery: effectiveFocusQuery, hashtagContext, alertDirection, toolContext, runId, emit });
   step("insight_ranking", "Insights synthesized from findings", {
     sourceTables: Object.keys(summary.sourceCounts).length,
     topSeverity: insights[0]?.severity || null,
@@ -170,6 +204,111 @@ async function collectIndexRecords({ config, dateFrom, dateTo, limit, excludedKe
 
 function filterExcludedRecords(records = [], excludedKeys = new Set()) {
   return (records || []).filter((record) => !excludedKeys.has(sourceKey(record)));
+}
+
+function buildHashtagContext(records = [], { selectedHashtags = [], mode = "boost", alertHashtags = [] } = {}) {
+  const selected = normalizeRecordTags(selectedHashtags);
+  const fromAlerts = normalizeRecordTags(alertHashtags);
+  const top = topHashtagsFromRecords(records, 20);
+  // Priority: explicit user selection > alert-derived direction > top index hashtags.
+  const active = selected.length
+    ? selected
+    : (fromAlerts.length ? fromAlerts.slice(0, 8) : top.slice(0, 8).map((item) => item.tag));
+  return {
+    mode: mode === "boost" ? "boost" : "boost",
+    selected,
+    fromAlerts,
+    active,
+    top
+  };
+}
+
+function sortRecordsByHashtagBoost(records = [], activeHashtags = []) {
+  if (!activeHashtags?.length) return records;
+  return [...records].sort((a, b) => hashtagOverlap(b.hashtags || b.tags, activeHashtags) - hashtagOverlap(a.hashtags || a.tags, activeHashtags));
+}
+
+/**
+ * Reads the project alerts and derives a search direction for the index run:
+ * dominant hashtags + severity-weighted recurring terms, plus a query string.
+ * When OpenRouter is configured, an optional short LLM step refines the themes
+ * into a natural-language Hebrew focus query (deterministic fallback otherwise).
+ * Alerts steer retrieval/ranking; they never become findings themselves.
+ */
+async function primeFromAlerts({ config, dateFrom, dateTo, userFocusQuery = "" }) {
+  const empty = { alertCount: 0, hashtags: [], terms: [], derivedQuery: "", refinedQuery: "", refined: "none" };
+  let alerts = [];
+  try {
+    alerts = await fetchAlertsTimelineEvents({ config, limit: 2000 });
+  } catch {
+    return empty;
+  }
+  if (!Array.isArray(alerts) || !alerts.length) return empty;
+
+  const scoped = alerts.filter((event) => {
+    if (!event.date) return true;
+    if (dateFrom && event.date < dateFrom) return false;
+    if (dateTo && event.date > dateTo) return false;
+    return true;
+  });
+  if (!scoped.length) return empty;
+
+  const hashtags = topHashtagsFromRecords(scoped, 10).map((item) => item.tag);
+
+  const termCounts = new Map();
+  for (const alert of scoped) {
+    const weight = Math.max(1, Number(alert.severity) || 1);
+    const normalized = normalizeRecord(alert);
+    const text = `${normalized.title || ""} ${normalized.summary || normalized.text || ""}`;
+    for (const token of tokenizeFocusText(text)) {
+      termCounts.set(token, (termCounts.get(token) || 0) + weight);
+    }
+  }
+  const terms = [...termCounts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "he"))
+    .slice(0, 8)
+    .map(([term]) => term);
+
+  const derivedQuery = [...terms, ...hashtags.map((tag) => `#${tag}`)].join(" ").trim();
+  const direction = { alertCount: scoped.length, hashtags, terms, derivedQuery, refinedQuery: "", refined: "deterministic" };
+
+  // With a user focus query we keep their intent (alert hashtags still steer ranking); no need to synthesize a query.
+  if (userFocusQuery) return direction;
+
+  // Optional LLM refinement into a natural-language Hebrew search direction.
+  if (config?.openRouterApiKey && (terms.length || hashtags.length)) {
+    try {
+      const content = await chatCompletion({
+        apiKey: config.openRouterApiKey,
+        model: config.models?.lite || config.models?.classifier || "openai/gpt-4o-mini",
+        temperature: 0.1,
+        maxTokens: 400,
+        timeoutMs: 30_000,
+        responseFormat: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You turn construction-project alert themes into a short search direction for an index of project records.",
+              "Return ONLY valid JSON: {\"focusQuery\":\"string\",\"topics\":[\"string\"]}.",
+              "focusQuery is a concise Hebrew phrase (<=140 chars) describing what to look for in the index based on the alerts.",
+              "Do not invent themes that are not implied by the provided hashtags/terms."
+            ].join("\n")
+          },
+          {
+            role: "user",
+            content: JSON.stringify({ hashtags, terms, alertCount: scoped.length })
+          }
+        ]
+      });
+      const parsed = extractJsonObject(content);
+      const refinedQuery = String(parsed?.focusQuery || "").trim();
+      if (refinedQuery) return { ...direction, refinedQuery, refined: "ai" };
+    } catch {
+      // fall back to the deterministic direction
+    }
+  }
+  return direction;
 }
 
 function cleanOptionalDate(value) {
@@ -253,7 +392,7 @@ async function runExistingProjectTools({ config, query, records, dateFrom, dateT
   return { graphContext, alertResult, toolCalls, sourceQuality, conflicts, n8nResults };
 }
 
-async function synthesizeInsights({ config, records, findings, summary, focusQuery, toolContext, runId, emit }) {
+async function synthesizeInsights({ config, records, findings, summary, focusQuery, hashtagContext, alertDirection = null, toolContext, runId, emit }) {
   if (!findings.length) return [];
   const fallbackInsights = buildDeterministicInsights({ findings });
   if (!config?.openRouterApiKey) return fallbackInsights;
@@ -265,11 +404,13 @@ async function synthesizeInsights({ config, records, findings, summary, focusQue
     severity: finding.severity,
     confidence: finding.confidence,
     finding: finding.finding || finding.statement || "",
+    hashtags: normalizeRecordTags(finding.hashtags || finding.tags),
     evidence: (finding.evidence || []).slice(0, 4).map((item) => ({
       title: item.title,
       source_table: item.source_table,
       source_id: item.source_id,
       date: item.date,
+      hashtags: normalizeRecordTags(item.hashtags || item.tags),
       excerpt: item.excerpt
     }))
   }));
@@ -282,6 +423,7 @@ async function synthesizeInsights({ config, records, findings, summary, focusQue
       source_table: normalized.source_table,
       source_id: normalized.source_id,
       severity_or_risk: normalized.severity_or_risk,
+      hashtags: normalized.hashtags,
       text: normalized.text.slice(0, 900)
     };
   });
@@ -304,6 +446,7 @@ async function synthesizeInsights({ config, records, findings, summary, focusQue
             "Findings are evidence-backed observations. Insights must synthesize multiple findings into a meaningful project pattern, implication, risk, or opportunity.",
             "Do not simply rename or repeat a finding as an insight.",
             "Every insight must include supporting_finding_ids from the provided findings.",
+            "Use hashtags as context and grouping signals when they are supported by evidence, but never infer a conclusion from a hashtag alone.",
             "Do not create a legal claim file. Do not make legal, entitlement, cost, or critical path conclusions.",
             "Use Hebrew for user-facing text.",
             "Schema: {\"insights\":[{\"title\":\"string\",\"category\":\"blocker|decision|missing_info|repeated_topic|commercial|quality_safety|entity\",\"severity\":\"high|medium|low\",\"confidence\":0.0,\"insight\":\"string\",\"why_it_matters\":\"string\",\"recommended_action\":\"string\",\"uncertainty\":\"string\",\"supporting_finding_ids\":[\"finding_id\"]}]}"
@@ -314,6 +457,8 @@ async function synthesizeInsights({ config, records, findings, summary, focusQue
           content: JSON.stringify({
             focusQuery: focusQuery || null,
             summary,
+            hashtagContext,
+            alertDirection: alertDirection || summary?.alertDirection || null,
             findings: candidateFindings,
             records: candidateRecords,
             graphContext: toolContext?.graphContext || [],
@@ -364,11 +509,11 @@ export function parseInsightJson(content) {
   }
 }
 
-async function searchFocusRecords({ config, focusQuery, dateFrom, dateTo, runId, emit }) {
+async function searchFocusRecords({ config, focusQuery, dateFrom, dateTo, activeHashtags = [], runId, emit }) {
   const query = String(focusQuery || "").trim();
   if (!query) return [];
   try {
-    const rows = await hybridSearch({ config, query, dateFrom, dateTo, topK: 80 });
+    const rows = await hybridSearch({ config, query, dateFrom, dateTo, hashtags: activeHashtags, topK: 80 });
     return Array.isArray(rows) ? rows.map((row) => normalizeRecord(row, "hybrid")) : [];
   } catch (error) {
     emit?.(runId, "focus_retrieval_warning", "Hybrid focus search failed; using index scan only", { error: error.message, status: "warning" });
@@ -376,21 +521,22 @@ async function searchFocusRecords({ config, focusQuery, dateFrom, dateTo, runId,
   }
 }
 
-export function detectProjectSignals(records = [], { focusQuery = "" } = {}) {
-  return detectProjectFindings(records, { focusQuery });
+export function detectProjectSignals(records = [], { focusQuery = "", activeHashtags = [] } = {}) {
+  return detectProjectFindings(records, { focusQuery, activeHashtags });
 }
 
-export function detectProjectFindings(records = [], { focusQuery = "" } = {}) {
+export function detectProjectFindings(records = [], { focusQuery = "", activeHashtags = [] } = {}) {
   const normalized = records.map((record) => normalizeRecord(record)).filter((record) => record.text);
   const findings = SIGNALS.map((signal) => {
     const matches = normalized
-      .map((record) => ({ record, score: scoreRecord(record, signal, focusQuery) }))
+      .map((record) => ({ record, score: scoreRecord(record, signal, focusQuery, activeHashtags) }))
       .filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 8);
 
     if (!matches.length) return null;
     const evidence = matches.map((item) => toEvidence(item.record, signal.terms));
+    const hashtags = topHashtagsFromRecords(matches.map((item) => item.record), 8).map((item) => item.tag);
     const confidence = Math.min(0.92, 0.35 + evidence.length * 0.07 + matches.reduce((sum, item) => sum + item.score, 0) * 0.015);
     const text = buildFindingText(signal, evidence);
     return {
@@ -400,6 +546,7 @@ export function detectProjectFindings(records = [], { focusQuery = "" } = {}) {
       category: signal.category,
       severity: signal.severity,
       confidence: Number(confidence.toFixed(2)),
+      hashtags,
       evidence,
       finding: text,
       statement: text,
@@ -418,7 +565,9 @@ export function detectProjectFindings(records = [], { focusQuery = "" } = {}) {
 
 export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insights = [], findings = [], toolContext = {} } = {}) {
   const nodes = [
+    { id: "alerts_priming", label: "Alerts Priming", kind: "database", status: "done" },
     { id: "index_scan", label: "Index Scan", kind: "database", status: "done" },
+    { id: "hashtag_analysis", label: "Hashtag Analysis", kind: "router", status: "done" },
     { id: "focus_retrieval", label: "Focus Retrieval", kind: "vector", status: "done" },
     { id: "graph_search", label: "Project Graph Search", kind: "database", status: nodeStatus(toolContext.toolCalls, "graph_search") },
     { id: "alert_agent", label: "Alert Agent", kind: "ai", status: nodeStatus(toolContext.toolCalls, "alert") },
@@ -431,7 +580,9 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
     { id: "insights_output", label: "Insights Output", kind: "output", status: "done" }
   ];
   const edges = [
-    { from: "index_scan", to: "focus_retrieval" },
+    { from: "alerts_priming", to: "index_scan" },
+    { from: "index_scan", to: "hashtag_analysis" },
+    { from: "hashtag_analysis", to: "focus_retrieval" },
     { from: "focus_retrieval", to: "graph_search" },
     { from: "graph_search", to: "alert_agent" },
     { from: "alert_agent", to: "n8n_tools" },
@@ -446,7 +597,9 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
     nodes,
     edges,
     nodeDetails: {
+      alerts_priming: { summary: `${summary.alertDirection?.alertCount || 0} alerts, ${summary.alertDirection?.hashtags?.length || 0} themes`, output: summary.alertDirection || null, logs: trace.filter((item) => item.step === "alerts_priming") },
       index_scan: { summary: `${summary.totalRecords || 0} index records scanned`, logs: trace.filter((item) => item.step === "index_scan") },
+      hashtag_analysis: { summary: `${summary.hashtagContext?.active?.length || 0} active hashtags`, output: summary.hashtagContext || null, logs: trace.filter((item) => item.step === "hashtag_analysis") },
       focus_retrieval: { summary: `Focus query: ${summary.focusQuery || "none"}`, logs: trace.filter((item) => item.step === "focus_retrieval" || item.step === "focus_retrieval_warning") },
       graph_search: { summary: `${toolContext.graphContext?.length || 0} graph relationships returned`, output: toolContext.graphContext || [], logs: trace.filter((item) => item.step === "graph_search") },
       alert_agent: { summary: toolContext.alertResult ? `${toolContext.alertResult.resultsCount || 0} alert records checked` : "Alert Agent unavailable or skipped", output: toolContext.alertResult || null, logs: trace.filter((item) => item.step === "alert_agent") },
@@ -632,6 +785,7 @@ function insightFromPlan(plan, support, index) {
 function summarizeProjectRecords(records, { focusQuery, dateFrom, dateTo }) {
   const sourceCounts = {};
   const dates = [];
+  const topHashtags = topHashtagsFromRecords(records, 12);
   for (const record of records) {
     const normalized = normalizeRecord(record);
     const source = normalized.source_table || normalized.source || "unknown";
@@ -642,20 +796,22 @@ function summarizeProjectRecords(records, { focusQuery, dateFrom, dateTo }) {
   return {
     totalRecords: records.length,
     sourceCounts,
+    topHashtags,
     dateFrom: dateFrom || dates[0] || null,
     dateTo: dateTo || dates.at(-1) || null,
     focusQuery: String(focusQuery || "").trim() || null
   };
 }
 
-function scoreRecord(record, signal, focusQuery) {
+function scoreRecord(record, signal, focusQuery, activeHashtags = []) {
   const text = record.text.toLowerCase();
   const termHits = signal.terms.reduce((count, term) => count + (text.includes(String(term).toLowerCase()) ? 1 : 0), 0);
   if (!termHits) return 0;
   const focus = String(focusQuery || "").trim().toLowerCase();
   const focusBonus = focus ? scoreFocusOverlap(text, focus) : 0;
+  const hashtagBonus = hashtagOverlap(record.hashtags || record.tags, activeHashtags) * 1.25;
   const severityBonus = String(record.severity_or_risk || "").match(/high|critical|גבוה|קריטי/i) ? 2 : 0;
-  return termHits + focusBonus + severityBonus;
+  return termHits + focusBonus + hashtagBonus + severityBonus;
 }
 
 function scoreFocusOverlap(text, focus) {
@@ -698,6 +854,8 @@ function normalizeRecord(record = {}, source = "") {
   const metadata = record.metadata && typeof record.metadata === "object" ? record.metadata : {};
   const title = record.title || metadata.title || record.question || record.source_id || record.id || "";
   const summary = record.summary || record.content || record.answer || record.index_text || record.text || metadata.summary || "";
+  const hashtags = normalizeRecordTags(record.tags || record.hashtags || metadata.hashtags || metadata.tags);
+  const hashtagText = hashtags.map((tag) => `#${tag}`).join(" ");
   return {
     ...record,
     source,
@@ -708,7 +866,9 @@ function normalizeRecord(record = {}, source = "") {
     source_id: record.source_id || metadata.source_id || record.id || "",
     source_url: record.source_url || record.data_link || metadata.source_url || "",
     severity_or_risk: record.severity_or_risk || record.severity_level || metadata.severity_or_risk || "",
-    text: [title, summary, record.index_text, record.content, metadata.index_text].filter(Boolean).join(" ")
+    tags: hashtags,
+    hashtags,
+    text: [title, summary, record.index_text, record.content, metadata.index_text, hashtagText].filter(Boolean).join(" ")
   };
 }
 
@@ -743,6 +903,38 @@ function normalizeSourceKeySet(value = []) {
   return new Set(items.map((item) => String(item || "").trim()).filter(Boolean));
 }
 
+function normalizeRecordTags(value) {
+  const input = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(/[,\n]+/)
+      : [];
+  return [...new Set(input
+    .map((tag) => String(tag || "").trim().replace(/^#+/, ""))
+    .filter(Boolean))];
+}
+
+function topHashtagsFromRecords(records = [], limit = 12) {
+  const counts = new Map();
+  for (const record of records || []) {
+    const tags = normalizeRecord(record).hashtags;
+    for (const tag of tags) counts.set(tag, (counts.get(tag) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, "he"))
+    .slice(0, limit);
+}
+
+function hashtagOverlap(recordTags = [], activeHashtags = []) {
+  const active = new Set(normalizeRecordTags(activeHashtags).map((tag) => tag.toLowerCase()));
+  if (!active.size) return 0;
+  return normalizeRecordTags(recordTags)
+    .map((tag) => tag.toLowerCase())
+    .filter((tag, index, all) => all.indexOf(tag) === index && active.has(tag))
+    .length;
+}
+
 export function toProjectInsightEvidence(record = {}, terms = []) {
   const normalized = normalizeRecord(record);
   return {
@@ -751,6 +943,7 @@ export function toProjectInsightEvidence(record = {}, terms = []) {
     source_id: normalized.source_id,
     date: normalized.date,
     title: normalized.title || "מקור מהאינדקס",
+    hashtags: normalized.hashtags,
     excerpt: excerptAroundTerm(normalized.text, terms),
     source_url: normalized.source_url || null
   };

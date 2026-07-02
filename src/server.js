@@ -270,14 +270,16 @@ async function handleApi(req, res, url) {
       const result = await runProjectInsightsAnalysis({
         config: cfg,
         focusQuery: body.focusQuery || body.query || "",
-          dateFrom: body.dateFrom || body.date_from || null,
-          dateTo: body.dateTo || body.date_to || null,
-          limit: body.limit || 350,
-          excludeSourceKeys: excludedSourceKeys,
-          expansion: Boolean(body.expansion),
-          runId,
-          emit: emitRunEvent
-        });
+        dateFrom: body.dateFrom || body.date_from || null,
+        dateTo: body.dateTo || body.date_to || null,
+        limit: body.limit || 350,
+        excludeSourceKeys: excludedSourceKeys,
+        selectedHashtags: body.selectedHashtags || body.selected_hashtags || [],
+        hashtagMode: body.hashtagMode || body.hashtag_mode || "boost",
+        expansion: Boolean(body.expansion),
+        runId,
+        emit: emitRunEvent
+      });
       completeRun(runId, {
         insights: result.insights.length,
         findings: Array.isArray(result.findings) ? result.findings.length : 0,

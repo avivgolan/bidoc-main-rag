@@ -1257,7 +1257,9 @@ test("project insights workflow exposes the index-first agent flow", () => {
     insights: [{ id: "blockers", evidence: [{}] }]
   });
   assert.deepEqual(workflow.nodes.map((node) => node.id), [
+    "alerts_priming",
     "index_scan",
+    "hashtag_analysis",
     "focus_retrieval",
     "graph_search",
     "alert_agent",
@@ -1269,6 +1271,8 @@ test("project insights workflow exposes the index-first agent flow", () => {
     "insight_ranking",
     "insights_output"
   ]);
+  assert.equal(workflow.nodeDetails.hashtag_analysis.summary, "0 active hashtags");
+  assert.equal(workflow.nodeDetails.alerts_priming.summary, "0 alerts, 0 themes");
 });
 
 test("AI project insights roadmap replaces claim-file product direction", () => {
