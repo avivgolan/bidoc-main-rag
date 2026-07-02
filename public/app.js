@@ -5742,25 +5742,29 @@ function applySettingsToForm() {
   renderSettingsPresetControls();
   applyModelSelectsToSettingsForm();
   applyChatPromptFieldsToSettingsForm();
-  $("hybridRpcName").value = state.settings.retrieval.rpcName;
-  $("hybridCandidates").value = state.settings.retrieval.candidates;
+  if ($("hybridRpcName")) $("hybridRpcName").value = state.settings.retrieval.rpcName;
+  if ($("hybridCandidates")) $("hybridCandidates").value = state.settings.retrieval.candidates;
   setInputValue("plannerCandidates", state.settings.retrieval.plannerCandidates ?? 20);
   setInputValue("alertCandidates", state.settings.retrieval.alertCandidates ?? 20);
-  $("rerankTopK").value = state.settings.retrieval.rerankTopK;
-  $("vectorWeight").value = state.settings.retrieval.vectorWeight;
-  $("keywordWeight").value = state.settings.retrieval.keywordWeight;
+  if ($("rerankTopK")) $("rerankTopK").value = state.settings.retrieval.rerankTopK;
+  if ($("vectorWeight")) $("vectorWeight").value = state.settings.retrieval.vectorWeight;
+  if ($("keywordWeight")) $("keywordWeight").value = state.settings.retrieval.keywordWeight;
   setInputValue("tlLimitInput", state.settings.retrieval.timelineLimit ?? 1000);
   if ($("knowledgeTriggerKeywords")) {
     $("knowledgeTriggerKeywords").value = (state.settings.knowledge?.triggerKeywords || []).join("\n");
   }
   applyAdvancedAiSettingsToForm();
-  $("n8nBaseUrl").value = state.settings.n8nBaseUrl || "";
+  if ($("n8nBaseUrl")) $("n8nBaseUrl").value = state.settings.n8nBaseUrl || "";
   if ($("timezone")) $("timezone").value = state.settings.timezone || "Asia/Jerusalem";
-  $("openRouterApiKey").value = "";
-  $("openRouterApiKey").placeholder = state.settings.secrets.openRouterApiKey || "sk-or-...";
-  $("supabaseUrl").value = state.settings.secrets.supabaseUrl || "";
-  $("supabaseServiceRoleKey").value = "";
-  $("supabaseServiceRoleKey").placeholder = state.settings.secrets.supabaseServiceRoleKey || "eyJ...";
+  if ($("openRouterApiKey")) {
+    $("openRouterApiKey").value = "";
+    $("openRouterApiKey").placeholder = state.settings.secrets.openRouterApiKey || "sk-or-...";
+  }
+  if ($("supabaseUrl")) $("supabaseUrl").value = state.settings.secrets.supabaseUrl || "";
+  if ($("supabaseServiceRoleKey")) {
+    $("supabaseServiceRoleKey").value = "";
+    $("supabaseServiceRoleKey").placeholder = state.settings.secrets.supabaseServiceRoleKey || "eyJ...";
+  }
   const contentSource = state.settings.contentSource || {};
   if ($("contentSupabaseUrl")) $("contentSupabaseUrl").value = contentSource.supabaseUrl || "";
   if ($("contentSupabaseServiceRoleKey")) {
@@ -5772,16 +5776,18 @@ function applySettingsToForm() {
   if ($("contentAlertsTable")) $("contentAlertsTable").value = contentSource.alertsTable || "";
   if ($("contentAlertsRpcName")) $("contentAlertsRpcName").value = contentSource.alertsRpcName || "";
 
-  $("toolSettings").innerHTML = "";
-  for (const tool of n8nTools) {
-    const label = document.createElement("label");
-    label.textContent = tool;
-    const input = document.createElement("input");
-    input.id = `tool_${tool}`;
-    input.placeholder = `${tool} webhook URL`;
-    input.value = state.settings.tools[tool]?.url || "";
-    label.append(input);
-    $("toolSettings").append(label);
+  if ($("toolSettings")) {
+    $("toolSettings").innerHTML = "";
+    for (const tool of n8nTools) {
+      const label = document.createElement("label");
+      label.textContent = tool;
+      const input = document.createElement("input");
+      input.id = `tool_${tool}`;
+      input.placeholder = `${tool} webhook URL`;
+      input.value = state.settings.tools[tool]?.url || "";
+      label.append(input);
+      $("toolSettings").append(label);
+    }
   }
 
   const configured = Object.entries(state.settings.tools).filter(([, value]) => value.configured).length;

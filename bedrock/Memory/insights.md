@@ -44,6 +44,13 @@ tags:
 - The `#insights` UI renders synthesized insights first, shows each insight's supporting findings inside the card, and keeps unmatched findings in a separate section.
 - Persisted Project Insight runs continue using `project_insight_runs`; `insights` remain in the existing column and `findings` are stored inside `metadata.findings`.
 - Historical runs without `findings` are loaded with a fallback that treats old insight cards as legacy findings, so old reports remain viewable.
+- The Insights page now includes an Alert/Index hashtag analytics chart above the Project Insights agent.
+- `GET /api/insights/hashtags` counts hashtags from the KAPAIM content Supabase project and accepts `date_from`, `date_to`, and `source`.
+- The hashtag chart uses the same Insights date range inputs, auto-refreshes after date changes, and can switch between `alerts` and `index` sources.
+- For KAPAIM content data, Alerts must come from `public.alerts` and Index must come from `public.data_index`; do not use the old default embeddings table name for this chart.
+- Local env now pins `CONTENT_INDEX_TABLE=data_index`; Content Supabase URL is resolved from settings/secret configuration and should point at project id `smxibuaowzuxkznuouwj`.
+- `trimSlash` in `src/config.js` trims surrounding whitespace before removing trailing slashes so pasted Supabase URLs with leading spaces do not leak into runtime config.
+- The Insights UI was redesigned with a dark SaaS/OLED visual system, improved chart controls, skeleton loading, welcome empty state, status pills, keyboard shortcuts, collapsible evidence, and auto-scroll after analysis.
 
 ## Recent Changes
 
@@ -58,9 +65,14 @@ tags:
 - 2026-06-24 -- Added persisted Project Insights run history, selectable historical reports, and cumulative expansion continuation from selected runs.
 - 2026-06-24 -- Fixed Project Insights focus-query scoring so non-exact phrasing still boosts related local signal matches.
 - 2026-06-25 -- Split Project Insights output into findings and synthesized insights, updated UI/history expansion handling, and persisted findings in `project_insight_runs.metadata`.
+- 2026-07-02 -- Added date-aware hashtag analytics to the Insights page, including Alerts/Index source toggle backed by KAPAIM `alerts` and `data_index` tables.
+- 2026-07-02 -- Redesigned the Insights page UI/UX with chart controls, loading/empty states, keyboard shortcuts, collapsible evidence, and modern dark dashboard styling.
+- 2026-07-02 -- Fixed content-source configuration gotchas by pinning `CONTENT_INDEX_TABLE=data_index` and trimming Supabase URL whitespace.
 
 ## Gotchas
 
 - Do not treat `docs/contractor-delay-claim-agents-roadmap.md` as the product direction for the Insights page. It is too claim-file oriented for the current requirement.
 - Do not add more Supabase tables for Stage 1 insights unless explicitly requested; current persistence uses only `project_insight_runs`.
 - Keep insight wording as observations and recommendations; avoid legal, entitlement, cost, or critical-path conclusions.
+- Hashtag analytics must use the KAPAIM content Supabase project `smxibuaowzuxkznuouwj`, not the app Supabase project and not old `*_embeddings_gf_dor_agent` defaults.
+- If the chart counts look wrong, first check `/api/settings` for `contentSource.supabaseUrl`, `contentSource.alertsTable`, and `contentSource.indexTable`.
