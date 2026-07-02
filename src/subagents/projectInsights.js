@@ -5,6 +5,7 @@ import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "..
 import { fetchAlertsTimelineEvents, fetchTimelineEventPage, graphSearch, hybridSearch } from "../supabase.js";
 import { callN8nTool } from "../tools.js";
 import { runAlertAgent } from "./alert.js";
+import { buildInsightAiContext, critiqueAndRankInsights, runInsightEvidencePipeline } from "./insightPipeline.js";
 
 const SIGNALS = [
   {
@@ -124,6 +125,40 @@ export async function runProjectInsightsAnalysis({
   const records = sortRecordsByHashtagBoost(candidateRecords, hashtagContext.active)
     .slice(0, boundedLimit);
 
+  // Deterministic evidence pipeline (normalize -> dedupe -> cluster/timeline -> analytics -> patterns).
+  // Feature flag: config.insights.evidencePipeline === false disables it and restores the old flow.
+  const pipelineEnabled = config?.insights?.evidencePipeline !== false;
+  const pipeline = pipelineEnabled
+    ? runInsightEvidencePipeline({ records, analysisWindow: { from: safeDateFrom, to: safeDateTo } })
+    : null;
+  if (pipeline) {
+    step("evidence_normalization", "Evidence normalized with lineage and statement types", {
+      evidence: pipeline.evidence.length,
+      derived: pipeline.evidence.filter((item) => item.lineage.origin_type === "derived").length,
+      commitments: pipeline.evidence.filter((item) => item.evidence_type === "commitment").length
+    });
+    step("deduplication", "Canonical events built", {
+      canonicalEvents: pipeline.canonicalEvents.length,
+      merged: pipeline.evidence.length - pipeline.canonicalEvents.length
+    });
+    step("clustering_timeline", "Topic clusters and timelines built", {
+      clusters: pipeline.clusters.length,
+      open: pipeline.clusters.filter((cluster) => ["open", "in_progress"].includes(cluster.latest_status)).length,
+      closed: pipeline.clusters.filter((cluster) => cluster.closed).length,
+      contradictions: pipeline.clusters.filter((cluster) => cluster.contradiction).length
+    });
+    step("analytics_engine", "Deterministic analytics computed", {
+      version: pipeline.analytics.analytics_version,
+      referenceDate: pipeline.analytics.reference_date,
+      openClusters: pipeline.analytics.project_metrics.open_clusters.value,
+      overdueCommitments: pipeline.analytics.project_metrics.overdue_commitments.value
+    });
+    step("pattern_detection", pipeline.patterns.length ? "Candidate insight patterns detected" : "No explicit insight patterns detected", {
+      patterns: pipeline.patterns.length,
+      byType: pipeline.patterns.reduce((acc, item) => ({ ...acc, [item.type]: (acc[item.type] || 0) + 1 }), {})
+    });
+  }
+
   const toolContext = await runExistingProjectTools({
     config,
     query: effectiveFocusQuery || DEFAULT_INSIGHTS_QUERY,
@@ -134,13 +169,6 @@ export async function runProjectInsightsAnalysis({
     emit
   });
 
-  const findings = detectProjectFindings(records, { focusQuery: effectiveFocusQuery, activeHashtags: hashtagContext.active });
-  step("signal_detection", "Project findings detected", {
-    findings: findings.length,
-    activeHashtags: hashtagContext.active,
-    evidence: findings.reduce((sum, item) => sum + item.evidence.length, 0)
-  });
-
   const summary = summarizeProjectRecords(records, { focusQuery: effectiveFocusQuery, dateFrom: safeDateFrom, dateTo: safeDateTo });
   summary.hashtagContext = hashtagContext;
   summary.alertDirection = alertDirection;
@@ -148,27 +176,67 @@ export async function runProjectInsightsAnalysis({
   summary.skippedRecords = indexScan.skipped + (hybridRecords.length - filteredHybridRecords.length);
   summary.expansion = Boolean(expansion);
 
-  const insights = await synthesizeInsights({ config, records, findings, summary, focusQuery: effectiveFocusQuery, hashtagContext, alertDirection, toolContext, runId, emit });
+  const evidenceContext = pipeline ? buildInsightAiContext(pipeline) : null;
+  const { findings, insights: rawInsights } = await generateProjectInsights({ config, records, summary, focusQuery: effectiveFocusQuery, hashtagContext, alertDirection, toolContext, evidenceContext, runId, emit });
+  step("signal_detection", "Findings generated from records", {
+    findings: findings.length,
+    activeHashtags: hashtagContext.active,
+    evidence: findings.reduce((sum, item) => sum + (item.evidence?.length || 0), 0)
+  });
+
+  // Insight critic: deterministic validation + ranking of the AI output (plan sections 8-9).
+  const critic = pipeline
+    ? critiqueAndRankInsights({ insights: rawInsights, findings, clusters: pipeline.clusters, patterns: pipeline.patterns })
+    : { accepted: rawInsights, rejected: [], score_version: null };
+  const insights = critic.accepted;
+  if (pipeline) {
+    step("insight_critic", `${insights.length} insights accepted, ${critic.rejected.length} rejected`, {
+      accepted: insights.length,
+      rejected: critic.rejected,
+      scoreVersion: critic.score_version
+    });
+  }
   step("insight_ranking", "Insights synthesized from findings", {
     sourceTables: Object.keys(summary.sourceCounts).length,
     topSeverity: insights[0]?.severity || null,
     findings: findings.length,
     insights: insights.length,
-    mode: insights.some((item) => item.ai_generated) ? "ai" : "heuristic"
+    mode: (findings.length || insights.length) ? "ai" : "none"
   });
 
-  const workflowLog = buildProjectInsightsWorkflowLog({ trace, summary, insights, findings, toolContext });
+  const workflowLog = buildProjectInsightsWorkflowLog({ trace, summary, insights, findings, toolContext, pipeline, critic });
   return {
     ok: true,
     summary,
     findings,
     insights,
+    analytics: pipeline?.analytics || null,
+    patterns: pipeline?.patterns || [],
+    clusters: pipeline ? compactClusters(pipeline.clusters) : [],
+    critic: pipeline ? { rejected: critic.rejected, score_version: critic.score_version } : null,
     toolContext: compactProjectToolContext(toolContext),
     recordsSample: records.slice(0, 12).map((record) => toEvidence(record)),
     scannedSourceKeys: records.map((record) => sourceKey(record)).filter(Boolean),
     hasMore: Boolean(indexScan.hasMore),
     workflowLog
   };
+}
+
+function compactClusters(clusters = []) {
+  return clusters.slice(0, 20).map((cluster) => ({
+    cluster_id: cluster.cluster_id,
+    topic: cluster.topic,
+    hashtags: cluster.hashtags,
+    latest_status: cluster.latest_status,
+    closed: cluster.closed,
+    contradiction: cluster.contradiction,
+    expected_date: cluster.expected_date,
+    occurrence_count: cluster.occurrence_count,
+    independent_source_count: cluster.independent_source_count,
+    first_date: cluster.first_date,
+    last_date: cluster.last_date,
+    timeline: cluster.timeline.slice(-6)
+  }));
 }
 
 async function collectIndexRecords({ config, dateFrom, dateTo, limit, excludedKeys }) {
@@ -392,28 +460,43 @@ async function runExistingProjectTools({ config, query, records, dateFrom, dateT
   return { graphContext, alertResult, toolCalls, sourceQuality, conflicts, n8nResults };
 }
 
-async function synthesizeInsights({ config, records, findings, summary, focusQuery, hashtagContext, alertDirection = null, toolContext, runId, emit }) {
-  if (!findings.length) return [];
-  const fallbackInsights = buildDeterministicInsights({ findings });
-  if (!config?.openRouterApiKey) return fallbackInsights;
+const DEFAULT_PROJECT_INSIGHTS_PROMPT = [
+  "You are the BIDOC construction-project Insight Synthesis Agent.",
+  "A retrieved record is a finding, not necessarily an insight. INSIGHT = EVIDENCE + CONNECTION + PROJECT IMPLICATION + REQUIRED ATTENTION.",
+  "You are given real project records from the index (each with a numeric `index`) plus deterministic support inputs:",
+  "- `evidence_clusters`: topic clusters with chronological timelines, latest status, closure and contradiction flags.",
+  "- `analytics_context`: deterministic calculated metrics (with formula versions and analysis window). Do not recalculate supplied metrics.",
+  "- `candidate_patterns`: rule-detected patterns (unfulfilled_commitment, status_deterioration, persistent_open_issue, contradiction, closure). Treat them as leads to verify against the evidence, not as proven conclusions.",
+  "Ground everything ONLY in the provided inputs — never invent records, facts, dates, causes, dependencies, or statuses.",
+  "Evidence rules:",
+  "- Never treat a commitment, request, or estimate as completed work.",
+  "- The latest dated update in a cluster timeline wins; never present an older status as current.",
+  "- When a cluster is closed, do not present it as an active risk.",
+  "- When sources contradict, present the contradiction, set the insight `status` to \"requires_validation\", and do not pick a side without evidence.",
+  "- Separate confirmed facts from inference; use cautious phrasing (\"נדרש לבדוק האם...\", \"לא נמצאה ראיה לכך ש...\") for anything not explicitly stated in the evidence.",
+  "Produce two layers:",
+  "1) findings: evidence-backed observations. Each finding MUST cite the records it is based on via `evidence_record_indexes` (the numeric `index` values of the provided records). Give each finding a short unique `id` (e.g. \"f1\").",
+  "2) insights: connect MULTIPLE findings into a management-level conclusion with a project implication and a required action. A single finding may support an insight only for a clearly critical event (stop-work order, explicit schedule deviation, formal decision, safety incident). Each insight MUST list `supporting_finding_ids`. Prefer cluster timelines and candidate patterns as the connection basis. Do not repeat a finding as an insight and do not duplicate the same issue across insights.",
+  "Quality bar: fewer, stronger insights. If the evidence supports findings but no meaningful connected insight, return the findings with an empty insights array — do not pad with weak insights.",
+  "Use hashtags as context/grouping only when supported by evidence; never infer a conclusion from a hashtag alone.",
+  "Do not create a legal claim file. Do not make legal, entitlement, cost, or critical-path conclusions.",
+  "Return at most 8 findings and 5 insights, prioritising the most significant. Keep each text field concise.",
+  "The findings array MUST NOT be empty when insights are present — every insight must trace back to findings that cite record indexes.",
+  "Use Hebrew for all user-facing text. Return ONLY valid JSON.",
+  "Schema: {\"findings\":[{\"id\":\"string\",\"title\":\"string\",\"category\":\"blocker|decision|missing_info|repeated_topic|commercial|quality_safety|entity\",\"severity\":\"high|medium|low\",\"confidence\":0.0,\"finding\":\"string\",\"why_it_matters\":\"string\",\"recommended_action\":\"string\",\"hashtags\":[\"string\"],\"evidence_record_indexes\":[0]}],\"insights\":[{\"title\":\"string\",\"category\":\"blocker|decision|missing_info|repeated_topic|commercial|quality_safety|entity\",\"severity\":\"high|medium|low\",\"confidence\":0.0,\"insight\":\"string\",\"why_it_matters\":\"string\",\"recommended_action\":\"string\",\"uncertainty\":\"string\",\"status\":\"active|requires_validation|resolved\",\"based_on_patterns\":[\"pattern_id\"],\"supporting_finding_ids\":[\"string\"]}]}"
+].join("\n");
 
-  const candidateFindings = findings.slice(0, 12).map((finding) => ({
-    id: finding.id,
-    title: finding.title,
-    category: finding.category,
-    severity: finding.severity,
-    confidence: finding.confidence,
-    finding: finding.finding || finding.statement || "",
-    hashtags: normalizeRecordTags(finding.hashtags || finding.tags),
-    evidence: (finding.evidence || []).slice(0, 4).map((item) => ({
-      title: item.title,
-      source_table: item.source_table,
-      source_id: item.source_id,
-      date: item.date,
-      hashtags: normalizeRecordTags(item.hashtags || item.tags),
-      excerpt: item.excerpt
-    }))
-  }));
+// Generates BOTH findings and insights from the real index records via one AI call.
+// Findings are grounded by citing record indexes; nothing is hardcoded. When the AI is
+// unavailable or fails, returns empty layers (no templated fallback).
+async function generateProjectInsights({ config, records, summary, focusQuery, hashtagContext, alertDirection = null, toolContext, evidenceContext = null, runId, emit }) {
+  const empty = { findings: [], insights: [] };
+  if (!records.length) return empty;
+  if (!config?.openRouterApiKey) {
+    emit?.(runId, "ai_synthesis_warning", "AI synthesis unavailable: OpenRouter key missing", { status: "warning" });
+    return empty;
+  }
+
   const candidateRecords = records.slice(0, 40).map((record, index) => {
     const normalized = normalizeRecord(record);
     return {
@@ -428,56 +511,158 @@ async function synthesizeInsights({ config, records, findings, summary, focusQue
     };
   });
 
+  const systemPrompt = config.prompts?.project_insights || DEFAULT_PROJECT_INSIGHTS_PROMPT;
+  const userPayload = JSON.stringify({
+    focusQuery: focusQuery || null,
+    summary,
+    hashtagContext,
+    alertDirection: alertDirection || summary?.alertDirection || null,
+    evidence_clusters: evidenceContext?.evidence_clusters || [],
+    analytics_context: evidenceContext?.analytics_context || null,
+    candidate_patterns: evidenceContext?.candidate_patterns || [],
+    records: candidateRecords,
+    graphContext: toolContext?.graphContext || [],
+    alertAgent: toolContext?.alertResult || null,
+    toolResults: compactToolResults(toolContext?.toolCalls || []),
+    sourceQuality: toolContext?.sourceQuality || null,
+    conflicts: toolContext?.conflicts || []
+  }, null, 2);
+  const callModel = (messages) => chatCompletion({
+    apiKey: config.openRouterApiKey,
+    model: config.models?.main || "openai/gpt-4o-mini",
+    temperature: 0.15,
+    maxTokens: 8000,
+    timeoutMs: 150_000,
+    responseFormat: { type: "json_object" },
+    messages
+  });
+
   try {
-    emit?.(runId, "ai_synthesis", "AI insight synthesis started", { findings: candidateFindings.length, records: candidateRecords.length, status: "running" });
-    const content = await chatCompletion({
-      apiKey: config.openRouterApiKey,
-      model: config.models?.main || "openai/gpt-4o-mini",
-      temperature: 0.15,
-      maxTokens: 3600,
-      timeoutMs: 90_000,
-      responseFormat: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: config.prompts?.project_insights || [
-            "You are an AI project insights agent for a construction project.",
-            "Return ONLY valid JSON.",
-            "Findings are evidence-backed observations. Insights must synthesize multiple findings into a meaningful project pattern, implication, risk, or opportunity.",
-            "Do not simply rename or repeat a finding as an insight.",
-            "Every insight must include supporting_finding_ids from the provided findings.",
-            "Use hashtags as context and grouping signals when they are supported by evidence, but never infer a conclusion from a hashtag alone.",
-            "Do not create a legal claim file. Do not make legal, entitlement, cost, or critical path conclusions.",
-            "Use Hebrew for user-facing text.",
-            "Schema: {\"insights\":[{\"title\":\"string\",\"category\":\"blocker|decision|missing_info|repeated_topic|commercial|quality_safety|entity\",\"severity\":\"high|medium|low\",\"confidence\":0.0,\"insight\":\"string\",\"why_it_matters\":\"string\",\"recommended_action\":\"string\",\"uncertainty\":\"string\",\"supporting_finding_ids\":[\"finding_id\"]}]}"
-          ].join("\n")
-        },
-        {
-          role: "user",
-          content: JSON.stringify({
-            focusQuery: focusQuery || null,
-            summary,
-            hashtagContext,
-            alertDirection: alertDirection || summary?.alertDirection || null,
-            findings: candidateFindings,
-            records: candidateRecords,
-            graphContext: toolContext?.graphContext || [],
-            alertAgent: toolContext?.alertResult || null,
-            toolResults: compactToolResults(toolContext?.toolCalls || []),
-            sourceQuality: toolContext?.sourceQuality || null,
-            conflicts: toolContext?.conflicts || []
-          }, null, 2)
+    emit?.(runId, "ai_synthesis", "AI insight synthesis started", { records: candidateRecords.length, status: "running" });
+    const baseMessages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPayload }
+    ];
+    const content = await callModel(baseMessages);
+    let parsed = tryParseInsightObject(content);
+    let findings = parsed ? normalizeAiFindings(parsed.findings, records) : [];
+    let insights = parsed ? normalizeAiInsights(parsed.insights, findings) : [];
+
+    // One corrective retry when the model broke the contract: invalid JSON, or
+    // insights without the grounded findings layer. If the retry also fails, the
+    // critic rejects ungrounded insights (better none than unsupported).
+    const brokeJson = !parsed;
+    const skippedFindings = Boolean(parsed && !findings.length && Array.isArray(parsed.insights) && parsed.insights.length);
+    if (brokeJson || skippedFindings) {
+      const correction = brokeJson
+        ? "Your previous response was not valid JSON. Return the full response again as strictly valid JSON only, matching the schema exactly, with both \"findings\" and \"insights\" arrays. No commentary, no code fences, no stray characters."
+        : "Your response omitted the required findings layer, so the insights cannot be grounded. Return the full JSON again: include 4-8 findings, each citing the provided record indexes via evidence_record_indexes and carrying a short unique id, and make every insight's supporting_finding_ids reference those finding ids. Return ONLY valid JSON with both \"findings\" and \"insights\"."
+      emit?.(runId, "ai_synthesis", brokeJson ? "AI output was not valid JSON; retrying once" : "AI returned insights without findings; requesting grounded findings", {
+        status: "running",
+        retry: true,
+        contentLength: String(content || "").length,
+        contentPreview: String(content || "").slice(0, 300)
+      });
+      try {
+        const retryContent = await callModel([
+          ...baseMessages,
+          { role: "assistant", content: String(content || "").slice(0, 6000) },
+          { role: "user", content: correction }
+        ]);
+        const retryParsed = tryParseInsightObject(retryContent);
+        if (retryParsed) {
+          const retryFindings = normalizeAiFindings(retryParsed.findings, records);
+          if (retryFindings.length || !findings.length) {
+            findings = retryFindings.length ? retryFindings : findings;
+            const retryInsightsRaw = Array.isArray(retryParsed.insights) && retryParsed.insights.length
+              ? retryParsed.insights
+              : (parsed?.insights || []);
+            insights = normalizeAiInsights(retryInsightsRaw, findings);
+          }
+        } else if (brokeJson) {
+          emit?.(runId, "ai_synthesis_warning", "AI synthesis returned unparseable output twice", {
+            contentLength: String(retryContent || "").length,
+            contentPreview: String(retryContent || "").slice(0, 400),
+            status: "warning"
+          });
+          return empty;
         }
-      ]
+      } catch (retryError) {
+        emit?.(runId, "ai_synthesis_warning", "AI synthesis retry failed", { error: retryError.message, status: "warning" });
+        if (brokeJson) return empty;
+      }
+    }
+    const produced = findings.length || insights.length;
+    emit?.(runId, produced ? "ai_synthesis" : "ai_synthesis_warning", produced ? "AI synthesis completed" : "AI returned no findings", {
+      findings: findings.length,
+      insights: insights.length,
+      status: produced ? "done" : "warning",
+      __debugRawFindings: Array.isArray(parsed?.findings) ? parsed.findings.length : typeof parsed?.findings,
+      __debugRawInsights: Array.isArray(parsed?.insights) ? parsed.insights.length : typeof parsed?.insights,
+      __debugPreview: String(content || "").slice(0, 400)
     });
-    const parsed = parseInsightJson(content);
-    const aiInsights = normalizeAiInsights(parsed?.insights, findings);
-    if (!aiInsights.length) return fallbackInsights;
-    emit?.(runId, "ai_synthesis", "AI insight synthesis completed", { insights: aiInsights.length, status: "done" });
-    return aiInsights;
+    return { findings, insights };
   } catch (error) {
-    emit?.(runId, "ai_synthesis_warning", "AI synthesis failed; using deterministic fallback", { error: error.message, status: "warning" });
-    return fallbackInsights;
+    emit?.(runId, "ai_synthesis_warning", "AI synthesis failed", { error: error.message, status: "warning" });
+    return empty;
+  }
+}
+
+// Maps AI-produced findings onto grounded evidence pulled from the actual records they cite.
+function normalizeAiFindings(items, records) {
+  if (!Array.isArray(items)) return [];
+  const normalizedRecords = (records || []).map((record) => normalizeRecord(record));
+  const seenIds = new Set();
+  return items.slice(0, 12).map((item, i) => {
+    let id = stringOr(item.id, "").replace(/\s+/g, "_");
+    if (!id || seenIds.has(id)) id = `ai_finding_${i + 1}`;
+    seenIds.add(id);
+    const refs = item.evidence_record_indexes || item.evidenceRecordIndexes || item.record_indexes || item.evidence_records || [];
+    const evidence = (Array.isArray(refs) ? refs : [])
+      .map((n) => normalizedRecords[Number(n)])
+      .filter(Boolean)
+      .slice(0, 6)
+      .map((record) => toEvidence(record));
+    const text = stringOr(item.finding || item.statement, "");
+    return {
+      id,
+      title: stringOr(item.title, "ממצא מהאינדקס"),
+      category: normalizeCategory(item.category),
+      severity: normalizeSeverity(item.severity),
+      confidence: boundedConfidence(item.confidence),
+      finding: text,
+      statement: text,
+      why_it_matters: stringOr(item.why_it_matters, ""),
+      recommended_action: stringOr(item.recommended_action, ""),
+      hashtags: normalizeRecordTags(item.hashtags),
+      human_status: "new",
+      ai_generated: true,
+      evidence
+    };
+  }).filter((finding) => finding.finding || finding.evidence.length);
+}
+
+function parseInsightObject(content) {
+  const obj = extractJsonObject(content);
+  if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+    return { findings: obj.findings, insights: obj.insights };
+  }
+  const legacy = parseInsightJson(content);
+  return { findings: [], insights: legacy?.insights };
+}
+
+// Returns null instead of throwing; also retries after stripping trailing commas,
+// which some models emit even in JSON mode.
+function tryParseInsightObject(content) {
+  try {
+    return parseInsightObject(content);
+  } catch {
+    try {
+      const repaired = String(content || "").replace(/,\s*([}\]])/g, "$1");
+      return parseInsightObject(repaired);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -563,12 +748,18 @@ export function detectProjectFindings(records = [], { focusQuery = "", activeHas
   });
 }
 
-export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insights = [], findings = [], toolContext = {} } = {}) {
+export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insights = [], findings = [], toolContext = {}, pipeline = null, critic = null } = {}) {
+  const pipelineStatus = pipeline ? "done" : "skipped";
   const nodes = [
     { id: "alerts_priming", label: "Alerts Priming", kind: "database", status: "done" },
     { id: "index_scan", label: "Index Scan", kind: "database", status: "done" },
     { id: "hashtag_analysis", label: "Hashtag Analysis", kind: "router", status: "done" },
     { id: "focus_retrieval", label: "Focus Retrieval", kind: "vector", status: "done" },
+    { id: "evidence_normalization", label: "Evidence Normalizer", kind: "router", status: pipelineStatus },
+    { id: "deduplication", label: "Deduplication", kind: "router", status: pipelineStatus },
+    { id: "clustering_timeline", label: "Clustering + Timeline", kind: "router", status: pipelineStatus },
+    { id: "analytics_engine", label: "Analytics Engine", kind: "router", status: pipelineStatus },
+    { id: "pattern_detection", label: "Pattern Detection", kind: "router", status: pipelineStatus },
     { id: "graph_search", label: "Project Graph Search", kind: "database", status: nodeStatus(toolContext.toolCalls, "graph_search") },
     { id: "alert_agent", label: "Alert Agent", kind: "ai", status: nodeStatus(toolContext.toolCalls, "alert") },
     { id: "n8n_tools", label: "n8n Tool Adapters", kind: "tool", status: n8nNodeStatus(toolContext.n8nResults) },
@@ -576,6 +767,7 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
     { id: "conflict_detection", label: "Conflict Detection", kind: "router", status: toolContext.conflicts?.length ? "error" : "done" },
     { id: "signal_detection", label: "Finding Detection", kind: "router", status: "done" },
     { id: "ai_synthesis", label: "AI Insight Synthesis", kind: "ai", status: "done" },
+    { id: "insight_critic", label: "Insight Critic", kind: "router", status: pipelineStatus },
     { id: "insight_ranking", label: "Insight Ranking", kind: "router", status: "done" },
     { id: "insights_output", label: "Insights Output", kind: "output", status: "done" }
   ];
@@ -583,14 +775,20 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
     { from: "alerts_priming", to: "index_scan" },
     { from: "index_scan", to: "hashtag_analysis" },
     { from: "hashtag_analysis", to: "focus_retrieval" },
-    { from: "focus_retrieval", to: "graph_search" },
+    { from: "focus_retrieval", to: "evidence_normalization" },
+    { from: "evidence_normalization", to: "deduplication" },
+    { from: "deduplication", to: "clustering_timeline" },
+    { from: "clustering_timeline", to: "analytics_engine" },
+    { from: "analytics_engine", to: "pattern_detection" },
+    { from: "pattern_detection", to: "graph_search" },
     { from: "graph_search", to: "alert_agent" },
     { from: "alert_agent", to: "n8n_tools" },
     { from: "n8n_tools", to: "source_quality" },
     { from: "source_quality", to: "conflict_detection" },
     { from: "conflict_detection", to: "signal_detection" },
     { from: "signal_detection", to: "ai_synthesis" },
-    { from: "ai_synthesis", to: "insight_ranking" },
+    { from: "ai_synthesis", to: "insight_critic" },
+    { from: "insight_critic", to: "insight_ranking" },
     { from: "insight_ranking", to: "insights_output" }
   ];
   return {
@@ -601,6 +799,11 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
       index_scan: { summary: `${summary.totalRecords || 0} index records scanned`, logs: trace.filter((item) => item.step === "index_scan") },
       hashtag_analysis: { summary: `${summary.hashtagContext?.active?.length || 0} active hashtags`, output: summary.hashtagContext || null, logs: trace.filter((item) => item.step === "hashtag_analysis") },
       focus_retrieval: { summary: `Focus query: ${summary.focusQuery || "none"}`, logs: trace.filter((item) => item.step === "focus_retrieval" || item.step === "focus_retrieval_warning") },
+      evidence_normalization: { summary: pipeline ? `${pipeline.evidence.length} evidence items normalized` : "Pipeline disabled", output: pipeline ? { evidence: pipeline.evidence.slice(0, 10), pipeline_version: pipeline.pipeline_version } : null, logs: trace.filter((item) => item.step === "evidence_normalization") },
+      deduplication: { summary: pipeline ? `${pipeline.canonicalEvents.length} canonical events (${pipeline.evidence.length - pipeline.canonicalEvents.length} merged)` : "Pipeline disabled", output: pipeline ? pipeline.canonicalEvents.slice(0, 10) : null, logs: trace.filter((item) => item.step === "deduplication") },
+      clustering_timeline: { summary: pipeline ? `${pipeline.clusters.length} topic clusters with timelines` : "Pipeline disabled", output: pipeline ? pipeline.clusters.slice(0, 8) : null, logs: trace.filter((item) => item.step === "clustering_timeline") },
+      analytics_engine: { summary: pipeline ? `Deterministic metrics (${pipeline.analytics.analytics_version})` : "Pipeline disabled", output: pipeline ? pipeline.analytics : null, logs: trace.filter((item) => item.step === "analytics_engine") },
+      pattern_detection: { summary: pipeline ? `${pipeline.patterns.length} candidate patterns` : "Pipeline disabled", output: pipeline ? pipeline.patterns : null, logs: trace.filter((item) => item.step === "pattern_detection") },
       graph_search: { summary: `${toolContext.graphContext?.length || 0} graph relationships returned`, output: toolContext.graphContext || [], logs: trace.filter((item) => item.step === "graph_search") },
       alert_agent: { summary: toolContext.alertResult ? `${toolContext.alertResult.resultsCount || 0} alert records checked` : "Alert Agent unavailable or skipped", output: toolContext.alertResult || null, logs: trace.filter((item) => item.step === "alert_agent") },
       n8n_tools: { summary: `${toolContext.n8nResults?.length || 0} project tools called`, output: compactToolResults(toolContext.toolCalls || []), logs: trace.filter((item) => item.step === "n8n_tools") },
@@ -608,6 +811,7 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
       conflict_detection: { summary: `${toolContext.conflicts?.length || 0} conflicts`, output: toolContext.conflicts || [], logs: trace.filter((item) => item.step === "conflict_detection") },
       signal_detection: { summary: `${findings.length || insights.length} findings detected`, logs: trace.filter((item) => item.step === "signal_detection") },
       ai_synthesis: { summary: "Synthesize insights from findings; deterministic fallback when AI is unavailable", logs: trace.filter((item) => item.step === "ai_synthesis" || item.step === "ai_synthesis_warning") },
+      insight_critic: { summary: critic ? `${critic.accepted?.length ?? insights.length} accepted, ${critic.rejected?.length || 0} rejected (${critic.score_version || "no ranking"})` : "Pipeline disabled", output: critic ? { rejected: critic.rejected || [], score_version: critic.score_version } : null, logs: trace.filter((item) => item.step === "insight_critic") },
       insight_ranking: { summary: `${insights.length} insights linked to findings`, logs: trace.filter((item) => item.step === "insight_ranking") },
       insights_output: { summary: "Insights and supporting findings ready for review", logs: trace }
     },
@@ -672,7 +876,8 @@ function normalizeAiInsights(items, findings) {
   const findingMap = new Map((findings || []).map((finding) => [finding.id, finding]));
   return items.slice(0, 8).map((item, index) => {
     const supportingIds = normalizeSupportingFindingIds(item.supporting_finding_ids || item.supportingFindingIds, findingMap);
-    if (!supportingIds.length) return null;
+    const insightText = stringOr(item.insight || item.finding, "");
+    if (!insightText) return null;
     return {
       id: `ai_insight_${index + 1}`,
       title: stringOr(item.title, "תובנה מהפרויקט"),
@@ -684,6 +889,8 @@ function normalizeAiInsights(items, findings) {
       why_it_matters: stringOr(item.why_it_matters, ""),
       recommended_action: stringOr(item.recommended_action, ""),
       uncertainty: stringOr(item.uncertainty, ""),
+      status: normalizeInsightStatus(item.status),
+      based_on_patterns: Array.isArray(item.based_on_patterns) ? item.based_on_patterns.map((id) => String(id || "").trim()).filter(Boolean).slice(0, 6) : [],
       supporting_finding_ids: supportingIds,
       human_status: "new",
       ai_generated: true,
@@ -695,91 +902,6 @@ function normalizeAiInsights(items, findings) {
 function normalizeSupportingFindingIds(value, findingMap) {
   const ids = Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
   return [...new Set(ids.filter((id) => findingMap.has(id)))];
-}
-
-export function buildDeterministicInsights({ findings = [] } = {}) {
-  if (findings.length < 2) return [];
-  const bySignal = new Map(findings.map((finding) => [finding.signal_id || String(finding.id || "").replace(/^finding_/, ""), finding]));
-  const plans = [
-    {
-      ids: ["blockers", "approvals"],
-      title: "צוואר בקבוק סביב אישורים ותיאום",
-      category: "blocker",
-      severity: "high",
-      insight: "הממצאים מצביעים על קשר בין חסמים או עיכובים לבין אישורים והחלטות פתוחות. זה מרמז על צוואר בקבוק תיאומי ולא רק על רשימת פריטים פתוחים.",
-      why_it_matters: "כאשר אישורים פתוחים מופיעים יחד עם חסמים, הסיכון הוא שהעבודה תיתקע שוב גם אחרי טיפול נקודתי.",
-      recommended_action: "לרכז את כל האישורים הפתוחים לפי גורם מאשר, להגדיר בעל אחריות ותאריך יעד לכל החלטה.",
-      uncertainty: "נדרש לוודא מול המקורות אילו אישורים עדיין פתוחים בפועל."
-    },
-    {
-      ids: ["blockers", "missing_info"],
-      title: "חסמים שמוזנים ממידע חסר",
-      category: "missing_info",
-      severity: "high",
-      insight: "הופעה משותפת של חסמים ומידע חסר מצביעה שהבעיה אינה רק ביצועית, אלא גם פער בנתונים או בהחלטות שמונע סגירה.",
-      why_it_matters: "בלי השלמת המידע, טיפול בחסם עלול להיות זמני או לחזור שוב בהמשך.",
-      recommended_action: "להפריד בין חסמים שניתן לפתור מיד לבין חסמים שתלויים במסמך, החלטה או הבהרה חסרה.",
-      uncertainty: "הקשר בין החסמים למידע החסר דורש אימות מול המסמכים המקוריים."
-    },
-    {
-      ids: ["commercial", "approvals"],
-      title: "החלטות פתוחות עם משקל מסחרי",
-      category: "commercial",
-      severity: "medium",
-      insight: "הממצאים מחברים בין נושאים מסחריים לבין אישורים או החלטות, ולכן חלק מההחלטות הפתוחות עלולות להשפיע גם על עלויות או הזמנות.",
-      why_it_matters: "זה מאפשר לתעדף בדיקה של החלטות שיש להן משמעות כספית, ולא רק תפעולית.",
-      recommended_action: "להצליב את ההחלטות הפתוחות מול הזמנות, חשבוניות ושינויים לפני סגירה.",
-      uncertainty: "אין להסיק סכום או זכאות; נדרש אימות מול מסמכי מקור."
-    },
-    {
-      ids: ["quality_safety", "blockers"],
-      title: "איכות ובטיחות עלולות להפוך לחסם ביצוע",
-      category: "quality_safety",
-      severity: "high",
-      insight: "כאשר אותות איכות או בטיחות מופיעים לצד חסמים, יש סיכון שהטיפול המקצועי יהפוך לגורם שמעכב המשך ביצוע.",
-      why_it_matters: "נושאי איכות ובטיחות דורשים סגירה מתועדת כדי לא ליצור עצירה חוזרת או עבודה כפולה.",
-      recommended_action: "לבדוק אילו ליקויים עדיין פתוחים, מי מאשר סגירה ומה התיעוד הנדרש.",
-      uncertainty: "צריך לוודא אם הליקויים פתוחים או שכבר טופלו."
-    }
-  ];
-
-  const output = [];
-  for (const plan of plans) {
-    const support = plan.ids.map((id) => bySignal.get(id)).filter(Boolean);
-    if (support.length < 2) continue;
-    output.push(insightFromPlan(plan, support, output.length));
-  }
-  if (!output.length && findings.length >= 2) {
-    output.push(insightFromPlan({
-      title: "דפוס רוחבי שדורש בדיקה ממוקדת",
-      category: "repeated_topic",
-      severity: findings.some((item) => item.severity === "high") ? "high" : "medium",
-      insight: "כמה ממצאים בלתי תלויים מופיעים באותה סריקה, ולכן כדאי להתייחס אליהם כדפוס בדיקה ולא כרשימת משימות נפרדות.",
-      why_it_matters: "חיבור הממצאים יכול לעזור לתעדף את הבדיקה הבאה ולמנוע טיפול נקודתי מדי.",
-      recommended_action: "לעבור על הממצאים התומכים, לסמן אילו עדיין פתוחים, ואז להחליט מי בעל האחריות לכל קבוצה.",
-      uncertainty: "הקשר בין הממצאים הוא ראשוני ומבוסס על אותות מהאינדקס."
-    }, findings.slice(0, 3), output.length));
-  }
-  return output;
-}
-
-function insightFromPlan(plan, support, index) {
-  const confidence = Math.min(0.9, 0.45 + support.length * 0.1 + support.reduce((sum, item) => sum + Number(item.confidence || 0), 0) * 0.08);
-  return {
-    id: `insight_${index + 1}`,
-    title: plan.title,
-    category: plan.category,
-    severity: plan.severity,
-    confidence: Number(confidence.toFixed(2)),
-    insight: plan.insight,
-    finding: plan.insight,
-    why_it_matters: plan.why_it_matters,
-    recommended_action: plan.recommended_action,
-    uncertainty: plan.uncertainty,
-    supporting_finding_ids: support.map((item) => item.id),
-    human_status: "new",
-    evidence: support.flatMap((item) => item.evidence || []).slice(0, 6)
-  };
 }
 
 function summarizeProjectRecords(records, { focusQuery, dateFrom, dateTo }) {
@@ -997,6 +1119,11 @@ function normalizeCategory(value) {
 function normalizeSeverity(value) {
   const text = String(value || "").toLowerCase();
   return ["high", "medium", "low"].includes(text) ? text : "medium";
+}
+
+function normalizeInsightStatus(value) {
+  const text = String(value || "").toLowerCase().trim();
+  return ["active", "requires_validation", "resolved"].includes(text) ? text : "active";
 }
 
 function boundedConfidence(value) {

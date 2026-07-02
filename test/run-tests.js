@@ -11,7 +11,8 @@ import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode, KNOWLEDGE_PLA
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryWorkflowLog, executeQueryPlans, introspectSupabaseTables, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, runDataQueryPipeline, validateQueryPlan, validateReadOnlySql } from "../src/subagents/dataQuery.js";
 import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
-import { buildDeterministicInsights, buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
+import { buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
+import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement, clusterCanonicalEvents, computeInsightAnalytics, critiqueAndRankInsights, dedupeInsightEvidence, detectInsightPatterns, extractExpectedDate, runInsightEvidencePipeline } from "../src/subagents/insightPipeline.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
@@ -1161,7 +1162,7 @@ test("project insights focus query boosts related records without exact phrase m
   assert.ok(focusedApprovals.confidence > unfocusedApprovals.confidence);
 });
 
-test("project insights synthesize only when findings can support an insight", () => {
+test("project insights detect evidence-backed findings from records", () => {
   const findings = detectProjectFindings([
     {
       id: "idx-1",
@@ -1178,12 +1179,8 @@ test("project insights synthesize only when findings can support an insight", ()
       source_id: "meeting-1"
     }
   ], { focusQuery: "approval delay" });
-  const oneFindingOnly = buildDeterministicInsights({ findings: findings.slice(0, 1) });
-  const insights = buildDeterministicInsights({ findings });
-  assert.equal(oneFindingOnly.length, 0);
-  assert.ok(insights.length >= 1);
-  assert.ok(insights.every((item) => Array.isArray(item.supporting_finding_ids)));
-  assert.ok(insights.every((item) => item.supporting_finding_ids.length >= 1));
+  assert.ok(findings.length >= 1);
+  assert.ok(findings.every((item) => Array.isArray(item.evidence) && item.evidence.length >= 1));
 });
 
 test("project insights evidence builder tolerates Array.map index argument", () => {
@@ -1212,6 +1209,151 @@ test("project insights parses fenced AI JSON output", () => {
   const parsed = parseInsightJson("```json\n[{\"title\":\"Blocked approval\",\"evidence_indices\":[0]}]\n```");
   assert.equal(parsed.insights.length, 1);
   assert.equal(parsed.insights[0].title, "Blocked approval");
+});
+
+test("insight pipeline classifies commitments and extracts expected dates", () => {
+  const classified = classifyEvidenceStatement("הקבלן התחייב לסיים את מחיצות קומה 4 עד 18.6");
+  assert.equal(classified.evidence_type, "commitment");
+  assert.equal(classified.status, "open");
+  assert.equal(extractExpectedDate("הקבלן התחייב לסיים עד 18.6", "2026-06-12"), "2026-06-18");
+  assert.equal(extractExpectedDate("יש להשלים עד 2026-07-01", "2026-06-12"), "2026-07-01");
+  assert.equal(extractExpectedDate("אין תאריך יעד בטקסט", "2026-06-12"), null);
+});
+
+test("insight pipeline merges derived sources into one canonical event (plan tests 3+15)", () => {
+  const evidence = buildInsightEvidence([
+    { id: "doc-1", title: "פרוטוקול ישיבה מחיצות קומה 4", text: "הקבלן התחייב לסיים את מחיצות קומה 4 עד 18.6", date: "2026-06-12", source_table: "index", source_id: "meeting-123" },
+    { id: "sum-1", title: "סיכום ישיבה מחיצות קומה 4", text: "הקבלן התחייב לסיים את מחיצות קומה 4 עד 18.6", date: "2026-06-12", source_table: "summaries", source_id: "summary-123", metadata: { source_id: "meeting-123" } },
+    { id: "alert-1", title: "התראה מחיצות קומה 4", text: "הקבלן התחייב לסיים את מחיצות קומה 4 עד 18.6", date: "2026-06-12", source_table: "alerts", source_id: "alert-456", metadata: { source_id: "meeting-123" } }
+  ]);
+  assert.equal(evidence.length, 3);
+  assert.equal(evidence.filter((item) => item.lineage.origin_type === "derived").length, 2);
+  const events = dedupeInsightEvidence(evidence);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].independent_source_count, 1);
+  assert.equal(events[0].evidence_ids.length, 3);
+});
+
+test("insight pipeline detects an unfulfilled commitment (plan test 2)", () => {
+  const pipeline = runInsightEvidencePipeline({
+    records: [
+      { id: "m-1", title: "מחיצות קומה 4", text: "הקבלן התחייב לסיים את מחיצות קומה 4 עד 5.6", date: "2026-06-01", source_table: "index", source_id: "meeting-1" },
+      { id: "r-1", title: "מחיצות קומה 4", text: "מחיצות קומה 4 עדיין בביצוע ולא הושלמו", date: "2026-06-09", source_table: "index", source_id: "report-1" }
+    ],
+    analysisWindow: { from: "2026-06-01", to: "2026-06-30" },
+    referenceDate: "2026-06-10"
+  });
+  assert.equal(pipeline.clusters.length, 1);
+  assert.equal(pipeline.clusters[0].expected_date, "2026-06-05");
+  assert.notEqual(pipeline.clusters[0].latest_status, "closed");
+  const unfulfilled = pipeline.patterns.find((item) => item.type === "unfulfilled_commitment");
+  assert.ok(unfulfilled);
+  assert.equal(unfulfilled.confidence, "high");
+});
+
+test("insight pipeline detects closure and does not flag a resolved topic as active (plan test 5)", () => {
+  const pipeline = runInsightEvidencePipeline({
+    records: [
+      { id: "a-1", title: "אישור כיבוי אש", text: "חסר אישור כיבוי אש ולא ניתן להתקדם", date: "2026-06-01", source_table: "index", source_id: "email-1" },
+      { id: "a-2", title: "אישור כיבוי אש", text: "אישור כיבוי אש התקבל והנושא נסגר", date: "2026-06-05", source_table: "index", source_id: "email-2" }
+    ],
+    referenceDate: "2026-06-10"
+  });
+  assert.equal(pipeline.clusters.length, 1);
+  assert.equal(pipeline.clusters[0].closed, true);
+  assert.ok(pipeline.patterns.some((item) => item.type === "closure"));
+  assert.ok(!pipeline.patterns.some((item) => item.type === "unfulfilled_commitment" || item.type === "persistent_open_issue"));
+});
+
+test("insight pipeline flags contradicting statuses for validation (plan test 4)", () => {
+  const pipeline = runInsightEvidencePipeline({
+    records: [
+      { id: "c-1", title: "איטום גג בניין A", text: "עבודות האיטום בגג הושלמו", date: "2026-06-03", source_table: "index", source_id: "email-9" },
+      { id: "c-2", title: "איטום גג בניין A", text: "עבודות האיטום בגג עדיין בביצוע", date: "2026-06-07", source_table: "index", source_id: "report-9" }
+    ],
+    referenceDate: "2026-06-10"
+  });
+  assert.equal(pipeline.clusters.length, 1);
+  assert.ok(pipeline.clusters[0].contradiction);
+  const contradiction = pipeline.patterns.find((item) => item.type === "contradiction");
+  assert.ok(contradiction);
+  assert.equal(contradiction.requires_validation, true);
+});
+
+test("insight analytics treats missing data as insufficient, never zero (plan test 10)", () => {
+  const analytics = computeInsightAnalytics({ clusters: [], evidence: [], analysisWindow: { from: "2026-06-01", to: "2026-06-30" }, referenceDate: "2026-06-30" });
+  assert.equal(analytics.project_metrics.oldest_open_cluster_age_days.value, null);
+  assert.equal(analytics.project_metrics.oldest_open_cluster_age_days.status, "insufficient_data");
+  assert.equal(analytics.data_quality.dated_evidence_ratio.value, null);
+  assert.equal(analytics.data_quality.dated_evidence_ratio.status, "insufficient_data");
+  assert.equal(analytics.analytics_version, "insights-analytics-v1");
+});
+
+test("insight pipeline is deterministic for the same input (plan test 9)", () => {
+  const input = () => ({
+    records: [
+      { id: "m-1", title: "מחיצות קומה 4", text: "הקבלן התחייב לסיים עד 5.6", date: "2026-06-01", source_table: "index", source_id: "meeting-1" },
+      { id: "r-1", title: "מחיצות קומה 4", text: "העבודה עדיין בביצוע", date: "2026-06-09", source_table: "index", source_id: "report-1" },
+      { id: "x-1", title: "חשבונית קבלן חשמל", text: "חשבונית לא אושרה וממתינה לבדיקה", date: "2026-06-04", source_table: "index", source_id: "invoice-1" }
+    ],
+    analysisWindow: { from: "2026-06-01", to: "2026-06-30" },
+    referenceDate: "2026-06-15"
+  });
+  const first = runInsightEvidencePipeline(input());
+  const second = runInsightEvidencePipeline(input());
+  assert.deepEqual(first, second);
+  const context = buildInsightAiContext(first);
+  assert.ok(Array.isArray(context.evidence_clusters));
+  assert.ok(context.analytics_context.analytics_version);
+});
+
+test("insight critic rejects unsupported and resolved insights and caps the count", () => {
+  const findings = [
+    { id: "f1", evidence: [{ source_table: "index", source_id: "email-1", id: "a-1", title: "אישור כיבוי אש" }] },
+    { id: "f2", evidence: [{ source_table: "index", source_id: "meeting-1", id: "m-1", title: "מחיצות קומה 4" }] }
+  ];
+  const clusters = [
+    { cluster_id: "c1", closed: true, contradiction: null, record_keys: ["index:email-1:a-1:אישור כיבוי אש"] },
+    { cluster_id: "c2", closed: false, contradiction: null, record_keys: ["index:meeting-1:m-1:מחיצות קומה 4"] }
+  ];
+  const insights = [
+    { id: "i1", title: "אי עמידה בהתחייבות מחיצות", insight: "ההתחייבות לא קוימה ונדרש מועד מעודכן", severity: "high", confidence: 0.8, supporting_finding_ids: ["f2"] },
+    { id: "i2", title: "סיכון אישור כיבוי אש", insight: "חסר אישור כיבוי אש וזה מעכב", severity: "medium", confidence: 0.7, supporting_finding_ids: ["f1"] },
+    { id: "i3", title: "ללא ראיות", insight: "תובנה ללא ממצאים", severity: "high", confidence: 0.9, supporting_finding_ids: ["missing"] }
+  ];
+  const result = critiqueAndRankInsights({ insights, findings, clusters, patterns: [], maxInsights: 5 });
+  assert.ok(result.accepted.some((item) => item.id === "i1"));
+  assert.ok(result.rejected.some((item) => item.id === "i3" && item.reason === "no_supporting_findings"));
+  assert.ok(result.rejected.some((item) => item.id === "i2" && item.reason === "topic_already_resolved"));
+  assert.equal(result.score_version, "insight-ranking-v1");
+  assert.ok(result.accepted.every((item) => typeof item.score === "number" && item.score_version === "insight-ranking-v1"));
+
+  const many = Array.from({ length: 7 }, (_, i) => ({
+    id: `x${i}`,
+    title: `תובנה שונה לגמרי מספר ${i} על נושא ${["רכש", "בטיחות", "לוחות זמנים", "איכות", "תיאום", "חשמל", "מיזוג"][i]}`,
+    insight: `תוכן ייחודי ${i} על ${["הזמנות ציוד", "גידור אתר", "אבן דרך", "בדיקות בטון", "ישיבות תכנון", "לוחות חשמל", "צנרת מיזוג"][i]}`,
+    severity: "medium",
+    confidence: 0.6,
+    supporting_finding_ids: ["f2"]
+  }));
+  const capped = critiqueAndRankInsights({ insights: many, findings, clusters, patterns: [], maxInsights: 5 });
+  assert.equal(capped.accepted.length, 5);
+  assert.ok(capped.rejected.some((item) => item.reason === "over_insight_limit"));
+});
+
+test("insight clusters build chronological timelines with latest status precedence", () => {
+  const events = dedupeInsightEvidence(buildInsightEvidence([
+    { id: "t-1", title: "ריצוף לובי", text: "עבודות הריצוף בלובי עדיין בביצוע", date: "2026-06-02", source_table: "index", source_id: "r-1" },
+    { id: "t-2", title: "ריצוף לובי", text: "עבודות הריצוף בלובי הושלמו", date: "2026-06-12", source_table: "index", source_id: "r-2" }
+  ]));
+  const clusters = clusterCanonicalEvents(events);
+  assert.equal(clusters.length, 1);
+  assert.equal(clusters[0].timeline.length, 2);
+  assert.equal(clusters[0].timeline[0].date, "2026-06-02");
+  assert.equal(clusters[0].latest_status, "closed");
+  assert.equal(clusters[0].closed, true);
+  const patterns = detectInsightPatterns({ clusters, analytics: { reference_date: "2026-06-20" } });
+  assert.ok(patterns.some((item) => item.type === "closure"));
 });
 
 test("project insights UI is wired to the index analysis endpoint", () => {
@@ -1261,6 +1403,11 @@ test("project insights workflow exposes the index-first agent flow", () => {
     "index_scan",
     "hashtag_analysis",
     "focus_retrieval",
+    "evidence_normalization",
+    "deduplication",
+    "clustering_timeline",
+    "analytics_engine",
+    "pattern_detection",
     "graph_search",
     "alert_agent",
     "n8n_tools",
@@ -1268,11 +1415,16 @@ test("project insights workflow exposes the index-first agent flow", () => {
     "conflict_detection",
     "signal_detection",
     "ai_synthesis",
+    "insight_critic",
     "insight_ranking",
     "insights_output"
   ]);
   assert.equal(workflow.nodeDetails.hashtag_analysis.summary, "0 active hashtags");
   assert.equal(workflow.nodeDetails.alerts_priming.summary, "0 alerts, 0 themes");
+  // Without a pipeline the new evidence nodes are marked skipped (feature-flag off / legacy runs).
+  const statusById = Object.fromEntries(workflow.nodes.map((node) => [node.id, node.status]));
+  assert.equal(statusById.evidence_normalization, "skipped");
+  assert.equal(statusById.insight_critic, "skipped");
 });
 
 test("AI project insights roadmap replaces claim-file product direction", () => {

@@ -7,6 +7,13 @@
       "runtimeArgs": ["/c", "set PORT=4071&& node src/server.js"],
       "port": 4071,
       "autoPort": false
+    },
+    {
+      "name": "bidoc-insights",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "set PORT=4072&& node src/server.js"],
+      "port": 4072,
+      "autoPort": false
     }
   ]
 }
