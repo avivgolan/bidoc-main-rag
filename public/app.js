@@ -192,6 +192,7 @@ const state = {
   projectInsightsRuns: 0,
   projectInsightHistory: [],
   selectedProjectInsightRunId: null,
+  selectedInsightHashtags: [],
   lastDelayAnalysis: null,
   lastDelayEventAnalysis: null,
   lastDelayPackage: null,
@@ -3803,9 +3804,11 @@ async function runProjectInsightsAnalysisFromUi({ expansion = false } = {}) {
     renderProjectInsightsResults();
   }
   const excluded = expansion ? state.projectInsightsScannedKeys : [];
+  const runId = `project_insights_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   renderProjectInsightsStatus(expansion
     ? `מרחיב תשובה ומדלג על ${excluded.length.toLocaleString()} מקורות שכבר נותחו...`
     : "מריץ ניתוח על נתוני האינדקס...");
+  startInsightsLiveRun(runId);
   // Show skeleton cards while loading
   const resultsContainer = $("projectInsightsResults");
   if (resultsContainer && !expansion) {
@@ -3822,12 +3825,15 @@ async function runProjectInsightsAnalysisFromUi({ expansion = false } = {}) {
   try {
     const result = await api("/api/insights/analyze", {
       method: "POST",
-      timeoutMs: 120_000,
+      timeoutMs: 300_000,
       body: {
+        runId,
         focusQuery: $("projectInsightsQuery")?.value || "",
         dateFrom: $("projectInsightsFrom")?.value || null,
         dateTo: $("projectInsightsTo")?.value || null,
         limit: Number($("projectInsightsLimit")?.value || 350),
+        selectedHashtags: state.selectedInsightHashtags || [],
+        hashtagMode: "boost",
         excludeSourceKeys: excluded,
         expansion,
         parentRunId: expansion ? state.lastProjectInsights?.runId || state.selectedProjectInsightRunId || null : null
@@ -3861,6 +3867,7 @@ async function runProjectInsightsAnalysisFromUi({ expansion = false } = {}) {
     renderProjectInsightsResults();
     showToast(`ניתוח תובנות נכשל: ${error.message}`, "error");
   } finally {
+    stopInsightsLiveRun();
     state.projectInsightsRunning = false;
     const agentCardFinal = document.querySelector(".projectInsightsAgent");
     if (agentCardFinal) delete agentCardFinal.dataset.running;
@@ -3963,6 +3970,15 @@ function mergeUnique(values = []) {
   return Array.from(new Set(values.map((value) => String(value || "").trim()).filter(Boolean)));
 }
 
+function toggleInsightHashtag(tag) {
+  const clean = String(tag || "").trim().replace(/^#+/, "");
+  if (!clean) return;
+  const current = Array.isArray(state.selectedInsightHashtags) ? state.selectedInsightHashtags : [];
+  state.selectedInsightHashtags = current.includes(clean)
+    ? current.filter((item) => item !== clean)
+    : [...current, clean].slice(0, 8);
+}
+
 async function loadHashtagChart({ sortAlpha = false, source = loadHashtagChart._source || "alerts" } = {}) {
   loadHashtagChart._source = source;
   const canvas = $("hashtagChartCanvas");
@@ -3989,6 +4005,10 @@ async function loadHashtagChart({ sortAlpha = false, source = loadHashtagChart._
       wrap?.parentElement?.insertBefore(controlBar, wrap);
     }
     const totalLabel = result.total != null ? `${result.total} רשומות · ` : "";
+    const selected = Array.isArray(state.selectedInsightHashtags) ? state.selectedInsightHashtags : [];
+    const selectedHtml = selected.length
+      ? `<div class="insightsSelectedHashtags">${selected.map((tag) => `<button type="button" class="insightsSelectedHashtag" data-hashtag="${escapeHtml(tag)}">#${escapeHtml(tag)} ×</button>`).join("")}<button type="button" class="insightsClearHashtags" id="clearInsightHashtags">נקה</button></div>`
+      : `<div class="insightsSelectedHashtags is-empty">לחץ על עמודת hashtag כדי לחזק אותה בניתוח הבא</div>`;
     controlBar.innerHTML = `
       <span class="insightsChartTotalBadge">${totalLabel}${all.length} האשטגים</span>
       <div class="insightsChartSourceToggle">
@@ -3999,11 +4019,22 @@ async function loadHashtagChart({ sortAlpha = false, source = loadHashtagChart._
         <button class="insightsChartSortBtn" aria-pressed="${sortAlpha ? "true" : "false"}" id="hashtagSortAlpha">א-ב</button>
         <button class="insightsChartSortBtn" aria-pressed="${!sortAlpha ? "true" : "false"}" id="hashtagSortCount">כמות</button>
       </div>
+      ${selectedHtml}
     `;
     controlBar.querySelector("#hashtagSortAlpha")?.addEventListener("click", () => loadHashtagChart({ sortAlpha: true }));
     controlBar.querySelector("#hashtagSortCount")?.addEventListener("click", () => loadHashtagChart({ sortAlpha: false }));
     controlBar.querySelector("#hashtagSourceAlerts")?.addEventListener("click", () => loadHashtagChart({ source: "alerts" }));
     controlBar.querySelector("#hashtagSourceIndex")?.addEventListener("click", () => loadHashtagChart({ source: "index" }));
+    controlBar.querySelector("#clearInsightHashtags")?.addEventListener("click", () => {
+      state.selectedInsightHashtags = [];
+      loadHashtagChart({ sortAlpha, source });
+    });
+    controlBar.querySelectorAll(".insightsSelectedHashtag").forEach((button) => {
+      button.addEventListener("click", () => {
+        toggleInsightHashtag(button.dataset.hashtag || "");
+        loadHashtagChart({ sortAlpha, source });
+      });
+    });
 
     if (!hashtags.length) {
       canvas.hidden = true;
@@ -4012,15 +4043,15 @@ async function loadHashtagChart({ sortAlpha = false, source = loadHashtagChart._
     }
     canvas.hidden = false;
     if (empty) empty.hidden = true;
-    drawHashtagBarChart(canvas, hashtags);
-    attachChartTooltip(canvas, hashtags);
+    drawHashtagBarChart(canvas, hashtags, { selectedHashtags: state.selectedInsightHashtags });
+    attachChartTooltip(canvas, hashtags, { sortAlpha, source });
   } catch {
     canvas.hidden = true;
     if (empty) { empty.hidden = false; empty.textContent = "שגיאה בטעינת נתוני האשטגים."; }
   }
 }
 
-function attachChartTooltip(canvas, hashtags) {
+function attachChartTooltip(canvas, hashtags, { sortAlpha = false, source = "alerts" } = {}) {
   // Remove previous listener
   canvas._tooltipCleanup?.();
   let tooltip = document.querySelector(".insightsChartTooltip");
@@ -4055,16 +4086,24 @@ function attachChartTooltip(canvas, hashtags) {
     tooltip.classList.add("visible");
   };
   const onLeave = () => tooltip.classList.remove("visible");
+  const onClick = (e) => {
+    const i = getBarIndex(e);
+    if (i < 0) return;
+    toggleInsightHashtag(hashtags[i]?.tag || "");
+    loadHashtagChart({ sortAlpha, source });
+  };
 
   canvas.addEventListener("mousemove", onMove);
   canvas.addEventListener("mouseleave", onLeave);
+  canvas.addEventListener("click", onClick);
   canvas._tooltipCleanup = () => {
     canvas.removeEventListener("mousemove", onMove);
     canvas.removeEventListener("mouseleave", onLeave);
+    canvas.removeEventListener("click", onClick);
   };
 }
 
-function drawHashtagBarChart(canvas, hashtags) {
+function drawHashtagBarChart(canvas, hashtags, { selectedHashtags = [] } = {}) {
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.clientWidth || canvas.offsetWidth || 600;
   const H = 220;
@@ -4078,9 +4117,10 @@ function drawHashtagBarChart(canvas, hashtags) {
   const chartW = W - PAD_LEFT - PAD_RIGHT;
   const chartH = H - PAD_TOP - PAD_BOTTOM;
   const n = hashtags.length;
-  const maxCount = hashtags[0]?.count || 1;
+  const maxCount = Math.max(...hashtags.map((item) => Number(item.count || 0)), 1);
   const barW = Math.max(4, Math.floor((chartW / n) * 0.72));
   const gap = (chartW - barW * n) / (n + 1);
+  const selectedSet = new Set((selectedHashtags || []).map((tag) => String(tag).toLowerCase()));
 
   ctx.clearRect(0, 0, W, H);
 
@@ -4094,18 +4134,24 @@ function drawHashtagBarChart(canvas, hashtags) {
   }
 
   hashtags.forEach(({ tag, count }, i) => {
+    const selected = selectedSet.has(String(tag || "").toLowerCase());
     const x = PAD_LEFT + gap + i * (barW + gap);
     const barH = Math.max(2, Math.round((count / maxCount) * chartH));
     const y = PAD_TOP + chartH - barH;
 
     // Bar gradient
     const grad = ctx.createLinearGradient(x, y, x, y + barH);
-    grad.addColorStop(0, "#5eefc0");
-    grad.addColorStop(1, "#3f8d68");
+    grad.addColorStop(0, selected ? "#ffd166" : "#5eefc0");
+    grad.addColorStop(1, selected ? "#d29922" : "#3f8d68");
     ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.roundRect(x, y, barW, barH, [3, 3, 0, 0]);
     ctx.fill();
+    if (selected) {
+      ctx.strokeStyle = "rgba(255,209,102,0.75)";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
 
     // Count label on top
     ctx.fillStyle = "#c8f5d8";
@@ -4233,6 +4279,83 @@ function normalizeProjectInsightRun(run = {}) {
     scannedSourceKeys: Array.isArray(run.scanned_source_keys) ? run.scanned_source_keys : [],
     hasMore: Boolean(metadata.hasMore)
   };
+}
+
+const INSIGHTS_STEP_LABELS = {
+  created: "פותח ריצה חדשה...",
+  alerts_priming: "לומד מההתראות ומכוון את החיפוש...",
+  index_scan: "סורק את נתוני האינדקס...",
+  hashtag_analysis: "מנתח האשטגים...",
+  focus_retrieval: "מאחזר מקורות ממוקדים...",
+  focus_retrieval_warning: "חיפוש ממוקד נכשל, ממשיך עם סריקת אינדקס...",
+  graph_search: "בודק גרף קשרים...",
+  alert_agent: "בודק מול סוכן התראות...",
+  n8n_tools: "בודק מול סוכני הפרויקט...",
+  source_quality: "בודק אמינות מקורות...",
+  conflict_detection: "מזהה סתירות בין מקורות...",
+  signal_detection: "מזהה ממצאים...",
+  ai_synthesis: "מסנתז תובנות עם AI...",
+  ai_synthesis_warning: "סינתזת AI נכשלה, עובר לניתוח דטרמיניסטי...",
+  insight_ranking: "מדרג ומסדר תובנות..."
+};
+
+function insightsStepLabel(item) {
+  const step = String(item?.step || "");
+  if (step === "complete" || step === "error" || step === "client" || step === "persistence_warning") return "";
+  return INSIGHTS_STEP_LABELS[step] || "";
+}
+
+function renderProjectInsightsLiveSteps() {
+  const el = $("projectInsightsStatus");
+  if (!el) return;
+  const steps = state.insightsLiveSteps || [];
+  if (!steps.length) return;
+  el.dataset.state = "running";
+  el.innerHTML = `
+    <div class="insightsLiveSteps">
+      ${steps.map((label, i) => {
+        const isLast = i === steps.length - 1;
+        return `<div class="insightsLiveStep ${isLast ? "active" : "done"}">
+          <span class="insightsLiveStepIcon">${isLast ? '<span class="progressSpinner" aria-hidden="true"></span>' : "✓"}</span>
+          <span>${escapeHtml(label)}</span>
+        </div>`;
+      }).join("")}
+    </div>
+  `;
+}
+
+function pushInsightsLiveStep(item) {
+  const label = insightsStepLabel(item);
+  if (!label) return;
+  if (!Array.isArray(state.insightsLiveSteps)) state.insightsLiveSteps = [];
+  if (state.insightsLiveSteps[state.insightsLiveSteps.length - 1] === label) return;
+  state.insightsLiveSteps.push(label);
+  renderProjectInsightsLiveSteps();
+}
+
+function startInsightsLiveRun(runId) {
+  stopInsightsLiveRun();
+  state.insightsLiveSteps = [];
+  try {
+    state.insightsEventSource = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events`);
+  } catch {
+    state.insightsEventSource = null;
+    return;
+  }
+  state.insightsEventSource.addEventListener("log", (event) => {
+    let item;
+    try { item = JSON.parse(event.data); } catch { return; }
+    if (item.step === "complete" || item.step === "error") { stopInsightsLiveRun(); return; }
+    pushInsightsLiveStep(item);
+  });
+  state.insightsEventSource.onerror = () => {};
+}
+
+function stopInsightsLiveRun() {
+  if (state.insightsEventSource) {
+    state.insightsEventSource.close();
+    state.insightsEventSource = null;
+  }
 }
 
 function renderProjectInsightsStatus(override = "") {

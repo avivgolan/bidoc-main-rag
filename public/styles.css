@@ -9040,6 +9040,38 @@ body:has(#timeline.active) .sidebar {
   border-color: rgba(63,185,80,0.3);
   color: var(--i-green-hi);
 }
+.insightsHashtagChartWrap canvas {
+  cursor: pointer;
+}
+.insightsSelectedHashtags {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  color: var(--i-text-muted);
+  font-size: 11px;
+}
+.insightsSelectedHashtags.is-empty {
+  color: var(--i-text-muted);
+}
+.insightsSelectedHashtag,
+.insightsClearHashtags {
+  border-radius: 999px;
+  border: 1px solid rgba(210,153,34,0.28);
+  background: rgba(210,153,34,0.11);
+  color: #ffd166;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.insightsClearHashtags {
+  border-color: var(--i-border-md);
+  background: var(--i-bg2);
+  color: var(--i-text-muted);
+}
 
 /* ── Status bar refinements ── */
 .projectInsightsStatus .insightStatusDetails {
@@ -9065,6 +9097,39 @@ body:has(#timeline.active) .sidebar {
   background: var(--i-teal-soft);
   border-color: rgba(57,211,83,0.2);
   color: var(--i-green-hi);
+}
+
+.insightsLiveSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.insightsLiveStep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--i-text-muted);
+  transition: color 150ms ease;
+}
+.insightsLiveStep.active {
+  color: var(--i-text);
+  font-weight: 600;
+}
+.insightsLiveStepIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  flex: none;
+}
+.insightsLiveStep.done .insightsLiveStepIcon {
+  color: var(--i-green-hi);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 /* ── Mobile responsive ── */
