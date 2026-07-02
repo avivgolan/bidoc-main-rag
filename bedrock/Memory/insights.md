@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: insights
-last_updated: 2026-06-24
+last_updated: 2026-07-02
 tags:
   - insights
   - ai-agent
@@ -47,10 +47,16 @@ tags:
 - The Insights page now includes an Alert/Index hashtag analytics chart above the Project Insights agent.
 - `GET /api/insights/hashtags` counts hashtags from the KAPAIM content Supabase project and accepts `date_from`, `date_to`, and `source`.
 - The hashtag chart uses the same Insights date range inputs, auto-refreshes after date changes, and can switch between `alerts` and `index` sources.
+- The hashtag chart now also acts as an input control for Project Insights: clicking a chart bar toggles a selected hashtag chip, and selected hashtags are sent to `POST /api/insights/analyze` as `selectedHashtags` with `hashtagMode: "boost"`.
+- Project Insights now has a `hashtag_analysis` workflow node. It computes selected, top, and active hashtags, sends active hashtags into focus `hybridSearch`, boosts local record/evidence ranking by hashtag overlap, and includes hashtag context in the AI synthesis payload.
+- Insight findings/evidence/records now carry normalized `hashtags`, and the project-insights system prompt instructs the model to use hashtags as grouping context only when supported by evidence.
 - For KAPAIM content data, Alerts must come from `public.alerts` and Index must come from `public.data_index`; do not use the old default embeddings table name for this chart.
 - Local env now pins `CONTENT_INDEX_TABLE=data_index`; Content Supabase URL is resolved from settings/secret configuration and should point at project id `smxibuaowzuxkznuouwj`.
 - `trimSlash` in `src/config.js` trims surrounding whitespace before removing trailing slashes so pasted Supabase URLs with leading spaces do not leak into runtime config.
 - The Insights UI was redesigned with a dark SaaS/OLED visual system, improved chart controls, skeleton loading, welcome empty state, status pills, keyboard shortcuts, collapsible evidence, and auto-scroll after analysis.
+- The `project_insights` agent prompt is now editable in Settings -> "סוכני AI" like other agents: it is defined in `AGENT_DEFINITIONS` (`src/prompts.js`), read at runtime by `src/subagents/projectInsights.js` via `config.prompts.project_insights` (hardcoded fallback retained), and rendered as an agent card by the React settings island (`public/react/bidoc-react.js`).
+- Read-only insights endpoints (`/api/insights/runs`, `/api/insights/hashtags`) AND `POST /api/insights/analyze` use `checkBidocSecretForRead`: same-origin UI requests (no `x-content-supabase-url` header) skip the `BIDOC_API_SECRET` check, while cross-tenant/proxy requests still require it. This is why the analyze button worked locally (no secret set) and via direct API (secret sent) but 401'd on Vercel (secret set, UI sends no secret header) until fixed.
+- `applySettingsToForm()` in `public/app.js` must guard every write to a Settings-tab field with `if ($("..."))`, because those fields live in the React settings island and only exist in the DOM once that tab has mounted.
 
 ## Recent Changes
 
@@ -68,6 +74,10 @@ tags:
 - 2026-07-02 -- Added date-aware hashtag analytics to the Insights page, including Alerts/Index source toggle backed by KAPAIM `alerts` and `data_index` tables.
 - 2026-07-02 -- Redesigned the Insights page UI/UX with chart controls, loading/empty states, keyboard shortcuts, collapsible evidence, and modern dark dashboard styling.
 - 2026-07-02 -- Fixed content-source configuration gotchas by pinning `CONTENT_INDEX_TABLE=data_index` and trimming Supabase URL whitespace.
+- 2026-07-02 -- Connected hashtag analytics into the Project Insights workflow with selected hashtag chips, automatic top-hashtag context, hybrid-search hashtag boosting, local evidence ranking boost, and AI payload/prompt support.
+- 2026-07-02 -- Exposed the `project_insights` agent prompt for editing in Settings -> "סוכני AI" (added to `AGENT_DEFINITIONS`, read from config in the subagent, rendered as an agent card in the React settings island).
+- 2026-07-02 -- Fixed the deployed "נתח את הפרויקט" button returning 401 on Vercel by routing `POST /api/insights/analyze` through `checkBidocSecretForRead` so same-origin UI requests skip the `BIDOC_API_SECRET` check.
+- 2026-07-02 -- Fixed the hashtag chart not rendering (and date-change auto-refresh not firing) on a fresh load of `#insights`: `applySettingsToForm()` crashed on unguarded writes to Settings-only React-island fields, which aborted `init()` before the tab's own data loader ran. Guarded the writes.
 
 ## Gotchas
 
@@ -76,3 +86,6 @@ tags:
 - Keep insight wording as observations and recommendations; avoid legal, entitlement, cost, or critical-path conclusions.
 - Hashtag analytics must use the KAPAIM content Supabase project `smxibuaowzuxkznuouwj`, not the app Supabase project and not old `*_embeddings_gf_dor_agent` defaults.
 - If the chart counts look wrong, first check `/api/settings` for `contentSource.supabaseUrl`, `contentSource.alertsTable`, and `contentSource.indexTable`.
+- Hashtag influence is boost-only by default, not a hard filter; records still need textual signal matches before becoming findings.
+- Any function that runs during `init()` (before a tab is opened) must not assume Settings-tab / React-island DOM elements exist. Landing directly on `#insights` via URL hash or hard reload will crash and silently abort the rest of `init()` if a settings field is written unguarded.
+- Insights features can appear to "work locally but fail on Vercel" purely because `BIDOC_API_SECRET` is set on Vercel but not locally; check the secret gating before assuming a data/logic bug.
