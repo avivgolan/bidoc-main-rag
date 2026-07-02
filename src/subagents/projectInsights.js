@@ -298,7 +298,7 @@ async function synthesizeInsights({ config, records, findings, summary, focusQue
       messages: [
         {
           role: "system",
-          content: [
+          content: config.prompts?.project_insights || [
             "You are an AI project insights agent for a construction project.",
             "Return ONLY valid JSON.",
             "Findings are evidence-backed observations. Insights must synthesize multiple findings into a meaningful project pattern, implication, risk, or opportunity.",

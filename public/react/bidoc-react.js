@@ -8089,6 +8089,13 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		label: "QA Report",
 		desc: "ניתוח איכות ריצה",
 		promptRows: 9
+	},
+	{
+		key: "project_insights",
+		label: "Project Insights",
+		desc: "ניתוח תובנות פרויקט — חסמים, סיכונים, החלטות פתוחות",
+		promptRows: 12,
+		wide: true
 	}
 ], C = {
 	temperature: "קובע כמה התשובה תהיה יצירתית או צפויה. ערך נמוך נותן תשובות יציבות ומדויקות יותר; ערך גבוה נותן ניסוח מגוון יותר.",
@@ -9957,13 +9964,16 @@ function ke() {
 function Ae() {
 	let [e, t] = (0, b.useState)({}), [n, r] = (0, b.useState)([]), [i, a] = (0, b.useState)(!0), [o, s] = (0, b.useState)("connections"), [c, l] = (0, b.useState)("idle"), [u, d] = (0, b.useState)({}), [f, p] = (0, b.useState)(""), m = (0, b.useRef)(null);
 	(0, b.useEffect)(() => {
-		Promise.all([ne("/api/settings").catch(() => null), ne("/api/openrouter/models").catch(() => ({ models: [] }))]).then(([e, n]) => {
+		Promise.all([ne("/api/settings").catch(() => null), ne("/api/openrouter/models").catch(() => ({ models: [] })), ne("/api/agents").catch(() => ({ agents: [] }))]).then(([e, n, ag]) => {
 			let i = e?.settings ?? e;
-			i && (t(w(i)), d({
-				openRouter: i.openRouterConfigured,
-				supabase: i.supabaseConfigured,
-				contentSupabase: i.contentSupabaseConfigured
-			})), r(n?.models || []), a(!1);
+			const agentDefaults = {};
+			for (const agent of (ag?.agents || [])) { if (agent.id && agent.prompt) agentDefaults[agent.id] = agent.prompt; }
+			if (i) {
+				const merged = { ...i, prompts: { ...agentDefaults, ...(i.prompts || {}) } };
+				t(w(merged));
+				d({ openRouter: i.openRouterConfigured, supabase: i.supabaseConfigured, contentSupabase: i.contentSupabaseConfigured });
+			}
+			r(n?.models || []), a(!1);
 		});
 	}, []);
 	let h = (0, b.useCallback)((e, n) => {
