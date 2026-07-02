@@ -259,7 +259,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/insights/analyze") {
-    if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
     const cfg = buildRequestConfig(req, body);
     const runId = body.runId || `project_insights_${Date.now()}_${Math.random().toString(16).slice(2)}`;
