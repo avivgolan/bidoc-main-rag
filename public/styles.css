@@ -3534,17 +3534,20 @@ label {
     padding: 0;
     text-align: left;
   }
-  nav {
-    grid-template-columns: repeat(4, minmax(58px, 1fr));
-    padding: 8px;
+  .sidebar nav {
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: none;
+    gap: 6px;
+    padding: 10px 12px 14px;
   }
-  .tab {
-    justify-content: center;
-    min-height: 40px;
-    padding: 8px 6px;
+  .sidebar .tab {
+    justify-content: flex-start;
+    min-height: 44px;
+    padding: 10px 12px;
   }
-  .tab.active::before { display: none; }
-  .tabLabel { display: none; }
+  .sidebar .tab.active::before { display: block; }
+  .sidebar .tabLabel { display: block; }
   .panel {
     padding: 18px 14px;
   }
@@ -3575,7 +3578,7 @@ label {
 }
 
 @media (max-width: 560px) {
-  nav { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
+  .sidebar nav { grid-template-columns: none; }
   .sidebarBrand {
     align-items: flex-start;
     flex-direction: column;
@@ -9248,4 +9251,92 @@ body:has(#timeline.active) .sidebar {
 @media (max-width: 760px) {
   .wfShell .workflowLayout { flex-direction: column; }
   .wfShell .runHistoryStrip { width: 100%; }
+}
+
+/* ── Phase-2 insight engines: toggles + panels (dark insights theme) ── */
+.insightsEngineToggles {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  margin: 10px 0 4px; padding: 10px 14px;
+  background: var(--i-bg1); border: 1px solid var(--i-border);
+  border-radius: var(--i-radius-sm); color: var(--i-text-sub); font-size: 12.5px;
+}
+.insightsEngineTogglesLabel { color: var(--i-text-sub); font-weight: 600; }
+.insightsEngineTogglesLabel small { color: var(--i-text-muted); font-weight: 400; }
+.insightsEngineToggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--i-text); cursor: pointer; user-select: none;
+}
+.insightsEngineToggle input { accent-color: var(--i-green-hi); cursor: pointer; }
+
+.insightEnginePanels { display: grid; gap: 14px; margin-bottom: 18px; }
+.enginePanel {
+  background: var(--i-bg1); border: 1px solid var(--i-border-md);
+  border-radius: var(--i-radius); box-shadow: var(--i-shadow); padding: 16px 18px;
+}
+.enginePanel > header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px;
+}
+.enginePanel > header span { color: var(--i-text-sub); font-size: 12px; font-weight: 600; letter-spacing: 0.02em; }
+.enginePanel > header span small { color: var(--i-text-muted); font-weight: 400; }
+.enginePanel > header h4 { margin: 4px 0 0; color: var(--i-text); font-size: 15px; }
+.enginePanelHint { margin: 12px 0 0; color: var(--i-text-muted); font-size: 11.5px; }
+
+/* Health score */
+.healthScorePanel > header h4 { font-size: 34px; line-height: 1; color: var(--i-green-hi); }
+.healthScorePanel[data-status="not_computed"] > header h4 { color: var(--i-text-muted); }
+.healthScoreMeta { text-align: left; display: grid; gap: 2px; }
+.healthScoreMeta b { color: var(--i-text); font-size: 12.5px; }
+.healthScoreMeta small { color: var(--i-text-muted); font-size: 11.5px; }
+.healthScoreMeta .healthCapNote { color: var(--i-amber); }
+.healthSubscores { display: grid; gap: 8px; }
+.healthSubscore { display: grid; grid-template-columns: 130px 1fr 34px; align-items: center; gap: 10px; }
+.healthSubscore span { color: var(--i-text-sub); font-size: 12.5px; }
+.healthSubscore b { color: var(--i-text); font-size: 12.5px; text-align: left; }
+.healthSubscore[data-missing="true"] small { color: var(--i-text-muted); font-size: 11.5px; grid-column: 2 / 4; }
+.healthSubscoreBar { height: 6px; background: var(--i-bg2); border-radius: 4px; overflow: hidden; }
+.healthSubscoreBar i { display: block; height: 100%; background: linear-gradient(90deg, var(--i-green), var(--i-green-hi)); border-radius: 4px; }
+.healthCriticalFlags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.healthCriticalFlag {
+  background: var(--i-red-soft); color: #f0857f; border: 1px solid rgba(218,54,51,0.35);
+  border-radius: 999px; padding: 3px 10px; font-size: 11.5px; font-weight: 600;
+}
+
+/* Trends */
+.trendPanel .trendStatusNote { color: var(--i-amber); font-size: 12px; }
+.trendRows { display: grid; gap: 6px; }
+.trendRow {
+  display: grid; grid-template-columns: 130px 1fr auto auto; align-items: center; gap: 10px;
+  padding: 7px 10px; background: var(--i-bg2); border-radius: var(--i-radius-sm);
+}
+.trendRow span { color: var(--i-text); font-size: 12.5px; }
+.trendRow small { color: var(--i-text-muted); font-size: 11.5px; direction: ltr; text-align: right; }
+.trendRow b { font-size: 12px; font-weight: 600; }
+.trendRow[data-tone="bad"] b { color: #f0857f; }
+.trendRow[data-tone="good"] b { color: var(--i-green-hi); }
+.trendRow[data-tone="neutral"] b { color: var(--i-text-sub); }
+.trendRow .trendSampleNote { color: var(--i-amber); }
+
+/* Root-cause hypotheses */
+.hypothesisCards { display: grid; gap: 10px; }
+.hypothesisCard {
+  background: var(--i-bg2); border: 1px solid var(--i-border);
+  border-radius: var(--i-radius-sm); padding: 12px 14px;
+}
+.hypothesisCard header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.hypothesisBadge {
+  background: var(--i-amber-soft); color: var(--i-amber); border: 1px solid rgba(210,153,34,0.35);
+  border-radius: 999px; padding: 2px 10px; font-size: 11px; font-weight: 700;
+}
+.hypothesisCard header small { color: var(--i-text-muted); font-size: 11.5px; }
+.hypothesisCard p { margin: 0; color: var(--i-text); font-size: 13px; line-height: 1.55; }
+.hypothesisMissing, .hypothesisAlternatives { margin-top: 8px; color: var(--i-text-sub); font-size: 12px; }
+.hypothesisMissing b, .hypothesisAlternatives b { color: var(--i-text-sub); }
+.hypothesisMissing ul { margin: 4px 0 0; padding-inline-start: 18px; }
+.hypothesisMissing li { margin-bottom: 2px; }
+
+@media (max-width: 720px) {
+  .healthSubscore { grid-template-columns: 100px 1fr 30px; }
+  .trendRow { grid-template-columns: 100px 1fr auto; }
+  .trendRow .trendSampleNote { grid-column: 1 / -1; }
 }

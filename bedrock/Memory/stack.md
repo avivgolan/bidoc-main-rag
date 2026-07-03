@@ -16,6 +16,7 @@ tags:
 - `package.json` exposes `dev`, `start`, and `test`; all run Node directly.
 - The HTTP server is implemented with `node:http` in `src/server.js`.
 - The frontend is still primarily a plain HTML/CSS/JS single-page app in `public/`, with a progressive React island bridge for staged screen migration.
+- The main SPA sidebar is ordered around the primary project flow: Chat first, Insights second, and Settings last; on mobile the sidebar remains a labeled icon+text drawer rather than icon-only navigation.
 - React 19, ReactDOM, Vite, and `@vitejs/plugin-react` are installed; `npm run react:build` builds the React bridge into `public/react/bidoc-react.js`.
 - `public/index.html` loads a tiny `public/react-loader.js` module that imports the React bridge only when `[data-react-island]` elements exist, so current screens do not pay the React bundle cost until migrated.
 - Deployment routes all requests through `src/server.js` using `vercel.json`.
@@ -87,6 +88,7 @@ tags:
 - 2026-06-17 -- Added top-of-page Settings presets with 3 built-in calibration profiles (Conservative, Balanced, Cheap Test) plus persisted custom presets saved inside the shared `agent_settings` record.
 - 2026-06-20 -- Locked `agent_settings` persistence to the main Settings save route only; import, subagent saves, link-agent saves, preset saves, and startup prompt migration are all draft-only or non-persistent.
 - 2026-06-26 -- Added a progressive React/Vite frontend bridge with lazy island loading so individual screens can migrate from vanilla JS without replacing the existing SPA shell.
+- 2026-07-03 -- Reordered the main sidebar navigation so Chat is first, Insights second, and Settings last; fixed the mobile drawer to show labels next to icons.
 
 ## Recent Changes (continued)
 

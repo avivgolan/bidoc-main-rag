@@ -344,7 +344,11 @@ async function handleApi(req, res, url) {
             hasMore: Boolean(persistedResult.hasMore),
             findings: Array.isArray(persistedResult.findings) ? persistedResult.findings : [],
             recordsSample: Array.isArray(persistedResult.recordsSample) ? persistedResult.recordsSample.slice(0, 24) : [],
-            expansionRuns: Array.isArray(result.expansionRuns) ? result.expansionRuns.map((item) => item.runId).filter(Boolean) : []
+            expansionRuns: Array.isArray(result.expansionRuns) ? result.expansionRuns.map((item) => item.runId).filter(Boolean) : [],
+            // Phase-2 engine outputs so history restore can re-render their panels.
+            healthScore: result.healthScore || null,
+            trends: result.analytics?.trends || null,
+            rootCauseHypotheses: Array.isArray(result.rootCauseHypotheses) ? result.rootCauseHypotheses : []
           }
         }
       }).catch((error) => {

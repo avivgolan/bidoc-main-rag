@@ -3825,7 +3825,9 @@ async function runProjectInsightsAnalysisFromUi({ expansion = false } = {}) {
   try {
     const result = await api("/api/insights/analyze", {
       method: "POST",
-      timeoutMs: 300_000,
+      // Deep-engine runs (trend baseline scan, hypothesis LLM calls, synthesis retry)
+      // can pass 5 minutes; keep the client attached rather than erroring early.
+      timeoutMs: 900_000,
       body: {
         runId,
         focusQuery: $("projectInsightsQuery")?.value || "",
@@ -3834,6 +3836,7 @@ async function runProjectInsightsAnalysisFromUi({ expansion = false } = {}) {
         limit: Number($("projectInsightsLimit")?.value || 350),
         selectedHashtags: state.selectedInsightHashtags || [],
         hashtagMode: "boost",
+        insights: collectInsightEngineFlags(),
         excludeSourceKeys: excluded,
         expansion,
         parentRunId: expansion ? state.lastProjectInsights?.runId || state.selectedProjectInsightRunId || null : null
@@ -3880,6 +3883,16 @@ async function runProjectInsightsAnalysisFromUi({ expansion = false } = {}) {
       expandButton.textContent = "הרחב תשובה";
     }
   }
+}
+
+// Per-run engine toggles (phase-2): only true flags are sent; undefined is dropped
+// by JSON.stringify so an empty selection keeps the persisted config defaults.
+function collectInsightEngineFlags() {
+  const flags = {};
+  if ($("insightsFlagTrend")?.checked) flags.crossWindowTrend = true;
+  if ($("insightsFlagRootCause")?.checked) flags.rootCauseHypotheses = true;
+  if ($("insightsFlagHealth")?.checked) flags.healthScore = true;
+  return Object.keys(flags).length ? flags : undefined;
 }
 
 function mergeProjectInsightsResults(previous, next) {
@@ -4277,7 +4290,11 @@ function normalizeProjectInsightRun(run = {}) {
     workflowLog: run.workflow_log || run.workflowLog || null,
     recordsSample: Array.isArray(metadata.recordsSample) ? metadata.recordsSample : [],
     scannedSourceKeys: Array.isArray(run.scanned_source_keys) ? run.scanned_source_keys : [],
-    hasMore: Boolean(metadata.hasMore)
+    hasMore: Boolean(metadata.hasMore),
+    // Phase-2 engine outputs persisted in metadata (older runs simply lack them).
+    healthScore: metadata.healthScore || null,
+    analytics: metadata.trends ? { trends: metadata.trends } : (run.analytics || null),
+    rootCauseHypotheses: Array.isArray(metadata.rootCauseHypotheses) ? metadata.rootCauseHypotheses : []
   };
 }
 
@@ -4288,6 +4305,15 @@ const INSIGHTS_STEP_LABELS = {
   hashtag_analysis: "מנתח האשטגים...",
   focus_retrieval: "מאחזר מקורות ממוקדים...",
   focus_retrieval_warning: "חיפוש ממוקד נכשל, ממשיך עם סריקת אינדקס...",
+  evidence_normalization: "מנרמל ראיות ומסווג אמירות...",
+  deduplication: "מאחד כפילויות לאירועים קנוניים...",
+  clustering_timeline: "בונה אשכולות וצירי זמן...",
+  analytics_engine: "מחשב מדדים דטרמיניסטיים...",
+  pattern_detection: "מזהה דפוסי תובנה...",
+  closure_followup: "מחפש ראיות סגירה מאוחרות...",
+  trend_analysis: "משווה מול התקופה הקודמת...",
+  root_cause_hypotheses: "בוחן השערות סיבת שורש...",
+  health_score: "מחשב ציון בריאות...",
   graph_search: "בודק גרף קשרים...",
   alert_agent: "בודק מול סוכן התראות...",
   n8n_tools: "בודק מול סוכני הפרויקט...",
@@ -4296,6 +4322,7 @@ const INSIGHTS_STEP_LABELS = {
   signal_detection: "מזהה ממצאים...",
   ai_synthesis: "מסנתז תובנות עם AI...",
   ai_synthesis_warning: "סינתזת AI נכשלה, עובר לניתוח דטרמיניסטי...",
+  insight_critic: "מבקר ומסנן תובנות...",
   insight_ranking: "מדרג ומסדר תובנות..."
 };
 
@@ -4428,11 +4455,142 @@ function renderProjectInsightsResults() {
   }
   const findings = normalizeProjectFindings(result, { legacyInsightsAsFindings: true });
   const insights = normalizeProjectInsights(result);
-  if (!insights.length && !findings.length) {
+  const enginePanels = renderInsightEnginePanels(result);
+  if (!insights.length && !findings.length && !enginePanels) {
     container.innerHTML = '<div class="projectInsightEmpty">לא נמצאו אותות מספיק חזקים באינדקס עבור הסריקה הזו. אפשר ללחוץ על הרחב תשובה כדי לסרוק מקורות נוספים.</div>';
     return;
   }
-  container.innerHTML = renderProjectInsightsEnvelope({ insights, findings });
+  container.innerHTML = enginePanels + renderProjectInsightsEnvelope({ insights, findings });
+}
+
+// Panels for the phase-2 engines: health score, trend analysis, root-cause
+// hypotheses. Rendered only when the run actually produced them.
+function renderInsightEnginePanels(result = {}) {
+  const panels = [
+    renderHealthScorePanel(result.healthScore),
+    renderTrendPanel(result.analytics?.trends),
+    renderHypothesesPanel(result.rootCauseHypotheses)
+  ].filter(Boolean);
+  return panels.length ? `<section class="insightEnginePanels">${panels.join("")}</section>` : "";
+}
+
+function renderHealthScorePanel(healthScore) {
+  if (!healthScore) return "";
+  const dimensionLabels = {
+    schedule: "לוח זמנים",
+    coordination: "תיאום",
+    decision_velocity: "מהירות החלטות",
+    information_readiness: "מוכנות מידע"
+  };
+  const statusLabels = {
+    calculated: "מחושב",
+    provisional: "חלקי (כיסוי נתונים לא מלא)",
+    not_computed: "לא חושב — אין מספיק נתונים"
+  };
+  const subscores = Object.entries(healthScore.subscores || {}).map(([key, dim]) => {
+    const label = dimensionLabels[key] || key;
+    if (dim.score == null) {
+      return `<div class="healthSubscore" data-missing="true"><span>${escapeHtml(label)}</span><small>אין מספיק נתונים</small></div>`;
+    }
+    return `<div class="healthSubscore"><span>${escapeHtml(label)}</span><div class="healthSubscoreBar"><i style="width:${Math.max(2, dim.score)}%"></i></div><b>${dim.score}</b></div>`;
+  }).join("");
+  const flags = (healthScore.critical_flags || []).map((flag) => {
+    const flagLabels = {
+      commitment_overdue_30d: "התחייבות באיחור של 30+ יום",
+      safety_contradiction: "מידע סותר בנושא בטיחות",
+      open_safety_issue: "נושא בטיחות פתוח"
+    };
+    const parts = [flagLabels[flag.flag] || flag.flag, flag.topic].filter(Boolean);
+    return `<span class="healthCriticalFlag">${escapeHtml(parts.join(" · "))}</span>`;
+  }).join("");
+  return `
+    <article class="enginePanel healthScorePanel" data-status="${escapeHtml(healthScore.status || "")}">
+      <header>
+        <div>
+          <span>ציון בריאות הפרויקט <small>${escapeHtml(healthScore.score_version || "")}</small></span>
+          <h4>${healthScore.score != null ? healthScore.score : "—"}</h4>
+        </div>
+        <div class="healthScoreMeta">
+          <b>${escapeHtml(statusLabels[healthScore.status] || healthScore.status || "")}</b>
+          ${healthScore.data_coverage != null ? `<small>כיסוי נתונים: ${Math.round(healthScore.data_coverage * 100)}%</small>` : ""}
+          ${healthScore.critical_cap_applied ? '<small class="healthCapNote">הציון הוגבל בגלל אירוע קריטי</small>' : ""}
+        </div>
+      </header>
+      ${subscores ? `<div class="healthSubscores">${subscores}</div>` : ""}
+      ${flags ? `<div class="healthCriticalFlags">${flags}</div>` : ""}
+      <p class="enginePanelHint">הציון הוא כלי סיכום מחושב — הוא אינו ראיה ואינו מחליף את התובנות עצמן.</p>
+    </article>`;
+}
+
+function renderTrendPanel(trends) {
+  if (!trends || !Array.isArray(trends.metrics) || !trends.metrics.length) return "";
+  const isCrossWindow = trends.baseline_definition === "previous_window";
+  if (!isCrossWindow && trends.status !== "calculated") return "";
+  const metricLabels = {
+    open_statements: "אמירות פתוחות",
+    closure_statements: "דיווחי סגירה",
+    new_topics: "נושאים חדשים",
+    evidence_volume: "נפח ראיות"
+  };
+  const assessmentMeta = {
+    deteriorating: { label: "החמרה", tone: "bad" },
+    improving: { label: "שיפור", tone: "good" },
+    stable: { label: "יציב", tone: "neutral" },
+    unknown: { label: "לא חד-משמעי", tone: "neutral" }
+  };
+  const rows = trends.metrics.map((metric) => {
+    const meta = assessmentMeta[metric.assessment] || assessmentMeta.unknown;
+    const arrow = metric.direction === "up" ? "▲" : metric.direction === "down" ? "▼" : "—";
+    return `
+      <div class="trendRow" data-tone="${meta.tone}">
+        <span>${escapeHtml(metricLabels[metric.metric_id] || metric.metric_id)}</span>
+        <small>${metric.baseline_period?.value ?? "—"} ← ${metric.current_period?.value ?? "—"}</small>
+        <b>${arrow} ${escapeHtml(meta.label)}</b>
+        ${metric.sample_status !== "valid" ? `<small class="trendSampleNote">${escapeHtml(metric.sample_status === "coverage_mismatch" ? "פער כיסוי נתונים" : "מדגם קטן")}</small>` : ""}
+      </div>`;
+  }).join("");
+  const baselineText = isCrossWindow
+    ? `מול התקופה הקודמת (${escapeHtml(trends.metrics[0]?.baseline_period?.from || "")} – ${escapeHtml(trends.metrics[0]?.baseline_period?.to || "")})`
+    : "בתוך חלון הניתוח (מחצית ראשונה מול שנייה)";
+  return `
+    <article class="enginePanel trendPanel" data-status="${escapeHtml(trends.status || "")}">
+      <header>
+        <div>
+          <span>מגמות <small>${escapeHtml(trends.trend_version || "")}</small></span>
+          <h4>${escapeHtml(baselineText)}</h4>
+        </div>
+        ${trends.status !== "calculated" ? `<b class="trendStatusNote">${escapeHtml(trends.status === "coverage_mismatch" ? "השוואה לא תקפה — פער כיסוי" : "מדגם לא מספיק")}</b>` : ""}
+      </header>
+      <div class="trendRows">${rows}</div>
+    </article>`;
+}
+
+function renderHypothesesPanel(hypotheses) {
+  if (!Array.isArray(hypotheses) || !hypotheses.length) return "";
+  const confidenceLabels = { high: "גבוהה", medium: "בינונית", low: "נמוכה" };
+  const cards = hypotheses.map((item) => `
+    <div class="hypothesisCard">
+      <header>
+        <span class="hypothesisBadge">השערה — דורש אימות</span>
+        <small>ודאות: ${escapeHtml(confidenceLabels[item.confidence] || item.confidence || "")}</small>
+      </header>
+      <p>${escapeHtml(item.hypothesis || "")}</p>
+      ${Array.isArray(item.missing_evidence) && item.missing_evidence.length ? `
+        <div class="hypothesisMissing"><b>מה חסר כדי לאשר או להפריך:</b><ul>${item.missing_evidence.map((gap) => `<li>${escapeHtml(gap)}</li>`).join("")}</ul></div>` : ""}
+      ${Array.isArray(item.alternative_hypotheses) && item.alternative_hypotheses.length ? `
+        <div class="hypothesisAlternatives"><b>הסברים חלופיים:</b> ${escapeHtml(item.alternative_hypotheses.join(" · "))}</div>` : ""}
+    </div>`).join("");
+  return `
+    <article class="enginePanel hypothesesPanel">
+      <header>
+        <div>
+          <span>השערות סיבת שורש</span>
+          <h4>${hypotheses.length} השערות — כולן דורשות אימות</h4>
+        </div>
+      </header>
+      <div class="hypothesisCards">${cards}</div>
+      <p class="enginePanelHint">השערות הן הסקה בלבד ואינן קביעת סיבה. סדר כרונולוגי אינו הוכחה לסיבתיות.</p>
+    </article>`;
 }
 
 function renderProjectInsightsEnvelope({ insights = [], findings = [] } = {}) {
