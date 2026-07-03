@@ -191,6 +191,7 @@ const state = {
   projectInsightsScannedKeys: [],
   projectInsightsRuns: 0,
   projectInsightHistory: [],
+  projectInsightHistoryExpanded: false,
   selectedProjectInsightRunId: null,
   selectedInsightHashtags: [],
   lastDelayAnalysis: null,
@@ -1863,7 +1864,9 @@ async function runKnowledgeSearch() {
   }
 }
 
-let _workflowWired = false;
+// var (not let): init() runs at the top of the file before this line executes,
+// and a let binding here is still in its temporal dead zone at that point.
+var _workflowWired = false;
 function wireWorkflow() {
   // The workflow page is rendered by a React island that may mount after init().
   // Guard so this binds exactly once, and only after the DOM actually exists.
@@ -3761,6 +3764,7 @@ function wireDelayClaims() {
     toggle.setAttribute("aria-expanded", collapsed ? "true" : "false");
   });
   $("refreshHashtagChart")?.addEventListener("click", loadHashtagChart);
+  $("toggleProjectInsightsHistory")?.addEventListener("click", toggleProjectInsightHistory);
   $("refreshProjectInsightsHistory")?.addEventListener("click", () => loadProjectInsightHistory({ force: true }));
   // Reload chart when date range changes
   let _chartDebounce;
@@ -4188,6 +4192,7 @@ function drawHashtagBarChart(canvas, hashtags, { selectedHashtags = [] } = {}) {
 async function loadProjectInsightHistory({ force = false } = {}) {
   const list = $("projectInsightsHistoryList");
   if (!list) return;
+  syncProjectInsightHistoryPanel();
   if (!force && state.projectInsightHistory.length) {
     renderProjectInsightHistory();
     return;
@@ -4216,6 +4221,7 @@ function renderProjectInsightHistory() {
   const list = $("projectInsightsHistoryList");
   if (!list) return;
   const runs = Array.isArray(state.projectInsightHistory) ? state.projectInsightHistory : [];
+  syncProjectInsightHistoryPanel();
   if (!runs.length) {
     list.innerHTML = '<div class="projectInsightEmpty">אין עדיין ריצות תובנות שמורות.</div>';
     return;
@@ -4241,12 +4247,45 @@ function renderProjectInsightHistory() {
       </button>
     `;
   }).join("");
-  list.querySelectorAll(".projectInsightsHistoryItem").forEach((button) => {
-    button.addEventListener("click", () => {
-      const run = runs.find((item) => String(item.run_id || item.runId) === String(button.dataset.runId));
+  // Delegated once on the container: async refreshes re-render the buttons, and
+  // per-button listeners were lost with them (first click after a refresh was swallowed).
+  if (!list.dataset.delegated) {
+    list.dataset.delegated = "true";
+    list.addEventListener("click", (event) => {
+      const button = event.target.closest(".projectInsightsHistoryItem");
+      if (!button) return;
+      const currentRuns = Array.isArray(state.projectInsightHistory) ? state.projectInsightHistory : [];
+      const run = currentRuns.find((item) => String(item.run_id || item.runId) === String(button.dataset.runId));
       if (run) selectProjectInsightRun(run);
     });
-  });
+  }
+}
+
+function syncProjectInsightHistoryPanel() {
+  const panel = document.querySelector(".projectInsightsHistoryPanel");
+  const list = $("projectInsightsHistoryList");
+  const toggle = $("toggleProjectInsightsHistory");
+  if (!panel || !list || !toggle) return;
+  const expanded = state.projectInsightHistoryExpanded === true;
+  const runs = Array.isArray(state.projectInsightHistory) ? state.projectInsightHistory : [];
+  panel.dataset.collapsed = expanded ? "false" : "true";
+  list.hidden = !expanded;
+  toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  toggle.textContent = expanded ? "הסתר היסטוריה" : buildProjectInsightHistoryToggleLabel(runs);
+}
+
+function buildProjectInsightHistoryToggleLabel(runs) {
+  const count = Array.isArray(runs) ? runs.length : 0;
+  if (!count) return "הצג היסטוריה";
+  return `הצג היסטוריה (${count})`;
+}
+
+function toggleProjectInsightHistory() {
+  state.projectInsightHistoryExpanded = !state.projectInsightHistoryExpanded;
+  syncProjectInsightHistoryPanel();
+  if (state.projectInsightHistoryExpanded && !state.projectInsightHistory.length) {
+    loadProjectInsightHistory({ force: true });
+  }
 }
 
 function selectProjectInsightRun(run) {
