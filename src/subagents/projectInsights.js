@@ -7,6 +7,7 @@ import { callN8nTool } from "../tools.js";
 import { runAlertAgent } from "./alert.js";
 import { buildInsightAiContext, buildInsightEvidence, clusterCanonicalEvents, computeBaselineWindow, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, runInsightEvidencePipeline } from "./insightPipeline.js";
 import { generateRootCauseHypotheses } from "./rootCauseHypothesis.js";
+import { runGraphEnrichment } from "./graphEnrichment.js";
 import { computeHealthScore } from "./healthScore.js";
 
 const SIGNALS = [
@@ -131,6 +132,34 @@ export async function runProjectInsightsAnalysis({
   // mention links produced by the Graph Entity Enrichment Agent.
   const pipelineEnabled = config?.insights?.evidencePipeline !== false;
   let entityLinks = [];
+  // Keep the graph fresh when both graph flags are on: a small incremental
+  // enrichment over the last two weeks of records, bounded so a typical run adds
+  // seconds, not minutes. Failures never block the analysis.
+  if (pipelineEnabled && config?.insights?.graphClustering === true && config?.insights?.graphEnrichment === true) {
+    try {
+      const enrichmentWindowStart = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+      const enrichment = await runGraphEnrichment({
+        config,
+        source: "index",
+        mode: "incremental",
+        limit: 60,
+        dateFrom: enrichmentWindowStart,
+        runId,
+        emit
+      });
+      step("graph_enrichment", enrichment.records
+        ? `Enriched ${enrichment.records} recent records with ${enrichment.entities} entity mentions`
+        : "Graph entities are up to date for recent records", {
+        records: enrichment.records,
+        entities: enrichment.entities,
+        skippedExisting: enrichment.skippedExisting,
+        windowStart: enrichmentWindowStart,
+        status: enrichment.records ? "done" : "skipped"
+      });
+    } catch (error) {
+      step("graph_enrichment", "Incremental graph enrichment failed; analysis continues", { error: error.message }, "warning");
+    }
+  }
   if (pipelineEnabled && config?.insights?.graphClustering === true) {
     try {
       entityLinks = await listEntityMentionEdges({ config });
