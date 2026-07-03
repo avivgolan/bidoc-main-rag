@@ -25,9 +25,15 @@ export async function chatCompletion({
   const startedAt = Date.now();
   let response;
   let data = {};
+  // The abort timer must span the BODY read too: providers can send headers early
+  // and stream the completion body for minutes, so a fetch-only timeout never fires
+  // and response.json() hangs unbounded.
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    response = await fetchWithTimeout("https://openrouter.ai/api/v1/chat/completions", {
+    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -45,9 +51,13 @@ export async function chatCompletion({
         seed,
         response_format: responseFormat
       }))
-    }, timeoutMs);
+    });
 
-    data = await response.json().catch(() => ({}));
+    data = await response.json().catch((error) => {
+      if (controller.signal.aborted) throw new Error(`OpenRouter response timed out after ${timeoutMs}ms`);
+      if (!response.ok) return {};
+      throw error;
+    });
     if (!response.ok) {
       throw new Error(data?.error?.message || `OpenRouter request failed: ${response.status}`);
     }
@@ -70,6 +80,8 @@ export async function chatCompletion({
       httpStatus: response?.status || null
     }));
     throw error;
+  } finally {
+    clearTimeout(abortTimer);
   }
 }
 
