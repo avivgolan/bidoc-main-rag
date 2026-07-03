@@ -3896,6 +3896,7 @@ function collectInsightEngineFlags() {
   if ($("insightsFlagTrend")?.checked) flags.crossWindowTrend = true;
   if ($("insightsFlagRootCause")?.checked) flags.rootCauseHypotheses = true;
   if ($("insightsFlagHealth")?.checked) flags.healthScore = true;
+  if ($("insightsFlagGraph")?.checked) flags.graphClustering = true;
   return Object.keys(flags).length ? flags : undefined;
 }
 

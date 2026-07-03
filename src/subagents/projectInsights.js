@@ -708,15 +708,26 @@ async function generateProjectInsights({ config, records, summary, focusQuery, h
     sourceQuality: toolContext?.sourceQuality || null,
     conflicts: toolContext?.conflicts || []
   }, null, 2);
-  const callModel = (messages) => chatCompletion({
+  const callModel = (messages, modelOverride = null) => chatCompletion({
     apiKey: config.openRouterApiKey,
-    model: config.models?.main || "openai/gpt-4o-mini",
+    model: modelOverride || config.models?.main || "openai/gpt-4o-mini",
     temperature: 0.15,
     maxTokens: 8000,
     timeoutMs: 150_000,
     responseFormat: { type: "json_object" },
     messages
   });
+  // Slow main models (gemini-2.5-pro) sometimes exceed the timeout on large payloads;
+  // a degraded-but-grounded lite result beats returning nothing.
+  const callModelWithFallback = async (messages) => {
+    try {
+      return await callModel(messages);
+    } catch (error) {
+      if (!/timed out/i.test(error.message)) throw error;
+      emit?.(runId, "ai_synthesis", "Main model timed out; retrying with the lite model", { status: "running", fallbackModel: config.models?.lite || "openai/gpt-4o-mini" });
+      return callModel(messages, config.models?.lite || "openai/gpt-4o-mini");
+    }
+  };
 
   try {
     emit?.(runId, "ai_synthesis", "AI insight synthesis started", { records: candidateRecords.length, status: "running" });
@@ -724,7 +735,7 @@ async function generateProjectInsights({ config, records, summary, focusQuery, h
       { role: "system", content: systemPrompt },
       { role: "user", content: userPayload }
     ];
-    const content = await callModel(baseMessages);
+    const content = await callModelWithFallback(baseMessages);
     let parsed = tryParseInsightObject(content);
     let findings = parsed ? normalizeAiFindings(parsed.findings, records) : [];
     let insights = parsed ? normalizeAiInsights(parsed.insights, findings) : [];
@@ -745,7 +756,7 @@ async function generateProjectInsights({ config, records, summary, focusQuery, h
         contentPreview: String(content || "").slice(0, 300)
       });
       try {
-        const retryContent = await callModel([
+        const retryContent = await callModelWithFallback([
           ...baseMessages,
           { role: "assistant", content: String(content || "").slice(0, 6000) },
           { role: "user", content: correction }
