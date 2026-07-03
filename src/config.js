@@ -463,6 +463,7 @@ export function getConfig(settingsOverride = null) {
       ...defaultPrompts(),
       ...(settings.prompts || {})
     },
+    insights: normalizeInsightsSettings(settings.insights),
     retrieval: {
       rpcName: contentSource.hybridRpcName,
       candidates: clampNumber(settings.retrieval?.candidates ?? process.env.HYBRID_CANDIDATES, 1, 200, 40),
@@ -511,6 +512,7 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
     ai: config.ai,
     rag: config.rag,
     graph: config.graph,
+    insights: config.insights,
     cache: {
       ...config.cache,
       redisUrl: maskSecret(config.cache.redisUrl)
@@ -620,6 +622,20 @@ function normalizeRagSettings(value = {}) {
     contextRecordsLimit: clampNumber(raw.contextRecordsLimit, 1, 50, DEFAULT_RAG_SETTINGS.contextRecordsLimit),
     chunkTextLimit: clampNumber(raw.chunkTextLimit, 300, 6000, DEFAULT_RAG_SETTINGS.chunkTextLimit),
     plannerExtraQueriesLimit: clampNumber(raw.plannerExtraQueriesLimit, 0, 6, DEFAULT_RAG_SETTINGS.plannerExtraQueriesLimit)
+  };
+}
+
+// Project Insights feature flags (phase-2 spec). Pipeline + closure follow-up are
+// on by default; the calibration-stage engines are opt-in until tuned on real data.
+export function normalizeInsightsSettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  return {
+    evidencePipeline: raw.evidencePipeline !== false,
+    closureFollowup: raw.closureFollowup !== false,
+    primeFromAlerts: raw.primeFromAlerts !== false,
+    crossWindowTrend: raw.crossWindowTrend === true,
+    rootCauseHypotheses: raw.rootCauseHypotheses === true,
+    healthScore: raw.healthScore === true
   };
 }
 
@@ -870,6 +886,7 @@ export async function writeLocalSettings(settings, options = {}) {
   const mergedAi = mergeSection("ai", settings.ai || {}, existing.ai || {});
   const mergedRag = mergeSection("rag", settings.rag || {}, existing.rag || {});
   const mergedGraph = mergeSection("graph", settings.graph || {}, existing.graph || {});
+  const mergedInsights = mergeSection("insights", settings.insights || {}, existing.insights || {});
   const mergedCache = mergeSection("cache", settings.cache || {}, existing.cache || {});
   const mergedKnowledge = mergeSection("knowledge", settings.knowledge || {}, existing.knowledge || {});
   const mergedTimelineLinks = mergeSection("timelineLinks", settings.timelineLinks || {}, existing.timelineLinks || {});
@@ -916,6 +933,7 @@ export async function writeLocalSettings(settings, options = {}) {
     ai: normalizeAiSettings(mergedAi),
     rag: normalizeRagSettings(mergedRag),
     graph: normalizeGraphSettings(mergedGraph),
+    insights: normalizeInsightsSettings(mergedInsights),
     cache: normalizeCacheSettings(mergedCache, {
       redisUrl: mergeSecret(existing.cache?.redisUrl, has("cache") ? settings.cache?.redisUrl : undefined)
     }),

@@ -16,7 +16,7 @@ import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement,
 import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/subagents/rootCauseHypothesis.js";
 import { computeHealthScore } from "../src/subagents/healthScore.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
-import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
+import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
@@ -1477,6 +1477,23 @@ test("health score critical flags cap the score instead of averaging away (plan 
   const score = computeHealthScore({ analytics: pipeline.analytics, clusters: pipeline.clusters, patterns: pipeline.patterns, analysisWindow: { from: "2026-04-01", to: "2026-06-30" } });
   assert.ok(score.critical_flags.some((flag) => flag.flag === "commitment_overdue_30d"));
   if (score.score != null) assert.ok(score.score <= 60);
+});
+
+test("insights feature flags default to pipeline-on and calibration-engines-off", () => {
+  const defaults = normalizeInsightsSettings();
+  assert.deepEqual(defaults, {
+    evidencePipeline: true,
+    closureFollowup: true,
+    primeFromAlerts: true,
+    crossWindowTrend: false,
+    rootCauseHypotheses: false,
+    healthScore: false
+  });
+  const enabled = normalizeInsightsSettings({ crossWindowTrend: true, healthScore: true, evidencePipeline: false });
+  assert.equal(enabled.crossWindowTrend, true);
+  assert.equal(enabled.healthScore, true);
+  assert.equal(enabled.evidencePipeline, false);
+  assert.equal(enabled.rootCauseHypotheses, false);
 });
 
 test("insight quality metrics aggregate saved runs and tolerate legacy rows", () => {

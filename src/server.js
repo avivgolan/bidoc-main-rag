@@ -282,13 +282,19 @@ async function handleApi(req, res, url) {
     if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
     const cfg = buildRequestConfig(req, body);
+    // Per-request calibration flags: body.insights toggles the phase-2 engines for
+    // this run only, on top of the persisted config.insights defaults.
+    const requestInsights = body.insights && typeof body.insights === "object" ? body.insights : null;
+    const effectiveCfg = requestInsights
+      ? { ...cfg, insights: { ...(cfg.insights || {}), ...requestInsights } }
+      : cfg;
     const runId = body.runId || `project_insights_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     createRun(runId);
     const excludedSourceKeys = Array.isArray(body.excludeSourceKeys) ? body.excludeSourceKeys : [];
     const parentRunId = body.parentRunId || body.parent_run_id || null;
     try {
       const result = await runProjectInsightsAnalysis({
-        config: cfg,
+        config: effectiveCfg,
         focusQuery: body.focusQuery || body.query || "",
         dateFrom: body.dateFrom || body.date_from || null,
         dateTo: body.dateTo || body.date_to || null,
