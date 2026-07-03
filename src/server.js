@@ -15,7 +15,7 @@ import { callN8nTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { buildDataQueryWorkflowLog, DATA_QUERY_PIPELINE_STEPS, introspectSupabaseTables, runDataQueryAgent, runDataQueryPipeline, runDataQueryStep } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
-import { runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
+import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
@@ -223,6 +223,26 @@ async function handleApi(req, res, url) {
     const cfg = buildRequestConfig(req, {});
     const runs = await listProjectInsightRuns({ config: cfg, limit });
     return sendJson(res, 200, { runs });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/insights/quality-metrics") {
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    try {
+      const limit = Math.min(Number(url.searchParams.get("limit") || 50), 100);
+      const dateFrom = url.searchParams.get("date_from") || null;
+      const dateTo = url.searchParams.get("date_to") || null;
+      const cfg = buildRequestConfig(req, {});
+      const runs = await listProjectInsightRuns({ config: cfg, limit });
+      const scoped = (runs || []).filter((run) => {
+        const created = String(run?.created_at || "").slice(0, 10);
+        if (dateFrom && created && created < dateFrom) return false;
+        if (dateTo && created && created > dateTo) return false;
+        return true;
+      });
+      return sendJson(res, 200, { ...aggregateInsightQualityMetrics(scoped), date_from: dateFrom, date_to: dateTo });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
   }
 
   if (req.method === "GET" && url.pathname === "/api/insights/hashtags") {

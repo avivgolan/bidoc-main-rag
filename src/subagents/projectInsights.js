@@ -5,7 +5,9 @@ import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "..
 import { fetchAlertsTimelineEvents, fetchTimelineEventPage, graphSearch, hybridSearch } from "../supabase.js";
 import { callN8nTool } from "../tools.js";
 import { runAlertAgent } from "./alert.js";
-import { buildInsightAiContext, critiqueAndRankInsights, runInsightEvidencePipeline } from "./insightPipeline.js";
+import { buildInsightAiContext, buildInsightEvidence, clusterCanonicalEvents, computeBaselineWindow, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, runInsightEvidencePipeline } from "./insightPipeline.js";
+import { generateRootCauseHypotheses } from "./rootCauseHypothesis.js";
+import { computeHealthScore } from "./healthScore.js";
 
 const SIGNALS = [
   {
@@ -122,13 +124,13 @@ export async function runProjectInsightsAnalysis({
 
   const candidateRecords = dedupeRecords([...filteredHybridRecords, ...indexScan.records])
     .filter((record) => !excludedKeys.has(sourceKey(record)));
-  const records = sortRecordsByHashtagBoost(candidateRecords, hashtagContext.active)
+  let records = sortRecordsByHashtagBoost(candidateRecords, hashtagContext.active)
     .slice(0, boundedLimit);
 
   // Deterministic evidence pipeline (normalize -> dedupe -> cluster/timeline -> analytics -> patterns).
   // Feature flag: config.insights.evidencePipeline === false disables it and restores the old flow.
   const pipelineEnabled = config?.insights?.evidencePipeline !== false;
-  const pipeline = pipelineEnabled
+  let pipeline = pipelineEnabled
     ? runInsightEvidencePipeline({ records, analysisWindow: { from: safeDateFrom, to: safeDateTo } })
     : null;
   if (pipeline) {
@@ -159,6 +161,88 @@ export async function runProjectInsightsAnalysis({
     });
   }
 
+  // Follow-up retrieval: for clusters flagged as open patterns, search the index for
+  // later closure/status evidence so a resolved topic is not reported as an active risk.
+  let followupRecordCount = 0;
+  if (pipeline && config?.insights?.closureFollowup !== false) {
+    const followup = await searchClosureEvidence({
+      config,
+      pipeline,
+      existingKeys: new Set(records.map((record) => sourceKey(record))),
+      excludedKeys,
+      dateFrom: safeDateFrom,
+      dateTo: safeDateTo,
+      runId,
+      emit
+    });
+    followupRecordCount = followup.records.length;
+    if (followup.records.length) {
+      records = dedupeRecords([...records, ...followup.records]).slice(0, boundedLimit + 30);
+      pipeline = runInsightEvidencePipeline({ records, analysisWindow: { from: safeDateFrom, to: safeDateTo } });
+    }
+    step("closure_followup", followup.records.length
+      ? "Closure follow-up search added later evidence; pipeline recomputed"
+      : (followup.targets ? "Closure follow-up search found no new evidence" : "No open patterns required a closure follow-up"), {
+      targets: followup.targets,
+      queries: followup.queries,
+      newRecords: followup.records.length,
+      status: followup.targets ? "done" : "skipped"
+    });
+  }
+
+  // Cross-window trend (phase-2 spec Task 1, default off): retrieve the preceding
+  // window of equal length and compare the same versioned metrics against it.
+  if (pipeline && config?.insights?.crossWindowTrend === true && safeDateFrom && safeDateTo) {
+    const baselineWindow = computeBaselineWindow(safeDateFrom, safeDateTo);
+    if (baselineWindow) {
+      try {
+        const baselineScan = await collectIndexRecords({
+          config,
+          dateFrom: baselineWindow.from,
+          dateTo: baselineWindow.to,
+          limit: boundedLimit,
+          excludedKeys: new Set()
+        });
+        const baselineEvidence = buildInsightEvidence(dedupeRecords(baselineScan.records));
+        const baselineClusters = clusterCanonicalEvents(dedupeInsightEvidence(baselineEvidence));
+        pipeline.analytics.trends = computeTrendAnalysis({
+          evidence: pipeline.evidence,
+          clusters: pipeline.clusters,
+          analysisWindow: { from: safeDateFrom, to: safeDateTo },
+          baseline: { evidence: baselineEvidence, clusters: baselineClusters, window: baselineWindow }
+        });
+        step("trend_analysis", "Cross-window trend computed against the previous period", {
+          baselineWindow,
+          baselineRecords: baselineScan.records.length,
+          status: pipeline.analytics.trends.status,
+          coverageGap: pipeline.analytics.trends.coverage_gap ?? null
+        });
+      } catch (error) {
+        step("trend_analysis", "Cross-window trend failed; in-window trend retained", { error: error.message }, "warning");
+      }
+    }
+  }
+
+  // Root Cause Hypothesis Engine (phase-2 spec Task 2, default off): inference-only
+  // causal candidates for the strongest detected patterns.
+  let rootCauseHypotheses = [];
+  if (pipeline && config?.insights?.rootCauseHypotheses === true && pipeline.patterns.length) {
+    rootCauseHypotheses = await generateRootCauseHypotheses({
+      config,
+      patterns: pipeline.patterns,
+      clusters: pipeline.clusters,
+      evidence: pipeline.evidence,
+      runId,
+      emit
+    });
+    step("root_cause_hypotheses", rootCauseHypotheses.length
+      ? `${rootCauseHypotheses.length} inference-only hypotheses generated`
+      : "No supported root-cause hypotheses", {
+      hypotheses: rootCauseHypotheses.length,
+      requiresValidation: rootCauseHypotheses.every((item) => item.requires_validation === true)
+    });
+  }
+
   const toolContext = await runExistingProjectTools({
     config,
     query: effectiveFocusQuery || DEFAULT_INSIGHTS_QUERY,
@@ -177,6 +261,7 @@ export async function runProjectInsightsAnalysis({
   summary.expansion = Boolean(expansion);
 
   const evidenceContext = pipeline ? buildInsightAiContext(pipeline) : null;
+  if (evidenceContext && rootCauseHypotheses.length) evidenceContext.root_cause_hypotheses = rootCauseHypotheses;
   const { findings, insights: rawInsights } = await generateProjectInsights({ config, records, summary, focusQuery: effectiveFocusQuery, hashtagContext, alertDirection, toolContext, evidenceContext, runId, emit });
   step("signal_detection", "Findings generated from records", {
     findings: findings.length,
@@ -204,14 +289,90 @@ export async function runProjectInsightsAnalysis({
     mode: (findings.length || insights.length) ? "ai" : "none"
   });
 
+  // Executive Health Score (phase-2 spec Task 3, default off). Summary output only —
+  // it is intentionally NOT added to the AI synthesis payload (plan: a score is never
+  // evidence for an insight).
+  let healthScore = null;
+  if (pipeline && config?.insights?.healthScore === true) {
+    healthScore = computeHealthScore({
+      analytics: pipeline.analytics,
+      clusters: pipeline.clusters,
+      patterns: pipeline.patterns,
+      analysisWindow: { from: safeDateFrom, to: safeDateTo }
+    });
+    step("health_score", healthScore.score != null
+      ? `Health score ${healthScore.score} (${healthScore.status})`
+      : `Health score not computed (${healthScore.reason || healthScore.status})`, {
+      score: healthScore.score,
+      status: healthScore.status,
+      criticalFlags: healthScore.critical_flags?.length || 0,
+      version: healthScore.score_version
+    });
+  }
+
+  // Per-run observability (plan section 17): stage counts, versions, rejections, timing.
+  const observability = {
+    request: {
+      focusQuery: effectiveFocusQuery || null,
+      focusSource: userFocusQuery ? "user" : (alertDirection.alertCount ? "alerts" : "none"),
+      dateFrom: safeDateFrom,
+      dateTo: safeDateTo,
+      limit: boundedLimit,
+      expansion: Boolean(expansion),
+      excludedSourceKeys: excludedKeys.size
+    },
+    retrieval: {
+      indexRecords: indexScan.records.length,
+      hybridRecords: filteredHybridRecords.length,
+      followupRecords: followupRecordCount,
+      recordsAnalyzed: records.length,
+      skippedRecords: summary.skippedRecords
+    },
+    pipeline: pipeline ? {
+      evidence: pipeline.evidence.length,
+      canonicalEvents: pipeline.canonicalEvents.length,
+      mergedDuplicates: pipeline.evidence.length - pipeline.canonicalEvents.length,
+      clusters: pipeline.clusters.length,
+      openClusters: pipeline.analytics.project_metrics.open_clusters.value,
+      closedClusters: pipeline.analytics.project_metrics.closed_clusters.value,
+      contradictions: pipeline.analytics.project_metrics.contradictions.value,
+      patternsByType: pipeline.patterns.reduce((acc, item) => ({ ...acc, [item.type]: (acc[item.type] || 0) + 1 }), {}),
+      trendStatus: pipeline.analytics.trends?.status || null,
+      dataCoverage: pipeline.analytics.data_quality
+    } : null,
+    synthesis: {
+      findings: findings.length,
+      candidateInsights: rawInsights.length,
+      acceptedInsights: insights.length,
+      rejectedInsights: critic.rejected.length,
+      rejectionReasons: critic.rejected.reduce((acc, item) => ({ ...acc, [item.reason]: (acc[item.reason] || 0) + 1 }), {})
+    },
+    versions: {
+      pipeline: pipeline?.pipeline_version || null,
+      analytics: pipeline?.analytics?.analytics_version || null,
+      trend: pipeline?.analytics?.trends?.trend_version || null,
+      ranking: critic.score_version,
+      promptSource: config?.prompts?.project_insights ? "settings_override" : "default"
+    },
+    timing: {
+      startedAt: trace[0]?.time || null,
+      finishedAt: trace.at(-1)?.time || null,
+      steps: trace.map((item) => ({ step: item.step, time: item.time }))
+    }
+  };
+  summary.observability = observability;
+
   const workflowLog = buildProjectInsightsWorkflowLog({ trace, summary, insights, findings, toolContext, pipeline, critic });
   return {
     ok: true,
     summary,
     findings,
     insights,
+    observability,
     analytics: pipeline?.analytics || null,
     patterns: pipeline?.patterns || [],
+    rootCauseHypotheses,
+    healthScore,
     clusters: pipeline ? compactClusters(pipeline.clusters) : [],
     critic: pipeline ? { rejected: critic.rejected, score_version: critic.score_version } : null,
     toolContext: compactProjectToolContext(toolContext),
@@ -467,6 +628,7 @@ const DEFAULT_PROJECT_INSIGHTS_PROMPT = [
   "- `evidence_clusters`: topic clusters with chronological timelines, latest status, closure and contradiction flags.",
   "- `analytics_context`: deterministic calculated metrics (with formula versions and analysis window). Do not recalculate supplied metrics.",
   "- `candidate_patterns`: rule-detected patterns (unfulfilled_commitment, status_deterioration, persistent_open_issue, contradiction, closure). Treat them as leads to verify against the evidence, not as proven conclusions.",
+  "- `root_cause_hypotheses`: inference-only causal candidates. NEVER present them as confirmed causes; when used, keep them phrased as hypotheses requiring validation and mention the missing evidence.",
   "Ground everything ONLY in the provided inputs — never invent records, facts, dates, causes, dependencies, or statuses.",
   "Evidence rules:",
   "- Never treat a commitment, request, or estimate as completed work.",
@@ -520,6 +682,7 @@ async function generateProjectInsights({ config, records, summary, focusQuery, h
     evidence_clusters: evidenceContext?.evidence_clusters || [],
     analytics_context: evidenceContext?.analytics_context || null,
     candidate_patterns: evidenceContext?.candidate_patterns || [],
+    root_cause_hypotheses: evidenceContext?.root_cause_hypotheses || [],
     records: candidateRecords,
     graphContext: toolContext?.graphContext || [],
     alertAgent: toolContext?.alertResult || null,
@@ -694,6 +857,46 @@ export function parseInsightJson(content) {
   }
 }
 
+// Targets the top open-pattern clusters (unfulfilled commitment / persistent issue)
+// with a hybrid search for closure or status-change evidence. Read-only, capped at
+// 3 clusters; failures degrade to "no follow-up" without failing the run.
+async function searchClosureEvidence({ config, pipeline, existingKeys, excludedKeys, dateFrom, dateTo, runId, emit }) {
+  const openPatternClusterIds = [...new Set(pipeline.patterns
+    .filter((item) => ["unfulfilled_commitment", "persistent_open_issue"].includes(item.type))
+    .map((item) => item.cluster_id))];
+  const targets = openPatternClusterIds
+    .map((clusterId) => pipeline.clusters.find((cluster) => cluster.cluster_id === clusterId))
+    .filter((cluster) => cluster && !cluster.closed)
+    .sort((a, b) => b.evidence_ids.length - a.evidence_ids.length)
+    .slice(0, 3);
+  if (!targets.length) return { targets: 0, queries: [], records: [] };
+
+  const queries = targets.map((cluster) => `${cluster.topic} סטטוס עדכני הושלם נסגר בוצע`);
+  const found = [];
+  for (const [index, cluster] of targets.entries()) {
+    try {
+      const rows = await hybridSearch({
+        config,
+        query: queries[index],
+        dateFrom: cluster.last_date || dateFrom,
+        dateTo,
+        hashtags: cluster.hashtags,
+        topK: 10
+      });
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const normalized = normalizeRecord(row, "hybrid");
+        const key = sourceKey(normalized);
+        if (!key || existingKeys.has(key) || excludedKeys.has(key)) continue;
+        existingKeys.add(key);
+        found.push(normalized);
+      }
+    } catch (error) {
+      emit?.(runId, "closure_followup", `Closure follow-up search failed for ${cluster.topic}`, { error: error.message, status: "warning" });
+    }
+  }
+  return { targets: targets.length, queries, records: found };
+}
+
 async function searchFocusRecords({ config, focusQuery, dateFrom, dateTo, activeHashtags = [], runId, emit }) {
   const query = String(focusQuery || "").trim();
   if (!query) return [];
@@ -704,6 +907,57 @@ async function searchFocusRecords({ config, focusQuery, dateFrom, dateTo, active
     emit?.(runId, "focus_retrieval_warning", "Hybrid focus search failed; using index scan only", { error: error.message, status: "warning" });
     return [];
   }
+}
+
+// Aggregates saved insight runs into cross-run quality metrics (phase-2 spec Task 6,
+// plan section 17). Tolerates legacy rows without an observability object. Metrics
+// that need human judgement (precision, hallucination rate) are intentionally absent.
+export function aggregateInsightQualityMetrics(runs = []) {
+  const rows = Array.isArray(runs) ? runs : [];
+  const withObservability = [];
+  let totalInsights = 0;
+  let multiFindingInsights = 0;
+  let insightsWithAction = 0;
+  const rejectionReasons = {};
+  const durations = [];
+
+  for (const run of rows) {
+    const observability = run?.observability || run?.metadata?.observability || run?.summary?.observability || null;
+    if (observability) {
+      withObservability.push(observability);
+      for (const [reason, count] of Object.entries(observability.synthesis?.rejectionReasons || {})) {
+        rejectionReasons[reason] = (rejectionReasons[reason] || 0) + Number(count || 0);
+      }
+      const started = Date.parse(observability.timing?.startedAt || "");
+      const finished = Date.parse(observability.timing?.finishedAt || "");
+      if (Number.isFinite(started) && Number.isFinite(finished) && finished >= started) durations.push(finished - started);
+    }
+    for (const insight of Array.isArray(run?.insights) ? run.insights : []) {
+      totalInsights += 1;
+      if ((insight?.supporting_finding_ids?.length || 0) >= 2) multiFindingInsights += 1;
+      if (String(insight?.recommended_action || "").trim()) insightsWithAction += 1;
+    }
+  }
+
+  const sum = (selector) => withObservability.reduce((acc, item) => acc + (Number(selector(item)) || 0), 0);
+  const avg = (selector) => withObservability.length ? Number((sum(selector) / withObservability.length).toFixed(2)) : null;
+  const findingsTotal = sum((item) => item.synthesis?.findings);
+  const acceptedTotal = sum((item) => item.synthesis?.acceptedInsights);
+
+  return {
+    metrics_version: "insight-quality-metrics-v1",
+    runs: rows.length,
+    runs_with_observability: withObservability.length,
+    avg_findings_per_run: avg((item) => item.synthesis?.findings),
+    avg_accepted_insights_per_run: avg((item) => item.synthesis?.acceptedInsights),
+    avg_rejected_insights_per_run: avg((item) => item.synthesis?.rejectedInsights),
+    findings_to_accepted_ratio: findingsTotal ? Number((acceptedTotal / findingsTotal).toFixed(3)) : null,
+    rejection_reasons: rejectionReasons,
+    pct_insights_with_multiple_findings: totalInsights ? Number((multiFindingInsights / totalInsights).toFixed(3)) : null,
+    pct_insights_with_recommended_action: totalInsights ? Number((insightsWithAction / totalInsights).toFixed(3)) : null,
+    avg_run_duration_ms: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null,
+    total_insights: totalInsights
+  };
 }
 
 export function detectProjectSignals(records = [], { focusQuery = "", activeHashtags = [] } = {}) {
@@ -760,6 +1014,8 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
     { id: "clustering_timeline", label: "Clustering + Timeline", kind: "router", status: pipelineStatus },
     { id: "analytics_engine", label: "Analytics Engine", kind: "router", status: pipelineStatus },
     { id: "pattern_detection", label: "Pattern Detection", kind: "router", status: pipelineStatus },
+    { id: "closure_followup", label: "Closure Follow-up Search", kind: "vector", status: pipelineStatus },
+    { id: "root_cause_hypotheses", label: "Root Cause Hypotheses", kind: "ai", status: trace.some((item) => item.step === "root_cause_hypotheses") ? "done" : "skipped" },
     { id: "graph_search", label: "Project Graph Search", kind: "database", status: nodeStatus(toolContext.toolCalls, "graph_search") },
     { id: "alert_agent", label: "Alert Agent", kind: "ai", status: nodeStatus(toolContext.toolCalls, "alert") },
     { id: "n8n_tools", label: "n8n Tool Adapters", kind: "tool", status: n8nNodeStatus(toolContext.n8nResults) },
@@ -780,7 +1036,9 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
     { from: "deduplication", to: "clustering_timeline" },
     { from: "clustering_timeline", to: "analytics_engine" },
     { from: "analytics_engine", to: "pattern_detection" },
-    { from: "pattern_detection", to: "graph_search" },
+    { from: "pattern_detection", to: "closure_followup" },
+    { from: "closure_followup", to: "root_cause_hypotheses" },
+    { from: "root_cause_hypotheses", to: "graph_search" },
     { from: "graph_search", to: "alert_agent" },
     { from: "alert_agent", to: "n8n_tools" },
     { from: "n8n_tools", to: "source_quality" },
@@ -804,6 +1062,8 @@ export function buildProjectInsightsWorkflowLog({ trace = [], summary = {}, insi
       clustering_timeline: { summary: pipeline ? `${pipeline.clusters.length} topic clusters with timelines` : "Pipeline disabled", output: pipeline ? pipeline.clusters.slice(0, 8) : null, logs: trace.filter((item) => item.step === "clustering_timeline") },
       analytics_engine: { summary: pipeline ? `Deterministic metrics (${pipeline.analytics.analytics_version})` : "Pipeline disabled", output: pipeline ? pipeline.analytics : null, logs: trace.filter((item) => item.step === "analytics_engine") },
       pattern_detection: { summary: pipeline ? `${pipeline.patterns.length} candidate patterns` : "Pipeline disabled", output: pipeline ? pipeline.patterns : null, logs: trace.filter((item) => item.step === "pattern_detection") },
+      closure_followup: { summary: pipeline ? "Search for later closure/status evidence on open patterns" : "Pipeline disabled", logs: trace.filter((item) => item.step === "closure_followup") },
+      root_cause_hypotheses: { summary: "Inference-only causal hypotheses for the strongest patterns (feature-flagged)", logs: trace.filter((item) => item.step === "root_cause_hypotheses" || item.step === "trend_analysis") },
       graph_search: { summary: `${toolContext.graphContext?.length || 0} graph relationships returned`, output: toolContext.graphContext || [], logs: trace.filter((item) => item.step === "graph_search") },
       alert_agent: { summary: toolContext.alertResult ? `${toolContext.alertResult.resultsCount || 0} alert records checked` : "Alert Agent unavailable or skipped", output: toolContext.alertResult || null, logs: trace.filter((item) => item.step === "alert_agent") },
       n8n_tools: { summary: `${toolContext.n8nResults?.length || 0} project tools called`, output: compactToolResults(toolContext.toolCalls || []), logs: trace.filter((item) => item.step === "n8n_tools") },
@@ -984,6 +1244,10 @@ function normalizeRecord(record = {}, source = "") {
     title,
     summary,
     date: record.primary_date || record.data_date || record.created_at || record.date || metadata.primary_date || null,
+    // Dedicated ingestion fields when the index provides them (phase-2 spec Task 5);
+    // the pipeline falls back to `date` for both when absent.
+    event_date: record.event_date || metadata.event_date || null,
+    document_date: record.document_date || metadata.document_date || null,
     source_table: record.source_table || metadata.source_table || record.table || source || "index",
     source_id: record.source_id || metadata.source_id || record.id || "",
     source_url: record.source_url || record.data_link || metadata.source_url || "",

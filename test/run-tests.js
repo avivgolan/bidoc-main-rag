@@ -12,7 +12,10 @@ import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/
 import { buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryWorkflowLog, executeQueryPlans, introspectSupabaseTables, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, runDataQueryPipeline, validateQueryPlan, validateReadOnlySql } from "../src/subagents/dataQuery.js";
 import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
 import { buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
-import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement, clusterCanonicalEvents, computeInsightAnalytics, critiqueAndRankInsights, dedupeInsightEvidence, detectInsightPatterns, extractExpectedDate, runInsightEvidencePipeline } from "../src/subagents/insightPipeline.js";
+import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement, clusterCanonicalEvents, computeBaselineWindow, computeInsightAnalytics, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, detectInsightPatterns, extractExpectedDate, runInsightEvidencePipeline } from "../src/subagents/insightPipeline.js";
+import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/subagents/rootCauseHypothesis.js";
+import { computeHealthScore } from "../src/subagents/healthScore.js";
+import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
@@ -1341,6 +1344,166 @@ test("insight critic rejects unsupported and resolved insights and caps the coun
   assert.ok(capped.rejected.some((item) => item.reason === "over_insight_limit"));
 });
 
+test("trend analyzer compares baseline and current halves with versioned metrics (plan test 11)", () => {
+  const evidence = (dates, status) => dates.map((date, i) => ({
+    evidence_id: `t-${status}-${i}`, event_date: date, status, evidence_type: status === "closed" ? "closure" : "reported_claim",
+    source_id: `s-${status}-${i}`, lineage: { origin_type: "primary", derived_from: null }
+  }));
+  // Baseline half (01-15.06): 5 open items. Current half (16-30.06): 8 open items.
+  const baselineOpen = evidence(["2026-06-02", "2026-06-04", "2026-06-06", "2026-06-08", "2026-06-10"], "open");
+  const currentOpen = evidence(["2026-06-16", "2026-06-17", "2026-06-18", "2026-06-20", "2026-06-22", "2026-06-24", "2026-06-26", "2026-06-28"], "open");
+  const trends = computeTrendAnalysis({
+    evidence: [...baselineOpen, ...currentOpen],
+    clusters: [],
+    analysisWindow: { from: "2026-06-01", to: "2026-06-30" },
+    referenceDate: "2026-06-30"
+  });
+  assert.equal(trends.status, "calculated");
+  assert.equal(trends.trend_version, "insight-trend-v1");
+  const openTrend = trends.metrics.find((item) => item.metric_id === "open_statements");
+  assert.equal(openTrend.baseline_period.value, 5);
+  assert.equal(openTrend.current_period.value, 8);
+  assert.equal(openTrend.absolute_change, 3);
+  assert.equal(openTrend.percentage_change, 60);
+  assert.equal(openTrend.direction, "up");
+  assert.equal(openTrend.assessment, "deteriorating");
+  assert.equal(openTrend.sample_status, "valid");
+  assert.ok(openTrend.baseline_period.from && openTrend.current_period.to);
+});
+
+test("trend analyzer marks small samples as insufficient instead of asserting a trend", () => {
+  const trends = computeTrendAnalysis({
+    evidence: [
+      { evidence_id: "a", event_date: "2026-06-02", status: "open", evidence_type: "reported_claim", lineage: { origin_type: "primary", derived_from: null } },
+      { evidence_id: "b", event_date: "2026-06-20", status: "open", evidence_type: "reported_claim", lineage: { origin_type: "primary", derived_from: null } }
+    ],
+    clusters: [],
+    analysisWindow: { from: "2026-06-01", to: "2026-06-30" },
+    referenceDate: "2026-06-30"
+  });
+  assert.equal(trends.status, "insufficient_sample");
+  assert.ok(trends.metrics.every((item) => item.sample_status === "insufficient_sample" && item.confidence === "low"));
+  const empty = computeTrendAnalysis({ evidence: [], clusters: [], analysisWindow: { from: "2026-06-01", to: "2026-06-30" }, referenceDate: "2026-06-30" });
+  assert.equal(empty.status, "insufficient_data");
+});
+
+test("insight evidence keeps event_date and document_date separate when ingestion provides both", () => {
+  const evidence = buildInsightEvidence([
+    { id: "d-1", title: "התחייבות מחיצות", text: "הקבלן התחייב לסיים עד 18.6", date: "2026-06-20", event_date: "2026-06-12", document_date: "2026-06-20", source_table: "index", source_id: "m-1" }
+  ]);
+  assert.equal(evidence[0].event_date, "2026-06-12");
+  assert.equal(evidence[0].document_date, "2026-06-20");
+});
+
+test("cross-window trend compares against a previous window and rejects coverage mismatch", () => {
+  const window = computeBaselineWindow("2026-06-01", "2026-06-30");
+  assert.deepEqual(window, { from: "2026-05-03", to: "2026-06-01" });
+  const mkEvidence = (count, prefix, month, status) => Array.from({ length: count }, (_, i) => ({
+    evidence_id: `${prefix}-${i}`, event_date: `2026-${month}-${String(i + 2).padStart(2, "0")}`, status,
+    evidence_type: "reported_claim", lineage: { origin_type: "primary", derived_from: null }
+  }));
+  const trends = computeTrendAnalysis({
+    evidence: mkEvidence(8, "cur", "06", "open"),
+    clusters: [],
+    analysisWindow: { from: "2026-06-01", to: "2026-06-30" },
+    referenceDate: "2026-06-30",
+    baseline: { evidence: mkEvidence(5, "base", "05", "open"), clusters: [], window }
+  });
+  assert.equal(trends.baseline_definition, "previous_window");
+  assert.equal(trends.status, "calculated");
+  const open = trends.metrics.find((item) => item.metric_id === "open_statements");
+  assert.equal(open.baseline_period.value, 5);
+  assert.equal(open.current_period.value, 8);
+  assert.equal(open.assessment, "deteriorating");
+
+  // Baseline evidence without dates => dated-ratio gap > 0.25 => comparison invalidated.
+  const undatedBaseline = Array.from({ length: 6 }, (_, i) => ({
+    evidence_id: `ub-${i}`, event_date: null, status: "open", evidence_type: "reported_claim", lineage: { origin_type: "primary", derived_from: null }
+  }));
+  const mismatched = computeTrendAnalysis({
+    evidence: mkEvidence(8, "cur", "06", "open"),
+    clusters: [],
+    analysisWindow: { from: "2026-06-01", to: "2026-06-30" },
+    referenceDate: "2026-06-30",
+    baseline: { evidence: undatedBaseline, clusters: [], window }
+  });
+  assert.equal(mismatched.status, "coverage_mismatch");
+  assert.ok(mismatched.metrics.every((item) => item.sample_status === "coverage_mismatch" && ["unknown", "stable"].includes(item.assessment)));
+});
+
+test("root cause candidates precede the pattern and hypotheses are forced to inference (plan test 12)", () => {
+  const clusters = [
+    { cluster_id: "c1", first_date: "2026-06-10", hashtags: ["חשמל"], evidence_ids: ["ev-3"] },
+    { cluster_id: "c2", first_date: "2026-05-01", hashtags: ["חשמל"], evidence_ids: ["ev-1", "ev-2"] }
+  ];
+  const evidence = [
+    { evidence_id: "ev-1", event_date: "2026-05-25", subject: "חסר מידע מהיועץ", text: "לא התקבל מידע מיועץ החשמל", hashtags: ["חשמל"], status: "open", evidence_type: "reported_claim" },
+    { evidence_id: "ev-2", event_date: "2026-04-01", subject: "ישן מדי", text: "מחוץ לחלון", hashtags: ["חשמל"], status: "open", evidence_type: "reported_claim" },
+    { evidence_id: "ev-3", event_date: "2026-06-10", subject: "עיכוב החלטה", text: "ההחלטה מתעכבת", hashtags: ["חשמל"], status: "open", evidence_type: "reported_claim" }
+  ];
+  const candidates = collectRootCauseCandidates({ pattern: { cluster_id: "c1" }, clusters, evidence });
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].evidence_id, "ev-1");
+  assert.equal(candidates[0].category, "information_gap");
+
+  const validated = validateRootCauseHypotheses([
+    { hypothesis: "ייתכן שהעיכוב נובע ממידע חסר מהיועץ", classification: "confirmed_fact", requires_validation: false, supporting_evidence_ids: ["ev-1", "invented-id"], confidence: "certain" },
+    { hypothesis: "השערה בלי ראיות", supporting_evidence_ids: ["invented-only"] }
+  ], { patternId: "pattern-x", validEvidenceIds: new Set(["ev-1"]) });
+  assert.equal(validated.length, 1);
+  assert.equal(validated[0].classification, "inference");
+  assert.equal(validated[0].requires_validation, true);
+  assert.deepEqual(validated[0].supporting_evidence_ids, ["ev-1"]);
+  assert.equal(validated[0].confidence, "low");
+  assert.equal(validated[0].status, "candidate");
+});
+
+test("health score treats missing data as not-computed, never as healthy (plan tests 10+16)", () => {
+  const emptyAnalytics = computeInsightAnalytics({ clusters: [], evidence: [], analysisWindow: { from: "2026-06-01", to: "2026-06-30" }, referenceDate: "2026-06-30" });
+  const score = computeHealthScore({ analytics: emptyAnalytics, clusters: [], patterns: [], analysisWindow: { from: "2026-06-01", to: "2026-06-30" } });
+  assert.equal(score.score, null);
+  assert.equal(score.status, "not_computed");
+  assert.equal(score.score_version, "project-health-v1");
+  assert.notEqual(score.score, 100);
+  assert.ok(Object.values(score.subscores).every((dim) => dim.score === null));
+});
+
+test("health score critical flags cap the score instead of averaging away (plan test 13)", () => {
+  const records = Array.from({ length: 12 }, (_, i) => ({
+    id: `r-${i}`, title: `נושא תקין ${i}`, text: `עדכון שוטף מספר ${i} התקבל`, date: `2026-06-${String(i + 2).padStart(2, "0")}`, source_table: "index", source_id: `s-${i}`
+  }));
+  records.push({ id: "od", title: "התחייבות ישנה", text: "הקבלן התחייב לסיים עד 1.5", date: "2026-04-20", source_table: "index", source_id: "od-1" });
+  const pipeline = runInsightEvidencePipeline({ records, analysisWindow: { from: "2026-04-01", to: "2026-06-30" }, referenceDate: "2026-06-30" });
+  const score = computeHealthScore({ analytics: pipeline.analytics, clusters: pipeline.clusters, patterns: pipeline.patterns, analysisWindow: { from: "2026-04-01", to: "2026-06-30" } });
+  assert.ok(score.critical_flags.some((flag) => flag.flag === "commitment_overdue_30d"));
+  if (score.score != null) assert.ok(score.score <= 60);
+});
+
+test("insight quality metrics aggregate saved runs and tolerate legacy rows", () => {
+  const runs = [
+    {
+      insights: [
+        { supporting_finding_ids: ["f1", "f2"], recommended_action: "לבדוק" },
+        { supporting_finding_ids: ["f1"], recommended_action: "" }
+      ],
+      observability: {
+        synthesis: { findings: 4, acceptedInsights: 2, rejectedInsights: 1, rejectionReasons: { duplicate_insight: 1 } },
+        timing: { startedAt: "2026-07-01T10:00:00Z", finishedAt: "2026-07-01T10:02:00Z" }
+      }
+    },
+    { insights: [{ supporting_finding_ids: [], recommended_action: "פעולה" }] }
+  ];
+  const metrics = aggregateInsightQualityMetrics(runs);
+  assert.equal(metrics.runs, 2);
+  assert.equal(metrics.runs_with_observability, 1);
+  assert.equal(metrics.total_insights, 3);
+  assert.equal(metrics.pct_insights_with_multiple_findings, Number((1 / 3).toFixed(3)));
+  assert.equal(metrics.rejection_reasons.duplicate_insight, 1);
+  assert.equal(metrics.avg_run_duration_ms, 120000);
+  assert.equal(metrics.findings_to_accepted_ratio, 0.5);
+  assert.equal(metrics.metrics_version, "insight-quality-metrics-v1");
+});
+
 test("insight clusters build chronological timelines with latest status precedence", () => {
   const events = dedupeInsightEvidence(buildInsightEvidence([
     { id: "t-1", title: "ריצוף לובי", text: "עבודות הריצוף בלובי עדיין בביצוע", date: "2026-06-02", source_table: "index", source_id: "r-1" },
@@ -1408,6 +1571,8 @@ test("project insights workflow exposes the index-first agent flow", () => {
     "clustering_timeline",
     "analytics_engine",
     "pattern_detection",
+    "closure_followup",
+    "root_cause_hypotheses",
     "graph_search",
     "alert_agent",
     "n8n_tools",

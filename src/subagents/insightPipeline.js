@@ -6,6 +6,8 @@
 const PIPELINE_VERSION = "insight-pipeline-v1";
 const ANALYTICS_VERSION = "insights-analytics-v1";
 const RANKING_VERSION = "insight-ranking-v1";
+const TREND_VERSION = "insight-trend-v1";
+const TREND_MIN_SAMPLE = 5;
 const ANALYTICS_TIMEZONE = "Asia/Jerusalem";
 
 const STATEMENT_RULES = [
@@ -86,10 +88,10 @@ export function buildInsightEvidence(records = []) {
       source_table: record.source_table || "index",
       source_id: record.source_id || "",
       source_url: record.source_url || null,
-      // The index has one date per record today; event vs document date separation
-      // needs a dedicated ingestion field (open question in the gap analysis).
-      event_date: date,
-      document_date: date,
+      // Dedicated ingestion fields win when present (phase-2 spec Task 5); most index
+      // records still carry a single date, which then serves as both.
+      event_date: cleanDate(record.event_date) || date,
+      document_date: cleanDate(record.document_date) || date,
       subject,
       hashtags: Array.isArray(record.hashtags) ? record.hashtags : [],
       severity_or_risk: record.severity_or_risk || "",
@@ -279,12 +281,162 @@ export function computeInsightAnalytics({ clusters = [], evidence = [], analysis
         : insufficientMetric("open-age-v1")
     },
     per_cluster: perCluster,
+    trends: computeTrendAnalysis({ evidence, clusters, analysisWindow, referenceDate: reference }),
     data_quality: {
       dated_evidence_ratio: ratioMetric(datedEvidence, evidence.length, "dated-evidence-ratio-v1"),
       evidence_with_source_id_ratio: ratioMetric(withSourceId, evidence.length, "source-id-ratio-v1"),
       derived_source_ratio: ratioMetric(derivedCount, evidence.length, "derived-source-ratio-v1")
     }
   };
+}
+
+// Trend Analyzer — sub-component of the analytics engine, never a parallel pipeline.
+// v1 baseline definition: the first half of the analysis window is the baseline period
+// and the second half is the current period (both computed from the same evidence set,
+// same formula version). Cross-window baselines (previous month etc.) require extra
+// retrieval and are specified in docs/insight-agent-phase2-spec.md.
+export function computeTrendAnalysis({ evidence = [], clusters = [], analysisWindow = null, referenceDate = null, baseline = null } = {}) {
+  if (baseline) {
+    return computeCrossWindowTrend({ evidence, clusters, analysisWindow, referenceDate, baseline });
+  }
+  const dated = evidence.filter((item) => item.event_date);
+  const from = cleanDate(analysisWindow?.from) || dated.map((item) => item.event_date).sort()[0] || null;
+  const to = resolveReferenceDate(analysisWindow, referenceDate);
+  const spanDays = daysBetween(from, to);
+  if (!from || !to || spanDays == null || spanDays < 2 || !dated.length) {
+    return { trend_version: TREND_VERSION, status: "insufficient_data", metrics: [] };
+  }
+  const midpoint = addDays(from, Math.floor(spanDays / 2));
+  const baselinePeriod = { from, to: midpoint };
+  const current = { from: midpoint, to };
+  const inPeriod = (date, period) => date && date >= period.from && date < (period === current ? nextDay(period.to) : period.to);
+
+  const baselineEvidence = dated.filter((item) => inPeriod(item.event_date, baselinePeriod));
+  const currentEvidence = dated.filter((item) => inPeriod(item.event_date, current));
+  const sampleOk = baselineEvidence.length >= TREND_MIN_SAMPLE && currentEvidence.length >= TREND_MIN_SAMPLE;
+
+  const openCount = (items) => items.filter((item) => ["open", "in_progress"].includes(item.status)).length;
+  const closureCount = (items) => items.filter((item) => item.evidence_type === "closure").length;
+  const newClusters = (period) => clusters.filter((cluster) => cluster.first_date && inPeriod(cluster.first_date, period)).length;
+
+  // polarity: does an increase in the metric point at deterioration or improvement?
+  const definitions = [
+    { metric_id: "open_statements", baselineValue: openCount(baselineEvidence), currentValue: openCount(currentEvidence), increase_means: "deteriorating" },
+    { metric_id: "closure_statements", baselineValue: closureCount(baselineEvidence), currentValue: closureCount(currentEvidence), increase_means: "improving" },
+    { metric_id: "new_topics", baselineValue: newClusters(baselinePeriod), currentValue: newClusters(current), increase_means: "deteriorating" },
+    { metric_id: "evidence_volume", baselineValue: baselineEvidence.length, currentValue: currentEvidence.length, increase_means: "neutral" }
+  ];
+
+  const metrics = definitions.map((definition) => {
+    const absoluteChange = definition.currentValue - definition.baselineValue;
+    const percentageChange = definition.baselineValue > 0
+      ? Number(((absoluteChange / definition.baselineValue) * 100).toFixed(1))
+      : null;
+    const direction = absoluteChange > 0 ? "up" : absoluteChange < 0 ? "down" : "stable";
+    const assessment = !sampleOk || definition.increase_means === "neutral" || direction === "stable"
+      ? (direction === "stable" ? "stable" : "unknown")
+      : (direction === "up"
+        ? definition.increase_means
+        : (definition.increase_means === "deteriorating" ? "improving" : "deteriorating"));
+    return {
+      metric_id: definition.metric_id,
+      metric_version: TREND_VERSION,
+      baseline_period: { ...baselinePeriod, value: definition.baselineValue },
+      current_period: { ...current, value: definition.currentValue },
+      absolute_change: absoluteChange,
+      percentage_change: percentageChange,
+      direction,
+      assessment,
+      sample_status: sampleOk ? "valid" : "insufficient_sample",
+      confidence: sampleOk ? (Math.abs(absoluteChange) >= 3 ? "high" : "medium") : "low"
+    };
+  });
+
+  return {
+    trend_version: TREND_VERSION,
+    status: sampleOk ? "calculated" : "insufficient_sample",
+    baseline_definition: "first_half_of_analysis_window",
+    metrics
+  };
+}
+
+// Cross-window mode (phase-2 spec Task 1): the baseline is a separately retrieved
+// preceding window with its own evidence/clusters, computed with the same formula
+// version. A material coverage difference invalidates the comparison rather than
+// producing a false trend (plan section 27 validity conditions).
+function computeCrossWindowTrend({ evidence, clusters, analysisWindow, referenceDate, baseline }) {
+  const currentWindow = {
+    from: cleanDate(analysisWindow?.from),
+    to: resolveReferenceDate(analysisWindow, referenceDate)
+  };
+  const baselineWindow = { from: cleanDate(baseline.window?.from), to: cleanDate(baseline.window?.to) };
+  if (!currentWindow.from || !currentWindow.to || !baselineWindow.from || !baselineWindow.to) {
+    return { trend_version: TREND_VERSION, status: "insufficient_data", baseline_definition: "previous_window", metrics: [] };
+  }
+
+  const currentStats = periodStats(evidence, clusters);
+  const baselineStats = periodStats(baseline.evidence || [], baseline.clusters || []);
+  const sampleOk = baselineStats.volume >= TREND_MIN_SAMPLE && currentStats.volume >= TREND_MIN_SAMPLE;
+  const coverageGap = baselineStats.datedRatio != null && currentStats.datedRatio != null
+    ? Math.abs(baselineStats.datedRatio - currentStats.datedRatio)
+    : null;
+  const coverageMismatch = coverageGap != null && coverageGap > 0.25;
+  const sampleStatus = coverageMismatch ? "coverage_mismatch" : (sampleOk ? "valid" : "insufficient_sample");
+
+  const definitions = [
+    { metric_id: "open_statements", baselineValue: baselineStats.open, currentValue: currentStats.open, increase_means: "deteriorating" },
+    { metric_id: "closure_statements", baselineValue: baselineStats.closures, currentValue: currentStats.closures, increase_means: "improving" },
+    { metric_id: "new_topics", baselineValue: baselineStats.clusters, currentValue: currentStats.clusters, increase_means: "deteriorating" },
+    { metric_id: "evidence_volume", baselineValue: baselineStats.volume, currentValue: currentStats.volume, increase_means: "neutral" }
+  ];
+
+  const metrics = definitions.map((definition) => {
+    const absoluteChange = definition.currentValue - definition.baselineValue;
+    const direction = absoluteChange > 0 ? "up" : absoluteChange < 0 ? "down" : "stable";
+    const trustworthy = sampleStatus === "valid" && definition.increase_means !== "neutral" && direction !== "stable";
+    return {
+      metric_id: definition.metric_id,
+      metric_version: TREND_VERSION,
+      baseline_period: { ...baselineWindow, value: definition.baselineValue, coverage: baselineStats.datedRatio },
+      current_period: { ...currentWindow, value: definition.currentValue, coverage: currentStats.datedRatio },
+      absolute_change: absoluteChange,
+      percentage_change: definition.baselineValue > 0 ? Number(((absoluteChange / definition.baselineValue) * 100).toFixed(1)) : null,
+      direction,
+      assessment: !trustworthy
+        ? (direction === "stable" ? "stable" : "unknown")
+        : (direction === "up" ? definition.increase_means : (definition.increase_means === "deteriorating" ? "improving" : "deteriorating")),
+      sample_status: sampleStatus,
+      confidence: sampleStatus === "valid" ? (Math.abs(absoluteChange) >= 3 ? "high" : "medium") : "low"
+    };
+  });
+
+  return {
+    trend_version: TREND_VERSION,
+    status: coverageMismatch ? "coverage_mismatch" : (sampleOk ? "calculated" : "insufficient_sample"),
+    baseline_definition: "previous_window",
+    coverage_gap: coverageGap,
+    metrics
+  };
+}
+
+function periodStats(evidence = [], clusters = []) {
+  const dated = evidence.filter((item) => item.event_date);
+  return {
+    volume: evidence.length,
+    open: evidence.filter((item) => ["open", "in_progress"].includes(item.status)).length,
+    closures: evidence.filter((item) => item.evidence_type === "closure").length,
+    clusters: clusters.length,
+    datedRatio: evidence.length ? Number((dated.length / evidence.length).toFixed(3)) : null
+  };
+}
+
+// Helper for callers that retrieve the baseline window themselves.
+export function computeBaselineWindow(from, to) {
+  const cleanFrom = cleanDate(from);
+  const cleanTo = cleanDate(to);
+  const span = daysBetween(cleanFrom, cleanTo);
+  if (!cleanFrom || !cleanTo || span == null || span < 1) return null;
+  return { from: addDays(cleanFrom, -span), to: cleanFrom };
 }
 
 // Explicit insight-pattern rules from the upgrade plan (section 6). Patterns are
@@ -573,4 +725,14 @@ function daysBetween(from, to) {
   const end = parseDate(to);
   if (!start || !end) return null;
   return Math.round((end.getTime() - start.getTime()) / 86400000);
+}
+
+function addDays(date, days) {
+  const parsed = parseDate(date);
+  if (!parsed) return null;
+  return new Date(parsed.getTime() + days * 86400000).toISOString().slice(0, 10);
+}
+
+function nextDay(date) {
+  return addDays(date, 1);
 }
