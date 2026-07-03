@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: insights
-last_updated: 2026-07-02
+last_updated: 2026-07-03
 tags:
   - insights
   - ai-agent
@@ -86,6 +86,10 @@ tags:
 - G3 IMPLEMENTED (2026-07-03) — entity-aware clustering in the insights pipeline (original plan P11 / phase-2 Task 4), flag `config.insights.graphClustering === true` (default off): `listEntityMentionEdges` (supabase.js) loads v1 enrichment links; evidence carries `source_ref` + `entities`; clustering merges clusters sharing a non-hub entity ONLY when subject overlap >= 0.2 (an entity alone never merges unrelated topics — that becomes a `dependency_risk` pattern instead); hub guard: entity attached to >6 distinct records is excluded from both signals; `dependency_risk` patterns (max 5, always `requires_validation: true`) surface open clusters sharing an entity, and the prompt mandates "נדרש לבדוק האם X משפיע על Y" phrasing, never confirmed blockage. Cluster `entities` flow into the AI context.
 - Not implemented: graph-enriched clustering (P11) — quality check PASSED (graph RPC returns ~8 relationships per run) but edge→record-key mapping needs raw RPC shape inspection first (documented in the phase-2 spec); ingestion-side event/document date columns (needs n8n + manual migration); cross-project learning (P12, product-blocked).
 - `applySettingsToForm()` in `public/app.js` must guard every write to a Settings-tab field with `if ($("..."))`, because those fields live in the React settings island and only exist in the DOM once that tab has mounted.
+- The visible Insights page is now a React island: `src/react/InsightsPage.jsx`, mounted from `public/index.html` through `data-react-island="insights"` and registered in `src/react/main.jsx`. Legacy DOM ids remain hidden only for compatibility with older wiring/tests.
+- The React Insights UI owns focus/date/source-limit inputs, hashtag analytics and selected hashtag boosts, per-run engine toggles, live run status, saved history restore, expansion runs, synthesized insights, findings, and engine panels.
+- `window.__bidocSetWorkflowFromReact` in `public/app.js` lets the React Insights island pass workflow logs back to the legacy workflow renderer/history refresh.
+- Current Insights React asset version is `20260703-insights-react`.
 
 ## Recent Changes
 
@@ -111,6 +115,7 @@ tags:
 - 2026-07-02 -- Implemented the insight-agent upgrade plan (P0-P7): added `src/subagents/insightPipeline.js` (evidence schema + lineage, canonical-event dedup, topic clusters + timelines, versioned deterministic analytics, pattern detection, insight critic + ranking), wired it into `runProjectInsightsAnalysis` behind the `config.insights.evidencePipeline` flag, upgraded the `project_insights` prompt, extended the workflow log with 6 new nodes, wrote `docs/insight-agent-gap-analysis.md`, and added 9 pipeline unit tests mapped to the plan's acceptance tests.
 - 2026-07-03 -- Continued the plan: in-window Trend Analyzer as an analytics sub-component, closure follow-up retrieval with pipeline recompute, section-17 per-run observability object, `closure_followup` workflow node, 2 trend tests (200 passing), and `docs/insight-agent-phase2-spec.md` with 7 specced tasks (cross-window trend, root-cause hypotheses, health score, graph clustering, ingestion dates, quality metrics, cross-project learning) for the next implementation agent.
 - 2026-07-03 -- Implemented phase-2 tasks 1/2/3/5(code)/6: cross-window trend, root-cause hypothesis engine, health score, event/document date support, quality-metrics endpoint; 6 new tests (206 passing); graph clustering (task 4) quality-checked and documented for a dedicated round.
+- 2026-07-03 -- Migrated the visible Insights page to a React island with the redesigned command surface, hashtag controls, history restore, live status, engine toggles/panels, result cards, and workflow bridge; legacy ids are hidden for compatibility.
 
 ## Gotchas
 

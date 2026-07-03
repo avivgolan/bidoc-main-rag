@@ -937,6 +937,14 @@ function activateTab(tabId, pushHistory = true, options = {}) {
   }
 }
 
+window.__bidocActivateTab = activateTab;
+window.__bidocSetWorkflowFromReact = (result = {}) => {
+  state.lastWorkflow = result.workflowLog || null;
+  state.currentWorkflowMessageId = result.runId || null;
+  if (state.lastWorkflow) renderWorkflow(state.lastWorkflow);
+  loadRunHistory().catch(() => {});
+};
+
 function isMobileShellViewport() {
   return window.matchMedia(MOBILE_SHELL_QUERY).matches;
 }

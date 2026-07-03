@@ -51,8 +51,8 @@ test("React bridge is installed for progressive frontend migration", () => {
   assert.match(reactEntry, /createRoot/);
   assert.match(reactEntry, /window\.BiDocReact/);
   assert.match(reactLoader, /document\.querySelector\("\[data-react-island\]"\)/);
-  assert.match(reactLoader, /\/react\/bidoc-react\.js\?v=20260626-react-bridge/);
-  assert.match(indexHtml, /\/react-loader\.js\?v=20260626-react-bridge/);
+  assert.match(reactLoader, /\/react\/bidoc-react\.js\?v=20260703-insights-react/);
+  assert.match(indexHtml, /\/react-loader\.js\?v=20260703-insights-react/);
 });
 
 function withContentEnvCleared(fn) {

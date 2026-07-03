@@ -2,6 +2,7 @@ import React, { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { WorkflowPage } from "./WorkflowPage.jsx";
+import { InsightsPage } from "./InsightsPage.jsx";
 
 const mountedRoots = new WeakMap();
 
@@ -17,6 +18,7 @@ const islands = {
   status: ReactBridgeStatus,
   settings: SettingsPage,
   workflow: WorkflowPage,
+  insights: InsightsPage,
 };
 
 function mountIsland(element) {

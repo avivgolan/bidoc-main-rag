@@ -9361,3 +9361,557 @@ body:has(#timeline.active) .sidebar {
   .trendRow { grid-template-columns: 100px 1fr auto; }
   .trendRow .trendSampleNote { grid-column: 1 / -1; }
 }
+
+/* React Insights island */
+.reactInsights {
+  display: grid;
+  gap: 18px;
+  color: var(--i-text);
+  font-family: var(--font-display);
+}
+
+.riHero {
+  min-height: 188px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+  gap: 18px;
+  align-items: stretch;
+  padding: clamp(22px, 3vw, 34px);
+  border: 1px solid var(--i-border-md);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(63,185,80,0.16), transparent 38%),
+    linear-gradient(225deg, rgba(56,139,253,0.14), transparent 34%),
+    linear-gradient(180deg, rgba(22,27,34,0.98), rgba(13,17,23,0.98));
+  box-shadow: 0 24px 60px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.05);
+  overflow: hidden;
+}
+
+.riHeroMain { display: grid; align-content: center; gap: 12px; }
+.riEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--i-green-hi);
+  font-size: 12px;
+  font-weight: 700;
+}
+.riHero h2 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: clamp(34px, 5vw, 58px);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+}
+.riHero p {
+  max-width: 760px;
+  color: var(--i-text-sub);
+  font-size: 15px;
+  line-height: 1.7;
+}
+.riHeroStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-content: end;
+}
+.riMetric {
+  display: grid;
+  gap: 6px;
+  min-height: 88px;
+  align-content: end;
+  padding: 14px;
+  border: 1px solid var(--i-border);
+  border-radius: 14px;
+  background: rgba(255,255,255,0.035);
+}
+.riMetric span { color: var(--i-text-muted); font-size: 11.5px; }
+.riMetric strong { color: var(--i-text); font-size: 24px; line-height: 1; }
+
+.riCommand,
+.riPanel,
+.riStatus,
+.riResultSection,
+.riEnginePanel,
+.riWelcome,
+.riError {
+  border: 1px solid var(--i-border-md);
+  border-radius: 16px;
+  background: var(--i-bg1);
+  box-shadow: var(--i-shadow);
+}
+
+.riCommand {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+.riCommandGrid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1.6fr) repeat(3, minmax(140px, 0.45fr));
+  gap: 10px;
+}
+.riField {
+  display: grid;
+  gap: 7px;
+  color: var(--i-text-sub);
+  font-size: 12px;
+  font-weight: 700;
+}
+.riField input,
+.riField select {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid var(--i-border-md);
+  border-radius: 10px;
+  background: var(--i-bg0);
+  color: var(--i-text);
+}
+.riFieldWide input { min-width: 0; }
+
+.riEngineRow,
+.riActionRow,
+.riChartControls,
+.riSelectedTags,
+.riHistoryActions,
+.riSegment {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.riEngineRow {
+  padding: 10px 12px;
+  border: 1px solid var(--i-border);
+  border-radius: 12px;
+  background: var(--i-bg2);
+}
+.riEngineRow > span,
+.riChartControls > span,
+.riSelectedTags > span,
+.riShortcut {
+  color: var(--i-text-muted);
+  font-size: 12px;
+}
+.riToggle {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid var(--i-border-md);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.03);
+  color: var(--i-text-sub);
+  font-size: 12px;
+}
+.riToggle span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--i-text-muted);
+}
+.riToggle[aria-pressed="true"] {
+  color: var(--i-text);
+  border-color: rgba(63,185,80,0.4);
+  background: var(--i-green-glow);
+}
+.riToggle[aria-pressed="true"] span { background: var(--i-green-hi); }
+
+.riBtn,
+.riMiniBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--i-border-md);
+  border-radius: 10px;
+  background: var(--i-bg2);
+  color: var(--i-text);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+.riBtnPrimary {
+  border-color: rgba(63,185,80,0.5);
+  background: linear-gradient(180deg, rgba(63,185,80,0.24), rgba(35,134,54,0.2));
+  color: var(--i-green-hi);
+}
+.riBtn:disabled,
+.riMiniBtn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.riMiniBtn {
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 8px;
+}
+.riMiniBtn[aria-pressed="true"],
+.riSegment button[aria-pressed="true"] {
+  border-color: rgba(56,139,253,0.45);
+  background: var(--i-blue-soft);
+  color: #79c0ff;
+}
+
+.riSplit {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+  gap: 18px;
+}
+.riPanel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+.riPanel > header,
+.riResultSection > header,
+.riEnginePanel > header,
+.riInsightCard > header,
+.riFindingCard > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.riPanel h3,
+.riResultSection h3,
+.riEnginePanel h4 {
+  margin: 4px 0 0;
+  color: var(--i-text);
+  font-size: 17px;
+}
+.riSegment {
+  padding: 3px;
+  border: 1px solid var(--i-border);
+  border-radius: 10px;
+  background: var(--i-bg0);
+}
+.riSegment button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--i-text-sub);
+  font-size: 12px;
+}
+
+.riSelectedTags button,
+.riBar {
+  border: 1px solid var(--i-border);
+  background: var(--i-bg2);
+  color: var(--i-text-sub);
+}
+.riSelectedTags button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: var(--i-green-hi);
+}
+.riBars {
+  display: grid;
+  gap: 7px;
+  max-height: 360px;
+  overflow: auto;
+  padding-inline-end: 2px;
+}
+.riBar {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  text-align: right;
+}
+.riBar[data-selected="true"] {
+  border-color: rgba(63,185,80,0.5);
+  background: var(--i-green-glow);
+  color: var(--i-green-hi);
+}
+.riBar i {
+  height: 7px;
+  border-radius: 99px;
+  background:
+    linear-gradient(90deg, var(--i-green-hi) var(--bar), rgba(255,255,255,0.08) var(--bar));
+}
+.riBar b { color: var(--i-text); font-size: 12px; }
+
+.riHistory[data-open="false"] {
+  align-content: start;
+}
+.riHistoryList {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+}
+.riHistoryItem {
+  display: grid;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid var(--i-border);
+  border-radius: 10px;
+  background: var(--i-bg2);
+  text-align: right;
+}
+.riHistoryItem[aria-pressed="true"] {
+  border-color: rgba(56,139,253,0.5);
+  background: var(--i-blue-soft);
+}
+.riHistoryItem strong { color: var(--i-text); font-size: 13px; }
+.riHistoryItem span,
+.riHistoryItem small { color: var(--i-text-muted); font-size: 11.5px; }
+
+.riStatus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+}
+.riStatus[data-state="running"] {
+  border-color: rgba(63,185,80,0.34);
+  background: linear-gradient(90deg, var(--i-green-glow), var(--i-bg1));
+}
+.riStatus[data-state="error"],
+.riError {
+  border-color: rgba(218,54,51,0.35);
+  background: var(--i-red-soft);
+}
+.riStatus > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+.riStatus strong { color: var(--i-text); font-size: 13px; }
+.riStatus span { color: var(--i-text-sub); font-size: 12px; }
+.riLiveSteps {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.riLiveSteps span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--i-bg2);
+  color: var(--i-text-sub);
+}
+.riLiveSteps span.active {
+  color: var(--i-green-hi);
+  background: var(--i-green-glow);
+}
+
+.riResults {
+  display: grid;
+  gap: 18px;
+}
+.riWelcome,
+.riError {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 44px 18px;
+  text-align: center;
+}
+.riWelcome span {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--i-green-glow);
+  color: var(--i-green-hi);
+}
+.riWelcome h3 { color: var(--i-text); font-size: 20px; }
+.riWelcome p { max-width: 580px; color: var(--i-text-sub); line-height: 1.7; }
+
+.riEnginePanels {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.riEnginePanel {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+}
+.riEnginePanel > header span { color: var(--i-text-muted); font-size: 11px; }
+.riEnginePanel > header h4 { color: var(--i-green-hi); font-size: 28px; }
+.riHealthRows,
+.riTrendRows,
+.riHypotheses {
+  display: grid;
+  gap: 8px;
+}
+.riHealthRow,
+.riTrendRows > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.7fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--i-text-sub);
+  font-size: 12px;
+}
+.riHealthRow i {
+  height: 6px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--i-green-hi) var(--bar), rgba(255,255,255,0.08) var(--bar));
+}
+.riTrendRows > div {
+  grid-template-columns: minmax(100px, 0.8fr) auto auto;
+  padding: 7px;
+  border-radius: 8px;
+  background: var(--i-bg2);
+}
+.riTrendRows > div[data-tone="bad"] b { color: #ff8b86; }
+.riTrendRows > div[data-tone="good"] b { color: var(--i-green-hi); }
+.riHypotheses > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border-radius: 9px;
+  background: var(--i-bg2);
+}
+.riHypotheses b { color: var(--i-amber); font-size: 12px; }
+.riHypotheses p { color: var(--i-text-sub); font-size: 12px; line-height: 1.55; }
+
+.riResultSection {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+.riResultSection > header span {
+  color: var(--i-text-muted);
+  font-size: 12px;
+}
+.riInsightGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.riInsightCard,
+.riFindingCard {
+  display: grid;
+  gap: 11px;
+  padding: 15px;
+  border: 1px solid var(--i-border);
+  border-radius: 14px;
+  background: var(--i-bg2);
+}
+.riInsightCard[data-severity="high"],
+.riFindingCard[data-severity="high"] { border-color: rgba(218,54,51,0.34); }
+.riInsightCard[data-severity="medium"],
+.riFindingCard[data-severity="medium"] { border-color: rgba(210,153,34,0.3); }
+.riInsightCard > header span,
+.riFindingCard > header span {
+  color: var(--i-text-muted);
+  font-size: 11px;
+}
+.riInsightCard > header b,
+.riFindingCard > header b {
+  color: var(--i-green-hi);
+  font-size: 11px;
+}
+.riInsightCard h4,
+.riFindingCard h4 {
+  margin: 0;
+  color: var(--i-text);
+  font-size: 16px;
+  line-height: 1.35;
+}
+.riInsightCard p,
+.riFindingCard p {
+  color: var(--i-text-sub);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.riInfoLine {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.035);
+}
+.riInfoLine b { color: var(--i-text); font-size: 12px; }
+.riInfoLine span { color: var(--i-text-sub); font-size: 12px; line-height: 1.55; }
+.riSupporting {
+  display: grid;
+  gap: 8px;
+}
+.riSupporting > button {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--i-border);
+  border-radius: 8px;
+  background: var(--i-bg0);
+  color: var(--i-text-sub);
+  font-size: 12px;
+}
+.riFindingsList {
+  display: grid;
+  gap: 10px;
+}
+.riFindingCard[data-compact="true"] {
+  padding: 11px;
+  border-radius: 10px;
+}
+.riEvidence {
+  color: var(--i-text-sub);
+  font-size: 12px;
+}
+.riEvidence summary {
+  cursor: pointer;
+  color: var(--i-green-hi);
+}
+.riEmpty {
+  padding: 18px;
+  border: 1px dashed var(--i-border-md);
+  border-radius: 12px;
+  color: var(--i-text-muted);
+  background: rgba(255,255,255,0.025);
+  text-align: center;
+}
+
+@media (max-width: 1100px) {
+  .riHero,
+  .riSplit,
+  .riCommandGrid,
+  .riEnginePanels {
+    grid-template-columns: 1fr;
+  }
+  .riHeroStats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .reactInsights { gap: 14px; }
+  .riHero { padding: 20px 16px; border-radius: 14px; }
+  .riHero h2 { font-size: 36px; }
+  .riHeroStats,
+  .riInsightGrid {
+    grid-template-columns: 1fr;
+  }
+  .riMetric { min-height: 68px; }
+  .riCommand,
+  .riPanel,
+  .riStatus,
+  .riResultSection {
+    padding: 13px;
+  }
+  .riActionRow .riShortcut { display: none; }
+  .riBar { grid-template-columns: minmax(82px, 0.8fr) minmax(0, 1fr) auto; }
+}
