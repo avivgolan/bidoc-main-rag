@@ -16,6 +16,7 @@ import { runAlertAgent } from "./subagents/alert.js";
 import { buildDataQueryWorkflowLog, DATA_QUERY_PIPELINE_STEPS, introspectSupabaseTables, runDataQueryAgent, runDataQueryPipeline, runDataQueryStep } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
+import { runGraphEnrichment } from "./subagents/graphEnrichment.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
@@ -1005,7 +1006,40 @@ async function handleApi(req, res, url) {
     const saved = await upsertTimelineGraphData({ config: config(), entities: rows.entities, eventEntities: rows.eventEntities });
     const projectRows = buildGraphRowsFromRecords(events, { defaultSource: source === "alerts" ? "alerts" : config().contentSource?.indexTable || "data_index" });
     const projectSaved = await upsertProjectGraphData({ config: config(), nodes: projectRows.nodes, edges: projectRows.edges }).catch((error) => ({ nodes: 0, edges: 0, error: error.message }));
-    return sendJson(res, 200, { ok: true, source, events: events.length, ...saved, projectGraph: projectSaved });
+    // Entity enrichment piggybacks on rebuilds when requested explicitly or enabled in settings.
+    let enrichment = null;
+    if (body.enrichEntities === true || config().insights?.graphEnrichment === true) {
+      enrichment = await runGraphEnrichment({ config: config(), source, mode: body.enrichmentMode || "incremental", limit: Number(body.enrichmentLimit || 200) })
+        .catch((error) => ({ error: error.message }));
+    }
+    return sendJson(res, 200, { ok: true, source, events: events.length, ...saved, projectGraph: projectSaved, enrichment });
+  }
+
+  // Graph Entity Enrichment Agent (docs/graph-entity-enrichment-agent-spec.md, Task G2).
+  // Explicit invocation is consent; the insights.graphEnrichment flag only controls
+  // automatic enrichment during rebuilds.
+  if (req.method === "POST" && url.pathname === "/api/graph/enrich") {
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    const body = await readJson(req).catch(() => ({}));
+    const runId = body.runId || `graph_enrichment_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    try {
+      const summary = await runGraphEnrichment({
+        config: buildRequestConfig(req, body),
+        source: body.source === "alerts" ? "alerts" : "index",
+        dateFrom: body.dateFrom || body.date_from || null,
+        dateTo: body.dateTo || body.date_to || null,
+        limit: Math.max(1, Math.min(Number(body.limit) || 200, 1000)),
+        mode: body.mode === "backfill" ? "backfill" : "incremental",
+        runId,
+        emit: emitRunEvent
+      });
+      completeRun(runId, { entities: summary.entities, records: summary.records });
+      return sendJson(res, 200, { ok: true, runId, ...summary });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { ok: false, runId, error: error.message });
+    }
   }
 
   if (req.method === "POST" && url.pathname === "/api/timeline/links") {

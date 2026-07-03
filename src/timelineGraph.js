@@ -221,7 +221,7 @@ function sharedEntities(a, b) {
     }));
 }
 
-function extractLikelyCompanies(text) {
+export function extractLikelyCompanies(text) {
   const matches = [];
   const patterns = [
     /\b([A-Z][A-Za-z0-9&.' -]{2,40}\s(?:Ltd|LLC|Inc|Group|Systems|Construction))\b/g,

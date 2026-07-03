@@ -1205,6 +1205,33 @@ export async function upsertProjectGraphData({ config, nodes = [], edges = [] })
   return { nodes: uniqueNodes.length, edges: uniqueEdges.length };
 }
 
+// Entity mention links created by the Graph Entity Enrichment Agent (tagged
+// metadata.enrichment). Consumed by the insights pipeline for entity-aware
+// clustering and dependency detection (phase-2 Task 4 / spec Task G3).
+export async function listEntityMentionEdges({ config, limit = 2000 } = {}) {
+  if (!isConfigured(config)) return [];
+  const params = new URLSearchParams({
+    select: "to_node_id,metadata",
+    limit: String(Math.min(Math.max(Number(limit) || 2000, 1), 5000))
+  });
+  const rows = await supabaseFetch(
+    config,
+    `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}&metadata->>enrichment=eq.graph-enrichment-v1`
+  );
+  return (rows || [])
+    .map((row) => {
+      const metadata = row.metadata || {};
+      const entityId = String(row.to_node_id || "");
+      return {
+        record_ref: `${metadata.source_table || ""}:${metadata.source_id || ""}`,
+        entity_id: entityId,
+        kind: metadata.target_kind || entityId.split(":")[0] || "entity",
+        label: entityId.split(":").slice(1).join(":")
+      };
+    })
+    .filter((item) => item.entity_id && item.record_ref.length > 1 && !item.record_ref.startsWith(":") && !item.record_ref.endsWith(":"));
+}
+
 export async function graphSearch({ config, payload = {}, limit = 30 } = {}) {
   if (!isConfigured(config)) return { results: [], skipped: true, reason: "App Supabase is not configured" };
   const body = {

@@ -74,7 +74,9 @@ export function extractExpectedDate(text = "", referenceDate = null) {
 }
 
 // records are expected in the normalized shape produced by projectInsights.normalizeRecord.
-export function buildInsightEvidence(records = []) {
+// entitiesByRef (optional): Map of "source_table:source_id" -> [{entity_id,label,kind}]
+// from the Graph Entity Enrichment Agent.
+export function buildInsightEvidence(records = [], { entitiesByRef = null } = {}) {
   return (Array.isArray(records) ? records : []).map((record, index) => {
     const subject = String(record.title || "").trim();
     const text = String(record.text || record.summary || "").replace(/\s+/g, " ").trim();
@@ -82,7 +84,10 @@ export function buildInsightEvidence(records = []) {
     const classified = classifyEvidenceStatement(text || subject);
     const derived = DERIVED_SOURCE.test(String(record.source_table || "")) || record.source === "alert";
     const metadata = record.metadata && typeof record.metadata === "object" ? record.metadata : {};
+    const sourceRef = `${record.source_table || "index"}:${record.source_id || ""}`;
     return {
+      source_ref: sourceRef,
+      entities: entitiesByRef?.get(sourceRef) || [],
       evidence_id: `ev-${index + 1}`,
       record_key: recordKey(record),
       source_table: record.source_table || "index",
@@ -138,6 +143,7 @@ export function dedupeInsightEvidence(evidence = []) {
       status: latestKnownStatus(items),
       expected_date: items.map((item) => item.expected_date).find(Boolean) || null,
       hashtags: uniqueTags(items.flatMap((item) => item.hashtags)),
+      entities: uniqueEntities(items.flatMap((item) => item.entities || [])),
       severity_or_risk: primary.severity_or_risk,
       evidence_ids: items.map((item) => item.evidence_id),
       source_records: items.map((item) => item.record_key),
@@ -161,23 +167,32 @@ function sameCanonicalEvent(group, item, stems) {
 
 // Groups canonical events into topic clusters and builds a chronological timeline
 // per cluster, including latest status, closure, and contradiction detection.
-export function clusterCanonicalEvents(canonicalEvents = []) {
+// Real entities (graph enrichment) act as a merge booster like hashtags — but only
+// alongside some topical overlap, so one contractor working two unrelated issues
+// does not collapse them into one cluster. Hub entities (attached to many records)
+// are never a merge signal.
+export function clusterCanonicalEvents(canonicalEvents = [], { hubEntityIds = new Set() } = {}) {
   const events = [...canonicalEvents].sort((a, b) => compareDates(a.event_date, b.event_date));
   const clusters = [];
   for (const event of events) {
     const stems = stemSet(event.subject || event.canonical_text);
     const tags = new Set(event.hashtags.map((tag) => tag.toLowerCase()));
+    const entityIds = new Set((event.entities || []).map((item) => item.entity_id).filter((id) => id && !hubEntityIds.has(id)));
     const match = clusters.find((cluster) => {
       const subjectOverlap = jaccard(cluster.stems, stems);
       const sharedTags = [...tags].filter((tag) => cluster.tags.has(tag)).length;
-      return subjectOverlap >= 0.45 || sharedTags >= 2 || (sharedTags >= 1 && subjectOverlap >= 0.2);
+      const sharedEntities = [...entityIds].filter((id) => cluster.entityIds.has(id)).length;
+      return subjectOverlap >= 0.45
+        || sharedTags >= 2
+        || ((sharedTags >= 1 || sharedEntities >= 1) && subjectOverlap >= 0.2);
     });
     if (match) {
       match.events.push(event);
       for (const stem of stems) match.stems.add(stem);
       for (const tag of tags) match.tags.add(tag);
+      for (const id of entityIds) match.entityIds.add(id);
     } else {
-      clusters.push({ events: [event], stems, tags });
+      clusters.push({ events: [event], stems, tags, entityIds });
     }
   }
   return clusters.map((cluster, index) => {
@@ -196,6 +211,7 @@ export function clusterCanonicalEvents(canonicalEvents = []) {
       cluster_id: `cluster-${index + 1}`,
       topic: representativeTopic(cluster.events),
       hashtags: uniqueTags(cluster.events.flatMap((event) => event.hashtags)).slice(0, 6),
+      entities: uniqueEntities(cluster.events.flatMap((event) => event.entities || [])).slice(0, 8),
       event_ids: cluster.events.map((event) => event.canonical_event_id),
       evidence_ids: cluster.events.flatMap((event) => event.evidence_ids),
       record_keys: [...new Set(cluster.events.flatMap((event) => event.source_records))],
@@ -441,9 +457,33 @@ export function computeBaselineWindow(from, to) {
 
 // Explicit insight-pattern rules from the upgrade plan (section 6). Patterns are
 // candidates for the synthesizer/critic, not insights by themselves.
-export function detectInsightPatterns({ clusters = [], analytics = null } = {}) {
+export function detectInsightPatterns({ clusters = [], analytics = null, hubEntityIds = new Set() } = {}) {
   const reference = analytics?.reference_date || null;
   const patterns = [];
+
+  // Dependency risk (plan section 6.5): two OPEN clusters sharing a real non-hub
+  // entity. Always a lead to verify ("נדרש לבדוק האם"), never a confirmed blockage.
+  const entityToOpenClusters = new Map();
+  for (const cluster of clusters) {
+    if (!["open", "in_progress"].includes(cluster.latest_status)) continue;
+    for (const entity of cluster.entities || []) {
+      if (!entity.entity_id || hubEntityIds.has(entity.entity_id)) continue;
+      if (!entityToOpenClusters.has(entity.entity_id)) entityToOpenClusters.set(entity.entity_id, { entity, clusters: [] });
+      entityToOpenClusters.get(entity.entity_id).clusters.push(cluster);
+    }
+  }
+  let dependencyCount = 0;
+  for (const { entity, clusters: linked } of entityToOpenClusters.values()) {
+    if (linked.length < 2 || dependencyCount >= 5) continue;
+    dependencyCount += 1;
+    patterns.push(pattern("dependency_risk", linked[0], "medium", {
+      entity: entity.label,
+      entity_kind: entity.kind,
+      cluster_ids: linked.map((cluster) => cluster.cluster_id),
+      topics: linked.map((cluster) => cluster.topic).slice(0, 4)
+    }, true));
+  }
+
   for (const cluster of clusters) {
     if (cluster.expected_date && !cluster.closed) {
       const laterUpdate = cluster.timeline.find((entry) =>
@@ -573,13 +613,49 @@ function scoreInsight(insight, supporting, { patternBacked, hasContradiction }) 
   );
 }
 
-export function runInsightEvidencePipeline({ records = [], analysisWindow = null, referenceDate = null } = {}) {
-  const evidence = buildInsightEvidence(records);
+export function runInsightEvidencePipeline({ records = [], analysisWindow = null, referenceDate = null, entityLinks = [] } = {}) {
+  const entitiesByRef = new Map();
+  for (const link of Array.isArray(entityLinks) ? entityLinks : []) {
+    if (!link?.record_ref || !link?.entity_id) continue;
+    if (!entitiesByRef.has(link.record_ref)) entitiesByRef.set(link.record_ref, []);
+    entitiesByRef.get(link.record_ref).push({ entity_id: link.entity_id, label: link.label || link.entity_id, kind: link.kind || "entity" });
+  }
+  const evidence = buildInsightEvidence(records, { entitiesByRef: entitiesByRef.size ? entitiesByRef : null });
+  const hubEntityIds = computeHubEntities(evidence, 6);
   const canonicalEvents = dedupeInsightEvidence(evidence);
-  const clusters = clusterCanonicalEvents(canonicalEvents);
+  const clusters = clusterCanonicalEvents(canonicalEvents, { hubEntityIds });
   const analytics = computeInsightAnalytics({ clusters, evidence, analysisWindow, referenceDate });
-  const patterns = detectInsightPatterns({ clusters, analytics });
-  return { pipeline_version: PIPELINE_VERSION, evidence, canonicalEvents, clusters, analytics, patterns };
+  const patterns = detectInsightPatterns({ clusters, analytics, hubEntityIds });
+  return {
+    pipeline_version: PIPELINE_VERSION,
+    evidence,
+    canonicalEvents,
+    clusters,
+    analytics,
+    patterns,
+    entityStats: { links: (entityLinks || []).length, matchedRecords: entitiesByRef.size, hubs: hubEntityIds.size }
+  };
+}
+
+// An entity attached to more than `limit` distinct records behaves like a stopword
+// (e.g. the project company itself) — excluded from merging and dependency signals.
+function computeHubEntities(evidence = [], limit = 6) {
+  const refsByEntity = new Map();
+  for (const item of evidence) {
+    for (const entity of item.entities || []) {
+      if (!refsByEntity.has(entity.entity_id)) refsByEntity.set(entity.entity_id, new Set());
+      refsByEntity.get(entity.entity_id).add(item.source_ref);
+    }
+  }
+  return new Set([...refsByEntity.entries()].filter(([, refs]) => refs.size > limit).map(([id]) => id));
+}
+
+function uniqueEntities(entities = []) {
+  const seen = new Map();
+  for (const entity of entities) {
+    if (entity?.entity_id && !seen.has(entity.entity_id)) seen.set(entity.entity_id, entity);
+  }
+  return [...seen.values()];
 }
 
 // Compact, JSON-safe context for the AI synthesis payload — clusters with timelines,
@@ -593,6 +669,7 @@ export function buildInsightAiContext(pipeline = null) {
       cluster_id: cluster.cluster_id,
       topic: cluster.topic,
       hashtags: cluster.hashtags,
+      entities: (cluster.entities || []).map((entity) => ({ label: entity.label, kind: entity.kind })),
       latest_status: cluster.latest_status,
       closed: cluster.closed,
       contradiction: cluster.contradiction,

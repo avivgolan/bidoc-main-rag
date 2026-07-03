@@ -18,6 +18,7 @@ the right branch notes.
 ## Current State
 
 - Node.js HTTP server and plain SPA for a construction-project RAG assistant.
+- STRATEGIC DIRECTION (2026-07-03, from the user): the n8n agents/tools are being phased out in favor of internal in-code agents (src/subagents/*). New agent work must be implemented internally, not as n8n workflows.
 - Main chat, subagents, timeline, and stack notes are tracked as separate branches.
 - Timeline UI behavior is tracked in [timeline.md](timeline.md).
 - Workflow QA inspector behavior is tracked in [workflow.md](workflow.md).

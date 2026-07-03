@@ -2,7 +2,7 @@ import { TOOL_NAMES } from "../config.js";
 import { chatCompletion, extractJsonObject } from "../openrouter.js";
 import { buildGraphSearchPayload, summarizeGraphContext } from "../projectGraph.js";
 import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "../sourceQuality.js";
-import { fetchAlertsTimelineEvents, fetchTimelineEventPage, graphSearch, hybridSearch } from "../supabase.js";
+import { fetchAlertsTimelineEvents, fetchTimelineEventPage, graphSearch, hybridSearch, listEntityMentionEdges } from "../supabase.js";
 import { callN8nTool } from "../tools.js";
 import { runAlertAgent } from "./alert.js";
 import { buildInsightAiContext, buildInsightEvidence, clusterCanonicalEvents, computeBaselineWindow, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, runInsightEvidencePipeline } from "./insightPipeline.js";
@@ -127,11 +127,26 @@ export async function runProjectInsightsAnalysis({
   let records = sortRecordsByHashtagBoost(candidateRecords, hashtagContext.active)
     .slice(0, boundedLimit);
 
+  // Entity-aware clustering (phase-2 Task 4 / G3, default off): pull the entity
+  // mention links produced by the Graph Entity Enrichment Agent.
+  const pipelineEnabled = config?.insights?.evidencePipeline !== false;
+  let entityLinks = [];
+  if (pipelineEnabled && config?.insights?.graphClustering === true) {
+    try {
+      entityLinks = await listEntityMentionEdges({ config });
+      step("graph_entity_links", entityLinks.length ? "Entity mention links loaded from the graph" : "No enriched entities in the graph yet", {
+        links: entityLinks.length,
+        status: entityLinks.length ? "done" : "skipped"
+      });
+    } catch (error) {
+      step("graph_entity_links", "Entity link loading failed; clustering continues without entities", { error: error.message }, "warning");
+    }
+  }
+
   // Deterministic evidence pipeline (normalize -> dedupe -> cluster/timeline -> analytics -> patterns).
   // Feature flag: config.insights.evidencePipeline === false disables it and restores the old flow.
-  const pipelineEnabled = config?.insights?.evidencePipeline !== false;
   let pipeline = pipelineEnabled
-    ? runInsightEvidencePipeline({ records, analysisWindow: { from: safeDateFrom, to: safeDateTo } })
+    ? runInsightEvidencePipeline({ records, analysisWindow: { from: safeDateFrom, to: safeDateTo }, entityLinks })
     : null;
   if (pipeline) {
     step("evidence_normalization", "Evidence normalized with lineage and statement types", {
@@ -178,7 +193,7 @@ export async function runProjectInsightsAnalysis({
     followupRecordCount = followup.records.length;
     if (followup.records.length) {
       records = dedupeRecords([...records, ...followup.records]).slice(0, boundedLimit + 30);
-      pipeline = runInsightEvidencePipeline({ records, analysisWindow: { from: safeDateFrom, to: safeDateTo } });
+      pipeline = runInsightEvidencePipeline({ records, analysisWindow: { from: safeDateFrom, to: safeDateTo }, entityLinks });
     }
     step("closure_followup", followup.records.length
       ? "Closure follow-up search added later evidence; pipeline recomputed"
@@ -338,6 +353,7 @@ export async function runProjectInsightsAnalysis({
       contradictions: pipeline.analytics.project_metrics.contradictions.value,
       patternsByType: pipeline.patterns.reduce((acc, item) => ({ ...acc, [item.type]: (acc[item.type] || 0) + 1 }), {}),
       trendStatus: pipeline.analytics.trends?.status || null,
+      entityStats: pipeline.entityStats || null,
       dataCoverage: pipeline.analytics.data_quality
     } : null,
     synthesis: {
@@ -388,6 +404,7 @@ function compactClusters(clusters = []) {
     cluster_id: cluster.cluster_id,
     topic: cluster.topic,
     hashtags: cluster.hashtags,
+    entities: (cluster.entities || []).map((entity) => ({ label: entity.label, kind: entity.kind })),
     latest_status: cluster.latest_status,
     closed: cluster.closed,
     contradiction: cluster.contradiction,
@@ -627,7 +644,8 @@ const DEFAULT_PROJECT_INSIGHTS_PROMPT = [
   "You are given real project records from the index (each with a numeric `index`) plus deterministic support inputs:",
   "- `evidence_clusters`: topic clusters with chronological timelines, latest status, closure and contradiction flags.",
   "- `analytics_context`: deterministic calculated metrics (with formula versions and analysis window). Do not recalculate supplied metrics.",
-  "- `candidate_patterns`: rule-detected patterns (unfulfilled_commitment, status_deterioration, persistent_open_issue, contradiction, closure). Treat them as leads to verify against the evidence, not as proven conclusions.",
+  "- `candidate_patterns`: rule-detected patterns (unfulfilled_commitment, status_deterioration, persistent_open_issue, contradiction, closure, dependency_risk). Treat them as leads to verify against the evidence, not as proven conclusions.",
+  "- A dependency_risk pattern links open topics through a shared entity. Phrase it as \"נדרש לבדוק האם X משפיע על Y\" — never as a confirmed blockage.",
   "- `root_cause_hypotheses`: inference-only causal candidates. NEVER present them as confirmed causes; when used, keep them phrased as hypotheses requiring validation and mention the missing evidence.",
   "Ground everything ONLY in the provided inputs — never invent records, facts, dates, causes, dependencies, or statuses.",
   "Evidence rules:",

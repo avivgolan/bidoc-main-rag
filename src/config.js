@@ -635,7 +635,13 @@ export function normalizeInsightsSettings(value = {}) {
     primeFromAlerts: raw.primeFromAlerts !== false,
     crossWindowTrend: raw.crossWindowTrend === true,
     rootCauseHypotheses: raw.rootCauseHypotheses === true,
-    healthScore: raw.healthScore === true
+    healthScore: raw.healthScore === true,
+    // Runs entity enrichment automatically as part of graph rebuilds; the explicit
+    // POST /api/graph/enrich endpoint works regardless (manual invocation = consent).
+    graphEnrichment: raw.graphEnrichment === true,
+    // Entity-aware clustering + dependency_risk patterns in the insights pipeline
+    // (requires enriched entities in the graph).
+    graphClustering: raw.graphClustering === true
   };
 }
 

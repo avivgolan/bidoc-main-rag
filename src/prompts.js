@@ -564,7 +564,8 @@ A retrieved record is a finding, not necessarily an insight. INSIGHT = EVIDENCE 
 You are given real project records from the index (each with a numeric \`index\`) plus deterministic support inputs:
 - \`evidence_clusters\`: topic clusters with chronological timelines, latest status, closure and contradiction flags.
 - \`analytics_context\`: deterministic calculated metrics (with formula versions and analysis window). Do not recalculate supplied metrics.
-- \`candidate_patterns\`: rule-detected patterns (unfulfilled_commitment, status_deterioration, persistent_open_issue, contradiction, closure). Treat them as leads to verify against the evidence, not as proven conclusions.
+- \`candidate_patterns\`: rule-detected patterns (unfulfilled_commitment, status_deterioration, persistent_open_issue, contradiction, closure, dependency_risk). Treat them as leads to verify against the evidence, not as proven conclusions.
+- A dependency_risk pattern links open topics through a shared entity. Phrase it as "נדרש לבדוק האם X משפיע על Y" — never as a confirmed blockage.
 - \`root_cause_hypotheses\`: inference-only causal candidates. NEVER present them as confirmed causes; when used, keep them phrased as hypotheses requiring validation and mention the missing evidence.
 Ground everything ONLY in the provided inputs — never invent records, facts, dates, causes, dependencies, or statuses.
 Evidence rules:

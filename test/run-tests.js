@@ -15,6 +15,7 @@ import { buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSi
 import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement, clusterCanonicalEvents, computeBaselineWindow, computeInsightAnalytics, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, detectInsightPatterns, extractExpectedDate, runInsightEvidencePipeline } from "../src/subagents/insightPipeline.js";
 import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/subagents/rootCauseHypothesis.js";
 import { computeHealthScore } from "../src/subagents/healthScore.js";
+import { buildEntityGraphRows, collectDeterministicEntities, entityIdFor, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
@@ -1487,13 +1488,136 @@ test("insights feature flags default to pipeline-on and calibration-engines-off"
     primeFromAlerts: true,
     crossWindowTrend: false,
     rootCauseHypotheses: false,
-    healthScore: false
+    healthScore: false,
+    graphEnrichment: false,
+    graphClustering: false
   });
   const enabled = normalizeInsightsSettings({ crossWindowTrend: true, healthScore: true, evidencePipeline: false });
   assert.equal(enabled.crossWindowTrend, true);
   assert.equal(enabled.healthScore, true);
   assert.equal(enabled.evidencePipeline, false);
   assert.equal(enabled.rootCauseHypotheses, false);
+});
+
+test("entity links merge topically-adjacent clusters and flag unproven dependencies (plan test 6)", () => {
+  const contractor = (ref) => ({ record_ref: ref, entity_id: "contractor:אחים לוי", label: "אחים לוי", kind: "contractor" });
+  // Case A: partial topic overlap + shared entity => one cluster.
+  const merged = runInsightEvidencePipeline({
+    records: [
+      { id: "a1", title: "גבס קומה ארבע צפון מזרח", text: "העבודה עדיין בביצוע", date: "2026-06-01", source_table: "index", source_id: "a1" },
+      { id: "a2", title: "גבס קומה חמש דרום מערב", text: "ממתין להשלמה", date: "2026-06-05", source_table: "index", source_id: "a2" }
+    ],
+    entityLinks: [contractor("index:a1"), contractor("index:a2")],
+    referenceDate: "2026-06-10"
+  });
+  assert.equal(merged.clusters.length, 1);
+  assert.ok(merged.clusters[0].entities.some((entity) => entity.label === "אחים לוי"));
+
+  // Case B: zero topic overlap + shared entity => separate clusters + dependency_risk lead.
+  const dependency = runInsightEvidencePipeline({
+    records: [
+      { id: "b1", title: "אישור חשמל לובי", text: "ממתין לאישור חברת החשמל", date: "2026-06-01", source_table: "index", source_id: "b1" },
+      { id: "b2", title: "צנרת ביוב חניון", text: "העבודה עדיין פתוחה", date: "2026-06-03", source_table: "index", source_id: "b2" }
+    ],
+    entityLinks: [contractor("index:b1"), contractor("index:b2")],
+    referenceDate: "2026-06-10"
+  });
+  assert.equal(dependency.clusters.length, 2);
+  const risk = dependency.patterns.find((item) => item.type === "dependency_risk");
+  assert.ok(risk);
+  assert.equal(risk.requires_validation, true);
+  assert.equal(risk.details.entity, "אחים לוי");
+  assert.equal(risk.details.cluster_ids.length, 2);
+
+  // Case C: hub entity (attached to >6 records) is neither a merge nor a dependency signal.
+  const hubRecords = Array.from({ length: 7 }, (_, i) => ({
+    id: `h${i}`, title: `נושא נפרד לגמרי מספר ${["אחת","שתיים","שלוש","ארבע","חמש","שש","שבע"][i]}`,
+    text: "פריט פתוח וממתין", date: `2026-06-0${i + 1}`, source_table: "index", source_id: `h${i}`
+  }));
+  const hub = runInsightEvidencePipeline({
+    records: hubRecords,
+    entityLinks: hubRecords.map((record) => contractor(`index:${record.source_id}`)),
+    referenceDate: "2026-06-10"
+  });
+  assert.equal(hub.entityStats.hubs, 1);
+  assert.ok(!hub.patterns.some((item) => item.type === "dependency_risk"));
+});
+
+test("graph enrichment normalizes entity names and merges variants", () => {
+  assert.equal(normalizeEntityName("מר יוסי כהן"), "יוסי כהן");
+  assert.equal(normalizeEntityName("  אחים   לוי בע\"מ "), "אחים לוי");
+  assert.equal(entityIdFor("person", "מר יוסי כהן"), entityIdFor("person", "יוסי כהן"));
+  assert.ok(isAcceptableEntityName("קבלן גבס אחים לוי"));
+  assert.ok(!isAcceptableEntityName("קבלן"));
+  assert.ok(!isAcceptableEntityName("ספק"));
+  assert.ok(!isAcceptableEntityName("אב"));
+});
+
+test("graph enrichment enforces the grounding rule in code (no invented entities)", () => {
+  const text = "בישיבה סוכם שקבלן הגבס אחים לוי יסיים את קומה 4. אישר: דוד לוי.";
+  const { accepted, rejected } = validateExtractedEntities([
+    { name: "אחים לוי", kind: "contractor", role: "גבס", evidence: "קבלן הגבס אחים לוי" },
+    { name: "חברת חשמל", kind: "organization", role: "", evidence: "חברת חשמל אישרה" },
+    { name: "דוד לוי", kind: "invalid_kind", role: "", evidence: "אישר: דוד לוי" },
+    { name: "מנהל", kind: "person", role: "", evidence: "מנהל" }
+  ], text);
+  assert.equal(accepted.length, 1);
+  assert.equal(accepted[0].name, "אחים לוי");
+  assert.equal(accepted[0].extraction, "llm");
+  assert.deepEqual(rejected.map((item) => item.reason).sort(), ["generic_or_short_name", "invalid_kind", "ungrounded_evidence"].sort());
+});
+
+test("graph enrichment splits multi-person strings and blocks placeholder names", () => {
+  const text = "בפגישה השתתפו אור שטמרמן, זיו כהן ומזמין העבודה. אחראי: לא צוין.";
+  const { accepted, rejected } = validateExtractedEntities([
+    { name: "אור שטמרמן, זיו כהן", kind: "person", role: "", evidence: "אור שטמרמן, זיו כהן" },
+    { name: "מזמין העבודה", kind: "person", role: "", evidence: "מזמין העבודה" },
+    { name: "לא צוין", kind: "person", role: "", evidence: "לא צוין" }
+  ], text);
+  assert.deepEqual(accepted.map((item) => item.name).sort(), ["אור שטמרמן", "זיו כהן"].sort());
+  assert.equal(rejected.filter((item) => item.reason === "generic_or_short_name").length, 2);
+});
+
+test("graph enrichment builds idempotent entity nodes and mention edges", () => {
+  const record = {
+    nodeId: "data_index:77",
+    nodeType: "event",
+    sourceTable: "data_index",
+    sourceId: "77",
+    title: "סיכום ישיבה",
+    date: "2026-06-01",
+    text: "קבלן הגבס אחים לוי התחייב לסיים",
+    metadata: {}
+  };
+  const entities = [{ kind: "contractor", name: "אחים לוי", role: "גבס", evidence: "קבלן הגבס אחים לוי", confidence: 0.7, extraction: "llm" }];
+  const first = buildEntityGraphRows([{ record, entities }]);
+  const second = buildEntityGraphRows([{ record, entities }]);
+  assert.deepEqual(first, second);
+  assert.equal(first.nodes.length, 2);
+  const entityNode = first.nodes.find((node) => node.id.startsWith("contractor:"));
+  assert.equal(entityNode.node_type, "company");
+  assert.equal(entityNode.metadata.entity_kind, "contractor");
+  assert.equal(entityNode.metadata.enrichment, GRAPH_ENRICHMENT_VERSION);
+  assert.equal(first.edges.length, 1);
+  assert.equal(first.edges[0].edge_type, "mentions");
+  assert.equal(first.edges[0].metadata.source_id, "77");
+  assert.ok(first.edges[0].evidence_text.includes("אחים לוי"));
+});
+
+test("graph enrichment deterministic tier extracts approvers and metadata vendors", () => {
+  const entities = collectDeterministicEntities({
+    nodeId: "data_index:5",
+    nodeType: "event",
+    sourceTable: "data_index",
+    sourceId: "5",
+    title: "אישור הזמנה",
+    text: "ההזמנה אושרה. אישר: דוד לוי. הספק יספק את הציוד בשבוע הבא.",
+    metadata: { vendor_name: "טמבור צבעים" }
+  });
+  const kinds = entities.map((item) => `${item.kind}:${item.name}`);
+  assert.ok(kinds.some((item) => item.startsWith("person:")));
+  assert.ok(kinds.includes("supplier:טמבור צבעים"));
+  assert.ok(entities.every((item) => item.extraction !== "llm"));
 });
 
 test("insight quality metrics aggregate saved runs and tolerate legacy rows", () => {
