@@ -16,7 +16,7 @@ import { runAlertAgent } from "./subagents/alert.js";
 import { buildDataQueryWorkflowLog, DATA_QUERY_PIPELINE_STEPS, introspectSupabaseTables, runDataQueryAgent, runDataQueryPipeline, runDataQueryStep } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
-import { runGraphEnrichment } from "./subagents/graphEnrichment.js";
+import { consolidateGraphEntities, runGraphEnrichment } from "./subagents/graphEnrichment.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
@@ -1013,6 +1013,22 @@ async function handleApi(req, res, url) {
         .catch((error) => ({ error: error.message }));
     }
     return sendJson(res, 200, { ok: true, source, events: events.length, ...saved, projectGraph: projectSaved, enrichment });
+  }
+
+  // Entity-resolution v2: merge duplicate entity nodes (dry-run by default —
+  // pass {"dryRun": false} explicitly to apply).
+  if (req.method === "POST" && url.pathname === "/api/graph/consolidate") {
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    const body = await readJson(req).catch(() => ({}));
+    try {
+      const result = await consolidateGraphEntities({
+        config: buildRequestConfig(req, body),
+        dryRun: body.dryRun !== false
+      });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
   }
 
   // Graph Entity Enrichment Agent (docs/graph-entity-enrichment-agent-spec.md, Task G2).

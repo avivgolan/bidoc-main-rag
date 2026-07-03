@@ -318,17 +318,21 @@
             <label class="insightsEngineToggle"><input type="checkbox" id="insightsFlagTrend" /> מגמות מול תקופה קודמת</label>
             <label class="insightsEngineToggle"><input type="checkbox" id="insightsFlagRootCause" /> השערות סיבת שורש</label>
             <label class="insightsEngineToggle"><input type="checkbox" id="insightsFlagHealth" /> ציון בריאות</label>
+            <label class="insightsEngineToggle"><input type="checkbox" id="insightsFlagGraph" /> ישויות ותלויות מהגרף</label>
           </div>
           <div id="projectInsightsStatus" class="projectInsightsStatus">טרם הורץ ניתוח אינדקס.</div>
-          <section class="projectInsightsHistoryPanel" aria-label="Insight run history">
+          <section class="projectInsightsHistoryPanel" data-collapsed="true" aria-label="Insight run history">
             <div class="projectInsightsHistoryHeader">
               <div>
                 <h4>היסטוריית תובנות</h4>
                 <p class="hint">בחר דוח קודם כדי להציג אותו ולהמשיך להרחיב מהנקודה שבה הוא עצר.</p>
               </div>
-              <button id="refreshProjectInsightsHistory" type="button">רענן</button>
+              <div class="projectInsightsHistoryActions">
+                <button id="toggleProjectInsightsHistory" type="button" aria-expanded="false" aria-controls="projectInsightsHistoryList">הצג היסטוריה</button>
+                <button id="refreshProjectInsightsHistory" type="button">רענן</button>
+              </div>
             </div>
-            <div id="projectInsightsHistoryList" class="projectInsightsHistoryList">טוען היסטוריה...</div>
+            <div id="projectInsightsHistoryList" class="projectInsightsHistoryList" hidden>טוען היסטוריה...</div>
           </section>
           <div id="projectInsightsResults" class="projectInsightsResults"></div>
         </section>
@@ -855,6 +859,6 @@
     <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
     <script src="/react-loader.js?v=20260702-alerts-priming" type="module"></script>
-    <script src="/app.js?v=20260703-insights-engines" type="module"></script>
+    <script src="/app.js?v=20260703-insights-history-collapse" type="module"></script>
   </body>
 </html>

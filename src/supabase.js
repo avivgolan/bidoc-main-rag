@@ -1232,6 +1232,51 @@ export async function listEntityMentionEdges({ config, limit = 2000 } = {}) {
     .filter((item) => item.entity_id && item.record_ref.length > 1 && !item.record_ref.startsWith(":") && !item.record_ref.endsWith(":"));
 }
 
+// Entity-resolution v2: re-point every mention edge from an alias entity node to
+// its canonical node (merge-duplicates keeps the unique from/to/type constraint
+// happy), then remove the alias node. Alias rows are all enrichment-created, so
+// they can be regenerated from source records if ever needed.
+export async function mergeGraphEntityNodes({ config, moves = [] } = {}) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  let edgesRepointed = 0;
+  let nodesRemoved = 0;
+  for (const move of moves) {
+    if (!move?.from_id || !move?.to_id || move.from_id === move.to_id) continue;
+    const params = new URLSearchParams({
+      select: "from_node_id,to_node_id,edge_type,weight,confidence,evidence_text,metadata",
+      limit: "2000"
+    });
+    const edges = await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}&to_node_id=eq.${encodeURIComponent(move.from_id)}`);
+    const repointed = (edges || []).map((edge) => ({ ...edge, to_node_id: move.to_id }));
+    if (repointed.length) {
+      await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?on_conflict=from_node_id,to_node_id,edge_type`, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates" },
+        body: JSON.stringify(repointed)
+      });
+      await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?to_node_id=eq.${encodeURIComponent(move.from_id)}`, { method: "DELETE" });
+      edgesRepointed += repointed.length;
+    }
+    await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}?id=eq.${encodeURIComponent(move.from_id)}`, { method: "DELETE" });
+    nodesRemoved += 1;
+  }
+  return { edgesRepointed, nodesRemoved };
+}
+
+// Removes junk entity nodes (and their mention edges) outright — used by the
+// consolidation pass for sentence-length extraction artifacts.
+export async function removeGraphEntityNodes({ config, ids = [] } = {}) {
+  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  let removed = 0;
+  for (const id of ids) {
+    if (!id) continue;
+    await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?to_node_id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+    await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+    removed += 1;
+  }
+  return { removed };
+}
+
 export async function graphSearch({ config, payload = {}, limit = 30 } = {}) {
   if (!isConfigured(config)) return { results: [], skipped: true, reason: "App Supabase is not configured" };
   const body = {

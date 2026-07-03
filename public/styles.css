@@ -8463,6 +8463,10 @@ body:has(#timeline.active) .sidebar {
   padding: 16px 24px;
   border-bottom: 1px solid var(--i-border);
 }
+.projectInsightsHistoryPanel[data-collapsed="true"] {
+  gap: 0;
+  padding-block: 12px;
+}
 .projectInsightsHistoryHeader {
   display: flex;
   align-items: center;
@@ -8477,6 +8481,12 @@ body:has(#timeline.active) .sidebar {
   letter-spacing: -0.1px;
 }
 .projectInsightsHistoryHeader p.hint { font-size: 12px; color: var(--i-text-muted); margin: 2px 0 0; }
+.projectInsightsHistoryActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
 .projectInsightsHistoryHeader button {
   flex-shrink: 0;
   padding: 5px 12px;
@@ -8492,6 +8502,9 @@ body:has(#timeline.active) .sidebar {
 .projectInsightsHistoryHeader button:hover {
   background: rgba(255,255,255,0.07);
   color: var(--i-text);
+}
+.projectInsightsHistoryList[hidden] {
+  display: none;
 }
 .projectInsightsHistoryList {
   display: grid;
@@ -9161,6 +9174,14 @@ body:has(#timeline.active) .sidebar {
   .projectInsightsResults { padding-inline: 16px; }
   .projectInsightsStatus { padding-inline: 16px; }
   .projectInsightsHistoryPanel { padding: 14px 16px; }
+  .projectInsightsHistoryHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .projectInsightsHistoryActions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
   .insightsKbHint { display: none; }
 }
 

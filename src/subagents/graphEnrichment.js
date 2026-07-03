@@ -8,7 +8,7 @@
 
 import { chatCompletion, extractJsonObject } from "../openrouter.js";
 import { normalizeGraphRecord } from "../projectGraph.js";
-import { fetchAlertsTimelineEvents, fetchTimelineEvents, listEntityMentionEdges, upsertProjectGraphData } from "../supabase.js";
+import { fetchAlertsTimelineEvents, fetchTimelineEvents, listEntityMentionEdges, mergeGraphEntityNodes, removeGraphEntityNodes, upsertProjectGraphData } from "../supabase.js";
 import { extractApprover } from "../timelineLinks.js";
 import { extractLikelyCompanies } from "../timelineGraph.js";
 
@@ -60,6 +60,8 @@ export function isAcceptableEntityName(name = "") {
   if (!normalized) return false;
   if (GENERIC_NAME_BLOCKLIST.has(normalized.toLowerCase())) return false;
   const words = normalized.split(" ").filter(Boolean);
+  // Sentence-length "names" are extraction junk, not entities.
+  if (normalized.length > 40 || words.length > 5) return false;
   if (words.length < 2 && normalized.length < 4) return false;
   // A single generic word with an adjective is still generic ("קבלן משנה" is blocked
   // above); a single remaining blocklist word after normalization is rejected too.
@@ -240,6 +242,36 @@ export async function runGraphEnrichment({
     }
   }
 
+  // Canonicalize freshly extracted entities against the existing graph + this
+  // batch, so variants converge instead of creating new alias nodes.
+  try {
+    const byEntity = new Map();
+    for (const link of await listEntityMentionEdges({ config, limit: 5000 })) {
+      if (!byEntity.has(link.entity_id)) byEntity.set(link.entity_id, { entity_id: link.entity_id, kind: link.kind, label: link.label, mentions: 0 });
+      byEntity.get(link.entity_id).mentions += 1;
+    }
+    for (const item of recordEntities) {
+      for (const entity of item.entities) {
+        const id = entityIdFor(entity.kind, entity.name);
+        if (!byEntity.has(id)) byEntity.set(id, { entity_id: id, kind: entity.kind, label: normalizeEntityName(entity.name).toLowerCase(), mentions: 0 });
+        byEntity.get(id).mentions += 1;
+      }
+    }
+    const aliasMap = buildEntityAliasMap([...byEntity.values()]);
+    if (aliasMap.size) {
+      for (const item of recordEntities) {
+        item.entities = dedupeEntities(item.entities.map((entity) => {
+          const canonical = aliasMap.get(entityIdFor(entity.kind, entity.name));
+          if (!canonical) return entity;
+          const separator = canonical.indexOf(":");
+          return { ...entity, kind: canonical.slice(0, separator), name: canonical.slice(separator + 1) };
+        }));
+      }
+    }
+  } catch {
+    // Alias resolution is best-effort; extraction output is still valid without it.
+  }
+
   for (const item of recordEntities) {
     for (const entity of item.entities) {
       summary.entities += 1;
@@ -255,6 +287,115 @@ export async function runGraphEnrichment({
   }
   emit?.(runId, "graph_enrichment", `Graph enriched: ${summary.entities} entity mentions across ${records.length} records`, { ...summary, status: "done" });
   return summary;
+}
+
+// ── Entity resolution v2 ─────────────────────────────────────────────────────
+// Deterministic alias resolution over the entity set itself:
+// 1. Same kind + identical sorted token-stem signature => same entity
+//    ("עידו קדם" == "קדם עידו", "סמל מטבחים" == "מטבחי סמל").
+// 2. A single-token name is an alias of a multi-token name when its stem matches
+//    the first-token stem of EXACTLY ONE same-kind candidate ("יותם" -> "יותם פנר");
+//    two candidates ("אמנון טופציק" / "אמנון מטבחי סמל") => ambiguous, no merge.
+// Canonical = most mentions, then longest label, then lexicographic (deterministic).
+
+export function entityStemSignature(label = "") {
+  const tokens = String(label || "").toLowerCase().match(/[\p{L}\p{N}@.]+/gu) || [];
+  // Single-token names compare in full — a 4-char stem is too coarse for names
+  // ("עמנון" must not equal "עמנואל"). Stems only disambiguate word order and
+  // construct-state in multi-token names ("מטבחי סמל" == "סמל מטבחים").
+  if (tokens.length === 1) return tokens[0];
+  return tokens
+    .map((token) => (token.length > 4 ? token.slice(0, 4) : token))
+    .sort()
+    .join("|");
+}
+
+export function buildEntityAliasMap(entities = []) {
+  const aliasMap = new Map();
+  const byKind = new Map();
+  for (const entity of entities) {
+    if (!entity?.entity_id || !entity?.label) continue;
+    if (!byKind.has(entity.kind)) byKind.set(entity.kind, []);
+    byKind.get(entity.kind).push(entity);
+  }
+  const pickCanonical = (group) => [...group].sort((a, b) =>
+    (b.mentions || 0) - (a.mentions || 0)
+    || b.label.length - a.label.length
+    || a.entity_id.localeCompare(b.entity_id))[0];
+
+  for (const group of byKind.values()) {
+    // Rule 1: identical stem signatures.
+    const bySignature = new Map();
+    for (const entity of group) {
+      const signature = entityStemSignature(entity.label);
+      if (!bySignature.has(signature)) bySignature.set(signature, []);
+      bySignature.get(signature).push(entity);
+    }
+    for (const members of bySignature.values()) {
+      if (members.length < 2) continue;
+      const canonical = pickCanonical(members);
+      for (const member of members) {
+        if (member.entity_id !== canonical.entity_id) aliasMap.set(member.entity_id, canonical.entity_id);
+      }
+    }
+    // Rule 2: unambiguous single-token -> multi-token first-name match.
+    // EXACT first-token equality only (stems are too coarse for names: "עמנון"
+    // must not merge into "עמנואל"), and never into sentence-length junk labels.
+    const multiToken = group.filter((entity) =>
+      entity.label.trim().includes(" ")
+      && entity.label.length <= 40
+      && entity.label.trim().split(/\s+/).length <= 5
+      && !aliasMap.has(entity.entity_id));
+    for (const entity of group) {
+      if (aliasMap.has(entity.entity_id) || entity.label.trim().includes(" ")) continue;
+      const token = entity.label.trim().toLowerCase();
+      const candidates = multiToken.filter((candidate) => candidate.label.trim().split(/\s+/)[0].toLowerCase() === token);
+      if (candidates.length === 1) aliasMap.set(entity.entity_id, candidates[0].entity_id);
+    }
+  }
+  // Flatten alias chains (a->b, b->c => a->c).
+  for (const [alias, canonical] of aliasMap) {
+    let target = canonical;
+    const seen = new Set([alias]);
+    while (aliasMap.has(target) && !seen.has(target)) {
+      seen.add(target);
+      target = aliasMap.get(target);
+    }
+    aliasMap.set(alias, target);
+  }
+  return aliasMap;
+}
+
+// Merges duplicate entity nodes in the live graph. dryRun returns the merge plan
+// without touching data — always inspect it before applying.
+export async function consolidateGraphEntities({ config, dryRun = true } = {}) {
+  const links = await listEntityMentionEdges({ config, limit: 5000 });
+  const byEntity = new Map();
+  for (const link of links) {
+    if (!byEntity.has(link.entity_id)) {
+      byEntity.set(link.entity_id, { entity_id: link.entity_id, kind: link.kind, label: link.label, mentions: 0 });
+    }
+    byEntity.get(link.entity_id).mentions += 1;
+  }
+  // Sentence-length labels are extraction artifacts — slated for removal, and
+  // never used as merge targets.
+  const junk = [...byEntity.values()].filter((entity) => !isAcceptableEntityName(entity.label));
+  const junkIds = new Set(junk.map((entity) => entity.entity_id));
+  const aliasMap = buildEntityAliasMap([...byEntity.values()].filter((entity) => !junkIds.has(entity.entity_id)));
+  const moves = [...aliasMap.entries()].map(([fromId, toId]) => ({
+    from_id: fromId,
+    to_id: toId,
+    from_label: byEntity.get(fromId)?.label || fromId,
+    to_label: byEntity.get(toId)?.label || toId,
+    mentions_moved: byEntity.get(fromId)?.mentions || 0
+  }));
+  const junkList = junk.map((entity) => ({ entity_id: entity.entity_id, label: entity.label.slice(0, 60), mentions: entity.mentions }));
+  if (dryRun) {
+    return { dryRun: true, entities: byEntity.size, groups: moves.length, moves, junk: junkList };
+  }
+  const result = await mergeGraphEntityNodes({ config, moves });
+  const junkResult = await removeGraphEntityNodes({ config, ids: [...junkIds] });
+  return { dryRun: false, entities: byEntity.size, groups: moves.length, moves, junk: junkList, junkRemoved: junkResult.removed, ...result };
 }
 
 async function enrichBatchWithLlm({ config, batch, summary, runId, emit }) {

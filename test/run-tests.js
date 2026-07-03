@@ -15,7 +15,7 @@ import { buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSi
 import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement, clusterCanonicalEvents, computeBaselineWindow, computeInsightAnalytics, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, detectInsightPatterns, extractExpectedDate, runInsightEvidencePipeline } from "../src/subagents/insightPipeline.js";
 import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/subagents/rootCauseHypothesis.js";
 import { computeHealthScore } from "../src/subagents/healthScore.js";
-import { buildEntityGraphRows, collectDeterministicEntities, entityIdFor, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
+import { buildEntityAliasMap, buildEntityGraphRows, collectDeterministicEntities, entityIdFor, entityStemSignature, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
@@ -1541,6 +1541,35 @@ test("entity links merge topically-adjacent clusters and flag unproven dependenc
   });
   assert.equal(hub.entityStats.hubs, 1);
   assert.ok(!hub.patterns.some((item) => item.type === "dependency_risk"));
+});
+
+test("entity alias resolution merges variants deterministically with an ambiguity guard", () => {
+  // Token-order and construct-state variants share a stem signature.
+  assert.equal(entityStemSignature("עידו קדם"), entityStemSignature("קדם עידו"));
+  assert.equal(entityStemSignature("סמל מטבחים"), entityStemSignature("מטבחי סמל"));
+  // Single-token names never merge by stem ("עמנון" is not "עמנואל").
+  assert.notEqual(entityStemSignature("עמנון"), entityStemSignature("עמנואל"));
+  const entities = [
+    { entity_id: "person:עידו קדם", kind: "person", label: "עידו קדם", mentions: 121 },
+    { entity_id: "person:קדם עידו", kind: "person", label: "קדם עידו", mentions: 5 },
+    { entity_id: "organization:סמל מטבחים", kind: "organization", label: "סמל מטבחים", mentions: 25 },
+    { entity_id: "organization:מטבחי סמל", kind: "organization", label: "מטבחי סמל", mentions: 18 },
+    { entity_id: "person:יותם", kind: "person", label: "יותם", mentions: 3 },
+    { entity_id: "person:יותם פנר", kind: "person", label: "יותם פנר", mentions: 106 },
+    { entity_id: "person:אמנון", kind: "person", label: "אמנון", mentions: 30 },
+    { entity_id: "person:אמנון טופציק", kind: "person", label: "אמנון טופציק", mentions: 112 },
+    { entity_id: "person:אמנון מטבחי סמל", kind: "person", label: "אמנון מטבחי סמל", mentions: 22 },
+    { entity_id: "location:הרצליה", kind: "location", label: "הרצליה", mentions: 4 }
+  ];
+  const aliasMap = buildEntityAliasMap(entities);
+  assert.equal(aliasMap.get("person:קדם עידו"), "person:עידו קדם");
+  assert.equal(aliasMap.get("organization:מטבחי סמל"), "organization:סמל מטבחים");
+  assert.equal(aliasMap.get("person:יותם"), "person:יותם פנר");
+  // Two multi-token candidates start with "אמנון" => ambiguous, no merge.
+  assert.ok(!aliasMap.has("person:אמנון"));
+  // Different kinds never merge, unrelated entities untouched.
+  assert.ok(!aliasMap.has("location:הרצליה"));
+  assert.ok(!aliasMap.has("person:עידו קדם"));
 });
 
 test("graph enrichment normalizes entity names and merges variants", () => {
