@@ -10,11 +10,44 @@
 // content-rich and fully embedded (508/508). Other sources join as their data
 // fills in (see the spec's B1 priority order).
 
-import { createEmbedding } from "../openrouter.js";
+import { chatCompletion, createEmbedding } from "../openrouter.js";
+import { DEFAULT_CONTENT_TOOL_SETTINGS } from "../config.js";
 import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
 
 const MATCH_RPC = "match_data_index";
 const DEFAULT_TOP_K = 12;
+
+// Default answer-synthesis prompts (Task M2). Editable per tool from the
+// Subagents settings card (settings.subagents.contentTools.perTool.<tool>.prompt);
+// synthesis itself is OFF by default — the tools stay retrieval-only until the
+// user enables it per tool.
+const SYNTHESIS_BASE = [
+  "אתה סוכן משנה שמנסח תשובה תמציתית מתוצאות אחזור אמיתיות של פרויקט בנייה.",
+  "הסתמך אך ורק על התוצאות שסופקו. אל תמציא עובדות, תאריכים, אנשים או סכומים.",
+  "פלט רשימה קצרה בעברית, מהחדש לישן, עם תאריך בכל שורה כשקיים.",
+  "אם אין תוצאות רלוונטיות: כתוב \"לא נמצאו תוצאות רלוונטיות.\""
+].join("\n");
+export const DEFAULT_TOOL_PROMPTS = {
+  meetings: `${SYNTHESIS_BASE}\nלכל פגישה: תאריך, נושא, החלטות (אם יש), סטטוס ומשתתפים.`,
+  emails: `${SYNTHESIS_BASE}\nלכל מייל: תאריך קבלה, שולח, נושא ותמצית. ציין קטגוריה כשקיימת.`,
+  whatsapp_messages: `${SYNTHESIS_BASE}\nלכל שיחה: תאריך, משתתפים, תמצית, ומשימות/החלטות פתוחות אם יש.`,
+  financial_transactions: `${SYNTHESIS_BASE}\nלכל עסקה: תאריך, ספק, סוג עסקה, סכום וסטטוס.`,
+  safety_report: `${SYNTHESIS_BASE}\nלכל דוח: תאריך, אתר, רמת סיכון, וליקויים לפי חומרה. הדגש ליקויים חמורים/מסכני חיים.`
+};
+
+// Effective settings for one tool: saved settings (config.contentTools) merged
+// with per-call overrides (draft testing from the settings card).
+export function contentToolSettings(config, toolName, overrides = null) {
+  const saved = config?.contentTools?.perTool?.[toolName] || DEFAULT_CONTENT_TOOL_SETTINGS;
+  const draft = overrides && typeof overrides === "object" ? overrides : {};
+  return {
+    enabled: draft.enabled ?? saved.enabled !== false,
+    topK: Number(draft.topK) > 0 ? Math.min(Number(draft.topK), 50) : saved.topK || DEFAULT_TOP_K,
+    answerSynthesis: draft.answerSynthesis ?? saved.answerSynthesis === true,
+    model: (typeof draft.model === "string" && draft.model) || saved.model || "",
+    prompt: (typeof draft.prompt === "string" && draft.prompt.trim()) || saved.prompt || ""
+  };
+}
 
 export const CONTENT_TOOL_SPECS = {
   meetings: {
@@ -133,7 +166,9 @@ export function compactJsonList(value, limit = 5) {
 }
 
 export function isInternalContentTool(toolName, config) {
-  return Boolean(CONTENT_TOOL_SPECS[toolName]) && config?.n8n?.runtime?.internalTools === true;
+  return Boolean(CONTENT_TOOL_SPECS[toolName])
+    && config?.n8n?.runtime?.internalTools === true
+    && config?.contentTools?.perTool?.[toolName]?.enabled !== false;
 }
 
 // Local date filter over the index dates the indexing agent maintains:
@@ -160,6 +195,7 @@ export async function runContentToolAgent({
   dateFrom = null,
   dateTo = null,
   topK = null,
+  overrides = null,
   cacheContext = null,
   telemetry = null
 }) {
@@ -170,6 +206,7 @@ export async function runContentToolAgent({
     throw new Error("Content Supabase is not configured");
   }
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+  const settings = contentToolSettings(config, toolName, overrides);
 
   const searchQuery = String(query || "").trim() || spec.label;
   const embedding = await createEmbedding({
@@ -179,7 +216,7 @@ export async function runContentToolAgent({
     cacheContext,
     telemetry
   });
-  const matchCount = Math.max(1, Math.min(Number(topK) || DEFAULT_TOP_K, 50));
+  const matchCount = Math.max(1, Math.min(Number(topK) || settings.topK || DEFAULT_TOP_K, 50));
   const matches = await contentSupabaseRequest({
     config,
     path: `/rest/v1/rpc/${MATCH_RPC}`,
@@ -239,7 +276,7 @@ export async function runContentToolAgent({
     }
   }
 
-  return {
+  const output = {
     tool: toolName,
     mode: "internal",
     query: searchQuery,
@@ -248,18 +285,50 @@ export async function runContentToolAgent({
     resultsCount: filtered.length,
     results: filtered
   };
+
+  // Optional answer synthesis (Task M2): one lite-LLM call phrasing the raw
+  // results with the per-tool editable prompt. Raw results are always kept.
+  if (settings.answerSynthesis) {
+    try {
+      output.answer = await chatCompletion({
+        apiKey: config.openRouterApiKey,
+        model: settings.model || config.models?.lite || config.models?.main,
+        temperature: 0.1,
+        maxTokens: 1600,
+        timeoutMs: 60_000,
+        telemetry,
+        messages: [
+          { role: "system", content: settings.prompt || DEFAULT_TOOL_PROMPTS[toolName] || SYNTHESIS_BASE },
+          {
+            role: "user",
+            content: JSON.stringify({
+              query: searchQuery,
+              date_from: dateFrom,
+              date_to: dateTo,
+              results: filtered
+            })
+          }
+        ]
+      });
+      output.synthesis = { model: settings.model || config.models?.lite || null, prompt_overridden: Boolean(settings.prompt) };
+    } catch (error) {
+      output.synthesisError = error.message;
+    }
+  }
+  return output;
 }
 
 // Adapts the internal result to the callN8nTool response contract so chat,
 // insights, workflow logs, and QA see the same shape they always did.
-export async function callInternalContentTool({ config, toolName, query, dateFrom = null, dateTo = null, cacheContext = null, telemetry = null }) {
+export async function callInternalContentTool({ config, toolName, query, dateFrom = null, dateTo = null, overrides = null, cacheContext = null, telemetry = null }) {
   try {
-    const data = await runContentToolAgent({ config, toolName, query, dateFrom, dateTo, cacheContext, telemetry });
+    const data = await runContentToolAgent({ config, toolName, query, dateFrom, dateTo, overrides, cacheContext, telemetry });
     return {
       toolName,
       ok: true,
       internal: true,
       data,
+      ...(data.answer ? { answer: data.answer } : {}),
       sources: data.results
         .filter((row) => row.source_url)
         .slice(0, 8)

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BiDoc — AI Document Intelligence</title>
-    <link rel="stylesheet" href="/styles.css?v=20260703-insights-react" />
+    <link rel="stylesheet" href="/styles.css?v=20260705-internal-agents" />
   </head>
   <body>
     <a class="skipLink" href="#chatMain">דלג לתוכן הצ׳אט</a>
@@ -246,7 +246,11 @@
         <header class="panelHeader">
           <div>
             <h2>סוכני משנה</h2>
-            <p class="hint">סוכני n8n המחוברים למערכת — כל סוכן מטפל בתחום ספציפי ומוזמן על-ידי ה-Main Agent.</p>
+            <p class="hint">הסוכנים הפנימיים של המערכת — כל סוכן מטפל בתחום ספציפי ומוזמן על-ידי ה-Main Agent. שינויים בכרטיסים נשמרים לטופס; לחץ "שמור ל-Supabase" כדי להחיל.</p>
+          </div>
+          <div class="subagentsSaveBar">
+            <span id="subagentsSaveStatus" class="hint"></span>
+            <button id="subagentsSaveAll" class="primary">שמור ל-Supabase</button>
           </div>
         </header>
         <div id="subagentsList" class="subagents-grid"></div>
@@ -661,7 +665,7 @@
     <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
-    <script src="/react-loader.js?v=20260703-insights-react" type="module"></script>
-    <script src="/app.js?v=20260703-insights-react" type="module"></script>
+    <script src="/react-loader.js?v=20260705-internal-agents" type="module"></script>
+    <script src="/app.js?v=20260705-internal-agents" type="module"></script>
   </body>
 </html>

@@ -671,7 +671,9 @@ async function handleApi(req, res, url) {
         toolName,
         query: body.query || "",
         dateFrom: body.date_from || null,
-        dateTo: body.date_to || null
+        dateTo: body.date_to || null,
+        // Draft settings from the Subagents card — test before saving.
+        overrides: body.overrides && typeof body.overrides === "object" ? body.overrides : null
       });
       return sendJson(res, 200, result);
     }

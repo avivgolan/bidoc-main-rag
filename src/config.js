@@ -429,6 +429,39 @@ const DEFAULT_DATA_QUERY_SETTINGS = {
   plannerTimeoutMs: 30000
 };
 
+// Task M2: per-internal-tool settings (docs/n8n-agents-migration-spec.md).
+// Kept in config.js (not contentTools.js) to avoid an import cycle; a test
+// asserts this list matches Object.keys(CONTENT_TOOL_SPECS).
+export const INTERNAL_CONTENT_TOOL_NAMES = ["meetings", "emails", "whatsapp_messages", "financial_transactions", "safety_report"];
+export const DEFAULT_CONTENT_TOOL_SETTINGS = { enabled: true, topK: 12, answerSynthesis: false, model: "", prompt: "" };
+
+export function normalizeContentToolsSettings(value = {}) {
+  const raw = isPlainObject(value) ? value : {};
+  const perToolRaw = isPlainObject(raw.perTool) ? raw.perTool : {};
+  return {
+    perTool: Object.fromEntries(INTERNAL_CONTENT_TOOL_NAMES.map((tool) => {
+      const toolRaw = isPlainObject(perToolRaw[tool]) ? perToolRaw[tool] : {};
+      return [tool, {
+        enabled: toolRaw.enabled !== false,
+        topK: clampNumber(toolRaw.topK, 1, 50, DEFAULT_CONTENT_TOOL_SETTINGS.topK),
+        answerSynthesis: toolRaw.answerSynthesis === true,
+        model: typeof toolRaw.model === "string" ? toolRaw.model : "",
+        prompt: typeof toolRaw.prompt === "string" ? toolRaw.prompt : ""
+      }];
+    }))
+  };
+}
+
+export function normalizeIndexingSettings(value = {}) {
+  const raw = isPlainObject(value) ? value : {};
+  return {
+    // Bounded incremental indexing at the start of insights runs (the
+    // graphEnrichment precedent). Default OFF until calibrated.
+    autoIndexing: raw.autoIndexing === true,
+    incrementalLimit: clampNumber(raw.incrementalLimit, 1, 200, 40)
+  };
+}
+
 export function getConfig(settingsOverride = null) {
   const settings = settingsOverride && typeof settingsOverride === "object"
     ? settingsOverride
@@ -490,6 +523,8 @@ export function getConfig(settingsOverride = null) {
     timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks),
     meetingsEvidence: normalizeMeetingsEvidenceSettings(settings.subagents?.meetingsEvidence),
     dataQuery: normalizeDataQuerySettings(settings.subagents?.dataQuery),
+    contentTools: normalizeContentToolsSettings(settings.subagents?.contentTools),
+    indexing: normalizeIndexingSettings(settings.subagents?.indexing),
     n8n: {
       baseUrl: trimSlash(settings.n8nBaseUrl || process.env.N8N_BASE_URL || ""),
       runtime: normalizeToolRuntimeSettings(settings.toolsRuntime || settings.toolRuntime),
@@ -555,7 +590,7 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
       })
     ),
     agents: buildAgentList(config),
-    subagents: { ...(settings.subagents || {}), meetingsEvidence: config.meetingsEvidence, dataQuery: config.dataQuery },
+    subagents: { ...(settings.subagents || {}), meetingsEvidence: config.meetingsEvidence, dataQuery: config.dataQuery, contentTools: config.contentTools, indexing: config.indexing },
     presets: mergeSettingsPresets(settings.presets || [])
   };
 }

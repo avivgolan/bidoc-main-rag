@@ -37,6 +37,18 @@ const SUB_AGENTS = [
   },
 ];
 
+// Internal content tools (spec M2) — retrieval over data_index per source,
+// with optional per-tool answer synthesis. Settings live under
+// settings.subagents.contentTools.perTool.<id>.
+const CONTENT_TOOL_CARDS = [
+  { id: "meetings", label: "סוכן פגישות פנימי", desc: "חיפוש סמנטי בפגישות מהאינדקס, מועשר בפרטי הפגישה: משתתפים, החלטות, סטטוס ושעה." },
+  { id: "emails", label: "סוכן מיילים פנימי", desc: "חיפוש סמנטי במיילים רלוונטיים לפרויקט, מועשר בשולח, נמענים, קטגוריה וכיוון." },
+  { id: "whatsapp_messages", label: "סוכן וואטסאפ פנימי", desc: "חיפוש בניתוחי שיחות וואטסאפ, מועשר במשתתפים, משימות, החלטות ודדליינים." },
+  { id: "financial_transactions", label: "סוכן פיננסי פנימי", desc: "חיפוש בעסקאות פיננסיות, מועשר בספק, סכום, סוג עסקה וסטטוס." },
+  { id: "safety_report", label: "סוכן בטיחות פנימי", desc: "חיפוש בדוחות בטיחות, מועשר ברמת סיכון, ציון אתר ופירוט ליקויים לפי חומרה." }
+];
+const CONTENT_TOOL_DEFAULTS = { enabled: true, topK: 12, answerSynthesis: false, model: "", prompt: "" };
+
 const MEETINGS_EVIDENCE_DEFAULTS = {
   enabled: true,
   model: "",
@@ -436,6 +448,239 @@ async function loadAgentsTabData() {
   await loadOpenRouterModels();
 }
 
+// ─── Internal content tool cards (spec M2) ───────────────────────────────────
+
+function contentToolDraft(toolId) {
+  return {
+    ...CONTENT_TOOL_DEFAULTS,
+    ...(state.settings?.subagents?.contentTools?.perTool?.[toolId] || {})
+  };
+}
+
+function stageContentToolDraft(toolId, updated) {
+  const contentTools = state.settings?.subagents?.contentTools || {};
+  state.settings = {
+    ...(state.settings || {}),
+    subagents: {
+      ...(state.settings?.subagents || {}),
+      contentTools: {
+        ...contentTools,
+        perTool: { ...(contentTools.perTool || {}), [toolId]: updated }
+      }
+    }
+  };
+  state.settingsDirty = true;
+  markSubagentsDirty();
+}
+
+function renderContentToolCards(list, models) {
+  const internalToolsOn = state.settings?.toolsRuntime?.internalTools === true;
+  const master = document.createElement("div");
+  master.className = "subagent-card";
+  master.innerHTML = `
+    <div class="subagent-header">
+      <span class="subagent-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+      <span class="subagent-name">כלים פנימיים — מתג ראשי</span>
+      <span class="subagent-status ${internalToolsOn ? "status-ok" : "status-warn"}">${internalToolsOn ? "פעיל" : "כבוי"}</span>
+    </div>
+    <p class="subagent-desc">כשהמתג דולק, כלי הפרויקט (פגישות, מיילים, וואטסאפ, פיננסי, בטיחות) רצים בקוד פנימי מול מסד הנתונים במקום דרך n8n. אפשר לכבות כל סוכן בנפרד בכרטיס שלו.</p>
+    <div class="subagent-config">
+      <label class="subagent-config-label">
+        <input type="checkbox" class="ct-master" ${internalToolsOn ? "checked" : ""} /> הפעל כלים פנימיים
+      </label>
+    </div>
+  `;
+  master.querySelector(".ct-master").addEventListener("change", (event) => {
+    state.settings = {
+      ...(state.settings || {}),
+      toolsRuntime: { ...(state.settings?.toolsRuntime || {}), internalTools: event.target.checked }
+    };
+    state.settingsDirty = true;
+    markSubagentsDirty();
+  });
+  list.append(master);
+
+  for (const tool of CONTENT_TOOL_CARDS) {
+    const cfg = contentToolDraft(tool.id);
+    const modelOptions = models.map((m) =>
+      `<option value="${m.id}" ${m.id === (cfg.model || "") ? "selected" : ""}>${m.id}</option>`
+    ).join("");
+    const card = document.createElement("div");
+    card.className = "subagent-card";
+    card.innerHTML = `
+      <div class="subagent-header">
+        <span class="subagent-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+        <span class="subagent-name">${tool.label}</span>
+        <span class="subagent-status ${cfg.enabled !== false ? "status-ok" : "status-warn"}">${cfg.enabled !== false ? "פעיל" : "כבוי"}</span>
+      </div>
+      <p class="subagent-desc">${tool.desc}</p>
+      <div class="subagent-config">
+        <label class="subagent-config-label">
+          <input type="checkbox" class="ct-enabled" ${cfg.enabled !== false ? "checked" : ""} /> הפעל סוכן
+        </label>
+        <label class="subagent-config-label">מספר תוצאות (topK)
+          <input type="number" class="ct-topk" value="${cfg.topK || 12}" min="1" max="50" />
+        </label>
+        <label class="subagent-config-label">
+          <input type="checkbox" class="ct-synthesis" ${cfg.answerSynthesis ? "checked" : ""} /> ניסוח תשובה (קריאת AI נוספת)
+        </label>
+        <label class="subagent-config-label">מודל ניסוח (ריק = Lite)
+          <select class="ct-model"><option value="">— מודל Lite —</option>${modelOptions}</select>
+        </label>
+        <label class="subagent-config-label wide">פרומפט ניסוח (ריק = ברירת מחדל)
+          <textarea class="ct-prompt" rows="5" spellcheck="false" placeholder="השאר ריק כדי להשתמש בפרומפט ברירת המחדל של הסוכן">${cfg.prompt || ""}</textarea>
+        </label>
+        <button class="ct-save">עדכן בטופס</button>
+        <span class="ct-save-status"></span>
+      </div>
+      <div class="subagent-test">
+        <input class="ct-query" placeholder="שאילתת בדיקה…" />
+        <input class="ct-from" placeholder="מתאריך (YYYY-MM-DD)" />
+        <input class="ct-to" placeholder="עד תאריך (YYYY-MM-DD)" />
+        <button class="ct-run">בדוק עם הטיוטה</button>
+      </div>
+      <pre class="subagent-result">אין תוצאה עדיין.</pre>
+    `;
+    const readDraft = () => ({
+      enabled: card.querySelector(".ct-enabled").checked,
+      topK: Number(card.querySelector(".ct-topk").value) || 12,
+      answerSynthesis: card.querySelector(".ct-synthesis").checked,
+      model: card.querySelector(".ct-model").value,
+      prompt: card.querySelector(".ct-prompt").value
+    });
+    card.querySelector(".ct-save").addEventListener("click", () => {
+      stageContentToolDraft(tool.id, readDraft());
+      const status = card.querySelector(".ct-save-status");
+      status.textContent = "✓ עודכן בטופס";
+      setTimeout(() => { status.textContent = ""; }, 2500);
+    });
+    card.querySelector(".ct-run").addEventListener("click", async () => {
+      const resultEl = card.querySelector(".subagent-result");
+      resultEl.textContent = "מריץ…";
+      try {
+        const result = await api(`/api/tools/${encodeURIComponent(tool.id)}/test`, {
+          method: "POST",
+          body: {
+            internal: true,
+            query: card.querySelector(".ct-query").value,
+            date_from: card.querySelector(".ct-from").value || null,
+            date_to: card.querySelector(".ct-to").value || null,
+            overrides: readDraft()
+          }
+        });
+        resultEl.textContent = result.answer
+          ? result.answer
+          : JSON.stringify(result.data?.results?.slice(0, 5) ?? result, null, 2);
+      } catch (error) {
+        resultEl.textContent = `שגיאה: ${error.message}`;
+      }
+    });
+    list.append(card);
+  }
+}
+
+function renderIndexingCard(list) {
+  const cfg = { autoIndexing: false, incrementalLimit: 40, ...(state.settings?.subagents?.indexing || {}) };
+  const card = document.createElement("div");
+  card.className = "subagent-card";
+  card.innerHTML = `
+    <div class="subagent-header">
+      <span class="subagent-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg></span>
+      <span class="subagent-name">סוכן אינדוקס פנימי</span>
+      <span class="subagent-status ${cfg.autoIndexing ? "status-ok" : "status-warn"}">${cfg.autoIndexing ? "אוטומטי" : "ידני"}</span>
+    </div>
+    <p class="subagent-desc">מאנדקס רשומות מקור חדשות ל-data_index וממלא תאריכי אירוע/מסמך. Dry-run מציג תוכנית בלי לכתוב; "הרץ אינדוקס" כותב בפועל.</p>
+    <div class="subagent-config">
+      <label class="subagent-config-label">
+        <input type="checkbox" class="ix-auto" ${cfg.autoIndexing ? "checked" : ""} /> אינדוקס אוטומטי בריצות תובנות
+      </label>
+      <label class="subagent-config-label">תקרת שורות לריצה
+        <input type="number" class="ix-limit" value="${cfg.incrementalLimit || 40}" min="1" max="200" />
+      </label>
+      <button class="ix-save">עדכן בטופס</button>
+      <span class="ix-save-status"></span>
+    </div>
+    <div class="subagent-test">
+      <button class="ix-dry-dates">Dry-run תאריכים</button>
+      <button class="ix-dry-run">Dry-run אינדוקס</button>
+      <button class="ix-apply">הרץ אינדוקס עכשיו</button>
+    </div>
+    <pre class="subagent-result">אין תוצאה עדיין.</pre>
+  `;
+  card.querySelector(".ix-save").addEventListener("click", () => {
+    state.settings = {
+      ...(state.settings || {}),
+      subagents: {
+        ...(state.settings?.subagents || {}),
+        indexing: {
+          autoIndexing: card.querySelector(".ix-auto").checked,
+          incrementalLimit: Number(card.querySelector(".ix-limit").value) || 40
+        }
+      }
+    };
+    state.settingsDirty = true;
+    markSubagentsDirty();
+    const status = card.querySelector(".ix-save-status");
+    status.textContent = "✓ עודכן בטופס";
+    setTimeout(() => { status.textContent = ""; }, 2500);
+  });
+  const runIndexing = async (path, body) => {
+    const resultEl = card.querySelector(".subagent-result");
+    resultEl.textContent = "מריץ…";
+    try {
+      const result = await api(path, { method: "POST", body });
+      const { sample, ...summary } = result;
+      resultEl.textContent = JSON.stringify(summary, null, 2);
+    } catch (error) {
+      resultEl.textContent = `שגיאה: ${error.message}`;
+    }
+  };
+  card.querySelector(".ix-dry-dates").addEventListener("click", () => runIndexing("/api/index/backfill-dates", { dryRun: true }));
+  card.querySelector(".ix-dry-run").addEventListener("click", () => runIndexing("/api/index/run", { dryRun: true }));
+  card.querySelector(".ix-apply").addEventListener("click", () => runIndexing("/api/index/run", {
+    dryRun: false,
+    limit: Number(card.querySelector(".ix-limit").value) || 40
+  }));
+  list.append(card);
+}
+
+function markSubagentsDirty() {
+  const status = $("subagentsSaveStatus");
+  if (status) status.textContent = "יש שינויים שטרם נשמרו ב-Supabase.";
+}
+
+// The settings page is a React island with its own save; subagent drafts are
+// persisted from here with a partial PUT (the server merges sections).
+function wireSubagentsSaveBar() {
+  const button = $("subagentsSaveAll");
+  if (!button || button.dataset.wired) return;
+  button.dataset.wired = "1";
+  button.addEventListener("click", async () => {
+    const status = $("subagentsSaveStatus");
+    button.disabled = true;
+    if (status) status.textContent = "שומר ב-Supabase…";
+    try {
+      const result = await api("/api/settings", {
+        method: "PUT",
+        body: {
+          subagents: state.settings?.subagents || {},
+          toolsRuntime: state.settings?.toolsRuntime || {}
+        }
+      });
+      if (result?.settings) state.settings = result.settings;
+      state.settingsDirty = false;
+      if (status) status.textContent = "✓ נשמר ב-Supabase";
+      showToast("הגדרות הסוכנים נשמרו");
+      setTimeout(() => { if (status) status.textContent = ""; }, 3000);
+    } catch (error) {
+      if (status) status.textContent = `שגיאה: ${error.message}`;
+      showToast(`שגיאה בשמירה: ${error.message}`, "error");
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
 function loadSubAgents() {
   const list = $("subagentsList");
   list.innerHTML = "";
@@ -614,6 +859,10 @@ function loadSubAgents() {
     setTimeout(() => { meCard.querySelector("#meSaveStatus").textContent = ""; }, 2500);
   });
   list.append(meCard);
+
+  renderContentToolCards(list, models);
+  renderIndexingCard(list);
+  wireSubagentsSaveBar();
 
   const dqCfg = { ...DATA_QUERY_DEFAULTS, ...(state.settings?.subagents?.dataQuery || {}) };
   const dqCard = document.createElement("div");

@@ -9,6 +9,7 @@ import { runAlertAgent } from "./alert.js";
 import { buildInsightAiContext, buildInsightEvidence, clusterCanonicalEvents, computeBaselineWindow, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, runInsightEvidencePipeline } from "./insightPipeline.js";
 import { generateRootCauseHypotheses } from "./rootCauseHypothesis.js";
 import { runGraphEnrichment } from "./graphEnrichment.js";
+import { runIncrementalIndexing } from "./indexing.js";
 import { computeHealthScore } from "./healthScore.js";
 
 const SIGNALS = [
@@ -136,6 +137,24 @@ export async function runProjectInsightsAnalysis({
   // Keep the graph fresh when both graph flags are on: a small incremental
   // enrichment over the last two weeks of records, bounded so a typical run adds
   // seconds, not minutes. Failures never block the analysis.
+  // Task M2: bounded incremental indexing at the start of the run, so new
+  // source rows are searchable before enrichment/analysis. Default off.
+  if (config?.indexing?.autoIndexing === true) {
+    try {
+      const indexed = await runIncrementalIndexing({
+        config,
+        dryRun: false,
+        limit: Number(config?.indexing?.incrementalLimit || 40),
+        runId,
+        emit
+      });
+      step("auto_indexing", indexed.inserted
+        ? `Indexed ${indexed.inserted} new source rows`
+        : "Index is up to date", { planned: indexed.planned, inserted: indexed.inserted, status: indexed.inserted ? "done" : "skipped" });
+    } catch (error) {
+      step("auto_indexing", "Incremental indexing failed; analysis continues", { error: error.message }, "warning");
+    }
+  }
   if (pipelineEnabled && config?.insights?.graphClustering === true && config?.insights?.graphEnrichment === true) {
     try {
       const enrichmentWindowStart = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);

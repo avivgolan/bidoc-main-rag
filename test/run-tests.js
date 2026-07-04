@@ -17,7 +17,8 @@ import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/
 import { computeHealthScore } from "../src/subagents/healthScore.js";
 import { buildEntityAliasMap, buildEntityGraphRows, collectDeterministicEntities, entityIdFor, entityStemSignature, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
 import { buildIndexRow, computeIndexDates, INDEX_DATES_VERSION, SOURCE_TABLE_SPECS } from "../src/subagents/indexing.js";
-import { compactJsonList, CONTENT_TOOL_SPECS, contentToolRowDate, filterContentRowsByDate, isInternalContentTool } from "../src/subagents/contentTools.js";
+import { compactJsonList, CONTENT_TOOL_SPECS, contentToolRowDate, contentToolSettings, DEFAULT_TOOL_PROMPTS, filterContentRowsByDate, isInternalContentTool } from "../src/subagents/contentTools.js";
+import { DEFAULT_CONTENT_TOOL_SETTINGS, INTERNAL_CONTENT_TOOL_NAMES, normalizeContentToolsSettings, normalizeIndexingSettings } from "../src/config.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, normalizeToolUrlValue, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, resolveToolUrl, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
@@ -53,8 +54,8 @@ test("React bridge is installed for progressive frontend migration", () => {
   assert.match(reactEntry, /createRoot/);
   assert.match(reactEntry, /window\.BiDocReact/);
   assert.match(reactLoader, /document\.querySelector\("\[data-react-island\]"\)/);
-  assert.match(reactLoader, /\/react\/bidoc-react\.js\?v=20260703-insights-react/);
-  assert.match(indexHtml, /\/react-loader\.js\?v=20260703-insights-react/);
+  assert.match(reactLoader, /\/react\/bidoc-react\.js\?v=20260705-internal-agents/);
+  assert.match(indexHtml, /\/react-loader\.js\?v=20260705-internal-agents/);
 });
 
 function withContentEnvCleared(fn) {
@@ -4219,6 +4220,54 @@ test("internal content tool date filter prefers event_date over document and pri
   assert.deepEqual(filtered.map((row) => row.title), ["in"]);
   // No range = no filtering, undated rows included.
   assert.equal(filterContentRowsByDate(rows).length, 4);
+});
+
+test("content tool settings schema normalizes per-tool controls (spec M2)", () => {
+  // The config-side name list must match the registered tools.
+  assert.deepEqual([...INTERNAL_CONTENT_TOOL_NAMES].sort(), Object.keys(CONTENT_TOOL_SPECS).sort());
+
+  const normalized = normalizeContentToolsSettings({
+    perTool: {
+      meetings: { enabled: false, topK: 999, answerSynthesis: true, model: "openai/gpt-4o-mini", prompt: "פרומפט מותאם" },
+      emails: "not an object"
+    }
+  });
+  assert.equal(normalized.perTool.meetings.enabled, false);
+  assert.equal(normalized.perTool.meetings.topK, 50); // clamped
+  assert.equal(normalized.perTool.meetings.answerSynthesis, true);
+  assert.equal(normalized.perTool.meetings.prompt, "פרומפט מותאם");
+  assert.deepEqual(normalized.perTool.emails, DEFAULT_CONTENT_TOOL_SETTINGS);
+  assert.deepEqual(normalized.perTool.safety_report, DEFAULT_CONTENT_TOOL_SETTINGS);
+
+  const indexing = normalizeIndexingSettings({ autoIndexing: true, incrementalLimit: 5000 });
+  assert.equal(indexing.autoIndexing, true);
+  assert.equal(indexing.incrementalLimit, 200); // clamped
+  assert.deepEqual(normalizeIndexingSettings(), { autoIndexing: false, incrementalLimit: 40 });
+});
+
+test("per-tool enabled=false disables an internal tool despite the global flag", () => {
+  const config = {
+    n8n: { runtime: { internalTools: true } },
+    contentTools: normalizeContentToolsSettings({ perTool: { meetings: { enabled: false } } })
+  };
+  assert.equal(isInternalContentTool("meetings", config), false);
+  assert.equal(isInternalContentTool("emails", config), true);
+});
+
+test("content tool draft overrides beat saved settings and defaults exist per tool", () => {
+  const config = { contentTools: normalizeContentToolsSettings({ perTool: { meetings: { topK: 20, prompt: "שמור" } } }) };
+  const saved = contentToolSettings(config, "meetings");
+  assert.equal(saved.topK, 20);
+  assert.equal(saved.prompt, "שמור");
+  assert.equal(saved.answerSynthesis, false);
+  const draft = contentToolSettings(config, "meetings", { topK: 7, answerSynthesis: true, prompt: "טיוטה" });
+  assert.equal(draft.topK, 7);
+  assert.equal(draft.answerSynthesis, true);
+  assert.equal(draft.prompt, "טיוטה");
+  // Every registered tool has a default synthesis prompt.
+  for (const tool of Object.keys(CONTENT_TOOL_SPECS)) {
+    assert.ok(typeof DEFAULT_TOOL_PROMPTS[tool] === "string" && DEFAULT_TOOL_PROMPTS[tool].length > 40, tool);
+  }
 });
 
 let failed = 0;
