@@ -33,8 +33,57 @@ export const CONTENT_TOOL_SPECS = {
         document_filename: sourceRow.document_filename || null
       };
     }
+  },
+  emails: {
+    sourceTable: "emails",
+    label: "סוכן מיילים פנימי",
+    sourceSelect: "id,received_date,subject,sender_name,sender_mail,other_recipients,mail_category,direction,has_attachments",
+    enrichRow(row, sourceRow) {
+      if (!sourceRow) return row;
+      return {
+        ...row,
+        received_date: sourceRow.received_date || null,
+        sender: [sourceRow.sender_name, sourceRow.sender_mail].filter(Boolean).join(" / ") || null,
+        recipients: Array.isArray(sourceRow.other_recipients) ? sourceRow.other_recipients : null,
+        mail_category: sourceRow.mail_category || null,
+        direction: sourceRow.direction || null,
+        has_attachments: sourceRow.has_attachments ?? null
+      };
+    }
+  },
+  // The tool keeps its historical n8n name; the indexed source rows are the
+  // per-conversation analyses, not raw messages.
+  whatsapp_messages: {
+    sourceTable: "whatsapp_analysis",
+    label: "סוכן וואטסאפ פנימי",
+    sourceSelect: "id,conversation_id,people_involved_json,tasks_json,decisions_json,deadlines_json",
+    enrichRow(row, sourceRow) {
+      if (!sourceRow) return row;
+      return {
+        ...row,
+        conversation_id: sourceRow.conversation_id ?? null,
+        participants: Array.isArray(sourceRow.people_involved_json) ? sourceRow.people_involved_json : null,
+        tasks: compactJsonList(sourceRow.tasks_json),
+        decisions: compactJsonList(sourceRow.decisions_json),
+        deadlines: compactJsonList(sourceRow.deadlines_json)
+      };
+    }
   }
 };
+
+// Task/decision/deadline lists in whatsapp_analysis are jsonb arrays of small
+// objects — keep the first few, bound the size, and count the rest.
+export function compactJsonList(value, limit = 5) {
+  if (!Array.isArray(value) || !value.length) return null;
+  return {
+    total: value.length,
+    items: value.slice(0, limit).map((item) =>
+      typeof item === "object" && item !== null
+        ? Object.fromEntries(Object.entries(item).slice(0, 6).map(([key, entry]) => [key, String(entry ?? "").slice(0, 200)]))
+        : String(item).slice(0, 200)
+    )
+  };
+}
 
 export function isInternalContentTool(toolName, config) {
   return Boolean(CONTENT_TOOL_SPECS[toolName]) && config?.n8n?.runtime?.internalTools === true;

@@ -44,11 +44,13 @@ export const SOURCE_TABLE_SPECS = {
     eventDateColumn: "transaction_date"
   },
   whatsapp_analysis: {
-    // Source rows carry no conversation date column; the index row's own
-    // primary_date (when n8n filled it) is the only trustworthy signal.
+    // Source rows carry no date column of their own — the conversation they
+    // analyze does (whatsapp_conversations.conversation_start, ~270/525 rows);
+    // the index row's primary_date (when n8n filled it) is the fallback.
     documentDateColumn: null,
     eventDateColumn: null,
-    documentDateFromPrimary: true
+    documentDateFromPrimary: true,
+    dateJoin: { table: "whatsapp_conversations", sourceKey: "conversation_id", dateColumn: "conversation_start" }
   },
   other_documents: {
     // Only created_at (ingestion time) exists — no reliable dates at all.
@@ -70,10 +72,11 @@ export function toDateOnly(value) {
 // Deterministic date derivation. primaryDate follows the same convention as the
 // source date column in every table (verified live), so it is a safe fallback for
 // orphaned index rows whose source row was deleted.
-export function computeIndexDates({ sourceTable, sourceRow = null, primaryDate = null }) {
+export function computeIndexDates({ sourceTable, sourceRow = null, primaryDate = null, joinedDate = null }) {
   const spec = SOURCE_TABLE_SPECS[sourceTable];
   if (!spec) return { event_date: null, document_date: null };
   let documentDate = spec.documentDateColumn ? toDateOnly(sourceRow?.[spec.documentDateColumn]) : null;
+  if (!documentDate && spec.dateJoin) documentDate = toDateOnly(joinedDate);
   if (!documentDate && (spec.documentDateColumn || spec.documentDateFromPrimary)) {
     documentDate = toDateOnly(primaryDate);
   }
@@ -123,17 +126,28 @@ export async function runIndexDatesBackfill({ config, dryRun = true, limit = 300
       summary.skippedNoDates += tableRows.length;
       continue;
     }
-    const sourceRows = spec.documentDateColumn
+    const sourceSelect = [
+      "id",
+      spec.documentDateColumn,
+      spec.dateJoin?.sourceKey
+    ].filter(Boolean).join(",");
+    const sourceRows = spec.documentDateColumn || spec.dateJoin
       ? await fetchSourceRowsById({
           config,
           table: sourceTable,
           ids: tableRows.map((row) => row.source_id),
-          select: `id,${spec.documentDateColumn}`
+          select: sourceSelect
         })
       : new Map();
+    const joinedDates = await fetchJoinedDates({ config, spec, sourceRows });
     for (const row of tableRows) {
       const sourceRow = sourceRows.get(String(row.source_id)) || null;
-      const dates = computeIndexDates({ sourceTable, sourceRow, primaryDate: row.primary_date });
+      const dates = computeIndexDates({
+        sourceTable,
+        sourceRow,
+        primaryDate: row.primary_date,
+        joinedDate: joinedDates.get(String(row.source_id)) ?? null
+      });
       // Plan only actual changes — an email row whose document_date is already set
       // (and whose event_date is null by design) must not be re-written every run.
       if (dates.event_date === toDateOnly(row.event_date) && dates.document_date === toDateOnly(row.document_date)) {
@@ -228,10 +242,11 @@ export async function runIncrementalIndexing({ config, dryRun = true, limit = 50
     remaining -= missing.length;
 
     const sourceRows = await fetchSourceRowsById({ config, table: sourceTable, ids: missing, select: "*" });
+    const joinedDates = await fetchJoinedDates({ config, spec, sourceRows });
     for (const id of missing) {
       const sourceRow = sourceRows.get(id);
       if (!sourceRow) continue;
-      planned.push(buildIndexRow({ sourceTable, sourceRow }));
+      planned.push(buildIndexRow({ sourceTable, sourceRow, joinedDate: joinedDates.get(id) ?? null }));
     }
   }
   summary.planned = planned.length;
@@ -274,14 +289,14 @@ export async function runIncrementalIndexing({ config, dryRun = true, limit = 50
 
 // Builds a complete data_index row from a source row, mirroring the field and
 // index_text conventions of the existing n8n-written rows (sampled live per table).
-export function buildIndexRow({ sourceTable, sourceRow }) {
+export function buildIndexRow({ sourceTable, sourceRow, joinedDate = null }) {
   const title = indexTitle(sourceTable, sourceRow);
   const summaryText = indexSummary(sourceTable, sourceRow);
   const hashtags = Array.isArray(sourceRow.hashtags) ? sourceRow.hashtags.filter(Boolean) : [];
-  const primaryDate = indexPrimaryDate(sourceTable, sourceRow);
+  const primaryDate = indexPrimaryDate(sourceTable, sourceRow, joinedDate);
   const itemStatus = sourceRow.item_status ?? sourceRow.status ?? null;
   const severity = sourceTable === "safety_reports" ? sourceRow.risk_level ?? null : null;
-  const dates = computeIndexDates({ sourceTable, sourceRow, primaryDate });
+  const dates = computeIndexDates({ sourceTable, sourceRow, primaryDate, joinedDate });
   const row = {
     project_id: sourceRow.project_id,
     source_table: sourceTable,
@@ -355,9 +370,10 @@ function indexSummary(sourceTable, row) {
   return row.summary || null;
 }
 
-function indexPrimaryDate(sourceTable, row) {
+function indexPrimaryDate(sourceTable, row, joinedDate = null) {
   const spec = SOURCE_TABLE_SPECS[sourceTable] || {};
   if (spec.documentDateColumn && row[spec.documentDateColumn]) return row[spec.documentDateColumn];
+  if (spec.dateJoin && joinedDate) return joinedDate;
   if (sourceTable === "other_documents") return row.created_at || null;
   return null;
 }
@@ -463,6 +479,25 @@ async function fetchAllPages({ config, table, select, filter = null, max = 20000
     if (page.length < KEY_PAGE_SIZE) break;
   }
   return rows;
+}
+
+// Resolves per-source-row dates that live in a related table (e.g. the
+// whatsapp conversation a whatsapp_analysis row analyzes). Returns a map of
+// source-row id -> raw joined date value; empty when the spec has no dateJoin.
+async function fetchJoinedDates({ config, spec, sourceRows }) {
+  const joined = new Map();
+  if (!spec?.dateJoin || !sourceRows?.size) return joined;
+  const { table, sourceKey, dateColumn } = spec.dateJoin;
+  const joinIds = [...new Set(
+    [...sourceRows.values()].map((row) => row?.[sourceKey]).filter((id) => id != null).map(String)
+  )];
+  if (!joinIds.length) return joined;
+  const joinRows = await fetchSourceRowsById({ config, table, ids: joinIds, select: `id,${dateColumn}` });
+  for (const [sourceId, sourceRow] of sourceRows) {
+    const joinRow = joinRows.get(String(sourceRow?.[sourceKey]));
+    if (joinRow?.[dateColumn]) joined.set(sourceId, joinRow[dateColumn]);
+  }
+  return joined;
 }
 
 async function fetchSourceRowsById({ config, table, ids = [], select = "*" }) {

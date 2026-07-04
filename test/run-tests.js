@@ -17,7 +17,7 @@ import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/
 import { computeHealthScore } from "../src/subagents/healthScore.js";
 import { buildEntityAliasMap, buildEntityGraphRows, collectDeterministicEntities, entityIdFor, entityStemSignature, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
 import { buildIndexRow, computeIndexDates, INDEX_DATES_VERSION, SOURCE_TABLE_SPECS } from "../src/subagents/indexing.js";
-import { CONTENT_TOOL_SPECS, contentToolRowDate, filterContentRowsByDate, isInternalContentTool } from "../src/subagents/contentTools.js";
+import { compactJsonList, CONTENT_TOOL_SPECS, contentToolRowDate, filterContentRowsByDate, isInternalContentTool } from "../src/subagents/contentTools.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, normalizeToolUrlValue, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, resolveToolUrl, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
@@ -4106,6 +4106,62 @@ test("internal content tools are gated by the internalTools runtime flag", () =>
   // Tools without an internal implementation never route internally.
   assert.equal(isInternalContentTool("safety_report", { n8n: { runtime: { internalTools: true } } }), false);
   assert.ok(CONTENT_TOOL_SPECS.meetings.sourceTable === "meetings");
+  assert.ok(CONTENT_TOOL_SPECS.emails.sourceTable === "emails");
+  // The tool keeps its n8n name; the indexed rows are conversation analyses.
+  assert.ok(CONTENT_TOOL_SPECS.whatsapp_messages.sourceTable === "whatsapp_analysis");
+});
+
+test("whatsapp index dates come from the joined conversation start", () => {
+  const withJoin = computeIndexDates({
+    sourceTable: "whatsapp_analysis",
+    sourceRow: { conversation_id: 1085, created_at: "2026-06-02" },
+    primaryDate: null,
+    joinedDate: "2025-03-23T18:04:00+00:00"
+  });
+  assert.deepEqual(withJoin, { event_date: null, document_date: "2025-03-23" });
+  // The joined date wins over primary_date; primary_date remains the fallback.
+  const joinBeatsPrimary = computeIndexDates({
+    sourceTable: "whatsapp_analysis",
+    sourceRow: {},
+    primaryDate: "2026-04-07T09:40:00Z",
+    joinedDate: "2025-03-23T18:04:00+00:00"
+  });
+  assert.equal(joinBeatsPrimary.document_date, "2025-03-23");
+  const fallback = computeIndexDates({ sourceTable: "whatsapp_analysis", sourceRow: {}, primaryDate: "2026-04-07T09:40:00Z", joinedDate: null });
+  assert.equal(fallback.document_date, "2026-04-07");
+});
+
+test("email and whatsapp tool enrichment maps source fields compactly", () => {
+  const email = CONTENT_TOOL_SPECS.emails.enrichRow({ title: "נושא" }, {
+    received_date: "2026-02-09T08:17:01+00:00",
+    sender_name: "Or",
+    sender_mail: "or@kpym.co.il",
+    other_recipients: ["a@b.com"],
+    mail_category: "חוזים",
+    direction: "inbound",
+    has_attachments: true
+  });
+  assert.equal(email.sender, "Or / or@kpym.co.il");
+  assert.deepEqual(email.recipients, ["a@b.com"]);
+  assert.equal(email.mail_category, "חוזים");
+
+  const whatsapp = CONTENT_TOOL_SPECS.whatsapp_messages.enrichRow({ title: "שיחה" }, {
+    conversation_id: 1085,
+    people_involved_json: ["Itzik Libman", "עידו קדם"],
+    tasks_json: [
+      { status: "ממתין לתשובה", due_date: "2026-03-23", description: "לקבל דוגמאות", responsible: "אור" },
+      { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }
+    ],
+    decisions_json: [],
+    deadlines_json: null
+  });
+  assert.deepEqual(whatsapp.participants, ["Itzik Libman", "עידו קדם"]);
+  assert.equal(whatsapp.tasks.total, 6);
+  assert.equal(whatsapp.tasks.items.length, 5);
+  assert.equal(whatsapp.tasks.items[0].description, "לקבל דוגמאות");
+  assert.equal(whatsapp.decisions, null);
+  assert.equal(whatsapp.deadlines, null);
+  assert.equal(compactJsonList("not an array"), null);
 });
 
 test("internal content tool date filter prefers event_date over document and primary dates", () => {
