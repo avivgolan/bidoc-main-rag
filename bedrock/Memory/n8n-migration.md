@@ -1,0 +1,43 @@
+---
+note_type: durable-memory-branch
+project: bidoc agent
+branch: n8n-migration
+last_updated: 2026-07-04
+tags:
+  - n8n
+  - subagents
+  - indexing
+---
+
+# n8n Migration
+
+## Current State
+
+- The staged migration spec is `docs/n8n-agents-migration-spec.md` (mapping, binding rules, Phases A/B/C, recommended order).
+- MAPPING FINDING (2026-07-04, verified live in App Supabase `agent_settings`): all 9 n8n query tools (meetings, emails, whatsapp_messages, financial_transactions, consultants_reports, exceptions_report, quality_control, safety_report, submittals) are DEAD in production — `toolsRuntime.enabled=false`, `alertAgentEnabled=false`, `n8nBaseUrl=""`, and every `tools.<name>.url` is a corrupted nested object ending in `"[object Object]"`. Chat/insights already run without them.
+- SETTINGS CORRUPTION FIXED (Task M1, 2026-07-04): root cause — `publicSettings` returns tools as `{configured, url}` objects and saving that shape back persisted objects, nesting one `{url: ...}` layer per read→save round trip; `resolveToolUrl` returned the truthy object. Fix: `normalizeToolUrlValue` (exported from `src/config.js`) unwraps nested `{url:...}`, trims, and drops the literal `"[object Object]"`; applied on read (`getConfig` tools map — corrupted values no longer beat env vars — and `resolveToolUrl`) and on save (`writeLocalSettings`). The live `agent_settings` record was reset to empty-string tool urls (backup: `bedrock/Evidence/agent-settings-tools-corruption-backup-2026-07-04.md` — no real URLs were recoverable, every leaf was garbage). Verified live: `/api/settings` returns clean strings and `POST /api/tools/safety_report/test` returns a graceful `skipped: "Tool webhook is not configured"` instead of a fetch crash. 2 new unit tests.
+- `submittals` has NO table in Kapaim — open question whether to delete the tool.
+- n8n still owns the live ingestion pipelines (emails/OneDrive/WhatsApp/alerts + the data_index indexer); Phase C keeps them in n8n for now.
+- INTERNAL INDEXING AGENT IMPLEMENTED (Task A1, 2026-07-04): `src/subagents/indexing.js` + `POST /api/index/backfill-dates` and `POST /api/index/run` (both dry-run by default, explicit call = consent, run events, `contentSupabaseRequest` helper added to supabase.js). Versions: `index-dates-v1`, `internal-indexing-v1` (tagged in metadata of new rows).
+- Date rules (index-dates-v1, deterministic, null when unknown — never ingestion created_at): meetings/safety/consultants/financial event+document from meeting_date/report_date/transaction_date; emails document=received_date, event=null (LLM extraction is Task A2); whatsapp document from index primary_date only; other_documents both null. primary_date is the orphan fallback (same convention, verified live).
+- Incremental indexing preserves the n8n email relevance rule (`relevance_status in (project_related, multi_project)`; 3,422 `no_clear_project` mails intentionally excluded), copies summary/hashtags from source rows, replicates the per-table index_text templates (emails variant has תאריך קבלה/מאת/אל/נושא/תוכן המייל), embeds via `createEmbedding` (text-embedding-3-large, 3072 dims), and upserts with `resolution=ignore-duplicates` on the `data_index_source_unique (source_table, source_id)` unique index so it can coexist with the n8n writer.
+- APPLIED LIVE (2026-07-04, user-approved): backfill updated 1,043 rows (508 meetings + 362 emails + 32 safety + 39 financial + 4 consultants + 98 whatsapp-with-primary; 807 other_documents + 449 dateless whatsapp stay null by design) and incremental indexing inserted the 16 missing rows (8 safety + 7 financial + 1 other_documents) with embeddings. SQL verification: zero mismatches vs source tables, zero emails with event_date, all internal rows have index_text/embedding/project_id. Both dry-runs now report 0 pending — idempotent.
+- LEARNING: Postgres checks NOT NULL BEFORE ON CONFLICT arbitration, so a PostgREST merge-duplicates upsert that omits NOT NULL columns (project_id) fails even when every row conflicts. The backfill therefore uses grouped PATCH (rows sharing a date pair are updated in one request, `source_id=in.(...)`) — no insert path, write surface = exactly the two date columns.
+- LEARNING: the backfill plans only actual CHANGES (computed dates != stored dates); without that, email/whatsapp rows whose event_date is null by design get re-written on every run.
+- 7 new unit tests in `test/run-tests.js` (date rules, determinism, relevance rule, row/template building) — all pass; the 11 failing tests are the known old UI-regex tests.
+
+- B1 IMPLEMENTED — INTERNAL MEETINGS TOOL (2026-07-04): `src/subagents/contentTools.js` (`CONTENT_TOOL_SPECS`, `runContentToolAgent`, `callInternalContentTool` adapter matching the callN8nTool response contract). Order changed per user + live data check: meetings FIRST (508 rows, 100% embeddings+summaries); whatsapp/emails next; quality_control is EMPTY (0 rows), exceptions_report has 1. Flow: embed query → `match_data_index` RPC with `p_source_table` → fetch index dates (event_date wins) + source_url → local date filter → enrich from the source row (attendances/status/decisions/meeting_hour/document_filename). Flag: `toolsRuntime.internalTools === true` (default OFF; settings merge preserves it); internal tools bypass the `toolsRuntime.enabled` n8n kill-switch in chat (agent.js) and insights (projectInsights.js); `/api/tools/:name/test` accepts `body.internal: true` to force the internal path for calibration; diagnostics route internally when the flag is on. Verified live: "חריג בעבודות מיזוג" returns the exact HVAC-exception meetings at 0.56-0.60 similarity with correct dates and statuses.
+- OPERATIONALIZED (2026-07-04): `toolsRuntime.internalTools` was turned ON in the shared `agent_settings` via a partial `PUT /api/settings` save (merge preserved all other settings; applies to Vercel). Live chat verification: "מה הוחלט בפגישות על החריגים בעבודות המיזוג?" → classifier hinted `meetings,exceptions_report`, the internal meetings tool ran (`ok=true internal=true`, exceptions_report correctly filtered out — no internal spec, n8n disabled), and the grounded answer listed the real HVAC-exception decisions (Dec 2024 items, Apr 2025 conditional approval, pending-approval period) with per-claim SharePoint meeting-PDF links.
+- FINDING: the per-table `match_<table>` RPC family in Kapaim (match_meetings, match_alerts, ...) is BROKEN for this data — they filter `metadata @> filter`, but content tables store `metadata` as a jsonb STRING, so even an empty filter matches nothing (`'"text"'::jsonb @> '{}'` = false). `match_data_index` (the 5-arg overload) is written correctly (`filter = '{}' OR ...`) and is the backbone for all internal content tools. NOTE: the internal Alert agent uses `match_<alertsTable>` via `alertsRpcName` — its default table `alerts_embeddings_gf` may differ, but if it points at Kapaim `alerts`, the same metadata bug likely returns 0 rows; check when Alert is revisited.
+- GOTCHA (testing on Windows): PowerShell 5.1 `Invoke-RestMethod -Body '<hebrew json>'` sends ISO-8859-1 — Hebrew arrives as "?????" and vector search returns flat ~0.2 garbage. Always send `[System.Text.Encoding]::UTF8.GetBytes($json)` with `charset=utf-8`. This false-alarmed as an "embedding space mismatch"; verified all data_index embeddings (n8n + internal) share one space (cross-doc sims 0.4-0.9, exact-row query 0.69 via a Node probe).
+
+## Gotchas
+
+- data_index whatsapp rows: 22 orphans (source rows deleted after indexing) — handled by the primary_date fallback, not a bug.
+- `whatsapp_analysis` has no date column at all; 449/547 index rows have no primary_date either — a data-quality gap for a later task.
+- Merge-duplicates upsert in the backfill writes ONLY (source_table, source_id, event_date, document_date); if an index row is deleted between plan and apply the batch fails loudly on NOT NULL project_id — safe failure, rerun.
+
+## Related
+
+- See [insights](insights.md) for the event_date/document_date migration (applied 2026-07-03) and the consumer-side date preference.
+- See [subagents](subagents.md) for the existing internal agents (alert, data query, meeting evidence).

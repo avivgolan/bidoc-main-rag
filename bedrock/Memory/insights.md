@@ -91,6 +91,8 @@ tags:
 - `window.__bidocSetWorkflowFromReact` in `public/app.js` lets the React Insights island pass workflow logs back to the legacy workflow renderer/history refresh.
 - Current Insights React asset version is `20260703-insights-react`.
 
+- DATES MIGRATION APPLIED (2026-07-03, via the user-connected Supabase MCP): `data_index` in Kapaim (`smxibuaowzuxkznuouwj`) now has nullable `event_date` and `document_date` (date) columns — additive only, writer unaffected, verified readable via PostgREST. The deployed code already prefers them when non-null (fallback to `primary_date`). REMAINING: the indexing workflow must start FILLING them — natural time is when the indexing agent moves in-code per the n8n phase-out. The Supabase MCP connector now has access to the Kapaim org (projects: MAIN, Bidoc Meta DB, Kapaim).
+
 ## Recent Changes
 
 - 2026-07-03 -- Collapsed the Insights history panel by default and added a toggle so saved-run cards are shown only after the user opens history.
