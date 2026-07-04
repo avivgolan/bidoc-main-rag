@@ -5,6 +5,7 @@ import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.j
 import { graphSearch, hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
+import { callInternalContentTool, isInternalContentTool } from "./subagents/contentTools.js";
 import { runDataQueryAgent } from "./subagents/dataQuery.js";
 import { formatMeetingCitation, runMeetingEvidenceAgent } from "./subagents/meeting.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
@@ -430,7 +431,8 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   const dataQueryTool = shouldRunDataQuery({ message, classification, config }) ? ["data_query"] : [];
   const tools = buildToolOrder(classification, [...hintedTools(classification), ...plannerTools, ...meetingsEvidenceTool, ...dataQueryTool])
     .filter((toolName) => !safetyPrecheckTools.includes(toolName))
-    .filter((toolName) => toolsRuntime.enabled !== false)
+    // The n8n runtime kill-switch does not gate tools that run internally.
+    .filter((toolName) => toolsRuntime.enabled !== false || isInternalContentTool(toolName, config))
     .filter((toolName) => toolsRuntime.alertAgentEnabled !== false || toolName !== "alert")
     .filter((toolName) => toolName !== "meeting_evidence_search" || shouldRunMeetingEvidence)
     .filter((toolName) => toolName !== "data_query" || config.dataQuery?.enabled !== false)
@@ -736,6 +738,17 @@ async function callProjectTool({ toolName, message, classification, sessionId, c
     } catch (error) {
       return { toolName, ok: false, error: error.message, data: null, sources: [] };
     }
+  }
+  if (isInternalContentTool(toolName, config)) {
+    return callInternalContentTool({
+      config,
+      toolName,
+      query: message,
+      dateFrom: classification.date_from,
+      dateTo: classification.date_to,
+      cacheContext,
+      telemetry: telemetryFor(toolName)
+    });
   }
   return callN8nTool({
     toolName,

@@ -17,6 +17,7 @@ import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/
 import { computeHealthScore } from "../src/subagents/healthScore.js";
 import { buildEntityAliasMap, buildEntityGraphRows, collectDeterministicEntities, entityIdFor, entityStemSignature, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
 import { buildIndexRow, computeIndexDates, INDEX_DATES_VERSION, SOURCE_TABLE_SPECS } from "../src/subagents/indexing.js";
+import { CONTENT_TOOL_SPECS, contentToolRowDate, filterContentRowsByDate, isInternalContentTool } from "../src/subagents/contentTools.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, normalizeToolUrlValue, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, resolveToolUrl, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
@@ -4096,6 +4097,33 @@ test("resolveToolUrl returns only strings and falls back to the base url", () =>
   // Corrupted object no longer wins over the base-url fallback.
   assert.equal(resolveToolUrl("alert", config), "https://n8n.example/webhook/alert");
   assert.equal(resolveToolUrl("alert", { n8n: { baseUrl: "", tools: { alert: { url: {} } } } }), "");
+});
+
+test("internal content tools are gated by the internalTools runtime flag", () => {
+  assert.equal(isInternalContentTool("meetings", { n8n: { runtime: { internalTools: true } } }), true);
+  assert.equal(isInternalContentTool("meetings", { n8n: { runtime: { internalTools: false } } }), false);
+  assert.equal(isInternalContentTool("meetings", { n8n: { runtime: {} } }), false);
+  // Tools without an internal implementation never route internally.
+  assert.equal(isInternalContentTool("safety_report", { n8n: { runtime: { internalTools: true } } }), false);
+  assert.ok(CONTENT_TOOL_SPECS.meetings.sourceTable === "meetings");
+});
+
+test("internal content tool date filter prefers event_date over document and primary dates", () => {
+  assert.equal(contentToolRowDate({ event_date: "2025-03-01", document_date: "2025-04-01", primary_date: "2025-05-01T10:00:00Z" }), "2025-03-01");
+  assert.equal(contentToolRowDate({ document_date: "2025-04-01", primary_date: "2025-05-01T10:00:00Z" }), "2025-04-01");
+  assert.equal(contentToolRowDate({ primary_date: "2025-05-01T10:00:00Z" }), "2025-05-01");
+  assert.equal(contentToolRowDate({}), null);
+
+  const rows = [
+    { title: "in", event_date: "2025-03-15" },
+    { title: "before", event_date: "2025-01-01" },
+    { title: "after", event_date: "2026-01-01" },
+    { title: "undated" }
+  ];
+  const filtered = filterContentRowsByDate(rows, "2025-03-01", "2025-12-31");
+  assert.deepEqual(filtered.map((row) => row.title), ["in"]);
+  // No range = no filtering, undated rows included.
+  assert.equal(filterContentRowsByDate(rows).length, 4);
 });
 
 let failed = 0;

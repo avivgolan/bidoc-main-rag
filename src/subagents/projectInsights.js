@@ -4,6 +4,7 @@ import { buildGraphSearchPayload, summarizeGraphContext } from "../projectGraph.
 import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "../sourceQuality.js";
 import { fetchAlertsTimelineEvents, fetchTimelineEventPage, graphSearch, hybridSearch, listEntityMentionEdges } from "../supabase.js";
 import { callN8nTool } from "../tools.js";
+import { callInternalContentTool, isInternalContentTool } from "./contentTools.js";
 import { runAlertAgent } from "./alert.js";
 import { buildInsightAiContext, buildInsightEvidence, clusterCanonicalEvents, computeBaselineWindow, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, runInsightEvidencePipeline } from "./insightPipeline.js";
 import { generateRootCauseHypotheses } from "./rootCauseHypothesis.js";
@@ -647,13 +648,17 @@ async function runExistingProjectTools({ config, query, records, dateFrom, dateT
   const toolsRuntime = config.n8n?.runtime || {};
   const n8nTools = TOOL_NAMES
     .filter((toolName) => !["alert", "meeting_evidence_search"].includes(toolName))
-    .filter(() => toolsRuntime.enabled !== false)
+    // Internal content tools bypass the n8n runtime kill-switch.
+    .filter((toolName) => toolsRuntime.enabled !== false || isInternalContentTool(toolName, config))
     .slice(0, Number(toolsRuntime.parallelLimit || 6));
 
   emit?.(runId, "n8n_tools", "Calling existing project tools", { tools: n8nTools, status: n8nTools.length ? "running" : "skipped" });
   const n8nResults = await Promise.all(n8nTools.map((toolName) =>
-    callN8nTool({ toolName, query, dateFrom, dateTo, sessionId: runId, config }).then((result) => {
-      emit?.(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, skipped: result.skipped || false, error: result.error || null });
+    (isInternalContentTool(toolName, config)
+      ? callInternalContentTool({ config, toolName, query, dateFrom, dateTo })
+      : callN8nTool({ toolName, query, dateFrom, dateTo, sessionId: runId, config })
+    ).then((result) => {
+      emit?.(runId, "n8n_tools", `Tool ${toolName} completed`, { ok: result.ok, internal: result.internal || false, skipped: result.skipped || false, error: result.error || null });
       return result;
     })
   ));

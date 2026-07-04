@@ -688,7 +688,10 @@ function normalizeToolRuntimeSettings(value = {}) {
     enabled: raw.enabled !== false,
     parallelLimit: clampNumber(raw.parallelLimit, 1, 20, DEFAULT_TOOL_RUNTIME_SETTINGS.parallelLimit),
     alertAgentEnabled: raw.alertAgentEnabled !== false,
-    safetyPrecheckEnabled: raw.safetyPrecheckEnabled !== false
+    safetyPrecheckEnabled: raw.safetyPrecheckEnabled !== false,
+    // Task B1: route tools with an internal implementation (contentTools.js)
+    // through code instead of n8n webhooks. Default OFF until calibrated.
+    internalTools: raw.internalTools === true
   };
 }
 

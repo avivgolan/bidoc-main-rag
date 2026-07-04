@@ -18,6 +18,7 @@ import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepA
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { consolidateGraphEntities, runGraphEnrichment } from "./subagents/graphEnrichment.js";
 import { runIncrementalIndexing, runIndexDatesBackfill } from "./subagents/indexing.js";
+import { callInternalContentTool, CONTENT_TOOL_SPECS, isInternalContentTool } from "./subagents/contentTools.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
@@ -662,6 +663,18 @@ async function handleApi(req, res, url) {
       }
     }
     if (!TOOL_NAMES.includes(toolName)) return sendJson(res, 404, { error: "Unknown tool" });
+    // body.internal === true forces the internal path for calibration even
+    // while the toolsRuntime.internalTools flag is still off.
+    if (CONTENT_TOOL_SPECS[toolName] && (body.internal === true || isInternalContentTool(toolName, config()))) {
+      const result = await callInternalContentTool({
+        config: config(),
+        toolName,
+        query: body.query || "",
+        dateFrom: body.date_from || null,
+        dateTo: body.date_to || null
+      });
+      return sendJson(res, 200, result);
+    }
     const result = await callN8nTool({
       toolName,
       query: body.query || "",
@@ -2023,14 +2036,16 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
 
   for (const toolName of TOOL_NAMES) {
     add(`tool_${toolName}`, diagnosticToolLabel(toolName), "tools", async () => {
-      const result = await callN8nTool({
-        toolName,
-        query: "connection test",
-        sessionId: "diagnostic",
-        config: cfg
-      });
+      const result = isInternalContentTool(toolName, cfg)
+        ? await callInternalContentTool({ config: cfg, toolName, query: "בדיקת חיבור" })
+        : await callN8nTool({
+            toolName,
+            query: "connection test",
+            sessionId: "diagnostic",
+            config: cfg
+          });
       if (!result.ok) throw new Error(result.error || `${toolName} test failed`);
-      return { tool: toolName, configured: true, preview: summarizeDiagnosticToolResult(result) };
+      return { tool: toolName, configured: true, internal: result.internal || false, preview: summarizeDiagnosticToolResult(result) };
     });
   }
 
