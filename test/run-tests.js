@@ -4104,11 +4104,50 @@ test("internal content tools are gated by the internalTools runtime flag", () =>
   assert.equal(isInternalContentTool("meetings", { n8n: { runtime: { internalTools: false } } }), false);
   assert.equal(isInternalContentTool("meetings", { n8n: { runtime: {} } }), false);
   // Tools without an internal implementation never route internally.
-  assert.equal(isInternalContentTool("safety_report", { n8n: { runtime: { internalTools: true } } }), false);
+  assert.equal(isInternalContentTool("submittals", { n8n: { runtime: { internalTools: true } } }), false);
   assert.ok(CONTENT_TOOL_SPECS.meetings.sourceTable === "meetings");
   assert.ok(CONTENT_TOOL_SPECS.emails.sourceTable === "emails");
   // The tool keeps its n8n name; the indexed rows are conversation analyses.
   assert.ok(CONTENT_TOOL_SPECS.whatsapp_messages.sourceTable === "whatsapp_analysis");
+  assert.ok(CONTENT_TOOL_SPECS.financial_transactions.sourceTable === "financial_transactions");
+  // n8n singular tool name over the plural table.
+  assert.ok(CONTENT_TOOL_SPECS.safety_report.sourceTable === "safety_reports");
+  assert.equal(isInternalContentTool("safety_report", { n8n: { runtime: { internalTools: true } } }), true);
+});
+
+test("financial and safety tool enrichment maps source fields", () => {
+  const financial = CONTENT_TOOL_SPECS.financial_transactions.enrichRow({ title: "הצעת מחיר", source_url: null }, {
+    transaction_date: "2024-12-05T00:00:00+00:00",
+    vendor_name: "אנרפלז ניהול אנרגיה בע\"מ",
+    transaction_type: "הצעת מחיר",
+    category: "ספק",
+    amount_numeric: 5725.64,
+    currency: "ILS",
+    total: "5,725.64",
+    transaction_submitter: "אנרפלז ניהול אנרגיה בע\"מ",
+    data_link: "https://example.test/doc.pdf"
+  });
+  assert.equal(financial.vendor_name, "אנרפלז ניהול אנרגיה בע\"מ");
+  assert.equal(financial.amount, 5725.64);
+  // data_link fills source_url only when the index row has none.
+  assert.equal(financial.source_url, "https://example.test/doc.pdf");
+
+  const safety = CONTENT_TOOL_SPECS.safety_report.enrichRow({ title: "דוח בטיחות" }, {
+    report_date: "2023-02-07T00:00:00+00:00",
+    site_location: "7 קומה",
+    risk_level: "לא צוין",
+    total_workers: 10,
+    life_threatening_defects: 0,
+    severe_defects: 1,
+    medium_defects: 2,
+    minor_defects: 3,
+    resolved: 4,
+    project_manager: "פריהד בע\"מ",
+    site_manager: "לא צוין"
+  });
+  assert.equal(safety.site_location, "7 קומה");
+  assert.deepEqual(safety.defects, { life_threatening: 0, severe: 1, medium: 2, minor: 3, resolved: 4 });
+  assert.equal(safety.total_workers, 10);
 });
 
 test("whatsapp index dates come from the joined conversation start", () => {

@@ -51,6 +51,53 @@ export const CONTENT_TOOL_SPECS = {
       };
     }
   },
+  financial_transactions: {
+    sourceTable: "financial_transactions",
+    label: "סוכן פיננסי פנימי",
+    sourceSelect: "id,transaction_date,topic,vendor_name,transaction_type,category,status,amount_numeric,currency,total,transaction_submitter,data_link",
+    enrichRow(row, sourceRow) {
+      if (!sourceRow) return row;
+      return {
+        ...row,
+        transaction_date: sourceRow.transaction_date || null,
+        vendor_name: sourceRow.vendor_name || null,
+        transaction_type: sourceRow.transaction_type || null,
+        category: sourceRow.category || null,
+        status: sourceRow.status || null,
+        amount: sourceRow.amount_numeric ?? sourceRow.total ?? null,
+        currency: sourceRow.currency || null,
+        transaction_submitter: sourceRow.transaction_submitter || null,
+        source_url: row.source_url || sourceRow.data_link || null
+      };
+    }
+  },
+  // Tool name is the historical n8n singular; the table is safety_reports.
+  safety_report: {
+    sourceTable: "safety_reports",
+    label: "סוכן בטיחות פנימי",
+    sourceSelect: "id,report_date,site_location,risk_level,site_grade,total_workers,life_threatening_defects,severe_defects,medium_defects,minor_defects,resolved,project_manager,site_manager,document_filename",
+    enrichRow(row, sourceRow) {
+      if (!sourceRow) return row;
+      return {
+        ...row,
+        report_date: sourceRow.report_date || null,
+        site_location: sourceRow.site_location || null,
+        risk_level: sourceRow.risk_level || null,
+        site_grade: sourceRow.site_grade || null,
+        total_workers: sourceRow.total_workers ?? null,
+        defects: {
+          life_threatening: sourceRow.life_threatening_defects ?? null,
+          severe: sourceRow.severe_defects ?? null,
+          medium: sourceRow.medium_defects ?? null,
+          minor: sourceRow.minor_defects ?? null,
+          resolved: sourceRow.resolved ?? null
+        },
+        project_manager: sourceRow.project_manager || null,
+        site_manager: sourceRow.site_manager || null,
+        document_filename: sourceRow.document_filename || null
+      };
+    }
+  },
   // The tool keeps its historical n8n name; the indexed source rows are the
   // per-conversation analyses, not raw messages.
   whatsapp_messages: {
