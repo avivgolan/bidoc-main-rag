@@ -18,7 +18,7 @@ import { computeHealthScore } from "../src/subagents/healthScore.js";
 import { buildEntityAliasMap, buildEntityGraphRows, collectDeterministicEntities, entityIdFor, entityStemSignature, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
 import { buildIndexRow, computeIndexDates, INDEX_DATES_VERSION, SOURCE_TABLE_SPECS } from "../src/subagents/indexing.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
-import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
+import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, normalizeToolUrlValue, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, resolveToolUrl, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
 import { buildTimelineLinkSuggestions, daysBetweenDates, extractApprover } from "../src/timelineLinks.js";
 import { buildEntityGraphRowsForEvents, createTimelineGraphScorer, scoreTimelinePairWithGraph } from "../src/timelineGraph.js";
@@ -4075,6 +4075,27 @@ test("indexing agent builds the email index_text variant with sender and body", 
   assert.match(row.index_text, /^מקור: emails\nתאריך קבלה: 2026-02-09T08:17:01\+00:00\nמאת: Or shtamerman \/ or@kpym\.co\.il\nאל: tarek2207@gmail\.com\nנושא: סמל מטבחים הרצליה\n/);
   assert.match(row.index_text, /תוכן המייל: טארק שלום/);
   assert.match(row.source_url, /^https:\/\/outlook\.office\.com\/mail\/inbox\/id\//);
+});
+
+test("tool url normalization unwraps corrupted nested settings shapes", () => {
+  assert.equal(normalizeToolUrlValue("https://n8n.example/webhook/alert"), "https://n8n.example/webhook/alert");
+  assert.equal(normalizeToolUrlValue("  https://n8n.example/x  "), "https://n8n.example/x");
+  // The publicSettings {configured, url} shape saved back once:
+  assert.equal(normalizeToolUrlValue({ configured: true, url: "https://n8n.example/x" }), "https://n8n.example/x");
+  // The live corruption: repeated wrapping with a stringified object innermost.
+  assert.equal(normalizeToolUrlValue({ url: { url: { url: "[object Object]" } } }), "");
+  assert.equal(normalizeToolUrlValue("[object Object]"), "");
+  assert.equal(normalizeToolUrlValue(null), "");
+  assert.equal(normalizeToolUrlValue(123), "");
+  assert.equal(normalizeToolUrlValue(["https://x"]), "");
+});
+
+test("resolveToolUrl returns only strings and falls back to the base url", () => {
+  const config = { n8n: { baseUrl: "https://n8n.example", tools: { alert: { url: { url: "[object Object]" } }, meetings: "https://direct.example/meetings" } } };
+  assert.equal(resolveToolUrl("meetings", config), "https://direct.example/meetings");
+  // Corrupted object no longer wins over the base-url fallback.
+  assert.equal(resolveToolUrl("alert", config), "https://n8n.example/webhook/alert");
+  assert.equal(resolveToolUrl("alert", { n8n: { baseUrl: "", tools: { alert: { url: {} } } } }), "");
 });
 
 let failed = 0;

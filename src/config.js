@@ -494,7 +494,7 @@ export function getConfig(settingsOverride = null) {
       baseUrl: trimSlash(settings.n8nBaseUrl || process.env.N8N_BASE_URL || ""),
       runtime: normalizeToolRuntimeSettings(settings.toolsRuntime || settings.toolRuntime),
       tools: Object.fromEntries(
-        TOOL_NAMES.map((tool) => [tool, toolSettings[tool] || process.env[`N8N_TOOL_${tool.toUpperCase()}_URL`] || ""])
+        TOOL_NAMES.map((tool) => [tool, normalizeToolUrlValue(toolSettings[tool]) || process.env[`N8N_TOOL_${tool.toUpperCase()}_URL`] || ""])
       )
     },
     timezone: settings.timezone || process.env.TIMEZONE || "Asia/Jerusalem"
@@ -561,10 +561,24 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
 }
 
 export function resolveToolUrl(toolName, config = getConfig()) {
-  const direct = config.n8n.tools[toolName] || "";
+  const direct = normalizeToolUrlValue(config.n8n.tools[toolName]);
   if (direct) return direct;
   if (!config.n8n.baseUrl) return "";
   return `${config.n8n.baseUrl}/webhook/${toolName}`;
+}
+
+// A tool URL must be a plain string. Historic saves round-tripped the
+// publicSettings `{configured, url}` shape back into agent_settings, nesting
+// `{url:{url:...}}` one level deeper per save (with a stringified
+// "[object Object]" innermost) — unwrap objects and drop that garbage.
+export function normalizeToolUrlValue(value, depth = 0) {
+  if (depth > 8 || value == null) return "";
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text === "[object Object]" ? "" : text;
+  }
+  if (isPlainObject(value)) return normalizeToolUrlValue(value.url, depth + 1);
+  return "";
 }
 
 function trimSlash(value) {
@@ -967,7 +981,7 @@ export async function writeLocalSettings(settings, options = {}) {
       supabaseServiceRoleKey: mergeSecret(existing.secrets?.supabaseServiceRoleKey, has("secrets") ? incomingSecrets.supabaseServiceRoleKey : undefined)
     },
     tools: Object.fromEntries(
-      TOOL_NAMES.map((tool) => [tool, mergedTools[tool] ?? ""])
+      TOOL_NAMES.map((tool) => [tool, normalizeToolUrlValue(mergedTools[tool])])
     ),
     toolsRuntime: normalizeToolRuntimeSettings(mergedToolsRuntime),
     timezone: has("timezone") ? settings.timezone || "Asia/Jerusalem" : existing.timezone || "Asia/Jerusalem",
