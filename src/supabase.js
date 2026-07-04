@@ -726,6 +726,13 @@ function isConfigured(config) {
   return Boolean(config.supabaseUrl && config.supabaseServiceRoleKey);
 }
 
+// Raw REST access to the Content Supabase for internal agents (indexing agent).
+export async function contentSupabaseRequest({ config, path, options = {} }) {
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig)) throw new Error("Content Supabase is not configured");
+  return supabaseFetch(contentConfig, path, options);
+}
+
 export function contentSupabaseConfig(config) {
   return {
     supabaseUrl: config.contentSource?.supabaseUrl || config.supabaseUrl || "",

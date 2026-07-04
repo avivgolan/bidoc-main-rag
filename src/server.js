@@ -17,6 +17,7 @@ import { buildDataQueryWorkflowLog, DATA_QUERY_PIPELINE_STEPS, introspectSupabas
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { consolidateGraphEntities, runGraphEnrichment } from "./subagents/graphEnrichment.js";
+import { runIncrementalIndexing, runIndexDatesBackfill } from "./subagents/indexing.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
@@ -1051,6 +1052,51 @@ async function handleApi(req, res, url) {
         emit: emitRunEvent
       });
       completeRun(runId, { entities: summary.entities, records: summary.records });
+      return sendJson(res, 200, { ok: true, runId, ...summary });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { ok: false, runId, error: error.message });
+    }
+  }
+
+  // Internal Indexing Agent (docs/n8n-agents-migration-spec.md, Task A1).
+  // Explicit invocation is consent; dry-run is the default on both endpoints.
+  if (req.method === "POST" && url.pathname === "/api/index/backfill-dates") {
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    const body = await readJson(req).catch(() => ({}));
+    const runId = body.runId || `indexing_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    try {
+      const summary = await runIndexDatesBackfill({
+        config: buildRequestConfig(req, body),
+        dryRun: body.dryRun !== false,
+        limit: Math.max(1, Math.min(Number(body.limit) || 3000, 10000)),
+        runId,
+        emit: emitRunEvent
+      });
+      completeRun(runId, { planned: summary.planned, updated: summary.updated });
+      return sendJson(res, 200, { ok: true, runId, ...summary });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { ok: false, runId, error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/index/run") {
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    const body = await readJson(req).catch(() => ({}));
+    const runId = body.runId || `indexing_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    try {
+      const summary = await runIncrementalIndexing({
+        config: buildRequestConfig(req, body),
+        dryRun: body.dryRun !== false,
+        limit: Math.max(1, Math.min(Number(body.limit) || 50, 200)),
+        tables: Array.isArray(body.tables) ? body.tables : null,
+        runId,
+        emit: emitRunEvent
+      });
+      completeRun(runId, { planned: summary.planned, inserted: summary.inserted });
       return sendJson(res, 200, { ok: true, runId, ...summary });
     } catch (error) {
       failRun(runId, error);

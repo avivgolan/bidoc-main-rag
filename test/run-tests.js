@@ -16,6 +16,7 @@ import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement,
 import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/subagents/rootCauseHypothesis.js";
 import { computeHealthScore } from "../src/subagents/healthScore.js";
 import { buildEntityAliasMap, buildEntityGraphRows, collectDeterministicEntities, entityIdFor, entityStemSignature, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
+import { buildIndexRow, computeIndexDates, INDEX_DATES_VERSION, SOURCE_TABLE_SPECS } from "../src/subagents/indexing.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
@@ -3952,6 +3953,128 @@ test("timeline mobile CSS makes list first and AI secondary under 980px", () => 
   assert.match(cssSource, /@media \(max-width: 980px\)[\s\S]*?\.tlPrimaryColumn[\s\S]*?grid-template-columns:\s*1fr/s);
   assert.match(cssSource, /@media \(max-width: 980px\)[\s\S]*?\.timelineAdvancedControls[\s\S]*?grid-template-columns:\s*1fr/s);
   assert.match(cssSource, /@media \(max-width: 768px\)[\s\S]*?\.tlFetchControls[\s\S]*?grid-template-columns:\s*1fr/s);
+});
+
+test("indexing agent derives event and document dates from source-native columns", () => {
+  const meeting = computeIndexDates({
+    sourceTable: "meetings",
+    sourceRow: { meeting_date: "2025-02-04T00:00:00+00:00" },
+    primaryDate: "2025-02-04T00:00:00+00:00"
+  });
+  assert.deepEqual(meeting, { event_date: "2025-02-04", document_date: "2025-02-04" });
+
+  const email = computeIndexDates({
+    sourceTable: "emails",
+    sourceRow: { received_date: "2026-02-09T08:17:01+00:00" },
+    primaryDate: "2026-02-09T08:17:01+00:00"
+  });
+  assert.deepEqual(email, { event_date: null, document_date: "2026-02-09" });
+
+  const safety = computeIndexDates({
+    sourceTable: "safety_reports",
+    sourceRow: { report_date: "2023-02-07T00:00:00+00:00" },
+    primaryDate: null
+  });
+  assert.deepEqual(safety, { event_date: "2023-02-07", document_date: "2023-02-07" });
+});
+
+test("indexing agent never invents dates when the source has none", () => {
+  assert.deepEqual(
+    computeIndexDates({ sourceTable: "other_documents", sourceRow: { created_at: "2026-06-03T15:09:32+00:00" }, primaryDate: "2026-06-03T15:09:32+00:00" }),
+    { event_date: null, document_date: null }
+  );
+  assert.deepEqual(
+    computeIndexDates({ sourceTable: "unknown_table", sourceRow: { report_date: "2024-01-01" }, primaryDate: "2024-01-01" }),
+    { event_date: null, document_date: null }
+  );
+  assert.deepEqual(
+    computeIndexDates({ sourceTable: "meetings", sourceRow: { meeting_date: "not a date" }, primaryDate: null }),
+    { event_date: null, document_date: null }
+  );
+});
+
+test("indexing agent falls back to primary_date for orphans and whatsapp rows", () => {
+  // Orphaned index row: source row deleted; primary_date follows the same convention.
+  const orphan = computeIndexDates({ sourceTable: "meetings", sourceRow: null, primaryDate: "2025-06-01T00:00:00+00:00" });
+  assert.deepEqual(orphan, { event_date: "2025-06-01", document_date: "2025-06-01" });
+  // whatsapp_analysis has no source date column; only the index primary_date counts.
+  const whatsapp = computeIndexDates({ sourceTable: "whatsapp_analysis", sourceRow: { created_at: "2026-06-02" }, primaryDate: "2026-04-07T09:40:00Z" });
+  assert.deepEqual(whatsapp, { event_date: null, document_date: "2026-04-07" });
+  const whatsappNoPrimary = computeIndexDates({ sourceTable: "whatsapp_analysis", sourceRow: { created_at: "2026-06-02" }, primaryDate: null });
+  assert.deepEqual(whatsappNoPrimary, { event_date: null, document_date: null });
+});
+
+test("indexing agent date derivation is deterministic", () => {
+  const input = { sourceTable: "financial_transactions", sourceRow: { transaction_date: "2024-12-05T00:00:00+00:00" }, primaryDate: "2024-12-05T00:00:00+00:00" };
+  assert.deepEqual(computeIndexDates(input), computeIndexDates(input));
+  assert.deepEqual(computeIndexDates(input), { event_date: "2024-12-05", document_date: "2024-12-05" });
+});
+
+test("indexing agent keeps the n8n email relevance rule", () => {
+  assert.match(SOURCE_TABLE_SPECS.emails.relevanceFilter, /project_related/);
+  assert.match(SOURCE_TABLE_SPECS.emails.relevanceFilter, /multi_project/);
+  for (const table of ["meetings", "safety_reports", "consultants_reports", "financial_transactions", "whatsapp_analysis", "other_documents"]) {
+    assert.equal(SOURCE_TABLE_SPECS[table].relevanceFilter, undefined);
+  }
+});
+
+test("indexing agent builds index rows matching the n8n conventions", () => {
+  const row = buildIndexRow({
+    sourceTable: "meetings",
+    sourceRow: {
+      id: 508,
+      project_id: "11111111-1111-1111-1111-111111111111",
+      subject: "משימה מזהה 441",
+      summary: "פגישת מעקב משימות",
+      hashtags: ["#פרויקט", "#משימות"],
+      meeting_date: "2023-02-07T00:00:00+00:00",
+      item_status: "בטיפול",
+      status: "בטיפול",
+      attachment_id: "ATT1",
+      mentioned_dates: ["30.01.2023"]
+    }
+  });
+  assert.equal(row.source_table, "meetings");
+  assert.equal(row.source_id, "508");
+  assert.equal(row.title, "משימה מזהה 441");
+  assert.equal(row.event_date, "2023-02-07");
+  assert.equal(row.document_date, "2023-02-07");
+  assert.deepEqual(row.mentioned_dates, ["30.01.2023"]);
+  assert.equal(row.metadata.indexing, "internal-indexing-v1");
+  assert.equal(row.metadata.dates_version, INDEX_DATES_VERSION);
+  const lines = row.index_text.split("\n");
+  assert.equal(lines[0], "מקור: meetings");
+  assert.match(lines[1], /^תאריך: 2023-02-07T00:00:00\+00:00$/);
+  assert.equal(lines[2], "כותרת: משימה מזהה 441");
+  assert.equal(lines[3], "סטטוס טיפול: בטיפול");
+  assert.equal(lines[4], "תגיות: #פרויקט #משימות");
+  assert.equal(lines[5], "תקציר: פגישת מעקב משימות");
+});
+
+test("indexing agent builds the email index_text variant with sender and body", () => {
+  const row = buildIndexRow({
+    sourceTable: "emails",
+    sourceRow: {
+      id: 4520,
+      project_id: "11111111-1111-1111-1111-111111111111",
+      subject: "סמל מטבחים הרצליה",
+      summary: "בקשה להצעת מחיר",
+      mail_summarize: "לא אמור לשמש כשיש summary",
+      hashtags: [],
+      received_date: "2026-02-09T08:17:01+00:00",
+      sender_name: "Or shtamerman",
+      sender_mail: "or@kpym.co.il",
+      other_recipients: ["tarek2207@gmail.com"],
+      mail_body: "טארק שלום, מצ\"ב קובץ",
+      mail_id: "AAMkAGEw"
+    }
+  });
+  assert.equal(row.event_date, null);
+  assert.equal(row.document_date, "2026-02-09");
+  assert.equal(row.summary, "בקשה להצעת מחיר");
+  assert.match(row.index_text, /^מקור: emails\nתאריך קבלה: 2026-02-09T08:17:01\+00:00\nמאת: Or shtamerman \/ or@kpym\.co\.il\nאל: tarek2207@gmail\.com\nנושא: סמל מטבחים הרצליה\n/);
+  assert.match(row.index_text, /תוכן המייל: טארק שלום/);
+  assert.match(row.source_url, /^https:\/\/outlook\.office\.com\/mail\/inbox\/id\//);
 });
 
 let failed = 0;
