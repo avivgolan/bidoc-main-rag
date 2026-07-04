@@ -37,17 +37,17 @@ const SUB_AGENTS = [
   },
 ];
 
-// Internal content tools (spec M2) — retrieval over data_index per source,
-// with optional per-tool answer synthesis. Settings live under
-// settings.subagents.contentTools.perTool.<id>.
+// Specialist content agents (spec B2) — each agent searches ITS OWN Content-DB
+// table (vector + text), runs domain analysis, and returns a phrased answer.
+// Settings live under settings.subagents.contentTools.perTool.<id>.
 const CONTENT_TOOL_CARDS = [
-  { id: "meetings", label: "סוכן פגישות פנימי", desc: "חיפוש סמנטי בפגישות מהאינדקס, מועשר בפרטי הפגישה: משתתפים, החלטות, סטטוס ושעה." },
-  { id: "emails", label: "סוכן מיילים פנימי", desc: "חיפוש סמנטי במיילים רלוונטיים לפרויקט, מועשר בשולח, נמענים, קטגוריה וכיוון." },
-  { id: "whatsapp_messages", label: "סוכן וואטסאפ פנימי", desc: "חיפוש בניתוחי שיחות וואטסאפ, מועשר במשתתפים, משימות, החלטות ודדליינים." },
-  { id: "financial_transactions", label: "סוכן פיננסי פנימי", desc: "חיפוש בעסקאות פיננסיות, מועשר בספק, סכום, סוג עסקה וסטטוס." },
-  { id: "safety_report", label: "סוכן בטיחות פנימי", desc: "חיפוש בדוחות בטיחות, מועשר ברמת סיכון, ציון אתר ופירוט ליקויים לפי חומרה." }
+  { id: "meetings", label: "סוכן פגישות פנימי", sourceTable: "meetings", desc: "מומחה פגישות: חיפוש במאגר הפגישות + ניתוח החלטות, סטטוסים ומשתתפים." },
+  { id: "emails", label: "סוכן מיילים פנימי", sourceTable: "emails", desc: "מומחה תכתובת: חיפוש במאגר המיילים הרלוונטיים + ניתוח שולחים, קטגוריות וכיוון." },
+  { id: "whatsapp_messages", label: "סוכן וואטסאפ פנימי", sourceTable: "whatsapp_analysis", desc: "מומחה שיחות שטח: חיפוש בניתוחי השיחות + משימות פתוחות, דדליינים והחלטות." },
+  { id: "financial_transactions", label: "סוכן פיננסי פנימי", sourceTable: "financial_transactions", desc: "מומחה כספים: חיפוש בעסקאות + סכימות לפי סוג, ספקים מובילים וסטטוסים." },
+  { id: "safety_report", label: "סוכן בטיחות פנימי", sourceTable: "safety_reports", desc: "מומחה בטיחות: חיפוש בדוחות + סיכום ליקויים לפי חומרה ורמת סיכון." }
 ];
-const CONTENT_TOOL_DEFAULTS = { enabled: true, topK: 12, answerSynthesis: false, model: "", prompt: "" };
+const CONTENT_TOOL_DEFAULTS = { enabled: true, topK: 12, answerSynthesis: true, model: "", prompt: "", table: "" };
 
 const MEETINGS_EVIDENCE_DEFAULTS = {
   enabled: true,
@@ -514,9 +514,13 @@ function renderContentToolCards(list, models) {
         <span class="subagent-status ${cfg.enabled !== false ? "status-ok" : "status-warn"}">${cfg.enabled !== false ? "פעיל" : "כבוי"}</span>
       </div>
       <p class="subagent-desc">${tool.desc}</p>
+      <p class="subagent-desc ct-source">קורא ישירות מ: <code>${cfg.table || tool.sourceTable}</code> (המאגר של הסוכן ב-Content DB)</p>
       <div class="subagent-config">
         <label class="subagent-config-label">
           <input type="checkbox" class="ct-enabled" ${cfg.enabled !== false ? "checked" : ""} /> הפעל סוכן
+        </label>
+        <label class="subagent-config-label">טבלת מקור (ריק = ${tool.sourceTable})
+          <input class="ct-table" list="contentToolTables" value="${cfg.table || ""}" placeholder="${tool.sourceTable}" />
         </label>
         <label class="subagent-config-label">מספר תוצאות (topK)
           <input type="number" class="ct-topk" value="${cfg.topK || 12}" min="1" max="50" />
@@ -543,10 +547,15 @@ function renderContentToolCards(list, models) {
     `;
     const readDraft = () => ({
       enabled: card.querySelector(".ct-enabled").checked,
+      table: card.querySelector(".ct-table").value.trim(),
       topK: Number(card.querySelector(".ct-topk").value) || 12,
       answerSynthesis: card.querySelector(".ct-synthesis").checked,
       model: card.querySelector(".ct-model").value,
       prompt: card.querySelector(".ct-prompt").value
+    });
+    card.querySelector(".ct-table").addEventListener("change", () => {
+      const source = card.querySelector(".ct-source code");
+      if (source) source.textContent = card.querySelector(".ct-table").value.trim() || tool.sourceTable;
     });
     card.querySelector(".ct-save").addEventListener("click", () => {
       stageContentToolDraft(tool.id, readDraft());
@@ -568,14 +577,42 @@ function renderContentToolCards(list, models) {
             overrides: readDraft()
           }
         });
-        resultEl.textContent = result.answer
-          ? result.answer
-          : JSON.stringify(result.data?.results?.slice(0, 5) ?? result, null, 2);
+        const parts = [];
+        if (result.answer) parts.push(result.answer);
+        if (result.data?.analysis) parts.push(`--- ניתוח ---\n${JSON.stringify(result.data.analysis, null, 2)}`);
+        if (result.data?.retrieval?.warnings?.length) parts.push(`אזהרות אחזור: ${result.data.retrieval.warnings.join(", ")}`);
+        if (!result.answer) parts.push(JSON.stringify(result.data?.results?.slice(0, 5) ?? result, null, 2));
+        resultEl.textContent = parts.join("\n\n");
       } catch (error) {
         resultEl.textContent = `שגיאה: ${error.message}`;
       }
     });
     list.append(card);
+  }
+  populateContentToolTablesDatalist();
+}
+
+// Lazily fills the shared datalist of Content-DB tables for the .ct-table
+// inputs, reusing the data-query schema endpoint (content connection only).
+let _contentTablesDatalistLoaded = false;
+async function populateContentToolTablesDatalist() {
+  let datalist = document.getElementById("contentToolTables");
+  if (!datalist) {
+    datalist = document.createElement("datalist");
+    datalist.id = "contentToolTables";
+    document.body.append(datalist);
+  }
+  if (_contentTablesDatalistLoaded) return;
+  try {
+    const schema = await api("/api/subagents/data-query/schema", { method: "GET" });
+    const tables = (schema.connections || schema.tables || [])
+      .flatMap((connection) => connection.tables || (connection.table ? [connection] : []))
+      .map((table) => table.table || table.name)
+      .filter(Boolean);
+    datalist.innerHTML = [...new Set(tables)].sort().map((name) => `<option value="${name}"></option>`).join("");
+    _contentTablesDatalistLoaded = tables.length > 0;
+  } catch {
+    // Best-effort — free-text table input still works without the datalist.
   }
 }
 
@@ -590,6 +627,7 @@ function renderIndexingCard(list) {
       <span class="subagent-status ${cfg.autoIndexing ? "status-ok" : "status-warn"}">${cfg.autoIndexing ? "אוטומטי" : "ידני"}</span>
     </div>
     <p class="subagent-desc">מאנדקס רשומות מקור חדשות ל-data_index וממלא תאריכי אירוע/מסמך. Dry-run מציג תוכנית בלי לכתוב; "הרץ אינדוקס" כותב בפועל.</p>
+    <p class="subagent-desc ct-source">קורא מ: <code>meetings</code>, <code>emails</code>, <code>whatsapp_analysis</code>, <code>financial_transactions</code>, <code>safety_reports</code>, <code>consultants_reports</code>, <code>other_documents</code> · כותב ל: <code>data_index</code></p>
     <div class="subagent-config">
       <label class="subagent-config-label">
         <input type="checkbox" class="ix-auto" ${cfg.autoIndexing ? "checked" : ""} /> אינדוקס אוטומטי בריצות תובנות

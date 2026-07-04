@@ -18,6 +18,8 @@ import { computeHealthScore } from "../src/subagents/healthScore.js";
 import { buildEntityAliasMap, buildEntityGraphRows, collectDeterministicEntities, entityIdFor, entityStemSignature, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
 import { buildIndexRow, computeIndexDates, INDEX_DATES_VERSION, SOURCE_TABLE_SPECS } from "../src/subagents/indexing.js";
 import { compactJsonList, CONTENT_TOOL_SPECS, contentToolRowDate, contentToolSettings, DEFAULT_TOOL_PROMPTS, filterContentRowsByDate, isInternalContentTool } from "../src/subagents/contentTools.js";
+import { detectColumnRoles, extractSearchTerms, mergeRetrievalRows, parseOpenApiTableColumns } from "../src/subagents/contentRetrieval.js";
+import { analyzeFinancial, analyzeGeneric, analyzeMeetings, analyzeSafety, analyzeWhatsapp } from "../src/subagents/contentAnalysis.js";
 import { DEFAULT_CONTENT_TOOL_SETTINGS, INTERNAL_CONTENT_TOOL_NAMES, normalizeContentToolsSettings, normalizeIndexingSettings } from "../src/config.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, normalizeToolUrlValue, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, resolveToolUrl, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
@@ -4106,49 +4108,127 @@ test("internal content tools are gated by the internalTools runtime flag", () =>
   assert.equal(isInternalContentTool("meetings", { n8n: { runtime: {} } }), false);
   // Tools without an internal implementation never route internally.
   assert.equal(isInternalContentTool("submittals", { n8n: { runtime: { internalTools: true } } }), false);
-  assert.ok(CONTENT_TOOL_SPECS.meetings.sourceTable === "meetings");
-  assert.ok(CONTENT_TOOL_SPECS.emails.sourceTable === "emails");
-  // The tool keeps its n8n name; the indexed rows are conversation analyses.
-  assert.ok(CONTENT_TOOL_SPECS.whatsapp_messages.sourceTable === "whatsapp_analysis");
-  assert.ok(CONTENT_TOOL_SPECS.financial_transactions.sourceTable === "financial_transactions");
-  // n8n singular tool name over the plural table.
-  assert.ok(CONTENT_TOOL_SPECS.safety_report.sourceTable === "safety_reports");
+  // Spec B2: each agent has its OWN default table.
+  assert.ok(CONTENT_TOOL_SPECS.meetings.defaultTable === "meetings");
+  assert.ok(CONTENT_TOOL_SPECS.emails.defaultTable === "emails");
+  assert.ok(CONTENT_TOOL_SPECS.whatsapp_messages.defaultTable === "whatsapp_analysis");
+  assert.ok(CONTENT_TOOL_SPECS.financial_transactions.defaultTable === "financial_transactions");
+  assert.ok(CONTENT_TOOL_SPECS.safety_report.defaultTable === "safety_reports");
   assert.equal(isInternalContentTool("safety_report", { n8n: { runtime: { internalTools: true } } }), true);
+  // Every spec carries offline roles for its default table (no introspection).
+  for (const [tool, spec] of Object.entries(CONTENT_TOOL_SPECS)) {
+    assert.ok(Array.isArray(spec.roles.textColumns) && spec.roles.textColumns.length, tool);
+    assert.ok(typeof spec.analyze === "function", tool);
+  }
 });
 
-test("financial and safety tool enrichment maps source fields", () => {
-  const financial = CONTENT_TOOL_SPECS.financial_transactions.enrichRow({ title: "הצעת מחיר", source_url: null }, {
-    transaction_date: "2024-12-05T00:00:00+00:00",
-    vendor_name: "אנרפלז ניהול אנרגיה בע\"מ",
-    transaction_type: "הצעת מחיר",
-    category: "ספק",
-    amount_numeric: 5725.64,
-    currency: "ILS",
-    total: "5,725.64",
-    transaction_submitter: "אנרפלז ניהול אנרגיה בע\"מ",
-    data_link: "https://example.test/doc.pdf"
-  });
-  assert.equal(financial.vendor_name, "אנרפלז ניהול אנרגיה בע\"מ");
-  assert.equal(financial.amount, 5725.64);
-  // data_link fills source_url only when the index row has none.
-  assert.equal(financial.source_url, "https://example.test/doc.pdf");
+test("financial and safety analyzers compute domain rollups (spec B2)", () => {
+  const financial = analyzeFinancial([
+    { transaction_date: "2024-12-05", vendor_name: "אנרפלז", transaction_type: "הצעת מחיר", amount_numeric: 5725.64, status: "פתוח", currency: "ILS", date: "2024-12-05" },
+    { transaction_date: "2026-01-31", vendor_name: "פריהד", transaction_type: "חשבונית מס", total: "34,320", status: "שולם", date: "2026-01-31" }
+  ]);
+  assert.equal(financial.total, 2);
+  assert.equal(financial.total_amount, 40045.64);
+  assert.equal(financial.sum_by_type["הצעת מחיר"], 5725.64);
+  assert.equal(financial.sum_by_type["חשבונית מס"], 34320);
+  assert.deepEqual(financial.date_range, { from: "2024-12-05", to: "2026-01-31" });
 
-  const safety = CONTENT_TOOL_SPECS.safety_report.enrichRow({ title: "דוח בטיחות" }, {
-    report_date: "2023-02-07T00:00:00+00:00",
-    site_location: "7 קומה",
-    risk_level: "לא צוין",
-    total_workers: 10,
-    life_threatening_defects: 0,
-    severe_defects: 1,
-    medium_defects: 2,
-    minor_defects: 3,
-    resolved: 4,
-    project_manager: "פריהד בע\"מ",
-    site_manager: "לא צוין"
+  const safety = analyzeSafety([
+    { report_date: "2023-02-07", site_location: "קומה 7", risk_level: "נמוכה", life_threatening_defects: 0, severe_defects: 1, medium_defects: 2, minor_defects: 3, resolved: 4, date: "2023-02-07" },
+    { report_date: "2025-10-16", site_location: "קומה 7", risk_level: "גבוהה", life_threatening_defects: 1, severe_defects: 0, medium_defects: 0, minor_defects: 0, resolved: 0, date: "2025-10-16" }
+  ]);
+  assert.deepEqual(safety.defect_totals, { life_threatening: 1, severe: 1, medium: 2, minor: 3, resolved: 4 });
+  assert.equal(safety.worst_risk_level, "גבוהה");
+  assert.equal(safety.sites[0].name, "קומה 7");
+});
+
+test("meetings, whatsapp and generic analyzers extract domain signals (spec B2)", () => {
+  const meetings = analyzeMeetings([
+    { date: "2025-01-23", subject: "אישור חריג", decisions_made: "נדרש אישור סופי", status: "בטיפול", attendances: "איציק ליבמן - מנהל, יותם פנר - פיקוח" },
+    { date: "2025-01-05", subject: "חריג מיזוג", decisions_made: "", status: "בטיפול", attendances: "איציק ליבמן - מנהל" }
+  ]);
+  assert.equal(meetings.total, 2);
+  assert.equal(meetings.decisions_count, 1);
+  assert.equal(meetings.recent_decisions[0].subject, "אישור חריג");
+  assert.equal(meetings.by_status["בטיפול"], 2);
+  assert.equal(meetings.top_participants[0].name, "איציק ליבמן");
+
+  const whatsapp = analyzeWhatsapp([
+    {
+      date: "2026-03-20",
+      people_involved_json: ["אור", "טארק"],
+      tasks_json: [
+        { status: "ממתין לתשובה", due_date: "2026-03-23", description: "לקבל דוגמאות", responsible: "אור" },
+        { status: "בוצע", due_date: "2026-03-01", description: "נסגר" }
+      ],
+      decisions_json: [{ decision: "ממשיכים" }]
+    }
+  ]);
+  assert.equal(whatsapp.open_tasks_count, 1);
+  assert.equal(whatsapp.open_tasks[0].responsible, "אור");
+  assert.equal(whatsapp.upcoming_deadlines[0].due_date, "2026-03-01");
+  assert.equal(whatsapp.decisions_count, 1);
+
+  const generic = analyzeGeneric([
+    { id: 1, date: "2025-01-01", status: "פתוח", note: "טקסט ייחודי א" },
+    { id: 2, date: "2025-02-01", status: "סגור", note: "טקסט ייחודי ב" },
+    { id: 3, date: "2025-03-01", status: "פתוח", note: "טקסט ייחודי ג" }
+  ], { idColumn: "id", dateColumn: "date" });
+  assert.equal(generic.total, 3);
+  assert.deepEqual(generic.date_range, { from: "2025-01-01", to: "2025-03-01" });
+  assert.deepEqual(generic.breakdowns.status, { "פתוח": 2, "סגור": 1 });
+  // High-cardinality free text is not a breakdown.
+  assert.equal(generic.breakdowns.note, undefined);
+});
+
+test("column role detection classifies arbitrary content tables (spec B2)", () => {
+  const roles = detectColumnRoles([
+    { name: "id", type: "integer", format: "bigint", description: "Note:\nThis is a Primary Key.<pk/>" },
+    { name: "created_at", type: "string", format: "timestamp with time zone", description: "" },
+    { name: "report_date", type: "string", format: "timestamp with time zone", description: "" },
+    { name: "summary", type: "string", format: "text", description: "" },
+    { name: "title", type: "string", format: "text", description: "" },
+    { name: "embedding", type: "string", format: "public.vector", description: "" },
+    { name: "metadata", type: "string", format: "jsonb", description: "" }
+  ]);
+  assert.equal(roles.idColumn, "id");
+  assert.equal(roles.dateColumn, "report_date"); // domain date beats created_at
+  assert.equal(roles.embeddingColumn, "embedding");
+  assert.deepEqual(roles.textColumns.slice(0, 2), ["summary", "title"]);
+  assert.ok(!roles.selectColumns.includes("embedding"));
+  assert.ok(!roles.selectColumns.includes("metadata"));
+
+  const noDates = detectColumnRoles([
+    { name: "id", type: "integer", format: "bigint", description: "" },
+    { name: "name", type: "string", format: "text", description: "" }
+  ]);
+  assert.equal(noDates.dateColumn, null);
+  assert.equal(noDates.embeddingColumn, null);
+
+  const parsed = parseOpenApiTableColumns({ definitions: { demo: { properties: { id: { type: "integer", format: "bigint" }, body: { type: "string", format: "text" } } } } });
+  assert.deepEqual(parsed.get("demo").map((column) => column.name), ["id", "body"]);
+});
+
+test("retrieval merge unions vector and text legs with vector priority (spec B2)", () => {
+  const merged = mergeRetrievalRows({
+    vectorRows: [
+      { id: 1, similarity: 0.8, date: "2025-01-01" },
+      { id: 2, similarity: 0.6, date: "2025-05-01" }
+    ],
+    textRows: [
+      { id: 2, date: "2025-05-01" }, // dup: stays vector, tagged both
+      { id: 3, date: "2026-01-01" } // unembedded row — text leg only
+    ],
+    topK: 10
   });
-  assert.equal(safety.site_location, "7 קומה");
-  assert.deepEqual(safety.defects, { life_threatening: 0, severe: 1, medium: 2, minor: 3, resolved: 4 });
-  assert.equal(safety.total_workers, 10);
+  assert.deepEqual(merged.map((row) => row.id), [1, 2, 3]);
+  assert.equal(merged[1].matchedBy, "both");
+  assert.equal(merged[1].similarity, 0.6);
+  assert.equal(merged[2].matchedBy, "text");
+  assert.equal(mergeRetrievalRows({ vectorRows: merged, textRows: [], topK: 2 }).length, 2);
+
+  assert.deepEqual(extractSearchTerms("חריג בעבודות מיזוג אוויר"), ["בעבודות", "מיזוג", "אוויר"]);
+  assert.deepEqual(extractSearchTerms(""), []);
 });
 
 test("whatsapp index dates come from the joined conversation start", () => {
@@ -4171,50 +4251,27 @@ test("whatsapp index dates come from the joined conversation start", () => {
   assert.equal(fallback.document_date, "2026-04-07");
 });
 
-test("email and whatsapp tool enrichment maps source fields compactly", () => {
-  const email = CONTENT_TOOL_SPECS.emails.enrichRow({ title: "נושא" }, {
-    received_date: "2026-02-09T08:17:01+00:00",
-    sender_name: "Or",
-    sender_mail: "or@kpym.co.il",
-    other_recipients: ["a@b.com"],
-    mail_category: "חוזים",
-    direction: "inbound",
-    has_attachments: true
-  });
-  assert.equal(email.sender, "Or / or@kpym.co.il");
-  assert.deepEqual(email.recipients, ["a@b.com"]);
-  assert.equal(email.mail_category, "חוזים");
-
-  const whatsapp = CONTENT_TOOL_SPECS.whatsapp_messages.enrichRow({ title: "שיחה" }, {
-    conversation_id: 1085,
-    people_involved_json: ["Itzik Libman", "עידו קדם"],
-    tasks_json: [
-      { status: "ממתין לתשובה", due_date: "2026-03-23", description: "לקבל דוגמאות", responsible: "אור" },
-      { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }
-    ],
-    decisions_json: [],
-    deadlines_json: null
-  });
-  assert.deepEqual(whatsapp.participants, ["Itzik Libman", "עידו קדם"]);
-  assert.equal(whatsapp.tasks.total, 6);
-  assert.equal(whatsapp.tasks.items.length, 5);
-  assert.equal(whatsapp.tasks.items[0].description, "לקבל דוגמאות");
-  assert.equal(whatsapp.decisions, null);
-  assert.equal(whatsapp.deadlines, null);
+test("compactJsonList bounds jsonb lists", () => {
+  const bounded = compactJsonList([
+    { status: "ממתין לתשובה", due_date: "2026-03-23", description: "לקבל דוגמאות", responsible: "אור" },
+    { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }, { status: "פתוח" }
+  ]);
+  assert.equal(bounded.total, 6);
+  assert.equal(bounded.items.length, 5);
+  assert.equal(bounded.items[0].description, "לקבל דוגמאות");
   assert.equal(compactJsonList("not an array"), null);
+  assert.equal(compactJsonList([]), null);
 });
 
-test("internal content tool date filter prefers event_date over document and primary dates", () => {
-  assert.equal(contentToolRowDate({ event_date: "2025-03-01", document_date: "2025-04-01", primary_date: "2025-05-01T10:00:00Z" }), "2025-03-01");
-  assert.equal(contentToolRowDate({ document_date: "2025-04-01", primary_date: "2025-05-01T10:00:00Z" }), "2025-04-01");
-  assert.equal(contentToolRowDate({ primary_date: "2025-05-01T10:00:00Z" }), "2025-05-01");
+test("internal content tool date filter works on the row's own table date", () => {
+  assert.equal(contentToolRowDate({ date: "2025-03-01" }), "2025-03-01");
   assert.equal(contentToolRowDate({}), null);
 
   const rows = [
-    { title: "in", event_date: "2025-03-15" },
-    { title: "before", event_date: "2025-01-01" },
-    { title: "after", event_date: "2026-01-01" },
-    { title: "undated" }
+    { title: "in", date: "2025-03-15" },
+    { title: "before", date: "2025-01-01" },
+    { title: "after", date: "2026-01-01" },
+    { title: "undated", date: null }
   ];
   const filtered = filterContentRowsByDate(rows, "2025-03-01", "2025-12-31");
   assert.deepEqual(filtered.map((row) => row.title), ["in"]);
@@ -4228,14 +4285,20 @@ test("content tool settings schema normalizes per-tool controls (spec M2)", () =
 
   const normalized = normalizeContentToolsSettings({
     perTool: {
-      meetings: { enabled: false, topK: 999, answerSynthesis: true, model: "openai/gpt-4o-mini", prompt: "פרומפט מותאם" },
-      emails: "not an object"
+      meetings: { enabled: false, topK: 999, answerSynthesis: false, model: "openai/gpt-4o-mini", prompt: "פרומפט מותאם", table: " meetings_gf " },
+      emails: "not an object",
+      whatsapp_messages: { table: "bad-name; drop table" }
     }
   });
   assert.equal(normalized.perTool.meetings.enabled, false);
   assert.equal(normalized.perTool.meetings.topK, 50); // clamped
-  assert.equal(normalized.perTool.meetings.answerSynthesis, true);
+  // Synthesis is the standard now (spec B2): default true, explicit false kept.
+  assert.equal(normalized.perTool.meetings.answerSynthesis, false);
+  assert.equal(normalized.perTool.safety_report.answerSynthesis, true);
   assert.equal(normalized.perTool.meetings.prompt, "פרומפט מותאם");
+  assert.equal(normalized.perTool.meetings.table, "meetings_gf"); // trimmed
+  // Unsafe table names never survive normalization.
+  assert.equal(normalized.perTool.whatsapp_messages.table, "");
   assert.deepEqual(normalized.perTool.emails, DEFAULT_CONTENT_TOOL_SETTINGS);
   assert.deepEqual(normalized.perTool.safety_report, DEFAULT_CONTENT_TOOL_SETTINGS);
 
@@ -4255,15 +4318,19 @@ test("per-tool enabled=false disables an internal tool despite the global flag",
 });
 
 test("content tool draft overrides beat saved settings and defaults exist per tool", () => {
-  const config = { contentTools: normalizeContentToolsSettings({ perTool: { meetings: { topK: 20, prompt: "שמור" } } }) };
+  const config = { contentTools: normalizeContentToolsSettings({ perTool: { meetings: { topK: 20, prompt: "שמור", table: "meetings_gf" } } }) };
   const saved = contentToolSettings(config, "meetings");
   assert.equal(saved.topK, 20);
   assert.equal(saved.prompt, "שמור");
-  assert.equal(saved.answerSynthesis, false);
-  const draft = contentToolSettings(config, "meetings", { topK: 7, answerSynthesis: true, prompt: "טיוטה" });
+  assert.equal(saved.answerSynthesis, true); // spec B2 default
+  assert.equal(saved.table, "meetings_gf");
+  const draft = contentToolSettings(config, "meetings", { topK: 7, answerSynthesis: false, prompt: "טיוטה", table: "daily_work_log" });
   assert.equal(draft.topK, 7);
-  assert.equal(draft.answerSynthesis, true);
+  assert.equal(draft.answerSynthesis, false);
   assert.equal(draft.prompt, "טיוטה");
+  assert.equal(draft.table, "daily_work_log");
+  // An unsafe draft table falls back to the default (empty = spec default).
+  assert.equal(contentToolSettings(config, "meetings", { table: "x; drop" }).table, "");
   // Every registered tool has a default synthesis prompt.
   for (const tool of Object.keys(CONTENT_TOOL_SPECS)) {
     assert.ok(typeof DEFAULT_TOOL_PROMPTS[tool] === "string" && DEFAULT_TOOL_PROMPTS[tool].length > 40, tool);

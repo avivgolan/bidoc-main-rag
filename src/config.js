@@ -433,7 +433,10 @@ const DEFAULT_DATA_QUERY_SETTINGS = {
 // Kept in config.js (not contentTools.js) to avoid an import cycle; a test
 // asserts this list matches Object.keys(CONTENT_TOOL_SPECS).
 export const INTERNAL_CONTENT_TOOL_NAMES = ["meetings", "emails", "whatsapp_messages", "financial_transactions", "safety_report"];
-export const DEFAULT_CONTENT_TOOL_SETTINGS = { enabled: true, topK: 12, answerSynthesis: false, model: "", prompt: "" };
+// Spec B2: each agent runs on ITS OWN Content-DB table (user-editable), with
+// analysis + a phrased answer as the standard output (synthesis default ON).
+export const DEFAULT_CONTENT_TOOL_SETTINGS = { enabled: true, topK: 12, answerSynthesis: true, model: "", prompt: "", table: "" };
+const SAFE_TABLE_NAME = /^[A-Za-z0-9_]+$/;
 
 export function normalizeContentToolsSettings(value = {}) {
   const raw = isPlainObject(value) ? value : {};
@@ -441,12 +444,16 @@ export function normalizeContentToolsSettings(value = {}) {
   return {
     perTool: Object.fromEntries(INTERNAL_CONTENT_TOOL_NAMES.map((tool) => {
       const toolRaw = isPlainObject(perToolRaw[tool]) ? perToolRaw[tool] : {};
+      const table = typeof toolRaw.table === "string" ? toolRaw.table.trim() : "";
       return [tool, {
         enabled: toolRaw.enabled !== false,
         topK: clampNumber(toolRaw.topK, 1, 50, DEFAULT_CONTENT_TOOL_SETTINGS.topK),
-        answerSynthesis: toolRaw.answerSynthesis === true,
+        answerSynthesis: toolRaw.answerSynthesis !== false,
         model: typeof toolRaw.model === "string" ? toolRaw.model : "",
-        prompt: typeof toolRaw.prompt === "string" ? toolRaw.prompt : ""
+        prompt: typeof toolRaw.prompt === "string" ? toolRaw.prompt : "",
+        // Empty = the tool's default table; validated so a saved value can
+        // never inject into the PostgREST path.
+        table: SAFE_TABLE_NAME.test(table) ? table : ""
       }];
     }))
   };
