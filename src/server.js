@@ -17,7 +17,7 @@ import { buildDataQueryWorkflowLog, DATA_QUERY_PIPELINE_STEPS, introspectSupabas
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { consolidateGraphEntities, runGraphEnrichment } from "./subagents/graphEnrichment.js";
-import { runIncrementalIndexing, runIndexDatesBackfill } from "./subagents/indexing.js";
+import { runEmbeddingBackfill, runIncrementalIndexing, runIndexDatesBackfill } from "./subagents/indexing.js";
 import { callInternalContentTool, CONTENT_TOOL_SPECS, isInternalContentTool } from "./subagents/contentTools.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
@@ -1090,6 +1090,30 @@ async function handleApi(req, res, url) {
         emit: emitRunEvent
       });
       completeRun(runId, { planned: summary.planned, updated: summary.updated });
+      return sendJson(res, 200, { ok: true, runId, ...summary });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { ok: false, runId, error: error.message });
+    }
+  }
+
+  // Embedding backfill: fills NULL embedding columns in content source tables
+  // (additive only — the is.null filter is part of every write).
+  if (req.method === "POST" && url.pathname === "/api/index/embeddings") {
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    const body = await readJson(req).catch(() => ({}));
+    const runId = body.runId || `indexing_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    try {
+      const summary = await runEmbeddingBackfill({
+        config: buildRequestConfig(req, body),
+        tables: Array.isArray(body.tables) ? body.tables : null,
+        dryRun: body.dryRun !== false,
+        limit: Math.max(1, Math.min(Number(body.limit) || 150, 500)),
+        runId,
+        emit: emitRunEvent
+      });
+      completeRun(runId, { planned: summary.planned, embedded: summary.embedded });
       return sendJson(res, 200, { ok: true, runId, ...summary });
     } catch (error) {
       failRun(runId, error);

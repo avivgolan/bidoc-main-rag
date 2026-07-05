@@ -642,6 +642,8 @@ function renderIndexingCard(list) {
       <button class="ix-dry-dates">Dry-run תאריכים</button>
       <button class="ix-dry-run">Dry-run אינדוקס</button>
       <button class="ix-apply">הרץ אינדוקס עכשיו</button>
+      <button class="ix-emb-dry">Dry-run השלמת embeddings</button>
+      <button class="ix-emb-apply">השלם embeddings</button>
     </div>
     <pre class="subagent-result">אין תוצאה עדיין.</pre>
   `;
@@ -679,6 +681,8 @@ function renderIndexingCard(list) {
     dryRun: false,
     limit: Number(card.querySelector(".ix-limit").value) || 40
   }));
+  card.querySelector(".ix-emb-dry").addEventListener("click", () => runIndexing("/api/index/embeddings", { dryRun: true }));
+  card.querySelector(".ix-emb-apply").addEventListener("click", () => runIndexing("/api/index/embeddings", { dryRun: false }));
   list.append(card);
 }
 

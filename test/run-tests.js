@@ -16,7 +16,7 @@ import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement,
 import { collectRootCauseCandidates, validateRootCauseHypotheses } from "../src/subagents/rootCauseHypothesis.js";
 import { computeHealthScore } from "../src/subagents/healthScore.js";
 import { buildEntityAliasMap, buildEntityGraphRows, collectDeterministicEntities, entityIdFor, entityStemSignature, GRAPH_ENRICHMENT_VERSION, isAcceptableEntityName, normalizeEntityName, validateExtractedEntities } from "../src/subagents/graphEnrichment.js";
-import { buildIndexRow, computeIndexDates, INDEX_DATES_VERSION, SOURCE_TABLE_SPECS } from "../src/subagents/indexing.js";
+import { buildIndexRow, computeIndexDates, EMBEDDING_BACKFILL_TABLES, INDEX_DATES_VERSION, pickEmbeddingText, SOURCE_TABLE_SPECS } from "../src/subagents/indexing.js";
 import { compactJsonList, CONTENT_TOOL_SPECS, contentToolRowDate, contentToolSettings, DEFAULT_TOOL_PROMPTS, filterContentRowsByDate, isInternalContentTool } from "../src/subagents/contentTools.js";
 import { detectColumnRoles, extractSearchTerms, mergeRetrievalRows, parseOpenApiTableColumns } from "../src/subagents/contentRetrieval.js";
 import { analyzeFinancial, analyzeGeneric, analyzeMeetings, analyzeSafety, analyzeWhatsapp } from "../src/subagents/contentAnalysis.js";
@@ -4335,6 +4335,17 @@ test("content tool draft overrides beat saved settings and defaults exist per to
   for (const tool of Object.keys(CONTENT_TOOL_SPECS)) {
     assert.ok(typeof DEFAULT_TOOL_PROMPTS[tool] === "string" && DEFAULT_TOOL_PROMPTS[tool].length > 40, tool);
   }
+});
+
+test("embedding backfill picks the first non-empty text column and keeps the email relevance rule", () => {
+  const columns = EMBEDDING_BACKFILL_TABLES.safety_reports.textColumns;
+  assert.equal(pickEmbeddingText({ content: "  ", summary: "תקציר דוח", defect_details: "ליקוי" }, columns), "תקציר דוח");
+  assert.equal(pickEmbeddingText({ content: "תוכן מלא", summary: "תקציר" }, columns), "תוכן מלא");
+  assert.equal(pickEmbeddingText({}, columns), "");
+  assert.equal(pickEmbeddingText({ content: "א".repeat(20000) }, columns).length, 12000);
+  assert.match(EMBEDDING_BACKFILL_TABLES.emails.extraFilter, /project_related/);
+  // Only tables that actually have an embedding column are listed.
+  assert.equal(EMBEDDING_BACKFILL_TABLES.other_documents, undefined);
 });
 
 let failed = 0;

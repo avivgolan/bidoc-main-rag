@@ -287,6 +287,97 @@ export async function runIncrementalIndexing({ config, dryRun = true, limit = 50
   return summary;
 }
 
+// ── Embedding backfill: fill NULL embedding columns in source tables ─────────
+// The content tables follow the LangChain vector-store shape (content +
+// metadata + embedding + match_<table> RPC); n8n embeds the `content` column
+// but left gaps (safety: 32/40 missing). This fills ONLY rows whose embedding
+// IS NULL — the filter is server-side, so already-embedded rows are
+// untouchable — and writes ONLY the embedding column. Fully additive.
+
+export const EMBEDDING_BACKFILL_TABLES = {
+  safety_reports: { textColumns: ["content", "summary", "defect_details"] },
+  consultants_reports: { textColumns: ["content", "summary", "main_recommendations"] },
+  whatsapp_analysis: { textColumns: ["content", "summary"] },
+  meetings: { textColumns: ["content", "summary", "subject"] },
+  financial_transactions: { textColumns: ["content", "summary", "short_description"] },
+  // Only project-classified mails matter (the standing relevance rule).
+  emails: { textColumns: ["content", "summary", "mail_summarize", "mail_body"], extraFilter: "relevance_status=in.(project_related,multi_project)" }
+};
+
+export function pickEmbeddingText(row = {}, textColumns = []) {
+  for (const column of textColumns) {
+    const text = String(row?.[column] ?? "").trim();
+    if (text) return text.slice(0, 12000);
+  }
+  return "";
+}
+
+export async function runEmbeddingBackfill({ config, tables = null, dryRun = true, limit = 150, runId = null, emit = null } = {}) {
+  if (!config?.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+  const targetTables = (Array.isArray(tables) && tables.length ? tables : Object.keys(EMBEDDING_BACKFILL_TABLES))
+    .filter((table) => EMBEDDING_BACKFILL_TABLES[table]);
+  const summary = { dryRun, planned: 0, embedded: 0, skippedNoText: 0, byTable: {} };
+
+  let remaining = limit;
+  const plans = [];
+  for (const table of targetTables) {
+    if (remaining <= 0) break;
+    const spec = EMBEDDING_BACKFILL_TABLES[table];
+    const params = [
+      `select=${encodeURIComponent(["id", ...spec.textColumns].join(","))}`,
+      "embedding=is.null",
+      spec.extraFilter || null,
+      "order=id.asc",
+      `limit=${remaining}`
+    ].filter(Boolean).join("&");
+    const rows = await contentSupabaseRequest({ config, path: `/rest/v1/${table}?${params}` });
+    const tableSummary = { missing: Array.isArray(rows) ? rows.length : 0, planned: 0, skippedNoText: 0 };
+    summary.byTable[table] = tableSummary;
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const text = pickEmbeddingText(row, spec.textColumns);
+      if (!text) {
+        tableSummary.skippedNoText += 1;
+        summary.skippedNoText += 1;
+        continue;
+      }
+      plans.push({ table, id: row.id, textPreview: text.slice(0, 120), text });
+      tableSummary.planned += 1;
+    }
+    remaining -= tableSummary.missing;
+  }
+  summary.planned = plans.length;
+  emit?.(runId, "embedding_backfill", `${plans.length} rows are missing embeddings`, { ...summary, status: dryRun ? "done" : "running" });
+
+  if (dryRun) {
+    return { ...summary, sample: plans.slice(0, 15).map(({ text, ...plan }) => plan) };
+  }
+
+  for (const group of chunk(plans, EMBEDDING_CONCURRENCY)) {
+    await Promise.all(group.map(async (plan) => {
+      const embedding = await createEmbedding({
+        apiKey: config.openRouterApiKey,
+        model: config.models?.embedding,
+        input: plan.text
+      });
+      // PATCH scoped to this row AND embedding=is.null: even a concurrent
+      // writer cannot cause an overwrite of an existing vector.
+      await contentSupabaseRequest({
+        config,
+        path: `/rest/v1/${plan.table}?id=eq.${plan.id}&embedding=is.null`,
+        options: {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ embedding })
+        }
+      });
+      summary.embedded += 1;
+    }));
+    emit?.(runId, "embedding_backfill", `Embedded ${summary.embedded}/${plans.length} rows`, { status: "running" });
+  }
+  emit?.(runId, "embedding_backfill", `Embedding backfill complete: ${summary.embedded} rows`, { ...summary, status: "done" });
+  return { ...summary, sample: plans.slice(0, 15).map(({ text, ...plan }) => plan) };
+}
+
 // Builds a complete data_index row from a source row, mirroring the field and
 // index_text conventions of the existing n8n-written rows (sampled live per table).
 export function buildIndexRow({ sourceTable, sourceRow, joinedDate = null }) {
