@@ -1,6 +1,6 @@
 import { chatCompletion, createEmbedding } from "../openrouter.js";
 import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
-import { contentSupabaseConfig } from "../supabase.js";
+import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
 
 const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 
@@ -37,13 +37,49 @@ async function searchAlertsEmbeddings(config, query, table, topK = 20, cacheCont
   const response = await fetch(`${contentConfig.supabaseUrl}/rest/v1/rpc/${rpcName}`, {
     method: "POST",
     headers: supabaseHeaders(contentConfig.supabaseServiceRoleKey),
-    body: JSON.stringify({ query_embedding: embedding, match_count: topK })
+    // The match_* functions default match_threshold to 0.5 — query-vs-document
+    // similarities top out around 0.4-0.6, so the default silently returns
+    // nothing. Threshold 0 + match_count bounding, like the specialist agents.
+    body: JSON.stringify({ query_embedding: embedding, match_count: topK, filter: {}, match_threshold: 0 })
   });
 
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) throw new Error(data?.message || `Supabase RPC failed: ${response.status}`);
-  return Array.isArray(data) ? data : [];
+  return enrichAlertRows(config, table, Array.isArray(data) ? data : []);
+}
+
+// The RPC returns only (id, content, metadata-string, similarity) — no date, so
+// date filtering would drop every row. One batched fetch brings the real
+// columns from the alerts table; on legacy tables without them, the raw rows
+// are kept as-is.
+async function enrichAlertRows(config, table, rows) {
+  const ids = rows.map((row) => row?.id).filter((id) => id != null);
+  if (!ids.length) return rows;
+  try {
+    const detail = await contentSupabaseRequest({
+      config,
+      path: `/rest/v1/${table}?select=id,data_date,alert_type,severity_level,item_status,data_link,summary,alert_description&id=in.(${ids.join(",")})`
+    });
+    const byId = new Map((Array.isArray(detail) ? detail : []).map((row) => [String(row.id), row]));
+    return rows.map((row) => {
+      const extra = byId.get(String(row.id)) || {};
+      return {
+        id: row.id,
+        similarity: row.similarity ?? null,
+        date: extra.data_date || null,
+        alert_type: extra.alert_type || null,
+        severity_level: extra.severity_level || null,
+        item_status: extra.item_status || null,
+        data_link: extra.data_link || null,
+        summary: extra.summary || null,
+        description: extra.alert_description || null,
+        content: String(row.content || "").slice(0, 500)
+      };
+    });
+  } catch {
+    return rows;
+  }
 }
 
 export async function runAlertAgent({ query, dateFilter = "", dateFrom = null, dateTo = null, cacheContext = null, telemetry = null }) {
