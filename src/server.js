@@ -1379,10 +1379,7 @@ async function enrichTimelineSuggestionsWithModel({ cfg, events = [], links = []
     messages: [
       {
         role: "system",
-        content: [
-          linkAgent.prompt || "You verify timeline event links for a construction project.",
-          "Return ONLY valid JSON with the requested schema. Do not include markdown."
-        ].join(" ")
+        content: linkAgent.prompt || "You verify timeline event links for a construction project."
       },
       {
         role: "user",
