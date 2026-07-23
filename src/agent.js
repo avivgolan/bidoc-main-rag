@@ -866,7 +866,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
       return fallbackRagAnswer({ successful, failed, skipped, sources });
     }
     emitRunEvent(runId, "main_agent", "Main Agent response received", { length: answer.length });
-    return answer;
+    return linkifyCitations(answer, sources);
   } catch (error) {
     // Large investigation/RAG payloads can push generation past the per-call
     // timeout. Retry once with a trimmed context before giving up on a real
@@ -909,7 +909,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
         });
         if (String(retryAnswer || "").trim()) {
           emitRunEvent(runId, "main_agent", "Main Agent retry succeeded", { length: retryAnswer.length });
-          return retryAnswer;
+          return linkifyCitations(retryAnswer, sources);
         }
       } catch (retryError) {
         trace.push({ step: "mainAgent", ok: false, fallback: true, error: `retry failed: ${retryError.message}` });
@@ -1295,6 +1295,35 @@ function rowKey(row) {
     row?.text ||
     JSON.stringify(row)
   ).slice(0, 500);
+}
+
+// Deterministic safety net: despite the INLINE SOURCE CONTRACT / Citation
+// Rules instructing the model to always wrap a citation as a Markdown link
+// when a source_url is available, it sometimes still writes a bare bracket
+// like "[מקור: emails, כותרת, 29.01.2025]" or "[ישיבה: ..., 21.01.2025]" with
+// no "(url)" — which Markdown renders as plain, non-clickable text. Rather
+// than rely purely on prompt compliance, find these bare brackets after
+// generation and attach the matching URL from the retrieved sources by
+// matching the record title that the model already copied into the bracket.
+const BARE_CITATION_BRACKET = /\[(מקור|ישיבה)\s*:\s*([^\]]+)\](?!\()/g;
+
+function linkifyCitations(text, sources = []) {
+  const value = String(text || "");
+  if (!value || !Array.isArray(sources) || !sources.length) return value;
+  const candidates = sources
+    .filter((source) => source?.url && (source.title || source.label))
+    .map((source) => ({ url: source.url, normalizedTitle: normalizeForCitationMatch(source.title || source.label) }))
+    .filter((source) => source.normalizedTitle);
+  if (!candidates.length) return value;
+  return value.replace(BARE_CITATION_BRACKET, (full, label, inner) => {
+    const normalizedInner = normalizeForCitationMatch(inner);
+    const match = candidates.find((source) => normalizedInner.includes(source.normalizedTitle));
+    return match ? `[${label}: ${inner}](${match.url})` : full;
+  });
+}
+
+function normalizeForCitationMatch(value) {
+  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 // Hebrew display labels for tool names, kept out of the fallback answer's
