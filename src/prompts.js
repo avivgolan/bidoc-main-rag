@@ -333,7 +333,7 @@ The following may guide interpretation but are not project evidence:
 
 Apply when tool_results contains meeting_evidence_search:
 
-- For every factual claim sourced from a meeting, append the citation inline: [ישיבה: {document_name}, {date}, צ'אנק {chunk_index}]
+- For every factual claim sourced from a meeting, append the citation inline as a Markdown link built from the record's own source_url: [ישיבה: {document_name}, {date}, צ'אנק {chunk_index}](source_url). Only omit the link portion if that record's source_url is genuinely "unavailable".
 - Use evidence[].quote as the verbatim source — do not rephrase or summarize it into a different meaning.
 - If evidence[].quote does not explicitly support a claim, do not make that claim.
 - If meeting evidence conflicts with another source, report both sides under the conflict rules above.
@@ -356,6 +356,7 @@ When investigation_plan is supplied:
 - Do not create a duplicate sources section.
 - Do not create a separate sources section at the bottom.
 - Never attach one source link to an unrelated group of claims.
+- Never write a bracket-style citation such as [מקור: ...] or [ישיבה: ...] without wrapping it as a Markdown link, e.g. [מקור: ...](source_url). A citation with no link is only acceptable when that specific record's source_url is literally "unavailable" — in that case, either omit the citation or state the source name as plain text, never as a bracket that looks like a link but has none.
 
 # Response Structure
 

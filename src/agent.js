@@ -3,7 +3,7 @@ import { classifyMessage, hintedTools } from "./classifier.js";
 import { heuristicClassification, isHebrew } from "./heuristics.js";
 import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.js";
 import { graphSearch, hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
-import { buildToolOrder, callN8nTool, extractLinks } from "./tools.js";
+import { buildToolOrder, callN8nTool, extractLinks, buildInternalSourceUrl } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { callInternalContentTool, isInternalContentTool } from "./subagents/contentTools.js";
 import { runDataQueryAgent } from "./subagents/dataQuery.js";
@@ -308,7 +308,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
             runId, context: "knowledge_plan", cacheContext, telemetryFor
           });
           const plannedRows = normalizeRows(plannedSearch.results);
-          const plannedSources = extractLinks(plannedRows);
+          const plannedSources = extractLinks(plannedRows, config);
           emitRunEvent(runId, "hybrid_search", "Knowledge Planner RAG query completed", { query, records: plannedRows.length, relaxedHashtags: plannedSearch.relaxedHashtags });
           return { ok: true, query, rows: plannedRows, sources: plannedSources, relaxedHashtags: plannedSearch.relaxedHashtags };
         } catch (error) {
@@ -327,7 +327,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     }
 
     hybridResults = filterRowsByHashtags(uniqueRows(allRows), classification.hashtags || []);
-    const hybridSources = extractLinks(hybridResults);
+    const hybridSources = extractLinks(hybridResults, config);
     sources.push(...hybridSources);
     toolCalls.push(annotateToolCall({ toolName: "hybrid_search", ok: true, rawQuery: message, data: hybridResults, sources: hybridSources, relaxedHashtags: primarySearch.relaxedHashtags }));
     emitRunEvent(runId, "hybrid_search", "Hybrid Search completed", { records: countRows(hybridResults), sources: hybridSources.length, plannedQueries: planQueries.length });
@@ -408,7 +408,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
           telemetry: telemetryFor("reranker")
         })
       });
-      const rerankSources = extractLinks(rerankedResults);
+      const rerankSources = extractLinks(rerankedResults, config);
       sources.push(...rerankSources);
       toolCalls.push(annotateToolCall({ toolName: "reranker", ok: true, rawQuery: message, data: rerankedResults, sources: rerankSources }));
       emitRunEvent(runId, "reranker", "Reranker completed", { records: countRows(rerankedResults) });
@@ -805,7 +805,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
     const mainPayload = {
       user_message: message,
       answer_mode: listIntent ? "ranked_entity_list" : "standard_grounded_answer",
-      retrieval_context: formatRetrievalContext(retrievalResults, retrievalLimit, config.rag?.chunkTextLimit || 1800),
+      retrieval_context: formatRetrievalContext(retrievalResults, retrievalLimit, config.rag?.chunkTextLimit || 1800, config),
       retrieval_results: retrievalResults,
       graph_context: graphContext,
       project_graph_findings: projectGraphFindings,
@@ -878,7 +878,8 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
         const trimmedContext = formatRetrievalContext(
           retrievalResults,
           Math.max(4, Math.floor(retrievalLimit / 2)),
-          Math.min(900, config.rag?.chunkTextLimit || 1800)
+          Math.min(900, config.rag?.chunkTextLimit || 1800),
+          config
         );
         const retryAnswer = await chatCompletion({
           apiKey: config.openRouterApiKey,
@@ -1296,36 +1297,80 @@ function rowKey(row) {
   ).slice(0, 500);
 }
 
+// Hebrew display labels for tool names, kept out of the fallback answer's
+// technical vocabulary (per the "no technical details" requirement — the user
+// should never see raw tool/RPC identifiers or error strings in chat).
+const TOOL_DISPLAY_LABELS = {
+  hybrid_search: "חיפוש במסמכי הפרויקט",
+  hybrid_search_plan: "חיפוש משלים",
+  reranker: "מיון תוצאות לפי רלוונטיות",
+  graph_search: "קשרים בין נתוני הפרויקט",
+  alert: "התראות פרויקט",
+  data_query: "שאילתת נתונים",
+  safety_report: "דוחות בטיחות",
+  meetings: "ישיבות",
+  emails: "מיילים",
+  whatsapp_messages: "הודעות וואטסאפ",
+  financial_transactions: "נתונים כספיים",
+  consultants_reports: "דוחות יועצים",
+  exceptions_report: "דוח חריגים",
+  quality_control: "בקרת איכות",
+  submittals: "מסמכים להגשה",
+  meeting_evidence_search: "חיפוש ראיות מישיבות"
+};
+
+function toolDisplayLabel(toolName) {
+  return TOOL_DISPLAY_LABELS[toolName] || "מקור נוסף";
+}
+
+// Last-resort answer used only when the main LLM synthesis call itself fails
+// (missing key, timeout, provider error). Renders the *already retrieved*
+// records directly as clean bullet points with real links — never the raw
+// row/tool-call objects (those are large nested JSON blobs meant for
+// debugging, not for display) and never a raw error string.
 function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
-  const found = successful.length
-    ? successful.map((call) => {
+  const sections = successful
+    .map((call) => {
+      const label = toolDisplayLabel(call.toolName);
       const callSources = uniqueByUrl(call.sources || []);
-      const links = callSources.length
-        ? ` ${callSources.map((source) => `[למסמך לחץ כאן](${source.url})`).join(" ")}`
-        : "";
-      return `- ${call.toolName}: ${summarizeData(call.data)}${links}`;
-    }).join("\n")
-    : "- לא הצלחתי לאחזר מידע מהפרויקט כרגע.";
+      if (callSources.length) {
+        const items = callSources
+          .slice(0, 6)
+          .map((source) => {
+            const title = (source.title || source.label || "מסמך").slice(0, 120);
+            const date = source.date ? ` (${source.date})` : "";
+            return `  - [${title}${date}](${source.url})`;
+          })
+          .join("\n");
+        return `- **${label}**:\n${items}`;
+      }
+      if (typeof call.data === "string" && call.data.trim()) {
+        return `- **${label}**: ${call.data.trim().slice(0, 400)}`;
+      }
+      const count = Array.isArray(call.data) ? call.data.length : call.data ? 1 : 0;
+      return count
+        ? `- **${label}**: נמצאו ${count} רשומות רלוונטיות בפרויקט, ללא קישור ישיר זמין.`
+        : null;
+    })
+    .filter(Boolean);
 
-  // Build a human-readable reason for why we're in fallback mode
-  const reasons = [];
-  const supabaseFail = failed.find((c) => c.toolName === "hybrid_search");
-  if (supabaseFail) reasons.push(`חיפוש הוקטורי נכשל (${supabaseFail.error})`);
-  if (!successful.length && !supabaseFail) reasons.push("מפתח OpenRouter חסר — הסוכן הראשי לא הופעל");
+  const found = sections.length ? sections.join("\n") : "- לא הצלחתי לאחזר מידע רלוונטי מהפרויקט כרגע.";
 
-  const reasonNote = reasons.length
-    ? `\n> ⚠️ ${reasons.join(" · ")}`
-    : "";
+  const missingItems = [
+    ...failed.map((call) => `- ${toolDisplayLabel(call.toolName)}: לא ניתן היה להשלים את הבדיקה כרגע.`),
+    ...skipped.map((call) => `- ${toolDisplayLabel(call.toolName)}: לא מוגדר במערכת.`)
+  ];
+  const missing = missingItems.length ? missingItems.join("\n") : "- אין.";
 
-  const failedText = failed.map((call) => `- ${call.toolName}: ${call.error}`);
-  const skippedText = skipped.map((call) => `- ${call.toolName}: לא מוגדר`);
-  const missing = failedText.length || skippedText.length
-    ? [...failedText, ...skippedText].join("\n")
-    : "- אין.";
-  const noSourceNote = !successful.length && sources.length
-    ? `\n${sources.map((source) => `[למסמך לחץ כאן](${source.url})`).join(" ")}`
-    : "";
-  return `**תשובה:**\n${found}${noSourceNote}${reasonNote}\n\n**פרטים לפי מקור:**\n${found}${noSourceNote}\n\n**מה לא נמצא:**\n${missing}`;
+  return [
+    "**תשובה:**",
+    "לא הצלחתי להרכיב תשובה מנוסחת באמצעות מנוע ה-AI כרגע, אך הנה המידע שנמצא ישירות במקורות הפרויקט:",
+    "",
+    found,
+    "",
+    "**מה לא נמצא:**",
+    missing
+  ].join("\n");
 }
 
 function liteFallback(message) {
@@ -1339,7 +1384,7 @@ function summarizeData(data) {
   return text.length > 450 ? `${text.slice(0, 450)}...` : text;
 }
 
-function formatRetrievalContext(results, limit = 12, chunkTextLimit = 1800) {
+function formatRetrievalContext(results, limit = 12, chunkTextLimit = 1800, config = null) {
   const rows = normalizeRows(results).slice(0, limit);
   if (!rows.length) return "No vector records returned.";
   return rows
@@ -1358,7 +1403,10 @@ function formatRetrievalContext(results, limit = 12, chunkTextLimit = 1800) {
         JSON.stringify(row);
       const metadata = row.metadata ? `\nmetadata: ${JSON.stringify(row.metadata)}` : "";
       const score = row.similarity || row.score || row.distance || row.match_score || "";
-      const sourceUrl = row.source_url || row.url || row.link || row.data_link || row.metadata?.source_url || row.metadata?.url || "";
+      // Fall back to an internal bidoc "view in app" link (buildInternalSourceUrl)
+      // when the record has no external URL of its own, so the main agent always
+      // has *something* real to cite instead of leaving a bracket with no link.
+      const sourceUrl = row.source_url || row.url || row.link || row.data_link || row.metadata?.source_url || row.metadata?.url || buildInternalSourceUrl(config, row) || "";
       const source = sourceUrl ? `\nsource_url: ${sourceUrl}` : "\nsource_url: unavailable";
       return `[${index + 1}] score: ${score}\n${String(text).slice(0, Number(chunkTextLimit || 1800))}${metadata}${source}`;
     })

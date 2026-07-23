@@ -555,6 +555,12 @@ export function getConfig(settingsOverride = null) {
     // JWT. Managed service-account credentials take precedence when configured.
     dataQueryReadAccessToken: String(process.env.DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN || "").trim(),
     postgresUrl: process.env.POSTGRES_URL || "",
+    // Base origin of the bidoc web app. Used to build a clickable "view in bidoc"
+    // link for source records whose underlying table has no external URL of its
+    // own (e.g. safety_reports, meetings, consultants_reports) — see
+    // buildInternalSourceUrl() in tools.js. Optional: when unset, those records
+    // are cited without a link, same as before.
+    bidocWebAppUrl: trimSlash(process.env.BIDOC_WEB_APP_URL || ""),
     models: {
       classifier: settings.models?.classifier || process.env.CLASSIFIER_MODEL || "openai/gpt-4o-mini",
       knowledgePlanner: settings.models?.knowledgePlanner || process.env.KNOWLEDGE_PLANNER_MODEL || settings.models?.main || process.env.MAIN_MODEL || "openai/gpt-4o",
