@@ -666,7 +666,8 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
     date_to: dateTo,
     hashtags: normalizeHashtags(hashtags),
     vector_weight: config.retrieval.vectorWeight,
-    keyword_weight: config.retrieval.keywordWeight
+    keyword_weight: config.retrieval.keywordWeight,
+    ...(config.projectId ? { project_id_filter: config.projectId } : {})
   };
 
   return cachedOperation({
@@ -680,7 +681,8 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
       topK,
       rpc: contentConfig.hybridRpcName,
       vectorWeight: payload.vector_weight,
-      keywordWeight: payload.keyword_weight
+      keywordWeight: payload.keyword_weight,
+      ...(config.projectId ? { projectId: config.projectId } : {})
     },
     ttl: CACHE_TTL.hybridSearch,
     savedCall: "search",
@@ -692,11 +694,16 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
           body: JSON.stringify(payload)
         });
       } catch (error) {
-        if (!payload.hashtags.length || !looksLikeRpcSignatureError(error.message)) throw error;
-        const { hashtags: _hashtags, ...payloadWithoutHashtags } = payload;
+        if (!looksLikeRpcSignatureError(error.message)) throw error;
+        // Graceful degradation: strip all optional params that older company DBs
+        // may not recognise (project_id_filter requires migration 027, hashtags
+        // requires the GIN index from 026). Retry with the minimal required params.
+        const hasOptionalParams = payload.project_id_filter || payload.hashtags.length;
+        if (!hasOptionalParams) throw error;
+        const { project_id_filter: _pid, hashtags: _hashtags, ...payloadBase } = payload;
         return supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
           method: "POST",
-          body: JSON.stringify(payloadWithoutHashtags)
+          body: JSON.stringify(payloadBase)
         });
       }
     }

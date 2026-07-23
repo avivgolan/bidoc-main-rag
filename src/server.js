@@ -66,8 +66,8 @@ function buildRequestConfig(req, body = {}) {
   const rpc  = req.headers["x-hybrid-rpc-name"]       || body.hybridRpcName        || null;
   const idx  = req.headers["x-index-table"]            || body.indexTable           || null;
   const alt  = req.headers["x-alerts-table"]           || body.alertsTable          || null;
-  if (!url && !key) return base;
-  return {
+  const pid  = req.headers["x-project-id"]             || body.projectId || body.project_id || null;
+  const merged = (!url && !key) ? base : {
     ...base,
     contentSource: {
       ...base.contentSource,
@@ -78,6 +78,7 @@ function buildRequestConfig(req, body = {}) {
       ...(alt ? { alertsTable: alt }                     : {}),
     },
   };
+  return pid ? { ...merged, projectId: pid } : merged;
 }
 
 // Load persisted settings from Supabase before handling any requests.
@@ -129,16 +130,18 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/chat") {
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req);
     if (!body.message) return sendJson(res, 400, { error: "message is required" });
     const sessionId = body.sessionId || `session_${Date.now()}`;
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const cfg = buildRequestConfig(req, body);
     createRun(runId);
     try {
       const output = await runChatPipeline({
         message: body.message,
         sessionId,
-        config: config(),
+        config: cfg,
         runId,
         sourcesEnabled: body.sourcesEnabled !== false,
         deepResearch: body.deepResearch === true,

@@ -679,7 +679,8 @@ async function callProjectTool({ toolName, message, classification, sessionId, c
           sessionId,
           source: "main_agent",
           runId,
-          callerNodeId: "main_agent"
+          callerNodeId: "main_agent",
+          projectId: config.projectId || null
         },
         telemetry: telemetryFor("data_query")
       });
