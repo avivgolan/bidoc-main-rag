@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import { chatCompletion, extractJsonObject, summarizeOpenRouterUsage } from "../openrouter.js";
 import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig } from "../supabase.js";
+import { getDataQueryAccessToken } from "./dataQueryAuth.js";
+import { DATA_QUERY_EXACT_OPERATIONS, dataQueryTablePolicy, inferDataQueryField, validateDataQueryFilterValue } from "./dataQueryMetadata.js";
 
 export const DATA_QUERY_DEFAULTS = {
   enabled: true,
@@ -8,17 +11,30 @@ export const DATA_QUERY_DEFAULTS = {
   maxRowsPerPlan: 200,
   timeoutMsPerPlan: 8000,
   totalTimeoutMs: 20000,
+  runCacheEnabled: true,
+  runCacheTtlMs: 60000,
   allowedTables: [],
   allowedSchemas: ["content"],
   tables: [],
-  allowRawSql: false,
-  allowJoins: false,
-  allowAggregations: true,
-  requireHumanApprovalForRawSql: true,
   plannerEnabled: true,
   plannerModel: "",
   plannerTimeoutMs: 30000
 };
+
+export const DATA_QUERY_CONTRACT_VERSION = "data-query.v2";
+
+export const DATA_QUERY_CALLER_SOURCES = new Set([
+  "main_agent",
+  "project_insights",
+  "delay_claim",
+  "workflow_qa",
+  "api"
+]);
+
+export const DATA_QUERY_QUANTITATIVE_PATTERN = /כמה|ספור|ספירה|פילוח|ממוצע|מגמה|לפי סטטוס|לפי תאריך|לפי חומרה|מה הכי הרבה|השוואה בין|תמונת מצב|מדד|count|how many|breakdown|average|trend|by status|by date|by severity|top\s*\d*|compare|distribution|total|kpi/i;
+
+const DATA_QUERY_SEMANTIC_PATTERN = /ציטוט|צטט|מי אמר|מה נאמר|הצג.{0,20}(?:מקור|ראיה|מסמך)|ראיות|למה|מדוע|סכם|סיכום|גורם שורש|אחראי|cite|citation|quote|who said|what (?:did|was).{0,30}say|show.{0,20}(?:source|evidence|document)|evidence|why|explain|summari[sz]e|root cause|responsib/i;
+const DATA_QUERY_RUN_CACHE = new Map();
 
 const READ_OPERATIONS = new Set(["select", "count", "group_count", "aggregate", "timeseries", "top_n", "distinct"]);
 const FILTER_OPS = new Set(["eq", "neq", "gt", "gte", "lt", "lte", "ilike", "in", "is"]);
@@ -47,14 +63,12 @@ export function dataQuerySettings(config = getConfig()) {
     maxRowsPerPlan: clampNumber(raw.maxRowsPerPlan, 1, 1000, DATA_QUERY_DEFAULTS.maxRowsPerPlan),
     timeoutMsPerPlan: clampNumber(raw.timeoutMsPerPlan, 1000, 60000, DATA_QUERY_DEFAULTS.timeoutMsPerPlan),
     totalTimeoutMs: clampNumber(raw.totalTimeoutMs, 1000, 120000, DATA_QUERY_DEFAULTS.totalTimeoutMs),
+    runCacheEnabled: raw.runCacheEnabled !== false,
+    runCacheTtlMs: clampNumber(raw.runCacheTtlMs, 1000, 300000, DATA_QUERY_DEFAULTS.runCacheTtlMs),
     allowedTables,
     allowedSchemas,
     tables: selectionTables,
     usingSelection: hasSelection,
-    allowRawSql: raw.allowRawSql === true,
-    allowJoins: raw.allowJoins === true,
-    allowAggregations: raw.allowAggregations !== false,
-    requireHumanApprovalForRawSql: raw.requireHumanApprovalForRawSql !== false,
     plannerEnabled: raw.plannerEnabled !== false,
     plannerModel: String(raw.plannerModel || "").trim(),
     plannerTimeoutMs: clampNumber(raw.plannerTimeoutMs, 5000, 90000, DATA_QUERY_DEFAULTS.plannerTimeoutMs),
@@ -87,9 +101,16 @@ export function normalizeSelectionTables(value) {
 // Builds manifest entries from the user's real-table selection, reusing tableDef
 // so date/numeric/groupable heuristics are derived from the real column names.
 export function buildDataQueryManifestFromSelection(tables = []) {
-  return normalizeSelectionTables(tables).map((item) =>
-    tableDef(item.connection, item.table, item.description || `Selected table ${item.schema}.${item.table}`, item.columns)
-  );
+  return normalizeSelectionTables(tables).map((item) => {
+    const policy = dataQueryTablePolicy(item.table, item.columns);
+    return tableDef(
+      item.connection,
+      item.table,
+      item.description || `Selected table ${item.schema}.${item.table}`,
+      item.columns,
+      policy || {}
+    );
+  });
 }
 
 // Introspects a Supabase connection through the PostgREST OpenAPI root (no SQL,
@@ -129,47 +150,15 @@ export function parseOpenApiTables(doc = {}) {
 
 export function buildDataQueryManifest(config = getConfig()) {
   const content = contentSupabaseConfig(config);
-  const indexTable = content.indexTable || "data_index_embeddings_gf_dor_agent";
+  // Data Query's exact contract is fixed to the normalized Content metadata
+  // table. Do not inherit the hybrid-search embedding table when the optional
+  // UI selection is missing or has not yet been persisted.
+  const indexTable = "data_index";
   const alertsTable = content.alertsTable || "alerts_embeddings_gf";
-  const app = (tableName, description, fields, options = {}) => tableDef("app", tableName, description, fields, options);
   const contentTable = (tableName, description, fields, options = {}) => tableDef("content", tableName, description, fields, options);
 
   return [
-    app("chat_messages_gf", "Chat message runs and workflow logs", ["id", "created_at", "updated_at", "session_id", "status", "annotation"]),
-    app("qa_reports", "QA report records", ["id", "created_at", "message_id", "status"]),
-    app("graph_nodes", "Project graph nodes", ["id", "created_at", "node_type", "label", "source_table", "source_id", "event_date"]),
-    app("graph_edges", "Project graph edges", ["id", "created_at", "edge_type", "weight", "confidence", "from_node_id", "to_node_id"]),
-    app("timeline_event_links", "Saved timeline links", ["id", "created_at", "source_event_source", "source_event_id", "target_event_source", "target_event_id", "relation_type", "source_date", "target_date"]),
-    app("delay_claim_cases", "Delay claim cases", ["id", "created_at", "updated_at", "case_key", "title", "project_id", "human_status", "confidence"]),
-    app("delay_events", "Delay event candidates", ["id", "created_at", "updated_at", "case_id", "event_key", "title", "event_type", "start_date", "end_date", "human_status", "confidence", "readiness_score"], {
-      defaultDateField: "created_at",
-      numericFields: ["confidence", "readiness_score"]
-    }),
-    app("delay_event_evidence", "Delay event evidence", ["id", "created_at", "event_id", "case_id", "source_type", "supports_or_weakens", "confidence", "human_status"], {
-      numericFields: ["confidence"]
-    }),
-    app("delay_event_gaps", "Delay event gaps", ["id", "created_at", "event_id", "case_id", "urgency", "human_status", "confidence"], {
-      numericFields: ["confidence"]
-    }),
-    app("delay_event_findings", "Delay event findings", ["id", "created_at", "event_id", "case_id", "finding_type", "confidence", "human_status"], {
-      numericFields: ["confidence"]
-    }),
-    app("delay_event_change_log", "Delay event change log", ["id", "created_at", "event_id", "case_id", "changed_by", "change_type", "from_status", "to_status"]),
-    app("delay_schedule_versions", "Delay schedule versions", ["id", "created_at", "case_id", "version_key", "title", "schedule_date", "contractual_completion_date", "actual_completion_date", "confidence", "human_status"], {
-      numericFields: ["confidence"]
-    }),
-    app("delay_schedule_activities", "Delay schedule activities", ["id", "created_at", "case_id", "schedule_version_id", "activity_key", "name", "start_date", "finish_date", "duration_days", "float_days", "is_critical", "confidence", "human_status"], {
-      numericFields: ["duration_days", "float_days", "confidence"]
-    }),
-    app("delay_event_schedule_links", "Delay event schedule links", ["id", "created_at", "case_id", "event_id", "schedule_activity_id", "link_type", "confidence", "human_status"], {
-      numericFields: ["confidence"]
-    }),
-    app("delay_cost_items", "Delay cost items", ["id", "created_at", "case_id", "event_id", "cost_key", "title", "cost_type", "amount", "currency", "duplicate_risk", "confidence", "human_status"], {
-      numericFields: ["amount", "confidence"]
-    }),
-    app("delay_claim_exports", "Delay claim exports", ["id", "created_at", "case_id", "export_key", "export_type", "title", "human_status"]),
-    app("project_insight_runs", "Persisted project insight runs", ["id", "created_at", "run_id", "parent_run_id", "project_id", "focus_query", "date_from", "date_to", "status", "limit", "expansion"]),
-    contentTable(indexTable, "Content index records", ["id", "created_at", "primary_date", "title", "summary", "source_table", "source_id", "project_id", "item_status", "severity_or_risk", "mail_id", "attachment_id", "source_url"], {
+    contentTable(indexTable, "Content index records", ["id", "created_at", "primary_date", "title", "summary", "source_table", "source_id", "project_id", "item_status", "severity_or_risk", "mail_id", "attachment_id", "source_url"], dataQueryTablePolicy(indexTable) || {
       defaultDateField: "primary_date"
     }),
     contentTable(alertsTable, "Content alert records", ["id", "created_at", "data_date", "summary", "alert_type", "severity_level", "item_status", "status", "is_relevant", "input_data_type", "input_data_id", "data_link"], {
@@ -184,28 +173,87 @@ export function buildDataQueryManifest(config = getConfig()) {
 
 export async function runDataQueryAgent(input = {}) {
   const config = input.config || getConfig();
-  const settings = { ...dataQuerySettings(config), ...(input.settings || {}) };
-  const warnings = [];
+  const configuredSettings = { ...dataQuerySettings(config), ...(input.settings || {}) };
+  const normalizedCaller = normalizeDataQueryCaller(input, configuredSettings);
+  const settings = normalizedCaller.settings;
+  const caller = normalizedCaller.caller;
+  const requestedMetrics = normalizeStringList(input.requestedMetrics || input.requested_metrics || []);
+  settings.requestedMetrics = requestedMetrics;
+  const warnings = [...normalizedCaller.warnings];
+  const now = typeof input.now === "function" ? input.now : Date.now;
+  const deadlineAt = now() + settings.totalTimeoutMs;
   if (!settings.enabled) {
-    return dataQueryResponse({ status: "skipped", answer: "Data Query Agent is disabled.", warnings: ["disabled"], confidence: 0 });
+    return dataQueryResponse({ status: "skipped", answer: "Data Query Agent is disabled.", warnings: [...warnings, "disabled"], confidence: 0, caller });
   }
 
   const question = String(input.question || input.query || "").trim();
   if (!question) {
-    return dataQueryResponse({ status: "needs_clarification", answer: "Question is required.", warnings: ["missing_question"], confidence: 0 });
+    return dataQueryResponse({ status: "needs_clarification", answer: "Question is required.", warnings: [...warnings, "missing_question"], confidence: 0, caller });
   }
 
-  const planned = await resolveQueryPlan({ input, config, settings, question, warnings });
+  const routing = classifyDataQueryCapability(question, { hasExplicitPlan: Boolean(input.queryPlan) });
+  if (normalizedCaller.errors.length) {
+    return dataQueryResponse({
+      status: "needs_clarification",
+      answer: normalizedCaller.errors.join("; "),
+      warnings: [...warnings, ...normalizedCaller.errors.map((error) => `invalid_caller_scope:${error}`)],
+      confidence: 0,
+      caller,
+      routing,
+      machineResult: buildDataQueryMachineResult({ requestedMetrics, caller })
+    });
+  }
+  if (!routing.supported) {
+    return dataQueryResponse({
+      status: "needs_clarification",
+      answer: `${routing.reason} Suggested route: ${routing.suggestedAgent}.`,
+      warnings: [...warnings, routing.warning],
+      confidence: 0,
+      caller,
+      routing,
+      machineResult: buildDataQueryMachineResult({ requestedMetrics, caller })
+    });
+  }
+
+  const scopedInput = {
+    ...input,
+    context: { ...(input.context || {}), ...caller, budget: caller.budget },
+    requestedMetrics
+  };
+  const planned = await resolveQueryPlan({ input: scopedInput, config, settings, question, warnings, deadlineAt, now });
+  if (now() >= deadlineAt) {
+    return dataQueryResponse({ status: "error", answer: "Data Query Agent exceeded its total deadline during planning.", warnings: [...warnings, "total_timeout_exceeded"], confidence: 0, planner: planned.source, queryPlan: planned.plan, caller, routing });
+  }
+  const scopedPlan = applyDataQueryCallerScope(planned.plan, caller, settings);
+  warnings.push(...scopedPlan.warnings);
+  if (scopedPlan.errors.length) {
+    return dataQueryResponse({
+      status: "needs_clarification",
+      answer: scopedPlan.errors.join("; "),
+      warnings: [...warnings, ...scopedPlan.errors],
+      confidence: 0,
+      planner: planned.source,
+      queryPlan: scopedPlan.plan,
+      caller,
+      routing,
+      machineResult: buildDataQueryMachineResult({ requestedMetrics, caller })
+    });
+  }
+  planned.plan = scopedPlan.plan;
   const plan = planned.plan;
   let validation = validateQueryPlan(plan, settings);
   if (!validation.ok && !validation.plans.length && planned.source === "llm") {
     warnings.push(...validation.warnings, ...validation.errors);
     warnings.push("llm_plan_rejected_fallback_used");
-    const fallbackPlan = buildHeuristicQueryPlan({ question, context: input.context || {}, requestedMetrics: input.requestedMetrics || [], settings });
-    const fallbackValidation = validateQueryPlan(fallbackPlan, settings);
+    const fallbackPlan = buildHeuristicQueryPlan({ question, context: scopedInput.context, requestedMetrics, settings });
+    const scopedFallback = applyDataQueryCallerScope(fallbackPlan, caller, settings);
+    warnings.push(...scopedFallback.warnings, ...scopedFallback.errors);
+    const fallbackValidation = scopedFallback.errors.length
+      ? { ok: false, plans: [], warnings: scopedFallback.warnings, errors: scopedFallback.errors }
+      : validateQueryPlan(scopedFallback.plan, settings);
     if (fallbackValidation.plans.length) {
       validation = fallbackValidation;
-      planned.plan = fallbackPlan;
+      planned.plan = scopedFallback.plan;
       planned.source = "heuristic_fallback";
     }
   }
@@ -217,7 +265,10 @@ export async function runDataQueryAgent(input = {}) {
       warnings: [...warnings, ...validation.errors],
       confidence: Math.min(Number(plan.confidence || 0.2), 0.4),
       queryPlan: planned.plan,
-      planner: planned.source
+      planner: planned.source,
+      caller,
+      routing,
+      machineResult: buildDataQueryMachineResult({ requestedMetrics, caller })
     });
   }
 
@@ -225,39 +276,63 @@ export async function runDataQueryAgent(input = {}) {
     config,
     settings,
     plans: validation.plans,
-    fetchRows: input.fetchRows
+    fetchRows: input.fetchRows,
+    fetchExact: input.fetchExact,
+    caller,
+    deadlineAt,
+    now
   });
   warnings.push(...results.warnings);
   const synthesis = synthesizeDataQueryAnswer({ question, plan: planned.plan, planResults: results.plans, warnings });
+  const metrics = synthesis.metrics;
+  const machineResult = buildDataQueryMachineResult({ requestedMetrics, planResults: results.plans, metrics, caller });
+  const hasSuccessfulPlan = results.plans.some((item) => item.status === "ok");
+  const hasPartialResult = results.plans.some((item) => item.status !== "ok" || item.truncated || item.sampled);
   return dataQueryResponse({
-    status: results.plans.some((item) => item.status === "ok") ? (results.warnings.length ? "partial" : "ok") : "error",
+    status: hasSuccessfulPlan ? (hasPartialResult ? "partial" : "ok") : "error",
     answer: synthesis.answer,
-    metrics: synthesis.metrics,
+    metrics,
     plans: results.plans.map((item) => ({
       id: item.id,
+      requestId: item.requestId || null,
+      operation: item.operation,
       table: item.table,
       status: item.status,
       rows: Array.isArray(item.rows) ? item.rows.length : 0,
+      cardinality: item.cardinality,
+      exactness: item.exactness,
+      truncated: item.truncated,
+      sampled: item.sampled,
+      cacheHit: item.cacheHit === true,
+      provenance: item.provenance,
       summary: item.summary,
       error: item.error || undefined
     })),
     tablesUsed: [...new Set(results.plans.filter((item) => item.status === "ok").map((item) => item.table))],
     confidence: Number(planned.plan.confidence || synthesis.confidence || 0.65),
     warnings,
-    rawResultsPreview: Object.fromEntries(results.plans.map((item) => [item.id, (item.rows || []).slice(0, 5)])),
+    rawResultsPreview: {},
     queryPlan: planned.plan,
-    planner: planned.source
+    planner: planned.source,
+    caller,
+    routing,
+    machineResult
   });
 }
 
-async function resolveQueryPlan({ input, config, settings, question, warnings }) {
+async function resolveQueryPlan({ input, config, settings, question, warnings, deadlineAt, now }) {
   if (input.queryPlan && typeof input.queryPlan === "object") {
     return { plan: input.queryPlan, source: "provided" };
   }
   if (typeof input.planWithLlm === "function") {
     try {
+      const remainingMs = Math.max(1, deadlineAt - now());
       return {
-        plan: await input.planWithLlm({ question, context: input.context || {}, requestedMetrics: input.requestedMetrics || [], config, settings }),
+        plan: await runWithinDeadline(
+          () => input.planWithLlm({ question, context: input.context || {}, requestedMetrics: input.requestedMetrics || [], config, settings }),
+          remainingMs,
+          "data query planning"
+        ),
         source: "llm"
       };
     } catch (error) {
@@ -265,15 +340,21 @@ async function resolveQueryPlan({ input, config, settings, question, warnings })
     }
   } else if (settings.plannerEnabled !== false && !input.disableLlmPlanner && config.openRouterApiKey) {
     try {
+      const remainingMs = Math.max(1, deadlineAt - now());
       return {
-        plan: await planDataQueryWithLlm({
-          config,
-          settings,
-          question,
-          context: input.context || {},
-          requestedMetrics: input.requestedMetrics || [],
-          telemetry: input.telemetry || null
-        }),
+        plan: await runWithinDeadline(
+          () => planDataQueryWithLlm({
+            config,
+            settings,
+            question,
+            context: input.context || {},
+            requestedMetrics: input.requestedMetrics || [],
+            telemetry: input.telemetry || null,
+            timeoutMs: Math.min(settings.plannerTimeoutMs, remainingMs)
+          }),
+          remainingMs,
+          "data query planning"
+        ),
         source: "llm"
       };
     } catch (error) {
@@ -297,7 +378,8 @@ export async function planDataQueryWithLlm({
   context = {},
   requestedMetrics = [],
   telemetry = null,
-  chatComplete = chatCompletion
+  chatComplete = chatCompletion,
+  timeoutMs = settings.plannerTimeoutMs || DATA_QUERY_DEFAULTS.plannerTimeoutMs
 } = {}) {
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const manifest = settings.manifest
@@ -307,12 +389,21 @@ export async function planDataQueryWithLlm({
       schema: table.schemaAlias,
       table: table.tableName,
       description: table.description,
-      allowedFields: table.allowedFields,
+      fields: table.fields.filter((field) => field.queryable !== false).map((field) => ({
+        name: field.name,
+        type: field.type,
+        selectable: field.selectable,
+        filterOps: field.filterOps,
+        groupable: field.groupable,
+        aggregations: field.aggregations,
+        dateSemantics: field.dateSemantics
+      })),
       dateFields: table.dateFields,
       groupableFields: table.groupableFields,
       numericFields: table.numericFields,
       defaultDateField: table.defaultDateField,
-      allowedOperations: table.allowedOperations
+      allowedOperations: table.allowedOperations,
+      exactOperations: table.exactRpc ? [...DATA_QUERY_EXACT_OPERATIONS] : []
     }));
   const model = settings.plannerModel || config.models.knowledgePlanner || config.models.main;
   const content = await chatComplete({
@@ -320,7 +411,7 @@ export async function planDataQueryWithLlm({
     model,
     temperature: 0,
     maxTokens: 2200,
-    timeoutMs: settings.plannerTimeoutMs || DATA_QUERY_DEFAULTS.plannerTimeoutMs,
+    timeoutMs,
     responseFormat: { type: "json_object" },
     telemetry,
     messages: [
@@ -334,8 +425,6 @@ export async function planDataQueryWithLlm({
           limits: {
             maxPlans: settings.maxPlans,
             maxRowsPerPlan: settings.maxRowsPerPlan,
-            allowRawSql: false,
-            allowJoins: false,
             allowedOperations: [...READ_OPERATIONS]
           },
           schemaManifest: manifest
@@ -356,14 +445,16 @@ Allowed operations: select, count, group_count, aggregate, timeseries, top_n, di
 
 Hard rules:
 - Use only tables in schemaManifest.
-- Use only fields listed under each table.
+- Use only fields listed under each table and obey each field's selectable, filterOps, groupable, and aggregations metadata.
 - Every plan must include a stable id, schema, table, operation, limit, and reason.
+- When requestedMetrics is non-empty, copy the matching requested metric id into requestId on each plan. Never invent a different requestId.
 - limit must be a positive number no larger than maxRowsPerPlan.
 - Do not include rawSql, sql, join, joins, semicolons, comments, or SQL keywords.
 - If a JOIN would be required, return no executable join; either split into separate plans or add warning "unsupported_join_required".
 - If no table is suitable, return {"question": "...", "intent": "needs_clarification", "plans": [], "confidence": 0.2, "warnings": ["needs_clarification"]}.
 - Prefer group_count for "by status/date/severity/type" questions.
-- Prefer aggregate for count/avg/min/max/sum metrics.
+- Prefer aggregate for count/avg/min/max/sum metrics, but request avg/min/max/sum only when the field explicitly lists that aggregation.
+- Exact quantitative operations are available only when listed in exactOperations. Otherwise return no plan with warning "not_computable".
 - Use date filters from context only on dateFields/defaultDateField.
 
 Output shape:
@@ -373,7 +464,8 @@ Output shape:
   "plans": [
     {
       "id": "stable_snake_case",
-      "schema": "app|content",
+      "requestId": "requested_metric_id_or_null",
+      "schema": "content",
       "table": "table_name",
       "operation": "select|count|group_count|aggregate|timeseries|top_n|distinct",
       "select": ["field"],
@@ -396,7 +488,8 @@ function normalizeLlmQueryPlan(value = {}, question, settings) {
     intent: String(value.intent || (plans.length ? "metric_lookup" : "needs_clarification")),
     plans: plans.slice(0, settings.maxPlans).map((plan, index) => ({
       id: String(plan.id || `plan_${index + 1}`).trim(),
-      schema: String(plan.schema || plan.schemaAlias || "app").trim(),
+      requestId: String(plan.requestId || plan.request_id || "").trim() || null,
+      schema: String(plan.schema || plan.schemaAlias || "content").trim(),
       table: String(plan.table || plan.tableName || "").trim(),
       operation: String(plan.operation || "select").trim(),
       select: Array.isArray(plan.select) ? plan.select.map(String) : [],
@@ -412,7 +505,7 @@ function normalizeLlmQueryPlan(value = {}, question, settings) {
   };
 }
 
-export function buildHeuristicQueryPlan({ question, context = {}, settings = dataQuerySettings() } = {}) {
+export function buildHeuristicQueryPlan({ question, context = {}, requestedMetrics = [], settings = dataQuerySettings() } = {}) {
   const text = String(question || "").toLowerCase();
   const plans = [];
   const add = (plan) => plans.push(plan);
@@ -422,65 +515,31 @@ export function buildHeuristicQueryPlan({ question, context = {}, settings = dat
     ...(dateFrom ? [{ field, op: "gte", value: dateFrom }] : []),
     ...(dateTo ? [{ field, op: "lte", value: dateTo }] : [])
   ];
-  const wantsDelay = /delay|עיכוב|עיכובים|חסם|חסמים/.test(text);
-  const wantsGap = /gap|gaps|חוסר|חוסרים|פער|פערים/.test(text);
   const wantsAlert = /alert|alerts|התראה|התראות|חומרה|severity|risk|סיכון/.test(text);
-  const wantsInsight = /insight|תובנ|ממצא|findings|מדד|kpi|כמה|count|ספור|פילוח|לפי|status|סטטוס|תמונת מצב/.test(text);
-
-  if (wantsDelay) {
-    add({
-      id: "delay_events_by_status",
-      schema: "app",
-      table: "delay_events",
-      operation: "group_count",
-      filters: dateFilters("created_at"),
-      groupBy: ["human_status"],
-      limit: Math.min(100, settings.maxRowsPerPlan || 200),
-      reason: "Delay status count requested."
-    });
-  }
-  if (wantsGap) {
-    add({
-      id: "delay_gaps_by_urgency",
-      schema: "app",
-      table: "delay_event_gaps",
-      operation: "group_count",
-      filters: dateFilters("created_at"),
-      groupBy: ["urgency"],
-      limit: Math.min(100, settings.maxRowsPerPlan || 200),
-      reason: "Gap urgency count requested."
-    });
-  }
   if (wantsAlert) {
-    const alertsTable = settings.manifest.find((item) => item.schemaAlias === "content" && item.defaultDateField === "data_date")?.tableName || "alerts_embeddings_gf";
+    const alertDefinition = settings.manifest.find((item) =>
+      item.schemaAlias === "content" && item.groupableFields.includes("severity_level")
+    );
+    const alertsTable = alertDefinition?.tableName || "alerts_embeddings_gf";
+    const alertDateField = alertDefinition?.dateFields.includes("data_date") ? "data_date" : (alertDefinition?.defaultDateField || "data_date");
     add({
       id: "alerts_by_severity",
       schema: "content",
       table: alertsTable,
       operation: "group_count",
-      filters: dateFilters("data_date"),
+      filters: dateFilters(alertDateField),
       groupBy: ["severity_level", "item_status"],
       limit: Math.min(100, settings.maxRowsPerPlan || 200),
       reason: "Alert severity count requested."
     });
   }
-  if (!plans.length && wantsInsight) {
-    add({
-      id: "project_insight_runs_by_status",
-      schema: "app",
-      table: "project_insight_runs",
-      operation: "group_count",
-      filters: dateFilters("created_at"),
-      groupBy: ["status"],
-      limit: Math.min(100, settings.maxRowsPerPlan || 200),
-      reason: "Project insight run status count requested."
-    });
-  }
-
   return {
     question,
     intent: plans.length > 1 ? "multi_metric_summary" : "metric_lookup",
-    plans: plans.slice(0, settings.maxPlans || 5),
+    plans: plans.slice(0, settings.maxPlans || 5).map((plan, index) => ({
+      ...plan,
+      requestId: normalizeStringList(requestedMetrics)[index] || plan.id
+    })),
     confidence: plans.length ? 0.72 : 0.25,
     warnings: plans.length ? [] : ["low_confidence_no_table_selected"]
   };
@@ -500,10 +559,14 @@ export function validateQueryPlan(queryPlan = {}, settings = dataQuerySettings()
   const allowedSchemas = new Set(settings.allowedSchemas || DATA_QUERY_DEFAULTS.allowedSchemas);
   const accepted = [];
 
-  for (const original of rawPlans.slice(0, settings.maxPlans)) {
+  const requestedMetricIds = normalizeStringList(settings.requestedMetrics || []);
+  const requestedMetricSet = new Set(requestedMetricIds);
+  for (const [planIndex, original] of rawPlans.slice(0, settings.maxPlans).entries()) {
     const plan = normalizePlan(original, settings);
     const planErrors = [];
     if (!plan.id) planErrors.push("plan id is required");
+    if (!plan.requestId && requestedMetricIds[planIndex]) plan.requestId = requestedMetricIds[planIndex];
+    if (plan.requestId && requestedMetricSet.size && !requestedMetricSet.has(plan.requestId)) planErrors.push(`requestId ${plan.requestId} was not requested by the caller`);
     if (!READ_OPERATIONS.has(plan.operation)) planErrors.push(`operation ${plan.operation || "missing"} is not allowed`);
     if (!allowedSchemas.has(plan.schema)) planErrors.push(`schema ${plan.schema} is not allowed`);
     if (!allowedTables.has(plan.table)) planErrors.push(`table ${plan.table} is not allowed`);
@@ -513,6 +576,9 @@ export function validateQueryPlan(queryPlan = {}, settings = dataQuerySettings()
     if (plan.join || plan.joins?.length) planErrors.push("joins are not supported");
     if (plan.rawSql || plan.sql) planErrors.push("raw SQL is not supported");
     if (table) {
+      if (DATA_QUERY_EXACT_OPERATIONS.has(plan.operation) && !table.exactRpc) {
+        planErrors.push(`operation ${plan.operation} is not computable because ${table.tableName} has no approved exact analytics RPC`);
+      }
       const fieldErrors = validatePlanFields(plan, table);
       planErrors.push(...fieldErrors);
       plan.limit = Math.min(Number(plan.limit), table.maxLimit, settings.maxRowsPerPlan);
@@ -526,68 +592,366 @@ export function validateQueryPlan(queryPlan = {}, settings = dataQuerySettings()
 
   return {
     ok: accepted.length > 0 && errors.length === 0,
-    status: accepted.length ? "partial" : "error",
+    status: accepted.length ? "partial" : (warnings.some((warning) => /not computable|exact analytics RPC/i.test(warning)) ? "not_computable" : "error"),
     plans: errors.length ? [] : accepted,
     warnings,
     errors
   };
 }
 
-export async function executeQueryPlans({ config = getConfig(), settings = dataQuerySettings(config), plans = [], fetchRows = null } = {}) {
+export async function executeQueryPlans({ config = getConfig(), settings = dataQuerySettings(config), plans = [], fetchRows = null, fetchExact = null, caller = null, deadlineAt = null, now = Date.now } = {}) {
   const warnings = [];
   const output = [];
+  const startedAt = now();
+  const hasExternalDeadline = deadlineAt !== null && deadlineAt !== undefined && Number.isFinite(Number(deadlineAt));
+  const effectiveDeadline = hasExternalDeadline ? Number(deadlineAt) : startedAt + settings.totalTimeoutMs;
   for (const plan of plans) {
+    const cacheKey = caller?.runId && settings.runCacheEnabled !== false
+      ? `${caller.runId}:${dataQueryPlanSignature(plan)}`
+      : null;
+    const cached = cacheKey ? readDataQueryRunCache(cacheKey, now()) : null;
+    if (cached) {
+      if (!warnings.includes("served_from_run_cache")) warnings.push("served_from_run_cache");
+      output.push(successfulPlanResult(plan, cached, true));
+      continue;
+    }
+    const remainingMs = Math.max(0, effectiveDeadline - now());
+    if (remainingMs <= 0) {
+      warnings.push(`${plan.id}: total timeout exceeded`);
+      output.push(failedPlanResult(plan, "total timeout exceeded", "Plan skipped after total timeout."));
+      continue;
+    }
     try {
-      const rows = fetchRows
-        ? await fetchRows(plan)
-        : await fetchPlanRows({ config, settings, plan });
-      const derived = derivePlanRows(plan, rows);
-      output.push({
-        id: plan.id,
-        table: plan.table,
-        status: "ok",
-        rows: derived,
-        summary: summarizePlanResult(plan, derived)
-      });
+      let execution;
+      if (DATA_QUERY_EXACT_OPERATIONS.has(plan.operation)) {
+        if (fetchExact) {
+          execution = normalizeExactExecution(await fetchExact(plan), plan);
+        } else if (fetchRows) {
+          const rows = await fetchRows(plan);
+          execution = exactExecutionFromTrustedRows(plan, rows);
+        } else {
+          execution = await fetchExactPlan({ config, settings, plan, timeoutMs: Math.min(settings.timeoutMsPerPlan, remainingMs) });
+        }
+      } else {
+        const fetched = fetchRows
+          ? { rows: await fetchRows(plan), hasMore: false }
+          : await fetchPlanRows({ config, settings, plan, timeoutMs: Math.min(settings.timeoutMsPerPlan, remainingMs) });
+        const rows = Array.isArray(fetched) ? fetched : fetched.rows;
+        const hasMore = Array.isArray(fetched) ? false : fetched.hasMore;
+        execution = {
+          rows: rows.slice(0, plan.limit),
+          cardinality: hasMore ? null : rows.length,
+          exactness: hasMore ? "truncated" : "exact",
+          truncated: hasMore,
+          sampled: false
+        };
+      }
+      if (execution.truncated) warnings.push(`${plan.id}: result truncated at ${plan.limit} row(s)`);
+      if (execution.sampled) warnings.push(`${plan.id}: sampled result`);
+      if (cacheKey) writeDataQueryRunCache(cacheKey, execution, now(), settings.runCacheTtlMs);
+      output.push(successfulPlanResult(plan, execution, false));
     } catch (error) {
       warnings.push(`${plan.id}: ${error.message}`);
-      output.push({
-        id: plan.id,
-        table: plan.table,
-        status: "error",
-        rows: [],
-        summary: "Plan failed.",
-        error: error.message
-      });
+      output.push(failedPlanResult(plan, error.message));
     }
   }
   return { plans: output, warnings };
 }
 
+function successfulPlanResult(plan, execution, cacheHit) {
+  return {
+    id: plan.id,
+    requestId: plan.requestId || null,
+    operation: plan.operation,
+    table: plan.table,
+    status: "ok",
+    ...cloneDataQueryValue(execution),
+    cacheHit,
+    provenance: planProvenance(plan, execution),
+    summary: summarizePlanResult(plan, execution.rows, execution)
+  };
+}
+
+export function dataQueryPlanSignature(plan = {}) {
+  const normalized = normalizePlan(plan, { maxRowsPerPlan: Number.MAX_SAFE_INTEGER });
+  return createHash("sha256").update(stableStringify({
+    schema: normalized.schema,
+    table: normalized.table,
+    operation: normalized.operation,
+    select: normalized.select,
+    filters: [...normalized.filters].sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))),
+    groupBy: normalized.groupBy,
+    metrics: normalized.metrics,
+    orderBy: normalized.orderBy,
+    dateField: normalized.dateField || null,
+    granularity: normalized.granularity || null,
+    limit: normalized.limit
+  })).digest("hex");
+}
+
+export function clearDataQueryRunCache() {
+  DATA_QUERY_RUN_CACHE.clear();
+}
+
+function readDataQueryRunCache(key, now) {
+  const entry = DATA_QUERY_RUN_CACHE.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= now) {
+    DATA_QUERY_RUN_CACHE.delete(key);
+    return null;
+  }
+  return cloneDataQueryValue(entry.execution);
+}
+
+function writeDataQueryRunCache(key, execution, now, ttlMs) {
+  const ttl = clampNumber(ttlMs, 1000, 300000, DATA_QUERY_DEFAULTS.runCacheTtlMs);
+  DATA_QUERY_RUN_CACHE.set(key, { execution: cloneDataQueryValue(execution), expiresAt: now + ttl });
+  if (DATA_QUERY_RUN_CACHE.size > 500) {
+    for (const [entryKey, entry] of DATA_QUERY_RUN_CACHE) {
+      if (entry.expiresAt <= now || DATA_QUERY_RUN_CACHE.size > 400) DATA_QUERY_RUN_CACHE.delete(entryKey);
+      if (DATA_QUERY_RUN_CACHE.size <= 400) break;
+    }
+  }
+}
+
+function cloneDataQueryValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function applyDataQueryCallerScope(queryPlan = {}, caller = {}, settings = dataQuerySettings()) {
+  const warnings = [];
+  const errors = [];
+  const plans = (Array.isArray(queryPlan.plans) ? queryPlan.plans : []).map((original) => {
+    const plan = { ...original, filters: Array.isArray(original.filters) ? original.filters.map((filter) => ({ ...filter })) : [] };
+    const tableName = String(plan.table || plan.tableName || "").trim();
+    const schema = String(plan.schema || plan.schemaAlias || "content").trim();
+    const table = settings.manifest?.find((item) => item.schemaAlias === schema && item.tableName === tableName);
+    if (!table) return plan;
+
+    if (caller.projectId) {
+      if (!table.allowedFields.includes("project_id")) {
+        errors.push(`${plan.id || tableName}: project_scope_not_supported`);
+      } else {
+        appendUniqueFilter(plan.filters, { field: "project_id", op: "eq", value: caller.projectId });
+      }
+    }
+
+    if (caller.dateFrom || caller.dateTo) {
+      const dateField = table.dateFields.includes(plan.dateField) ? plan.dateField : table.defaultDateField;
+      const definition = table.fields?.find((field) => field.name === dateField);
+      if (!dateField || !table.dateFields.includes(dateField) || !definition) {
+        errors.push(`${plan.id || tableName}: date_scope_not_supported`);
+      } else {
+        if (caller.dateFrom) {
+          removeMirroredScopeFilter(plan.filters, dateField, ["gte", "gt"], caller.dateFrom);
+          appendUniqueFilter(plan.filters, { field: dateField, op: "gte", value: caller.dateFrom });
+        }
+        if (caller.dateTo) {
+          removeMirroredScopeFilter(plan.filters, dateField, ["lte", "lt"], caller.dateTo);
+          const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(caller.dateTo);
+          if (definition.type === "timestamptz" && dateOnly) {
+            appendUniqueFilter(plan.filters, { field: dateField, op: "lt", value: nextUtcDate(caller.dateTo) });
+          } else {
+            appendUniqueFilter(plan.filters, { field: dateField, op: "lte", value: caller.dateTo });
+          }
+        }
+        warnings.push(`${plan.id || tableName}: caller_date_scope_applied`);
+      }
+    }
+    return plan;
+  });
+  return { plan: { ...queryPlan, plans }, warnings: [...new Set(warnings)], errors: [...new Set(errors)] };
+}
+
+function appendUniqueFilter(filters, candidate) {
+  if (!filters.some((filter) => stableStringify(filter) === stableStringify(candidate))) filters.push(candidate);
+}
+
+function removeMirroredScopeFilter(filters, field, operators, value) {
+  for (let index = filters.length - 1; index >= 0; index -= 1) {
+    const filter = filters[index];
+    if (filter.field === field && operators.includes(filter.op) && String(filter.value) === String(value)) filters.splice(index, 1);
+  }
+}
+
+function nextUtcDate(value) {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString();
+}
+
 function tableDef(schemaAlias, tableName, description, fields, options = {}) {
-  const dateFields = options.dateFields || fields.filter((field) => /date|created_at|updated_at/.test(field));
-  const numericFields = options.numericFields || fields.filter((field) => /count|score|amount|duration|float|confidence|weight/.test(field));
+  const fieldDefinitions = (options.fields || fields.map(inferDataQueryField))
+    .filter((definition) => definition?.name && fields.includes(definition.name));
+  const queryableFields = fieldDefinitions.filter((definition) => definition.queryable !== false);
+  const allowedFields = queryableFields.map((definition) => definition.name);
+  const dateFields = options.dateFields || queryableFields.filter((definition) => ["date", "timestamptz"].includes(definition.type)).map((definition) => definition.name);
+  const numericFields = options.numericFields || queryableFields.filter((definition) => definition.aggregations?.length).map((definition) => definition.name);
   return {
     schemaAlias,
     tableName,
     description,
-    allowedFields: [...new Set(fields)],
+    allowedFields: [...new Set(allowedFields)],
+    fields: fieldDefinitions,
     dateFields,
-    searchableFields: options.searchableFields || fields.filter((field) => /title|summary|description|name|label|status|type/.test(field)),
-    groupableFields: options.groupableFields || fields.filter((field) => !numericFields.includes(field)),
+    searchableFields: options.searchableFields || queryableFields.filter((definition) => definition.filterOps.includes("ilike")).map((definition) => definition.name),
+    groupableFields: options.groupableFields || queryableFields.filter((definition) => definition.groupable).map((definition) => definition.name),
     numericFields,
     defaultDateField: options.defaultDateField || dateFields[0] || "created_at",
     defaultLimit: options.defaultLimit || 100,
     maxLimit: options.maxLimit || 1000,
-    allowedOperations: options.allowedOperations || [...READ_OPERATIONS]
+    allowedOperations: options.allowedOperations || [...READ_OPERATIONS],
+    exactRpc: options.exactRpc || null
   };
+}
+
+export function normalizeDataQueryCaller(input = {}, settings = DATA_QUERY_DEFAULTS) {
+  const context = input.context && typeof input.context === "object" ? input.context : {};
+  const warnings = [];
+  const errors = [];
+  const rawSource = String(input.source || context.source || "").trim();
+  const source = DATA_QUERY_CALLER_SOURCES.has(rawSource) ? rawSource : "api";
+  if (!DATA_QUERY_CALLER_SOURCES.has(rawSource)) warnings.push("unknown_caller_source");
+
+  const runId = normalizeCallerId(input.runId || input.run_id || context.runId || context.run_id, "runId", warnings);
+  const callerNodeId = normalizeCallerId(input.callerNodeId || input.caller_node_id || context.callerNodeId || context.caller_node_id, "callerNodeId", warnings);
+  const dateFrom = normalizeScopeDate(input.dateFrom || input.date_from || context.dateFrom || context.date_from, "dateFrom", errors);
+  const dateTo = normalizeScopeDate(input.dateTo || input.date_to || context.dateTo || context.date_to, "dateTo", errors);
+  if (dateFrom && dateTo && Date.parse(dateFrom) > Date.parse(dateTo)) errors.push("dateFrom must not be after dateTo");
+
+  const projectId = normalizeOptionalString(input.projectId || input.project_id || context.projectId || context.project_id);
+  if (projectId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(projectId)) {
+    errors.push("projectId must be a UUID");
+  }
+  const caseId = normalizeOptionalString(input.caseId || input.case_id || context.caseId || context.case_id);
+  if (caseId) errors.push("caseId scope is not supported by the Content data_index contract");
+
+  const rawBudget = {
+    ...(context.budget && typeof context.budget === "object" ? context.budget : {}),
+    ...(input.budget && typeof input.budget === "object" ? input.budget : {})
+  };
+  if (input.maxPlans !== undefined && rawBudget.maxPlans === undefined) rawBudget.maxPlans = input.maxPlans;
+  const budgetFields = [
+    ["maxPlans", 1],
+    ["maxRowsPerPlan", 1],
+    ["timeoutMsPerPlan", 1],
+    ["totalTimeoutMs", 1],
+    ["plannerTimeoutMs", 1]
+  ];
+  const effectiveSettings = { ...settings };
+  const budget = {};
+  for (const [field, minimum] of budgetFields) {
+    const configured = Number(settings[field] ?? DATA_QUERY_DEFAULTS[field]);
+    const requested = rawBudget[field];
+    if (requested === undefined || requested === null || requested === "") {
+      effectiveSettings[field] = configured;
+      budget[field] = configured;
+      continue;
+    }
+    const parsed = Number(requested);
+    if (!Number.isFinite(parsed) || parsed < minimum) {
+      warnings.push(`invalid_budget_ignored:${field}`);
+      effectiveSettings[field] = configured;
+      budget[field] = configured;
+      continue;
+    }
+    if (parsed > configured) warnings.push(`budget_expansion_ignored:${field}`);
+    const narrowed = Math.min(configured, Math.floor(parsed));
+    effectiveSettings[field] = narrowed;
+    budget[field] = narrowed;
+  }
+
+  return {
+    caller: {
+      version: 1,
+      source,
+      runId,
+      callerNodeId,
+      dateFrom,
+      dateTo,
+      projectId,
+      caseId,
+      budget
+    },
+    settings: effectiveSettings,
+    warnings,
+    errors
+  };
+}
+
+export function classifyDataQueryCapability(question, { hasExplicitPlan = false } = {}) {
+  const text = String(question || "").trim();
+  if (DATA_QUERY_SEMANTIC_PATTERN.test(text)) {
+    const suggestedAgent = /עיכוב|תביעה|אחריות|delay|claim|responsib|root cause|גורם שורש/i.test(text)
+      ? "delay_claim"
+      : /פגישה|ישיבה|meeting|minutes|quote|ציטוט/i.test(text)
+        ? "meeting_evidence"
+        : "hybrid_search";
+    return {
+      supported: false,
+      domain: "semantic_or_citation",
+      reason: "Data Query supports structured metadata metrics, not semantic interpretation or citation retrieval.",
+      warning: "semantic_question_route_elsewhere",
+      suggestedAgent
+    };
+  }
+  if (hasExplicitPlan || DATA_QUERY_QUANTITATIVE_PATTERN.test(text)) {
+    return {
+      supported: true,
+      domain: "content_metadata_metrics",
+      reason: "The request is a structured quantitative question over approved Content metadata.",
+      warning: null,
+      suggestedAgent: null
+    };
+  }
+  return {
+    supported: false,
+    domain: "unsupported_question",
+    reason: "The request does not identify a supported quantitative metric.",
+    warning: "non_quantitative_question_route_elsewhere",
+    suggestedAgent: "hybrid_search"
+  };
+}
+
+function normalizeCallerId(value, field, warnings) {
+  const normalized = String(value || "").trim();
+  if (!normalized) return null;
+  if (normalized.length > 160 || !/^[A-Za-z0-9._:-]+$/.test(normalized)) {
+    warnings.push(`invalid_caller_id_ignored:${field}`);
+    return null;
+  }
+  return normalized;
+}
+
+function normalizeScopeDate(value, field, errors) {
+  const normalized = normalizeOptionalString(value);
+  if (!normalized) return null;
+  if (Number.isNaN(Date.parse(normalized))) {
+    errors.push(`${field} must be a valid date`);
+    return null;
+  }
+  return normalized;
+}
+
+function normalizeOptionalString(value) {
+  const normalized = String(value || "").trim();
+  return normalized || null;
 }
 
 function normalizePlan(plan = {}, settings = dataQuerySettings()) {
   return {
     ...plan,
     id: String(plan.id || "").trim(),
-    schema: String(plan.schema || plan.schemaAlias || "app").trim(),
+    requestId: String(plan.requestId || plan.request_id || "").trim() || null,
+    schema: String(plan.schema || plan.schemaAlias || "content").trim(),
     table: String(plan.table || plan.tableName || "").trim(),
     operation: String(plan.operation || "select").trim(),
     filters: Array.isArray(plan.filters) ? plan.filters : [],
@@ -605,14 +969,23 @@ function validatePlanFields(plan, table) {
   const errors = [];
   const allowed = new Set(table.allowedFields);
   const groupable = new Set(table.groupableFields);
-  const numeric = new Set(table.numericFields);
   const allowedOps = new Set(table.allowedOperations);
+  const fieldMap = new Map((table.fields || []).map((definition) => [definition.name, definition]));
   if (!allowedOps.has(plan.operation)) errors.push(`operation ${plan.operation} is not allowed for ${table.tableName}`);
-  for (const field of plan.select || []) if (!allowed.has(field)) errors.push(`field ${field} is not allowed`);
+  for (const field of plan.select || []) {
+    if (!allowed.has(field)) errors.push(`field ${field} is not allowed`);
+    else if (!fieldMap.get(field)?.selectable) errors.push(`field ${field} is not selectable`);
+  }
+  if ((plan.groupBy || []).length > 2) errors.push("at most two group fields are supported");
   for (const field of plan.groupBy || []) if (!groupable.has(field)) errors.push(`group field ${field} is not allowed`);
   for (const filter of plan.filters || []) {
     if (!allowed.has(filter.field)) errors.push(`filter field ${filter.field} is not allowed`);
-    if (!FILTER_OPS.has(filter.op)) errors.push(`filter op ${filter.op} is not allowed`);
+    if (!FILTER_OPS.has(filter.op)) {
+      errors.push(`filter op ${filter.op} is not allowed`);
+    } else if (allowed.has(filter.field)) {
+      const valueError = validateDataQueryFilterValue(fieldMap.get(filter.field), filter.op, filter.value);
+      if (valueError) errors.push(`filter ${filter.field}: ${valueError}`);
+    }
   }
   for (const order of plan.orderBy || []) {
     const field = order.field;
@@ -620,30 +993,103 @@ function validatePlanFields(plan, table) {
   }
   for (const metric of plan.metrics || []) {
     if (!["count", "avg", "min", "max", "sum"].includes(metric.type)) errors.push(`metric ${metric.type} is not allowed`);
-    if (metric.type !== "count" && !numeric.has(metric.field)) errors.push(`metric field ${metric.field} is not numeric`);
+    if (metric.as && !/^[a-z][a-z0-9_]{0,62}$/i.test(metric.as)) errors.push(`metric alias ${metric.as} is invalid`);
+    if (metric.type !== "count") {
+      const definition = fieldMap.get(metric.field);
+      if (!definition?.aggregations?.includes(metric.type)) errors.push(`metric ${metric.type} is not allowed for field ${metric.field}`);
+    }
+  }
+  if (plan.operation === "distinct" && !(plan.select?.[0] || plan.groupBy?.[0])) errors.push("distinct requires one selected or group field");
+  if (plan.operation === "top_n" && !plan.groupBy?.length) errors.push("top_n requires at least one group field");
+  if (plan.operation === "timeseries") {
+    const dateField = plan.dateField || plan.filters?.find((filter) => table.dateFields.includes(filter.field))?.field || table.defaultDateField;
+    if (!table.dateFields.includes(dateField)) errors.push(`timeseries field ${dateField} is not a declared date field`);
+    if (!["day", "month"].includes(plan.granularity || "day")) errors.push(`timeseries granularity ${plan.granularity} is not allowed`);
   }
   return errors;
 }
 
-async function fetchPlanRows({ config, settings, plan }) {
-  const connection = plan.schema === "content" ? contentSupabaseConfig(config) : config;
+export function dataQuerySupabaseHeaders(config, extra = {}) {
+  const connection = contentSupabaseConfig(config);
+  const accessToken = String(config?.dataQueryReadAccessToken || "").trim();
+  if (!accessToken) {
+    throw new Error("DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN is missing");
+  }
+  return {
+    ...supabaseHeaders(connection.supabaseServiceRoleKey),
+    Authorization: `Bearer ${accessToken}`,
+    ...extra
+  };
+}
+
+export async function resolveDataQuerySupabaseHeaders(
+  config,
+  extra = {},
+  { fetchImpl = fetch, now = Date.now } = {}
+) {
+  const connection = contentSupabaseConfig(config);
+  const accessToken = await getDataQueryAccessToken(config, { fetchImpl, now });
+  return {
+    ...supabaseHeaders(connection.supabaseServiceRoleKey),
+    Authorization: `Bearer ${accessToken}`,
+    ...extra
+  };
+}
+
+export async function fetchExactPlan({ config, settings, plan, timeoutMs = settings.timeoutMsPerPlan, fetchImpl = fetch, now = Date.now }) {
+  const connection = contentSupabaseConfig(config);
+  const table = settings.manifest.find((item) => item.schemaAlias === plan.schema && item.tableName === plan.table);
+  if (!connection.supabaseUrl || !connection.supabaseServiceRoleKey) throw new Error(`${plan.schema} Supabase is not configured`);
+  if (!table?.exactRpc) throw new Error(`${plan.table} has no approved exact analytics RPC`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const body = {
+    p_operation: plan.operation,
+    p_filters: plan.filters || [],
+    p_group_by: plan.groupBy || [],
+    p_metrics: plan.metrics || [],
+    p_select: plan.select || [],
+    p_date_field: plan.dateField || table.defaultDateField || null,
+    p_granularity: plan.granularity || "day",
+    p_order_by: plan.orderBy || [],
+    p_limit: plan.limit
+  };
+  const response = await fetchImpl(`${connection.supabaseUrl}/rest/v1/rpc/${encodeURIComponent(table.exactRpc)}`, {
+    method: "POST",
+    signal: controller.signal,
+    headers: await resolveDataQuerySupabaseHeaders(
+      config,
+      { "Content-Type": "application/json" },
+      { fetchImpl, now }
+    ),
+    body: JSON.stringify(body)
+  }).finally(() => clearTimeout(timeout));
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new Error(data?.message || data?.hint || `Exact analytics request failed: ${response.status}`);
+  return normalizeExactExecution(Array.isArray(data) && data.length === 1 ? data[0] : data, plan);
+}
+
+async function fetchPlanRows({ config, settings, plan, timeoutMs = settings.timeoutMsPerPlan }) {
+  const connection = contentSupabaseConfig(config);
   if (!connection.supabaseUrl || !connection.supabaseServiceRoleKey) throw new Error(`${plan.schema} Supabase is not configured`);
   const table = settings.manifest.find((item) => item.schemaAlias === plan.schema && item.tableName === plan.table);
   const select = fieldsForFetch(plan, table).join(",");
-  const params = new URLSearchParams({ select, limit: String(plan.limit) });
+  const params = new URLSearchParams({ select, limit: String(plan.limit + 1) });
   applyFilters(params, plan.filters);
   applyOrder(params, plan.orderBy, table);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), settings.timeoutMsPerPlan);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const response = await fetch(`${connection.supabaseUrl}/rest/v1/${encodeURIComponent(plan.table)}?${params.toString()}`, {
     signal: controller.signal,
-    headers: supabaseHeaders(connection.supabaseServiceRoleKey)
+    headers: await resolveDataQuerySupabaseHeaders(config)
   }).finally(() => clearTimeout(timeout));
   const text = await response.text();
   const data = text ? JSON.parse(text) : [];
   if (!response.ok) throw new Error(data?.message || `Supabase request failed: ${response.status}`);
-  return Array.isArray(data) ? data : [];
+  const rows = Array.isArray(data) ? data : [];
+  return { rows: rows.slice(0, plan.limit), hasMore: rows.length > plan.limit };
 }
 
 function fieldsForFetch(plan, table) {
@@ -702,6 +1148,80 @@ function derivePlanRows(plan, rows = []) {
   return data;
 }
 
+export function normalizeExactExecution(payload, plan = {}) {
+  if (!payload || typeof payload !== "object") throw new Error("Exact analytics RPC returned an invalid payload");
+  const rows = Array.isArray(payload.rows) ? payload.rows : [];
+  const exactness = ["exact", "truncated", "sampled", "not_computable"].includes(payload.exactness)
+    ? payload.exactness
+    : "not_computable";
+  const cardinality = payload.cardinality === null || payload.cardinality === undefined
+    ? null
+    : Number(payload.cardinality);
+  if (cardinality !== null && (!Number.isFinite(cardinality) || cardinality < 0)) throw new Error("Exact analytics RPC returned invalid cardinality");
+  return {
+    rows,
+    cardinality,
+    resultRows: Number.isFinite(Number(payload.result_rows)) ? Number(payload.result_rows) : rows.length,
+    exactness,
+    truncated: payload.truncated === true || exactness === "truncated",
+    sampled: payload.sampled === true || exactness === "sampled",
+    operation: payload.operation || plan.operation || null
+  };
+}
+
+function exactExecutionFromTrustedRows(plan, rows) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const derived = derivePlanRows(plan, sourceRows);
+  const truncated = derived.length > plan.limit;
+  return {
+    rows: derived.slice(0, plan.limit),
+    cardinality: sourceRows.length,
+    resultRows: derived.length,
+    exactness: truncated ? "truncated" : "exact",
+    truncated,
+    sampled: false,
+    operation: plan.operation
+  };
+}
+
+function failedPlanResult(plan, error, summary = "Plan failed.") {
+  return {
+    id: plan.id,
+    requestId: plan.requestId || null,
+    operation: plan.operation,
+    table: plan.table,
+    status: "error",
+    rows: [],
+    cardinality: null,
+    resultRows: 0,
+    exactness: /not computable/i.test(error) ? "not_computable" : null,
+    truncated: false,
+    sampled: false,
+    provenance: planProvenance(plan),
+    summary,
+    error
+  };
+}
+
+function planProvenance(plan, execution = {}) {
+  const filters = (plan.filters || []).map((filter) => ({ field: filter.field, op: filter.op }));
+  const filterSignature = createHash("sha256").update(JSON.stringify(plan.filters || [])).digest("hex").slice(0, 16);
+  return {
+    connection: "content",
+    schema: "public",
+    table: plan.table,
+    requestId: plan.requestId || null,
+    operation: plan.operation,
+    filters,
+    filterSignature,
+    select: plan.select || [],
+    groupBy: plan.groupBy || [],
+    metricDefinitions: (plan.metrics || []).map((metric) => ({ type: metric.type, field: metric.field || null, as: metric.as || metric.type })),
+    cardinality: execution.cardinality ?? null,
+    exactness: execution.exactness || null
+  };
+}
+
 function groupRows(rows, fields = [], reducer) {
   const groupFields = fields.length ? fields : ["_all"];
   const groups = new Map();
@@ -728,19 +1248,15 @@ function computeMetric(metric, rows) {
 }
 
 function synthesizeDataQueryAnswer({ planResults = [], warnings = [] }) {
-  const metrics = [];
-  for (const result of planResults) {
-    if (result.status !== "ok") continue;
-    const total = result.rows.reduce((sum, row) => sum + Number(row.count || row.events_count || 0), 0);
-    if (Number.isFinite(total) && total > 0) {
-      metrics.push({ id: `${result.id}_count`, label: result.table, value: total });
-    }
-  }
+  const metrics = buildDataQueryMetrics(planResults);
   const ok = planResults.filter((item) => item.status === "ok");
   const failed = planResults.filter((item) => item.status !== "ok");
-  const answer = ok.length
-    ? `Data Query Agent executed ${ok.length} plan(s), returned ${ok.reduce((sum, item) => sum + item.rows.length, 0)} result row(s), and produced ${metrics.length} metric(s).`
-    : "Data Query Agent could not execute an approved plan.";
+  const preview = metrics.slice(0, 6).map((metric) => `${metric.label}: ${formatMetricValue(metric.value)} (${metric.exactness})`).join("; ");
+  const answer = metrics.length
+    ? `${preview}${metrics.length > 6 ? `; and ${metrics.length - 6} more metric(s)` : ""}.`
+    : ok.length
+      ? `Data Query Agent returned ${ok.reduce((sum, item) => sum + item.rows.length, 0)} result row(s); no scalar metric was requested.`
+      : "Data Query Agent could not execute an approved plan.";
   return {
     answer: failed.length || warnings.length ? `${answer} Warnings: ${[...warnings, ...failed.map((item) => item.error)].filter(Boolean).join("; ")}` : answer,
     metrics,
@@ -748,15 +1264,135 @@ function synthesizeDataQueryAnswer({ planResults = [], warnings = [] }) {
   };
 }
 
-function summarizePlanResult(plan, rows) {
-  if (plan.operation === "group_count") return `Grouped ${plan.table} by ${(plan.groupBy || []).join(", ")}.`;
-  if (plan.operation === "aggregate") return `Aggregated ${plan.table}.`;
-  if (plan.operation === "count") return `Counted ${plan.table}.`;
-  return `Read ${rows.length} row(s) from ${plan.table}.`;
+export function buildDataQueryMetrics(planResults = []) {
+  const metrics = [];
+  for (const result of planResults) {
+    if (result.status !== "ok") continue;
+    const provenance = result.provenance || {};
+    const groupFields = provenance.groupBy || [];
+    if (result.operation === "count") {
+      metrics.push(metricRecord(result, "count", result.rows[0]?.count ?? 0, {}));
+      continue;
+    }
+    if (["group_count", "top_n", "timeseries"].includes(result.operation)) {
+      for (const row of result.rows) {
+        const group = Object.fromEntries(Object.entries(row).filter(([key]) => key !== "count"));
+        metrics.push(metricRecord(result, "count", row.count ?? 0, group));
+      }
+      continue;
+    }
+    if (result.operation === "distinct") {
+      const field = groupFields[0] || provenance.select?.[0] || "value";
+      metrics.push(metricRecord(result, `distinct_${field}`, result.resultRows ?? result.rows.length, {}));
+      continue;
+    }
+    if (result.operation === "aggregate") {
+      const definitions = provenance.metricDefinitions?.length ? provenance.metricDefinitions : [{ type: "count", field: null, as: "count" }];
+      for (const row of result.rows) {
+        const group = Object.fromEntries(groupFields.map((field) => [field, row[field]]));
+        for (const definition of definitions) {
+          metrics.push(metricRecord(result, definition.as, row[definition.as], group, definition));
+        }
+      }
+    }
+  }
+  return metrics;
 }
 
-function dataQueryResponse({ status, answer, metrics = [], plans = [], tablesUsed = [], confidence = 0, warnings = [], rawResultsPreview = {}, queryPlan = null, planner = null }) {
-  return { status, answer, metrics, plans, tablesUsed, confidence, warnings, rawResultsPreview, queryPlan, planner };
+export function buildDataQueryMachineResult({ requestedMetrics = [], planResults = [], metrics = [], caller = null } = {}) {
+  const requested = normalizeStringList(requestedMetrics);
+  const keys = requested.length
+    ? requested
+    : [...new Set(planResults.map((plan) => plan.requestId || plan.id).filter(Boolean))];
+  const metricsByRequestId = {};
+  const planStatusByRequestId = {};
+
+  keys.forEach((requestId, index) => {
+    const explicit = planResults.filter((plan) => plan.requestId === requestId || plan.id === requestId);
+    const fallback = explicit.length ? explicit : (requested.length && planResults[index] ? [planResults[index]] : []);
+    const planIds = new Set(fallback.map((plan) => plan.id));
+    metricsByRequestId[requestId] = metrics
+      .filter((metric) => planIds.has(metric.planId))
+      .map((metric) => ({ ...metric }));
+    planStatusByRequestId[requestId] = fallback.map((plan) => ({
+      planId: plan.id,
+      status: plan.status,
+      exactness: plan.exactness || null,
+      cardinality: plan.cardinality ?? null,
+      truncated: plan.truncated === true,
+      sampled: plan.sampled === true,
+      cacheHit: plan.cacheHit === true
+    }));
+  });
+
+  return {
+    contractVersion: DATA_QUERY_CONTRACT_VERSION,
+    source: caller?.source || "api",
+    requestedMetrics: requested,
+    metricsByRequestId,
+    planStatusByRequestId
+  };
+}
+
+function metricRecord(result, alias, value, group, definition = null) {
+  const groupHash = Object.keys(group).length
+    ? createHash("sha256").update(JSON.stringify(group)).digest("hex").slice(0, 12)
+    : "all";
+  const exactness = value === null || value === undefined ? "not_computable" : result.exactness;
+  const groupLabel = Object.entries(group).map(([key, item]) => `${key}=${item ?? "null"}`).join(", ");
+  const metricNamespace = result.requestId || result.provenance?.requestId || result.id;
+  return {
+    id: `${metricNamespace}__${alias}__${groupHash}`,
+    planId: result.id,
+    requestId: result.requestId || result.provenance?.requestId || null,
+    label: `${result.table}.${alias}${groupLabel ? ` [${groupLabel}]` : ""}`,
+    value: value ?? null,
+    operation: result.operation,
+    exactness,
+    group,
+    definition: definition || { type: alias, field: null, as: alias },
+    source: {
+      connection: "content",
+      schema: "public",
+      table: result.table
+    },
+    filters: result.provenance?.filters || [],
+    filterSignature: result.provenance?.filterSignature || null,
+    cardinality: result.cardinality
+  };
+}
+
+function formatMetricValue(value) {
+  if (value === null || value === undefined) return "not computable";
+  if (typeof value === "number") return new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 }).format(value);
+  return String(value);
+}
+
+function summarizePlanResult(plan, rows, execution = {}) {
+  const exactness = execution.exactness ? ` (${execution.exactness})` : "";
+  if (plan.operation === "group_count") return `Grouped ${plan.table} by ${(plan.groupBy || []).join(", ")}${exactness}.`;
+  if (plan.operation === "aggregate") return `Aggregated ${plan.table}${exactness}.`;
+  if (plan.operation === "count") return `Counted ${plan.table}${exactness}.`;
+  return `Read ${rows.length} row(s) from ${plan.table}${exactness}.`;
+}
+
+function dataQueryResponse({ status, answer, metrics = [], plans = [], tablesUsed = [], confidence = 0, warnings = [], rawResultsPreview = {}, queryPlan = null, planner = null, caller = null, routing = null, machineResult = null }) {
+  return {
+    contractVersion: DATA_QUERY_CONTRACT_VERSION,
+    status,
+    answer,
+    metrics,
+    plans,
+    tablesUsed,
+    confidence,
+    warnings,
+    rawResultsPreview,
+    queryPlan,
+    planner,
+    caller,
+    routing,
+    machineResult: machineResult || buildDataQueryMachineResult({ metrics, caller })
+  };
 }
 
 // Builds a workflow-graph log from a Data Query Agent response so a direct
@@ -767,23 +1403,26 @@ export function buildDataQueryWorkflowLog(result = {}, { question = "", context 
   const executedPlans = Array.isArray(result.plans) ? result.plans : [];
   const planner = result.planner || "unknown";
   const warnings = Array.isArray(result.warnings) ? result.warnings : [];
-  const previews = result.rawResultsPreview && typeof result.rawResultsPreview === "object" ? result.rawResultsPreview : {};
   const usedFallback = warnings.includes("llm_plan_rejected_fallback_used") || planner === "heuristic_fallback";
   const errored = result.status === "error";
+  const routedElsewhere = result.routing?.supported === false;
+  const caller = result.caller || context || {};
 
   const nodes = [
     { id: "dq_input", label: "Question Input", kind: "trigger", status: "done" },
+    { id: "dq_routing", label: "Capability Router", kind: "router", status: "done" },
     {
       id: "dq_planner",
       label: planner === "llm" ? "LLM Query Planner" : "Heuristic Planner",
       kind: planner === "llm" ? "ai" : "router",
-      status: plannedPlans.length ? "done" : "error",
+      status: routedElsewhere ? "skipped" : plannedPlans.length ? "done" : "error",
       ...(usedFallback ? { fallback: true } : {})
     },
-    { id: "dq_validation", label: "Plan Validation", kind: "router", status: executedPlans.length ? "done" : "error" }
+    { id: "dq_validation", label: "Plan Validation", kind: "router", status: routedElsewhere ? "skipped" : executedPlans.length ? "done" : "error" }
   ];
   const edges = [
-    { from: "dq_input", to: "dq_planner" },
+    { from: "dq_input", to: "dq_routing" },
+    { from: "dq_routing", to: "dq_planner" },
     { from: "dq_planner", to: "dq_validation" }
   ];
 
@@ -807,8 +1446,13 @@ export function buildDataQueryWorkflowLog(result = {}, { question = "", context 
   const nodeDetails = {
     dq_input: {
       summary: question || "(no question)",
-      input: { question, context },
-      output: { intent: queryPlan.intent || null }
+      input: { question, context: caller },
+      output: { intent: queryPlan.intent || null, contractVersion: result.contractVersion || DATA_QUERY_CONTRACT_VERSION }
+    },
+    dq_routing: {
+      summary: result.routing?.reason || "Structured quantitative route accepted.",
+      input: { source: caller.source || "api", callerNodeId: caller.callerNodeId || null },
+      output: result.routing || { supported: true, domain: "content_metadata_metrics" }
     },
     dq_planner: {
       summary: `Planner: ${planner}; ${plannedPlans.length} plan(s) proposed${usedFallback ? " (fallback used)" : ""}`,
@@ -817,12 +1461,12 @@ export function buildDataQueryWorkflowLog(result = {}, { question = "", context 
     },
     dq_validation: {
       summary: `${executedPlans.length} plan(s) accepted for execution`,
-      output: { acceptedPlans: executedPlans.map((p) => ({ id: p.id, table: p.table, status: p.status, rows: p.rows })) },
+      output: { acceptedPlans: executedPlans.map((p) => ({ id: p.id, table: p.table, operation: p.operation, status: p.status, rows: p.rows, cardinality: p.cardinality, exactness: p.exactness })) },
       logs: warnings.filter((w) => /reject|exceeded|limit|not allowed|forbidden/i.test(w)).map((message) => ({ step: "dq_validation", message }))
     },
     dq_synthesis: {
       summary: result.answer || "",
-      output: { metrics: result.metrics || [], tablesUsed: result.tablesUsed || [], confidence: result.confidence }
+      output: { metrics: result.metrics || [], machineResult: result.machineResult || null, tablesUsed: result.tablesUsed || [], confidence: result.confidence }
     },
     dq_output: {
       summary: `status: ${result.status}; ${(result.metrics || []).length} metric(s); ${(result.tablesUsed || []).length} table(s)`,
@@ -830,10 +1474,20 @@ export function buildDataQueryWorkflowLog(result = {}, { question = "", context 
     }
   };
   for (const plan of executedPlans) {
+    const planned = plannedPlans.find((p) => p.id === plan.id) || { id: plan.id, table: plan.table };
     nodeDetails[`dq_exec_${plan.id}`] = {
       summary: plan.summary || `Read from ${plan.table}`,
-      input: plannedPlans.find((p) => p.id === plan.id) || { id: plan.id, table: plan.table },
-      output: { rows: plan.rows, status: plan.status, error: plan.error || null, preview: previews[plan.id] || [] }
+      input: planned,
+      output: {
+        rows: plan.rows,
+        cardinality: plan.cardinality ?? null,
+        exactness: plan.exactness || null,
+        truncated: plan.truncated === true,
+        status: plan.status,
+        error: plan.error || null,
+        // Workflow history stores structure, never source row values.
+        fields: [...new Set([...(planned.select || []), ...(planned.groupBy || []), ...(planned.metrics || []).map((metric) => metric.as || metric.field).filter(Boolean)])]
+      }
     };
   }
 
@@ -851,8 +1505,13 @@ export function buildDataQueryWorkflowLog(result = {}, { question = "", context 
     summary: {
       planner,
       status: result.status,
+      contractVersion: result.contractVersion || DATA_QUERY_CONTRACT_VERSION,
+      callerSource: caller.source || "api",
+      callerNodeId: caller.callerNodeId || null,
+      parentRunId: caller.runId || null,
       tablesUsed: result.tablesUsed || [],
       metrics: (result.metrics || []).length,
+      cacheHits: executedPlans.filter((plan) => plan.cacheHit).length,
       warnings: warnings.length,
       fallback: usedFallback
     }
@@ -875,12 +1534,29 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, number));
 }
 
+async function runWithinDeadline(factory, timeoutMs, label) {
+  let timeout;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(factory),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} exceeded the total timeout`)), Math.max(1, timeoutMs));
+      })
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // ============================================================================
-// SQL Pipeline — 7 discrete, individually-runnable stages.
-// Each stage takes the accumulated `state` and returns { step, output, state }.
+// RETIRED IN PHASE 0: the legacy SQL-pipeline helpers remain temporarily for
+// source-history compatibility, but they are deliberately private. No server
+// route or UI control can call them, and the exec_read_sql RPC is removed by
+// the Phase 0/1 hardening migration. The typed Query Plan path above is the
+// only supported runtime.
 // ============================================================================
 
-export const DATA_QUERY_PIPELINE_STEPS = [
+const DATA_QUERY_PIPELINE_STEPS = [
   { id: "user_question", label: "User Question" },
   { id: "schema_inspection", label: "Schema Inspection" },
   { id: "field_selection", label: "Field & Table Selection" },
@@ -893,7 +1569,7 @@ export const DATA_QUERY_PIPELINE_STEPS = [
 const SQL_FORBIDDEN = /\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|call|do|merge|comment|vacuum|analyze|reindex|cluster|lock|listen|notify|set|reset|begin|commit|rollback|savepoint|prepare|execute|deallocate|refresh)\b/i;
 
 // Defense-in-depth SQL guard (the DB read-only role is the primary guarantee).
-export function validateReadOnlySql(sql, { allowedTables = [] } = {}) {
+function validateReadOnlySql(sql, { allowedTables = [] } = {}) {
   const errors = [];
   const text = String(sql || "").trim().replace(/;\s*$/, "");
   if (!text) return { ok: false, errors: ["empty sql"], sql: "", tables: [] };
@@ -917,7 +1593,7 @@ function pipelineConnection(_connKey, config) {
 }
 
 // Runs read-only SQL through the exec_read_sql Postgres RPC (created via migration).
-export async function execReadSql({ connection, sql, maxRows = 200, timeoutMs = 8000, fetchImpl = fetch }) {
+async function execReadSql({ connection, sql, maxRows = 200, timeoutMs = 8000, fetchImpl = fetch }) {
   if (!connection?.supabaseUrl || !connection?.supabaseServiceRoleKey) {
     throw new Error("Supabase connection is not configured");
   }
@@ -1149,7 +1825,7 @@ function stepResult({ state }) {
   return { step: "result", output, state: { ...state, result: output } };
 }
 
-export async function runDataQueryStep({ step, state = {}, config = getConfig(), settings = dataQuerySettings(config), telemetry = null, chatComplete = chatCompletion, fetchImpl = fetch } = {}) {
+async function runDataQueryStep({ step, state = {}, config = getConfig(), settings = dataQuerySettings(config), telemetry = null, chatComplete = chatCompletion, fetchImpl = fetch } = {}) {
   switch (step) {
     case "user_question": return stepUserQuestion(state);
     case "schema_inspection": return stepSchemaInspection({ state, config, settings, fetchImpl });
@@ -1162,7 +1838,7 @@ export async function runDataQueryStep({ step, state = {}, config = getConfig(),
   }
 }
 
-export async function runDataQueryPipeline({ question, context = {}, config = getConfig(), settings = dataQuerySettings(config), telemetry = null, onStep = null, chatComplete = chatCompletion, fetchImpl = fetch } = {}) {
+async function runDataQueryPipeline({ question, context = {}, config = getConfig(), settings = dataQuerySettings(config), telemetry = null, onStep = null, chatComplete = chatCompletion, fetchImpl = fetch } = {}) {
   let state = { question: String(question || "").trim(), context: context || {} };
   const steps = [];
   for (const def of DATA_QUERY_PIPELINE_STEPS) {

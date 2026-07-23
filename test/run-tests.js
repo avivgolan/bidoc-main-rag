@@ -9,7 +9,10 @@ import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
 import { buildAlertAgentRequest, enforceProfessionalKnowledgeMode, KNOWLEDGE_PLANNER_RESPONSE_FORMAT } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
-import { buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryWorkflowLog, executeQueryPlans, introspectSupabaseTables, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, runDataQueryPipeline, validateQueryPlan, validateReadOnlySql } from "../src/subagents/dataQuery.js";
+import { applyDataQueryCallerScope, buildDataQueryMachineResult, buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryMetrics, buildDataQueryWorkflowLog, classifyDataQueryCapability, clearDataQueryRunCache, DATA_QUERY_CONTRACT_VERSION, dataQueryPlanSignature, dataQuerySupabaseHeaders, executeQueryPlans, fetchExactPlan, introspectSupabaseTables, normalizeDataQueryCaller, normalizeExactExecution, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, validateQueryPlan } from "../src/subagents/dataQuery.js";
+import { clearDataQueryAccessTokenCache, getDataQueryAccessToken, validateDataQueryAccessToken } from "../src/subagents/dataQueryAuth.js";
+import { DATA_QUERY_EXACT_RPC } from "../src/subagents/dataQueryMetadata.js";
+import { authorizeDataQueryRequest } from "../src/apiSecurity.js";
 import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
 import { buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
 import { buildInsightAiContext, buildInsightEvidence, classifyEvidenceStatement, clusterCanonicalEvents, computeBaselineWindow, computeInsightAnalytics, computeTrendAnalysis, critiqueAndRankInsights, dedupeInsightEvidence, detectInsightPatterns, extractExpectedDate, runInsightEvidencePipeline } from "../src/subagents/insightPipeline.js";
@@ -38,6 +41,11 @@ import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigate
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
+const testJwt = (claims) => [
+  Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
+  Buffer.from(JSON.stringify(claims)).toString("base64url"),
+  "test-signature"
+].join(".");
 
 test("React bridge is installed for progressive frontend migration", () => {
   const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -340,35 +348,26 @@ test("general fallback uses alert and whatsapp_messages", () => {
 });
 
 function dataQueryTestSettings(overrides = {}) {
-  const config = {
-    contentSource: {
-      indexTable: "data_index",
-      alertsTable: "alerts",
-      supabaseUrl: "https://content.example",
-      supabaseServiceRoleKey: "key"
-    },
-    retrieval: {}
-  };
+  const selection = [
+    { connection: "content", schema: "public", table: "analytics_fixture", columns: ["id", "created_at", "human_status", "urgency", "readiness_score"] },
+    { connection: "content", schema: "public", table: "alerts", columns: ["id", "created_at", "data_date", "severity_level", "item_status"] }
+  ];
   return {
     enabled: true,
     maxPlans: 2,
     maxRowsPerPlan: 2,
     timeoutMsPerPlan: 8000,
     totalTimeoutMs: 20000,
-    allowedTables: [],
-    allowedSchemas: ["app", "content"],
-    allowRawSql: false,
-    allowJoins: false,
-    allowAggregations: true,
-    requireHumanApprovalForRawSql: true,
-    manifest: buildDataQueryManifest(config),
+    allowedTables: selection.map((item) => item.table),
+    allowedSchemas: ["content"],
+    manifest: buildDataQueryManifestFromSelection(selection).map((table) => ({ ...table, exactRpc: "test_exact_rpc" })),
     ...overrides
   };
 }
 
 test("data query validator rejects unapproved table", () => {
   const result = validateQueryPlan({
-    plans: [{ id: "bad", schema: "app", table: "not_allowed", operation: "count", limit: 10 }]
+    plans: [{ id: "bad", schema: "content", table: "not_allowed", operation: "count", limit: 10 }]
   }, dataQueryTestSettings());
   assert.equal(result.ok, false);
   assert.match(result.warnings.join(" "), /table not_allowed/);
@@ -378,8 +377,8 @@ test("data query validator rejects unapproved field", () => {
   const result = validateQueryPlan({
     plans: [{
       id: "bad_field",
-      schema: "app",
-      table: "delay_events",
+      schema: "content",
+      table: "analytics_fixture",
       operation: "group_count",
       groupBy: ["not_a_field"],
       limit: 10
@@ -391,7 +390,7 @@ test("data query validator rejects unapproved field", () => {
 
 test("data query validator rejects dangerous operations and raw SQL", () => {
   const result = validateQueryPlan({
-    plans: [{ id: "drop_it", schema: "app", table: "delay_events", operation: "delete", rawSql: "delete from delay_events", limit: 10 }]
+    plans: [{ id: "drop_it", schema: "content", table: "analytics_fixture", operation: "delete", rawSql: "delete from analytics_fixture", limit: 10 }]
   }, dataQueryTestSettings());
   assert.equal(result.ok, false);
   assert.match(result.errors.join(" "), /forbidden SQL/);
@@ -401,8 +400,8 @@ test("data query validator requires limit and clamps plans and rows", () => {
   const settings = dataQueryTestSettings({ maxPlans: 1, maxRowsPerPlan: 2 });
   const result = validateQueryPlan({
     plans: [
-      { id: "ok", schema: "app", table: "delay_events", operation: "select", limit: 100 },
-      { id: "extra", schema: "app", table: "delay_event_gaps", operation: "count", limit: 10 }
+      { id: "ok", schema: "content", table: "analytics_fixture", operation: "select", limit: 100 },
+      { id: "extra", schema: "content", table: "alerts", operation: "count", limit: 10 }
     ]
   }, settings);
   assert.equal(result.ok, true);
@@ -411,7 +410,7 @@ test("data query validator requires limit and clamps plans and rows", () => {
   assert.match(result.warnings.join(" "), /maxPlans exceeded/);
 
   const missing = validateQueryPlan({
-    plans: [{ id: "missing_limit", schema: "app", table: "delay_events", operation: "select", limit: 0 }]
+    plans: [{ id: "missing_limit", schema: "content", table: "analytics_fixture", operation: "select", limit: 0 }]
   }, settings);
   assert.equal(missing.ok, false);
   assert.match(missing.warnings.join(" "), /limit is required/);
@@ -419,7 +418,7 @@ test("data query validator requires limit and clamps plans and rows", () => {
 
 test("data query executor groups counts from mock rows", async () => {
   const [plan] = validateQueryPlan({
-    plans: [{ id: "by_status", schema: "app", table: "delay_events", operation: "group_count", groupBy: ["human_status"], limit: 10 }]
+    plans: [{ id: "by_status", schema: "content", table: "analytics_fixture", operation: "group_count", groupBy: ["human_status"], limit: 10 }]
   }, dataQueryTestSettings({ maxRowsPerPlan: 10 })).plans;
   const result = await executeQueryPlans({
     plans: [plan],
@@ -442,8 +441,8 @@ test("data query executor aggregates count avg min max sum and preserves partial
     plans: [
       {
         id: "aggregate_readiness",
-        schema: "app",
-        table: "delay_events",
+        schema: "content",
+        table: "analytics_fixture",
         operation: "aggregate",
         metrics: [
           { type: "count", as: "events_count" },
@@ -454,7 +453,7 @@ test("data query executor aggregates count avg min max sum and preserves partial
         ],
         limit: 10
       },
-      { id: "will_fail", schema: "app", table: "delay_events", operation: "count", limit: 10 }
+      { id: "will_fail", schema: "content", table: "analytics_fixture", operation: "count", limit: 10 }
     ]
   }, settings);
   const result = await executeQueryPlans({
@@ -481,22 +480,22 @@ test("data query workflow log exposes planner, validation and per-plan execution
     status: "ok",
     answer: "executed 2 plans",
     planner: "llm",
-    metrics: [{ id: "m1", label: "delay_claim_cases", value: 1 }],
-    tablesUsed: ["delay_events", "delay_claim_cases"],
+    metrics: [{ id: "m1", label: "alerts", value: 1 }],
+    tablesUsed: ["analytics_fixture", "alerts"],
     warnings: [],
     rawResultsPreview: {
       a: [],
-      b: [{ human_status: "candidate", count: 1 }]
+      b: [{ severity_level: "high", count: 1, confidential_value: "must-not-be-logged" }]
     },
     plans: [
-      { id: "a", table: "delay_events", status: "ok", rows: 0, summary: "Grouped delay_events." },
-      { id: "b", table: "delay_claim_cases", status: "ok", rows: 1, summary: "Grouped delay_claim_cases." }
+      { id: "a", table: "analytics_fixture", status: "ok", rows: 0, summary: "Grouped analytics_fixture." },
+      { id: "b", table: "alerts", status: "ok", rows: 1, summary: "Grouped alerts." }
     ],
     queryPlan: {
       intent: "count_by_status",
       plans: [
-        { id: "a", schema: "app", table: "delay_events", operation: "group_count", groupBy: ["human_status"], limit: 200 },
-        { id: "b", schema: "app", table: "delay_claim_cases", operation: "group_count", groupBy: ["human_status"], limit: 200 }
+        { id: "a", schema: "content", table: "analytics_fixture", operation: "group_count", groupBy: ["human_status"], limit: 200 },
+        { id: "b", schema: "content", table: "alerts", operation: "group_count", groupBy: ["severity_level"], limit: 200 }
       ]
     }
   };
@@ -510,7 +509,9 @@ test("data query workflow log exposes planner, validation and per-plan execution
   assert.equal(log.nodes.find((node) => node.id === "dq_planner").kind, "ai");
   assert.ok(log.edges.some((edge) => edge.from === "dq_validation" && edge.to === "dq_exec_b"));
   assert.ok(log.edges.some((edge) => edge.from === "dq_exec_b" && edge.to === "dq_synthesis"));
-  assert.deepEqual(log.nodeDetails.dq_exec_b.output.preview, [{ human_status: "candidate", count: 1 }]);
+  assert.deepEqual(log.nodeDetails.dq_exec_b.output.fields, ["severity_level"]);
+  assert.equal("preview" in log.nodeDetails.dq_exec_b.output, false);
+  assert.doesNotMatch(JSON.stringify(log), /must-not-be-logged/);
   assert.equal(log.summary.planner, "llm");
   // OpenRouter telemetry is attached to the planner node and aggregated for the workflow totals.
   assert.equal(log.nodes.find((node) => node.id === "dq_planner").openrouter.length, 1);
@@ -519,6 +520,163 @@ test("data query workflow log exposes planner, validation and per-plan execution
   assert.equal(log.openRouterUsage.totals.cost, 0.00101205);
 });
 
+test("data query API requires its configured server secret", () => {
+  const request = (value) => ({ headers: value ? { "x-bidoc-api-secret": value } : {} });
+  assert.equal(authorizeDataQueryRequest(request(), { secret: "" }).status, 503);
+  assert.equal(authorizeDataQueryRequest(request("wrong"), { secret: "expected" }).status, 401);
+  assert.deepEqual(authorizeDataQueryRequest(request("expected"), { secret: "expected" }), { ok: true, status: 200, error: null });
+});
+
+test("data query reads require a dedicated database-role access token", () => {
+  const config = {
+    contentSource: { supabaseServiceRoleKey: "server-api-key" },
+    dataQueryReadAccessToken: "dedicated-read-jwt"
+  };
+  const headers = dataQuerySupabaseHeaders(config);
+  assert.equal(headers.apikey, "server-api-key");
+  assert.equal(headers.Authorization, "Bearer dedicated-read-jwt");
+  assert.throws(() => dataQuerySupabaseHeaders({ contentSource: config.contentSource }), /DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN/);
+  const exposed = publicSettings({
+    ...getConfig(),
+    dataQueryReadAccessToken: "dedicated-read-jwt",
+    dataQueryServiceEmail: "private@example.invalid",
+    dataQueryServicePassword: "private-password"
+  });
+  assert.equal("dataQueryReadAccessToken" in exposed, false);
+  assert.equal("dataQueryServiceEmail" in exposed, false);
+  assert.equal("dataQueryServicePassword" in exposed, false);
+});
+
+test("data query managed service account validates, caches, and refreshes short-lived tokens", async () => {
+  clearDataQueryAccessTokenCache();
+  const baseSeconds = 2_000_000_000;
+  let clock = baseSeconds * 1000;
+  let requests = 0;
+  const firstToken = testJwt({
+    role: "authenticated",
+    app_metadata: { data_query_role: "bidoc_data_query" },
+    exp: baseSeconds + 120
+  });
+  const refreshedToken = testJwt({
+    role: "authenticated",
+    app_metadata: { data_query_role: "bidoc_data_query" },
+    exp: baseSeconds + 500
+  });
+  const config = {
+    contentSource: {
+      supabaseUrl: "https://content.example",
+      supabaseServiceRoleKey: "server-api-key"
+    },
+    dataQueryServiceEmail: "data-query@example.invalid",
+    dataQueryServicePassword: "secret-password"
+  };
+  const fetchImpl = async (url, options) => {
+    requests += 1;
+    assert.match(url, /\/auth\/v1\/token\?grant_type=/);
+    if (requests === 1) {
+      assert.match(url, /grant_type=password/);
+      assert.deepEqual(JSON.parse(options.body), {
+        email: "data-query@example.invalid",
+        password: "secret-password"
+      });
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          access_token: firstToken,
+          refresh_token: "refresh-one",
+          expires_at: baseSeconds + 120
+        })
+      };
+    }
+    assert.match(url, /grant_type=refresh_token/);
+    assert.deepEqual(JSON.parse(options.body), { refresh_token: "refresh-one" });
+    return {
+      ok: true,
+      text: async () => JSON.stringify({
+        access_token: refreshedToken,
+        refresh_token: "refresh-two",
+        expires_at: baseSeconds + 500
+      })
+    };
+  };
+
+  assert.equal(await getDataQueryAccessToken(config, { fetchImpl, now: () => clock }), firstToken);
+  clock += 30_000;
+  assert.equal(await getDataQueryAccessToken(config, { fetchImpl, now: () => clock }), firstToken);
+  assert.equal(requests, 1);
+  clock += 40_000;
+  assert.equal(await getDataQueryAccessToken(config, { fetchImpl, now: () => clock }), refreshedToken);
+  assert.equal(requests, 2);
+  assert.equal(validateDataQueryAccessToken(refreshedToken).mode, "managed_service_account");
+  assert.throws(
+    () => validateDataQueryAccessToken(testJwt({ role: "authenticated", app_metadata: {}, exp: baseSeconds + 500 })),
+    /missing the bidoc_data_query authorization claim/
+  );
+});
+
+test("data query managed credentials fail closed when only one value is configured", async () => {
+  clearDataQueryAccessTokenCache();
+  await assert.rejects(
+    () => getDataQueryAccessToken({
+      contentSource: { supabaseUrl: "https://content.example", supabaseServiceRoleKey: "server-api-key" },
+      dataQueryServiceEmail: "data-query@example.invalid",
+      dataQueryReadAccessToken: testJwt({ role: "bidoc_data_query" })
+    }),
+    /Both DATA_QUERY_SUPABASE_SERVICE_EMAIL and DATA_QUERY_SUPABASE_SERVICE_PASSWORD are required/
+  );
+});
+
+test("data query managed authentication forbids App Supabase fallback", async () => {
+  clearDataQueryAccessTokenCache();
+  await assert.rejects(
+    () => getDataQueryAccessToken({
+      contentSource: {
+        supabaseUrl: "https://main.example",
+        supabaseServiceRoleKey: "main-server-key",
+        usesAppSupabase: true
+      },
+      dataQueryServiceEmail: "data-query@example.invalid",
+      dataQueryServicePassword: "secret-password"
+    }),
+    /App\/MAIN Supabase fallback is forbidden/
+  );
+});
+
+test("data query executor enforces the total deadline across plans", async () => {
+  const settings = dataQueryTestSettings({ totalTimeoutMs: 20, timeoutMsPerPlan: 20 });
+  const validation = validateQueryPlan({
+    plans: [
+      { id: "first", schema: "content", table: "alerts", operation: "count", limit: 10 },
+      { id: "second", schema: "content", table: "alerts", operation: "count", limit: 10 }
+    ]
+  }, settings);
+  let clock = 0;
+  let fetchCount = 0;
+  const result = await executeQueryPlans({
+    settings,
+    plans: validation.plans,
+    now: () => clock,
+    fetchRows: async () => {
+      fetchCount += 1;
+      clock = 25;
+      return [{ id: "one" }];
+    }
+  });
+  assert.equal(fetchCount, 1);
+  assert.equal(result.plans[0].status, "ok");
+  assert.equal(result.plans[1].status, "error");
+  assert.match(result.plans[1].error, /total timeout exceeded/);
+});
+
+test("data query Phase 0 routes expose only the authenticated typed runtime", () => {
+  const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.match(serverSource, /authorizeDataQueryRequest/);
+  assert.doesNotMatch(serverSource, /data-query\/step|data-query\/pipeline|data-query\/schema/);
+  assert.doesNotMatch(appSource, /data-query\/step|data-query\/pipeline|data-query\/schema|dqRunBtn|SQL Generation/);
+});
+
+/* Phase 0 retired the raw-SQL runtime and its compatibility tests.
 test("data query SQL guard accepts read-only selects and rejects unsafe statements", () => {
   assert.equal(validateReadOnlySql("select count(*) from emails_gf", { allowedTables: ["emails_gf"] }).ok, true);
   assert.equal(validateReadOnlySql("with x as (select 1) select * from x").ok, true);
@@ -558,6 +716,7 @@ test("data query SQL pipeline runs stage-by-stage with mocked LLM and DB", async
   assert.equal(result.steps.find((s) => s.id === "calculation").output.metrics.find((m) => m.id === "row_count").value, 2);
 });
 
+*/
 test("data query settings normalization preserves the real-table selection", () => {
   const normalized = normalizeDataQuerySettings({
     enabled: true,
@@ -568,11 +727,11 @@ test("data query settings normalization preserves the real-table selection", () 
       { connection: "app", table: "emails_gf", columns: ["mail_id"] } // duplicate dropped
     ]
   });
-  assert.equal(normalized.tables.length, 2);
-  assert.deepEqual(normalized.tables.map((t) => t.table), ["emails_gf", "data_index_embeddings_gf_dor_agent"]);
+  assert.equal(normalized.tables.length, 1);
+  assert.deepEqual(normalized.tables.map((t) => t.table), ["data_index_embeddings_gf_dor_agent"]);
   // allowlists are derived from the selection, not the legacy defaults
-  assert.deepEqual(normalized.allowedTables, ["emails_gf", "data_index_embeddings_gf_dor_agent"]);
-  assert.deepEqual(normalized.allowedSchemas.sort(), ["app", "content"]);
+  assert.deepEqual(normalized.allowedTables, ["data_index_embeddings_gf_dor_agent"]);
+  assert.deepEqual(normalized.allowedSchemas, ["content"]);
   // empty selection falls back to the default allowlist (content-only — the agent has no main/app access)
   const empty = normalizeDataQuerySettings({ tables: [] });
   assert.deepEqual(empty.tables, []);
@@ -600,19 +759,35 @@ test("data query introspection parses PostgREST OpenAPI into tables and columns"
 
 test("data query manifest from real-table selection drives the allowlist", () => {
   const selection = [
-    { connection: "app", schema: "public", table: "emails_gf", columns: ["mail_id", "subject", "received_date", "sender_name"] }
+    { connection: "content", schema: "public", table: "documents", columns: ["id", "title", "primary_date", "source_table"] }
   ];
   const manifest = buildDataQueryManifestFromSelection(selection);
   assert.equal(manifest.length, 1);
-  assert.equal(manifest[0].tableName, "emails_gf");
-  assert.ok(manifest[0].allowedFields.includes("subject"));
+  assert.equal(manifest[0].tableName, "documents");
+  assert.ok(manifest[0].allowedFields.includes("title"));
 
-  const settings = dataQueryTestSettings({ manifest, allowedTables: ["emails_gf"], allowedSchemas: ["app"] });
-  const accepted = validateQueryPlan({ plans: [{ id: "p1", schema: "app", table: "emails_gf", operation: "select", select: ["subject"], limit: 10 }] }, settings);
+  const settings = dataQueryTestSettings({ manifest, allowedTables: ["documents"], allowedSchemas: ["content"] });
+  const accepted = validateQueryPlan({ plans: [{ id: "p1", schema: "content", table: "documents", operation: "select", select: ["title"], limit: 10 }] }, settings);
   assert.equal(accepted.ok, true);
-  const rejected = validateQueryPlan({ plans: [{ id: "p2", schema: "app", table: "delay_events", operation: "count", limit: 10 }] }, settings);
+  const rejected = validateQueryPlan({ plans: [{ id: "p2", schema: "content", table: "alerts", operation: "count", limit: 10 }] }, settings);
   assert.equal(rejected.ok, false);
-  assert.match(rejected.warnings.join(" "), /delay_events/);
+  assert.match(rejected.warnings.join(" "), /alerts/);
+});
+
+test("data query missing selection falls back to the exact data_index contract", () => {
+  const config = {
+    contentSource: {
+      indexTable: "data_index_embeddings_gf_dor_agent",
+      alertsTable: "alerts_embeddings_gf"
+    },
+    dataQuery: {}
+  };
+  const settings = dataQueryTestSettings({
+    manifest: buildDataQueryManifest(config),
+    allowedTables: ["data_index"]
+  });
+  assert.equal(settings.manifest[0].tableName, "data_index");
+  assert.equal(settings.manifest[0].exactRpc, DATA_QUERY_EXACT_RPC);
 });
 
 test("data query workflow log flags planner fallback and errored runs", () => {
@@ -649,14 +824,14 @@ test("data query LLM planner requests JSON and normalizes safe plans", async () 
         question: "כמה אירועי עיכוב יש לפי סטטוס?",
         intent: "status_breakdown",
         plans: [{
-          id: "delay_events_by_status",
-          schema: "app",
-          table: "delay_events",
+          id: "alerts_by_severity",
+          schema: "content",
+          table: "alerts",
           operation: "group_count",
-          filters: [{ field: "created_at", op: "gte", value: "2026-06-01" }],
-          groupBy: ["human_status"],
+          filters: [{ field: "data_date", op: "gte", value: "2026-06-01" }],
+          groupBy: ["severity_level"],
           limit: 50,
-          reason: "Count delay events by status."
+          reason: "Count alerts by severity."
         }],
         confidence: 0.84,
         warnings: []
@@ -665,7 +840,7 @@ test("data query LLM planner requests JSON and normalizes safe plans", async () 
   });
   assert.equal(captured.model, "openai/gpt-4o-mini");
   assert.deepEqual(captured.responseFormat, { type: "json_object" });
-  assert.equal(plan.plans[0].table, "delay_events");
+  assert.equal(plan.plans[0].table, "alerts");
   assert.equal(plan.confidence, 0.84);
 });
 
@@ -680,18 +855,330 @@ test("data query LLM planner output still passes validator before execution", as
     },
     settings,
     question: "כמה אירועי עיכוב יש לפי סטטוס?",
+    question: "alerts by severity",
     planWithLlm: async () => ({
       question: "bad",
       intent: "unsafe",
-      plans: [{ id: "unsafe", schema: "app", table: "delay_events", operation: "select", rawSql: "drop table delay_events", limit: 10 }],
+      plans: [{ id: "unsafe", schema: "content", table: "alerts", operation: "select", rawSql: "drop table alerts", limit: 10 }],
       confidence: 0.9,
       warnings: []
     }),
-    fetchRows: async () => [{ human_status: "candidate" }]
+    fetchRows: async () => [{ severity_level: "high" }]
   });
   assert.equal(result.planner, "heuristic_fallback");
   assert.ok(result.warnings.includes("llm_plan_rejected_fallback_used"));
   assert.ok(result.warnings.some((warning) => /forbidden SQL|raw SQL/i.test(warning)));
+});
+
+test("data query Phase 2 metadata is typed and excludes content-bearing fields", () => {
+  const [manifest] = buildDataQueryManifestFromSelection([{
+    connection: "content",
+    schema: "public",
+    table: "data_index",
+    columns: ["id", "project_id", "source_table", "summary", "index_text", "metadata", "embedding", "primary_date", "item_status"]
+  }]);
+  assert.equal(manifest.exactRpc, DATA_QUERY_EXACT_RPC);
+  assert.equal(manifest.fields.find((field) => field.name === "project_id").type, "uuid");
+  assert.equal(manifest.fields.find((field) => field.name === "primary_date").dateSemantics, "canonical_source_time");
+  assert.ok(manifest.allowedFields.includes("source_table"));
+  assert.ok(!manifest.allowedFields.includes("summary"));
+  assert.ok(!manifest.allowedFields.includes("index_text"));
+  assert.ok(!manifest.allowedFields.includes("metadata"));
+  assert.ok(!manifest.allowedFields.includes("embedding"));
+});
+
+test("data query Phase 2 validates filter types and reports unsupported exact analytics", () => {
+  const [dataIndex] = buildDataQueryManifestFromSelection([{
+    connection: "content",
+    schema: "public",
+    table: "data_index",
+    columns: ["id", "project_id", "source_table", "primary_date"]
+  }]);
+  const settings = dataQueryTestSettings({ manifest: [dataIndex], allowedTables: ["data_index"] });
+  const invalidUuid = validateQueryPlan({ plans: [{
+    id: "bad_uuid", schema: "content", table: "data_index", operation: "count",
+    filters: [{ field: "project_id", op: "eq", value: "not-a-uuid" }], limit: 10
+  }] }, settings);
+  assert.equal(invalidUuid.ok, false);
+  assert.match(invalidUuid.warnings.join(" "), /not a UUID/);
+
+  const [unregistered] = buildDataQueryManifestFromSelection([{
+    connection: "content", schema: "public", table: "future_table", columns: ["id", "status"]
+  }]);
+  const unsupported = validateQueryPlan({ plans: [{
+    id: "future_count", schema: "content", table: "future_table", operation: "count", limit: 10
+  }] }, dataQueryTestSettings({ manifest: [unregistered], allowedTables: ["future_table"] }));
+  assert.equal(unsupported.status, "not_computable");
+  assert.match(unsupported.warnings.join(" "), /no approved exact analytics RPC/);
+});
+
+test("data query exact RPC call uses the typed payload and dedicated role token", async () => {
+  const [manifest] = buildDataQueryManifestFromSelection([{
+    connection: "content", schema: "public", table: "data_index", columns: ["id", "source_table", "primary_date"]
+  }]);
+  const settings = dataQueryTestSettings({ manifest: [manifest], allowedTables: ["data_index"] });
+  let request = null;
+  const legacyRoleToken = testJwt({ role: "bidoc_data_query", exp: 2_000_000_000 });
+  const result = await fetchExactPlan({
+    config: {
+      contentSource: { supabaseUrl: "https://content.example", supabaseServiceRoleKey: "server-key" },
+      dataQueryReadAccessToken: legacyRoleToken
+    },
+    settings,
+    plan: {
+      id: "count_index", schema: "content", table: "data_index", operation: "count",
+      filters: [{ field: "source_table", op: "eq", value: "emails" }], groupBy: [], metrics: [], select: [], orderBy: [], limit: 200
+    },
+    fetchImpl: async (url, options) => {
+      request = { url, options, body: JSON.parse(options.body) };
+      return { ok: true, text: async () => JSON.stringify({ operation: "count", rows: [{ count: 1248 }], cardinality: 1248, result_rows: 1, exactness: "exact", truncated: false, sampled: false }) };
+    }
+  });
+  assert.match(request.url, new RegExp(`/rpc/${DATA_QUERY_EXACT_RPC}$`));
+  assert.equal(request.options.method, "POST");
+  assert.equal(request.options.headers.Authorization, `Bearer ${legacyRoleToken}`);
+  assert.equal(request.body.p_operation, "count");
+  assert.deepEqual(request.body.p_filters, [{ field: "source_table", op: "eq", value: "emails" }]);
+  assert.equal(result.cardinality, 1248);
+  assert.equal(result.exactness, "exact");
+});
+
+test("data query exact metrics preserve zero and stable provenance", () => {
+  const execution = normalizeExactExecution({
+    operation: "count", rows: [{ count: 0 }], cardinality: 0, result_rows: 1, exactness: "exact", truncated: false, sampled: false
+  }, { operation: "count" });
+  const planResult = {
+    id: "zero_count", operation: "count", table: "data_index", status: "ok", ...execution,
+    provenance: { groupBy: [], filters: [{ field: "source_table", op: "eq" }], filterSignature: "fixed" }
+  };
+  const first = buildDataQueryMetrics([planResult]);
+  const second = buildDataQueryMetrics([planResult]);
+  assert.equal(first[0].value, 0);
+  assert.equal(first[0].exactness, "exact");
+  assert.equal(first[0].cardinality, 0);
+  assert.equal(first[0].id, second[0].id);
+  assert.deepEqual(first[0].filters, [{ field: "source_table", op: "eq" }]);
+});
+
+test("data query exact adapter is not capped by the legacy 200-row fetch limit", async () => {
+  const settings = dataQueryTestSettings({ maxRowsPerPlan: 200 });
+  const [plan] = validateQueryPlan({ plans: [{
+    id: "gold_10000", schema: "content", table: "analytics_fixture", operation: "count", filters: [], limit: 200
+  }] }, settings).plans;
+  const result = await executeQueryPlans({
+    settings,
+    plans: [plan],
+    fetchExact: async () => ({ operation: "count", rows: [{ count: 10000 }], cardinality: 10000, result_rows: 1, exactness: "exact", truncated: false, sampled: false })
+  });
+  assert.equal(result.plans[0].rows[0].count, 10000);
+  assert.equal(result.plans[0].cardinality, 10000);
+  assert.equal(result.plans[0].exactness, "exact");
+});
+
+test("data query Phase 2 response exposes exact metrics and no raw-row preview", async () => {
+  const [manifest] = buildDataQueryManifestFromSelection([{
+    connection: "content", schema: "public", table: "data_index", columns: ["id", "source_table", "primary_date"]
+  }]);
+  const settings = dataQueryTestSettings({ manifest: [manifest], allowedTables: ["data_index"] });
+  const result = await runDataQueryAgent({
+    config: { contentSource: {}, models: {} },
+    settings,
+    question: "How many records are indexed?",
+    queryPlan: { plans: [{ id: "index_count", schema: "content", table: "data_index", operation: "count", filters: [], limit: 200 }], confidence: 1 },
+    fetchExact: async () => ({ operation: "count", rows: [{ count: 1248 }], cardinality: 1248, result_rows: 1, exactness: "exact", truncated: false, sampled: false })
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(result.metrics[0].value, 1248);
+  assert.equal(result.metrics[0].exactness, "exact");
+  assert.equal(result.plans[0].cardinality, 1248);
+  assert.equal(result.plans[0].exactness, "exact");
+  assert.match(result.answer, /1,248 \(exact\)/);
+  assert.deepEqual(result.rawResultsPreview, {});
+});
+
+test("data query full-run deadline includes planning", async () => {
+  const result = await runDataQueryAgent({
+    config: { openRouterApiKey: "test", models: { knowledgePlanner: "model", main: "model" }, contentSource: {} },
+    settings: dataQueryTestSettings({ totalTimeoutMs: 5 }),
+    question: "alerts by severity",
+    planWithLlm: async () => new Promise((resolve) => setTimeout(() => resolve({ plans: [] }), 25)),
+    fetchExact: async () => { throw new Error("must not execute"); }
+  });
+  assert.equal(result.status, "error");
+  assert.ok(result.warnings.includes("total_timeout_exceeded"));
+  assert.match(result.answer, /total deadline during planning/);
+});
+
+test("data query Phase 2 migration is fixed-table, invoker-only, and explicitly granted", () => {
+  const sql = fs.readFileSync(new URL("../supabase/data-query-exact-metrics-v1.sql", import.meta.url), "utf8");
+  assert.match(sql, /security invoker/i);
+  assert.match(sql, /set search_path = ''/i);
+  assert.match(sql, /from public\.data_index/i);
+  assert.match(sql, /revoke execute[\s\S]*from public, anon, authenticated, service_role/i);
+  assert.match(sql, /grant execute[\s\S]*to bidoc_data_query/i);
+  assert.match(sql, /v_metric_type in \('min', 'max'\) and v_field = 'id'/i);
+  assert.match(sql, /%I = any\(array\[%s\]::%s\[\]\)/i);
+  assert.doesNotMatch(sql, /%I::text = any/i);
+  assert.doesNotMatch(sql, /security definer/i);
+  assert.doesNotMatch(sql, /p_table|table_name text/i);
+});
+
+test("data query Phase 3.1 migration gates the exact RPC and removes raw table access", () => {
+  const sql = fs.readFileSync(new URL("../supabase/data-query-phase3-1-service-account.sql", import.meta.url), "utf8");
+  assert.match(sql, /app_metadata,data_query_role/);
+  assert.match(sql, /security definer/i);
+  assert.match(sql, /alter role bidoc_data_query nologin noinherit connection limit 3/i);
+  assert.match(sql, /revoke all privileges on all tables in schema public from bidoc_data_query/i);
+  assert.match(sql, /grant execute[\s\S]*to authenticated, bidoc_data_query/i);
+  assert.match(sql, /bidoc_data_query_data_index_impl_v1/);
+  assert.doesNotMatch(sql, /\b(insert|update|delete|drop|truncate)\b[\s\S]*public\.data_index/i);
+});
+
+test("data query Phase 3 caller envelope normalizes identity and only narrows budgets", () => {
+  const settings = dataQueryTestSettings({
+    maxPlans: 5,
+    maxRowsPerPlan: 200,
+    timeoutMsPerPlan: 8000,
+    totalTimeoutMs: 20000,
+    plannerTimeoutMs: 30000
+  });
+  const normalized = normalizeDataQueryCaller({
+    context: {
+      source: "project_insights",
+      runId: "run_phase3",
+      callerNodeId: "insights_metrics",
+      dateFrom: "2026-07-01",
+      budget: { maxPlans: 2, maxRowsPerPlan: 500, totalTimeoutMs: 5000 }
+    }
+  }, settings);
+  assert.equal(normalized.caller.source, "project_insights");
+  assert.equal(normalized.caller.runId, "run_phase3");
+  assert.equal(normalized.settings.maxPlans, 2);
+  assert.equal(normalized.settings.maxRowsPerPlan, 200);
+  assert.equal(normalized.settings.totalTimeoutMs, 5000);
+  assert.ok(normalized.warnings.includes("budget_expansion_ignored:maxRowsPerPlan"));
+
+  const unknown = normalizeDataQueryCaller({ context: { source: "invented_agent" } }, settings);
+  assert.equal(unknown.caller.source, "api");
+  assert.ok(unknown.warnings.includes("unknown_caller_source"));
+});
+
+test("data query Phase 3 routes semantic and citation questions without planning or database execution", async () => {
+  const route = classifyDataQueryCapability("Show the source quote that explains why the delay happened");
+  assert.equal(route.supported, false);
+  assert.equal(route.warning, "semantic_question_route_elsewhere");
+  assert.equal(route.suggestedAgent, "delay_claim");
+  assert.equal(classifyDataQueryCapability("How many records are there by status?").supported, true);
+
+  let plannerCalls = 0;
+  let fetchCalls = 0;
+  const result = await runDataQueryAgent({
+    config: { openRouterApiKey: "test", models: {}, contentSource: {} },
+    settings: dataQueryTestSettings(),
+    question: "Show the source quote that explains why the delay happened",
+    context: { source: "main_agent", runId: "semantic_route" },
+    planWithLlm: async () => { plannerCalls += 1; return { plans: [] }; },
+    fetchExact: async () => { fetchCalls += 1; return {}; }
+  });
+  assert.equal(result.status, "needs_clarification");
+  assert.equal(result.contractVersion, DATA_QUERY_CONTRACT_VERSION);
+  assert.ok(result.warnings.includes("semantic_question_route_elsewhere"));
+  assert.equal(plannerCalls, 0);
+  assert.equal(fetchCalls, 0);
+});
+
+test("data query Phase 3 enforces caller project and inclusive date scopes on every plan", () => {
+  const [manifest] = buildDataQueryManifestFromSelection([{
+    connection: "content", schema: "public", table: "data_index",
+    columns: ["id", "project_id", "source_table", "primary_date"]
+  }]);
+  const settings = dataQueryTestSettings({ manifest: [manifest], allowedTables: ["data_index"], maxRowsPerPlan: 200 });
+  const scoped = applyDataQueryCallerScope({ plans: [{
+    id: "scoped_count", requestId: "records_total", schema: "content", table: "data_index",
+    operation: "count", filters: [], limit: 200
+  }] }, {
+    projectId: "123e4567-e89b-42d3-a456-426614174000",
+    dateFrom: "2026-07-01",
+    dateTo: "2026-07-31"
+  }, settings);
+  assert.deepEqual(scoped.errors, []);
+  assert.deepEqual(scoped.plan.plans[0].filters, [
+    { field: "project_id", op: "eq", value: "123e4567-e89b-42d3-a456-426614174000" },
+    { field: "primary_date", op: "gte", value: "2026-07-01" },
+    { field: "primary_date", op: "lt", value: "2026-08-01T00:00:00.000Z" }
+  ]);
+  assert.equal(validateQueryPlan(scoped.plan, settings).ok, true);
+});
+
+test("data query Phase 3 plan signatures and run cache deduplicate equivalent executions", async () => {
+  clearDataQueryRunCache();
+  const settings = dataQueryTestSettings({ runCacheEnabled: true, runCacheTtlMs: 60000, maxRowsPerPlan: 200 });
+  const planA = validateQueryPlan({ plans: [{
+    id: "cached_count", schema: "content", table: "analytics_fixture", operation: "count",
+    filters: [{ field: "urgency", op: "eq", value: "high" }, { field: "human_status", op: "eq", value: "open" }], limit: 200
+  }] }, settings).plans[0];
+  const planB = { ...planA, filters: [...planA.filters].reverse() };
+  assert.equal(dataQueryPlanSignature(planA), dataQueryPlanSignature(planB));
+
+  let fetchCalls = 0;
+  const fetchExact = async () => {
+    fetchCalls += 1;
+    return { operation: "count", rows: [{ count: 42 }], cardinality: 42, result_rows: 1, exactness: "exact", truncated: false, sampled: false };
+  };
+  const caller = { source: "main_agent", runId: "run_cache_test" };
+  const first = await executeQueryPlans({ settings, plans: [planA], caller, fetchExact });
+  const second = await executeQueryPlans({ settings, plans: [planB], caller, fetchExact });
+  assert.equal(first.plans[0].cacheHit, false);
+  assert.equal(second.plans[0].cacheHit, true);
+  assert.ok(second.warnings.includes("served_from_run_cache"));
+  assert.equal(fetchCalls, 1);
+});
+
+test("data query Phase 3 response maps requested metrics without parsing answer prose", async () => {
+  clearDataQueryRunCache();
+  const [manifest] = buildDataQueryManifestFromSelection([{
+    connection: "content", schema: "public", table: "data_index", columns: ["id", "source_table", "primary_date"]
+  }]);
+  const settings = dataQueryTestSettings({ manifest: [manifest], allowedTables: ["data_index"], runCacheEnabled: false });
+  const result = await runDataQueryAgent({
+    config: { contentSource: {}, models: {} },
+    settings,
+    question: "How many indexed records are there?",
+    context: { source: "workflow_qa", runId: "machine_contract", callerNodeId: "qa_metrics" },
+    requestedMetrics: ["records_total"],
+    queryPlan: { plans: [{ id: "index_count", requestId: "records_total", schema: "content", table: "data_index", operation: "count", filters: [], limit: 200 }], confidence: 1 },
+    fetchExact: async () => ({ operation: "count", rows: [{ count: 1248 }], cardinality: 1248, result_rows: 1, exactness: "exact", truncated: false, sampled: false })
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(result.contractVersion, "data-query.v2");
+  assert.equal(result.caller.source, "workflow_qa");
+  assert.equal(result.machineResult.metricsByRequestId.records_total[0].value, 1248);
+  assert.equal(result.machineResult.planStatusByRequestId.records_total[0].exactness, "exact");
+  assert.equal(result.machineResult.metricsByRequestId.records_total[0].planId, "index_count");
+  assert.match(result.machineResult.metricsByRequestId.records_total[0].id, /^records_total__/);
+});
+
+test("data query Phase 3 settings and workflow expose cache and caller contract metadata", () => {
+  const normalized = normalizeDataQuerySettings({ runCacheEnabled: false, runCacheTtlMs: 12000 });
+  assert.equal(normalized.runCacheEnabled, false);
+  assert.equal(normalized.runCacheTtlMs, 12000);
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const agentSource = fs.readFileSync(new URL("../src/agent.js", import.meta.url), "utf8");
+  assert.match(appSource, /dqRunCacheEnabled/);
+  assert.match(agentSource, /machineResult\.metricsByRequestId/);
+
+  const log = buildDataQueryWorkflowLog({
+    contractVersion: "data-query.v2",
+    status: "needs_clarification",
+    caller: { source: "delay_claim", runId: "parent_run", callerNodeId: "delay_stage3" },
+    routing: { supported: false, domain: "semantic_or_citation", suggestedAgent: "delay_claim" },
+    warnings: ["semantic_question_route_elsewhere"],
+    metrics: [], plans: [], queryPlan: { plans: [] }
+  }, { question: "Why was this delayed?" });
+  assert.ok(log.nodes.some((node) => node.id === "dq_routing"));
+  assert.equal(log.nodes.find((node) => node.id === "dq_planner").status, "skipped");
+  assert.equal(log.summary.callerNodeId, "delay_stage3");
+  assert.equal(log.summary.parentRunId, "parent_run");
 });
 
 test("alert agent request carries structured date range", () => {

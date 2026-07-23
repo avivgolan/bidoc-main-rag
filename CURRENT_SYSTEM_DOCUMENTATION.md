@@ -250,8 +250,8 @@ Security note: `/api/settings/export` returns full resolved secrets. There is no
 | `OPENROUTER_API_KEY` | OpenRouter chat, embeddings, reranker, QA, alert agent. |
 | `SUPABASE_URL` | App Supabase URL. |
 | `SUPABASE_SERVICE_ROLE_KEY` | App Supabase service key. |
-| `CONTENT_SUPABASE_URL` | Optional separate Content Supabase URL. |
-| `CONTENT_SUPABASE_SERVICE_ROLE_KEY` | Optional separate Content Supabase service key. |
+| `CONTENT_SUPABASE_URL` | Explicit Content Supabase URL; required for Data Query Agent because App/MAIN fallback is forbidden. |
+| `CONTENT_SUPABASE_SERVICE_ROLE_KEY` | Matching Content-project server key; required for Data Query Agent provisioning and authentication. |
 | `CONTENT_HYBRID_RPC_NAME` | Content hybrid search RPC. |
 | `CONTENT_INDEX_TABLE` | Content index table. |
 | `CONTENT_ALERTS_TABLE` | Content alerts table. |

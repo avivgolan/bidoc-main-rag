@@ -1,55 +1,50 @@
--- Data Query Agent: read-only SQL execution RPC
--- Used by src/subagents/dataQuery.js -> execReadSql():
---   POST /rest/v1/rpc/exec_read_sql  body { "q": "<select ...>", "max_rows": 200 }
+-- Data Query Agent Phase 0/1 hardening (Kapaim Content project only).
 --
--- Run this in the Supabase SQL Editor for EVERY database the Data Query Agent
--- targets (the app/MAIN project and the separate content project).
---
--- Safety: this function ONLY runs a single read-only SELECT/WITH statement.
--- A hard transaction-level guard (transaction_read_only = on) makes any write
--- or DDL fail at the database level, even if the keyword checks are bypassed.
+-- The raw-SQL RPC is deliberately removed. The supported runtime uses typed
+-- PostgREST Query Plans authenticated as the dedicated bidoc_data_query role.
+-- Re-running this file is safe.
 
-create or replace function public.exec_read_sql(q text, max_rows int default 200)
-returns jsonb
-language plpgsql
-security invoker
-set search_path = public, pg_temp
-as $$
-declare
-  cleaned text := rtrim(btrim(coalesce(q, '')), ';');
-  capped  int  := least(greatest(coalesce(max_rows, 200), 1), 1000);
-  result  jsonb;
+do $$
 begin
-  if cleaned = '' then
-    raise exception 'empty query';
+  if to_regprocedure('public.exec_read_sql(text,integer)') is not null then
+    revoke execute on function public.exec_read_sql(text, integer) from public, anon, authenticated, service_role;
+    drop function public.exec_read_sql(text, integer);
   end if;
-
-  -- Only one statement, and it must be a read query.
-  if cleaned ~ ';' then
-    raise exception 'multiple statements are not allowed';
-  end if;
-  if lower(cleaned) !~ '^(select|with)\s' then
-    raise exception 'only read-only SELECT/WITH queries are allowed';
-  end if;
-
-  -- Hard database-level guard: any INSERT/UPDATE/DELETE/DDL fails under this.
-  set local transaction_read_only = on;
-
-  execute format(
-    'select coalesce(jsonb_agg(to_jsonb(t)), ''[]''::jsonb)
-       from ( select * from ( %s ) _q limit %s ) t',
-    cleaned,
-    capped
-  )
-  into result;
-
-  return result;
-end;
+end
 $$;
 
--- The agent calls this with the service role key.
-grant execute on function public.exec_read_sql(text, int) to service_role;
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'bidoc_data_query') then
+    create role bidoc_data_query nologin noinherit;
+  end if;
+end
+$$;
 
--- Refresh PostgREST so the new RPC is visible immediately (avoids the
--- "could not find function / schema cache" error).
+grant bidoc_data_query to authenticator;
+alter role bidoc_data_query set statement_timeout = '8s';
+
+grant usage on schema public to bidoc_data_query;
+grant select on table public.data_index to bidoc_data_query;
+revoke insert, update, delete, truncate, references, trigger
+  on table public.data_index from bidoc_data_query;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'data_index'
+      and policyname = 'data_index_bidoc_data_query_select'
+  ) then
+    create policy data_index_bidoc_data_query_select
+      on public.data_index
+      for select
+      to bidoc_data_query
+      using (true);
+  end if;
+end
+$$;
+
 notify pgrst, 'reload schema';

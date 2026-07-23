@@ -254,7 +254,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     : [];
   const safetyResults = await Promise.all(
     safetyPrecheckTools.map((toolName) =>
-      callProjectTool({ toolName, message, classification, sessionId, config, cacheContext, telemetryFor }).then((result) => {
+      callProjectTool({ toolName, message, classification, sessionId, config, runId, cacheContext, telemetryFor }).then((result) => {
         emitRunEvent(runId, "safety_precheck", `Safety precheck ${toolName} completed`, {
           ok: result.ok, skipped: result.skipped || false, error: result.error || null
         });
@@ -440,7 +440,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools in parallel", { tools });
   const toolResults = await Promise.all(
     tools.map((toolName) =>
-      callProjectTool({ toolName, message, classification, sessionId, config, cacheContext, telemetryFor }).then((result) => {
+      callProjectTool({ toolName, message, classification, sessionId, config, runId, cacheContext, telemetryFor }).then((result) => {
         if (toolName === "meeting_evidence_search") {
           emitRunEvent(runId, "meeting_evidence", `Meeting Evidence Agent completed`, {
             ok: result.ok,
@@ -667,7 +667,7 @@ Use this exact schema:
   }
 }
 
-async function callProjectTool({ toolName, message, classification, sessionId, config, cacheContext = null, telemetryFor }) {
+async function callProjectTool({ toolName, message, classification, sessionId, config, runId = null, cacheContext = null, telemetryFor }) {
   if (toolName === "data_query") {
     try {
       const result = await runDataQueryAgent({
@@ -677,14 +677,16 @@ async function callProjectTool({ toolName, message, classification, sessionId, c
           dateFrom: classification?.date_from || null,
           dateTo: classification?.date_to || null,
           sessionId,
-          source: "main_agent"
+          source: "main_agent",
+          runId,
+          callerNodeId: "main_agent"
         },
         telemetry: telemetryFor("data_query")
       });
       return {
         toolName,
         ok: ["ok", "partial"].includes(result.status),
-        skipped: ["skipped", "needs_clarification"].includes(result.status),
+        skipped: ["skipped", "needs_clarification", "not_computable"].includes(result.status),
         data: result,
         answer: result.answer,
         sources: []
@@ -884,6 +886,7 @@ CRITICAL KNOWLEDGE BOUNDARY:
 - knowledge_plan is planning guidance only. It is not project evidence.
 - Use knowledge_plan to decide what to look for and how to reason.
 - Final factual claims must come only from retrieval_context, retrieval_results, tool_results, graph_context/project_graph_findings when they are connected to retrieved records, or explicit user input from the current request.
+- For Data Query Agent output, consume numeric facts only from data.machineResult.metricsByRequestId and its planStatusByRequestId. Never parse numeric facts from the Data Query answer prose, and preserve exactness/truncation warnings.
 - Conversation memory is only for understanding follow-up wording. Never repeat an earlier assistant answer when current retrieval/tool results contradict it or provide newer evidence.
 - Never cite Knowledge Base excerpts as project sources unless they also appear in retrieval/tool results.
 
@@ -1451,9 +1454,13 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
           allowed_tables: config.dataQuery?.allowedTables || []
         }, {
           status: dataQueryCall.data?.status || null,
+          contract_version: dataQueryCall.data?.contractVersion || null,
+          caller: dataQueryCall.data?.caller || null,
+          routing: dataQueryCall.data?.routing || null,
           plans_executed: dataQueryCall.data?.plans || [],
           rows_returned: (dataQueryCall.data?.plans || []).reduce((sum, plan) => sum + Number(plan.rows || 0), 0),
           metrics: dataQueryCall.data?.metrics || [],
+          machine_result: dataQueryCall.data?.machineResult || null,
           tables_used: dataQueryCall.data?.tablesUsed || [],
           warnings: dataQueryCall.data?.warnings || [],
           error: dataQueryCall.error || null

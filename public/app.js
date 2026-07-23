@@ -71,12 +71,10 @@ const DATA_QUERY_DEFAULTS = {
   maxRowsPerPlan: 200,
   timeoutMsPerPlan: 8000,
   totalTimeoutMs: 20000,
+  runCacheEnabled: true,
+  runCacheTtlMs: 60000,
   allowedTables: [],
-  allowedSchemas: ["app", "content"],
-  allowRawSql: false,
-  allowJoins: false,
-  allowAggregations: true,
-  requireHumanApprovalForRawSql: true,
+  allowedSchemas: ["content"],
   plannerEnabled: true,
   plannerModel: "",
   plannerTimeoutMs: 30000
@@ -592,8 +590,9 @@ function renderContentToolCards(list, models) {
   populateContentToolTablesDatalist();
 }
 
-// Lazily fills the shared datalist of Content-DB tables for the .ct-table
-// inputs, reusing the data-query schema endpoint (content connection only).
+// Fills the shared datalist from already-authorized saved settings. Phase 1
+// protects schema introspection with a server secret, so browser code no longer
+// calls that privileged endpoint directly.
 let _contentTablesDatalistLoaded = false;
 async function populateContentToolTablesDatalist() {
   let datalist = document.getElementById("contentToolTables");
@@ -603,17 +602,11 @@ async function populateContentToolTablesDatalist() {
     document.body.append(datalist);
   }
   if (_contentTablesDatalistLoaded) return;
-  try {
-    const schema = await api("/api/subagents/data-query/schema", { method: "GET" });
-    const tables = (schema.connections || schema.tables || [])
-      .flatMap((connection) => connection.tables || (connection.table ? [connection] : []))
-      .map((table) => table.table || table.name)
-      .filter(Boolean);
-    datalist.innerHTML = [...new Set(tables)].sort().map((name) => `<option value="${name}"></option>`).join("");
-    _contentTablesDatalistLoaded = tables.length > 0;
-  } catch {
-    // Best-effort — free-text table input still works without the datalist.
-  }
+  const dataQueryTables = state.settings?.subagents?.dataQuery?.tables || [];
+  const contentToolTables = Object.values(state.settings?.subagents?.contentTools?.perTool || {}).map((item) => item?.table);
+  const tables = [...dataQueryTables.map((item) => item?.table), ...contentToolTables].filter(Boolean);
+  datalist.innerHTML = [...new Set(tables)].sort().map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
+  _contentTablesDatalistLoaded = tables.length > 0;
 }
 
 function renderIndexingCard(list) {
@@ -915,7 +908,7 @@ function loadSubAgents() {
       <span class="subagent-name">Data Query Agent</span>
       <span class="subagent-status ${dqCfg.enabled ? "status-ok" : "status-warn"}">${dqCfg.enabled ? "פעיל" : "כבוי"}</span>
     </div>
-    <p class="subagent-desc">Read-only metrics agent for safe table counts, breakdowns, simple aggregations and KPI-style summaries. Uses an allowlisted Query Plan and never runs free raw SQL.</p>
+    <p class="subagent-desc">Content-DB-only metrics agent. Contract data-query.v2 accepts scoped, typed Query Plans, narrows caller budgets, deduplicates identical plans within one run, and routes semantic/citation questions to retrieval agents. Exact database access uses a short-lived managed service identity; direct API calls require the server-side BIDOC_API_SECRET.</p>
     <div class="subagent-config">
       <label class="subagent-config-label toggleLabel">
         <input type="checkbox" id="dqEnabled" ${dqCfg.enabled ? "checked" : ""} /> הפעל סוכן
@@ -941,107 +934,29 @@ function loadSubAgents() {
       <label class="subagent-config-label">Total timeout (ms)
         <input type="number" id="dqTotalTimeoutMs" value="${dqCfg.totalTimeoutMs}" min="1000" max="120000" step="1000" />
       </label>
+      <label class="subagent-config-label toggleLabel">
+        <input type="checkbox" id="dqRunCacheEnabled" ${dqCfg.runCacheEnabled !== false ? "checked" : ""} /> Run-local dedup cache
+      </label>
+      <label class="subagent-config-label">Run cache TTL (ms)
+        <input type="number" id="dqRunCacheTtlMs" value="${dqCfg.runCacheTtlMs || DATA_QUERY_DEFAULTS.runCacheTtlMs}" min="1000" max="300000" step="1000" />
+      </label>
       <div class="dqTablesPicker">
         <div class="dqTablesHeader">
-          <span>טבלאות מורשות — נבחרות מסריקת ה-DB האמיתי. הסוכן ישתמש רק במה שמסומן.</span>
-          <button type="button" id="dqScanBtn">סרוק את ה-DB</button>
+          <span>טבלאות Content מורשות — מנוהלות בהגדרות המאובטחות. הסוכן משתמש רק במה שמסומן.</span>
         </div>
         <input type="search" id="dqTableSearch" placeholder="חיפוש טבלה..." autocomplete="off" />
         <div id="dqTablesStatus" class="dqTablesStatus"></div>
         <div id="dqTablesList" class="dqTablesList"></div>
       </div>
-      <label class="subagent-config-label toggleLabel">
-        <input type="checkbox" id="dqAllowAggregations" ${dqCfg.allowAggregations !== false ? "checked" : ""} /> Allow aggregations
-      </label>
-      <label class="subagent-config-label toggleLabel">
-        <input type="checkbox" id="dqAllowRawSql" ${dqCfg.allowRawSql ? "checked" : ""} disabled /> Raw SQL disabled
-      </label>
-      <label class="subagent-config-label toggleLabel">
-        <input type="checkbox" id="dqAllowJoins" ${dqCfg.allowJoins ? "checked" : ""} disabled /> Joins disabled in v1
-      </label>
       <button id="dqSaveBtn">שמור הגדרות</button>
       <span id="dqSaveStatus"></span>
     </div>
-    <div class="subagent-test">
-      <textarea class="subagent-query" id="dqTestQuestion" rows="3" placeholder="כמה אירועי עיכוב יש לפי סטטוס?"></textarea>
-      <input class="subagent-date" id="dqDateFrom" placeholder="date_from YYYY-MM-DD" />
-      <input class="subagent-date" id="dqDateTo" placeholder="date_to YYYY-MM-DD" />
-      <button id="dqRunBtn">הרץ בדיקה</button>
-    </div>
-    <pre class="subagent-result" id="dqResult">אין תוצאה עדיין.</pre>
-    <div class="dqPipeline">
-      <div class="dqPipelineHeader">
-        <span>פייפליין SQL — הרצה שלב אחר שלב</span>
-        <button type="button" id="dqPipelineRunAll">הרץ הכל</button>
-        <button type="button" id="dqPipelineReset">איפוס</button>
-      </div>
-      <div id="dqPipelineSteps"></div>
-    </div>
+    <p class="subagent-desc">בדיקה תפעולית מתבצעת דרך הצ׳אט הראשי או דרך <code>POST /api/subagents/data-query</code> עם כותרת <code>X-Bidoc-Api-Secret</code>.</p>
   `;
-  // --- SQL pipeline (step-by-step runner) ---
-  const DQ_PIPELINE_STEPS = [
-    { id: "user_question", label: "User Question", desc: "קבלת שאלה חופשית בטקסט" },
-    { id: "schema_inspection", label: "Schema Inspection", desc: "בדיקת טבלאות ושדות זמינים" },
-    { id: "field_selection", label: "Field & Table Selection", desc: "בחירת מקורות הנתונים הרלוונטיים" },
-    { id: "sql_generation", label: "SQL Generation", desc: "יצירת שאילתת SQL לפי הבקשה והשדות" },
-    { id: "sql_execution", label: "SQL Execution", desc: "הרצת השאילתה מול בסיס הנתונים" },
-    { id: "calculation", label: "Server-side Calculation", desc: "חישובים כמותיים: ספירה, סכימה, ממוצעים, חריגות" },
-    { id: "result", label: "Quantitative Result", desc: "החזרת נתונים מספריים מסודרים" }
-  ];
-  let dqPipeState = {};
-  function dqRenderPipeline() {
-    const host = dqCard.querySelector("#dqPipelineSteps");
-    host.innerHTML = "";
-    DQ_PIPELINE_STEPS.forEach((stepDef, index) => {
-      const card = document.createElement("div");
-      card.className = "dqStepCard";
-      card.dataset.step = stepDef.id;
-      card.innerHTML = `
-        <div class="dqStepHead">
-          <button type="button" class="dqStepPlay" title="הרץ שלב זה" aria-label="הרץ ${escapeHtml(stepDef.label)}">▶</button>
-          <div class="dqStepTitle"><span class="dqStepNum">${index + 1}</span> ${escapeHtml(stepDef.label)}<small>${escapeHtml(stepDef.desc)}</small></div>
-          <span class="dqStepStatus"></span>
-        </div>
-        <pre class="dqStepOutput" hidden></pre>`;
-      card.querySelector(".dqStepPlay").addEventListener("click", () => dqRunStep(stepDef.id, card));
-      host.append(card);
-    });
-  }
-  async function dqRunStep(step, card) {
-    const statusEl = card.querySelector(".dqStepStatus");
-    const outEl = card.querySelector(".dqStepOutput");
-    statusEl.textContent = "מריץ...";
-    statusEl.className = "dqStepStatus running";
-    try {
-      const result = await api("/api/subagents/data-query/step", {
-        method: "POST",
-        body: {
-          step,
-          state: dqPipeState,
-          question: dqCard.querySelector("#dqTestQuestion").value,
-          context: { dateFrom: dqCard.querySelector("#dqDateFrom").value || null, dateTo: dqCard.querySelector("#dqDateTo").value || null, source: "subagents_ui" }
-        }
-      });
-      if (result.state) dqPipeState = result.state;
-      const failed = result.status === "error";
-      statusEl.textContent = failed ? "✗ שגיאה" : "✓ בוצע";
-      statusEl.className = `dqStepStatus ${failed ? "err" : "ok"}`;
-      const tok = result.openRouterUsage?.totals?.total_tokens;
-      outEl.hidden = false;
-      outEl.textContent = failed
-        ? (result.error || "שגיאה")
-        : JSON.stringify(result.output, null, 2) + (tok ? `\n\n— ${tok} tokens, $${result.openRouterUsage.totals.cost ?? 0}` : "");
-    } catch (error) {
-      statusEl.textContent = "✗ שגיאה";
-      statusEl.className = "dqStepStatus err";
-      outEl.hidden = false;
-      outEl.textContent = `Error: ${error.message}`;
-    }
-  }
   // --- DB table picker state & rendering ---
   const dqSavedSelection = (Array.isArray(dqCfg.tables) ? dqCfg.tables : [])
     .map((t) => ({
-      connection: String(t.connection || t.schema || "app"),
+      connection: "content",
       schema: String(t.schema || "public"),
       table: String(t.table || t.name || ""),
       columns: Array.isArray(t.columns) ? t.columns.map(String) : []
@@ -1049,10 +964,8 @@ function loadSubAgents() {
     .filter((t) => t.table);
   const dqCheckedKeys = new Set(dqSavedSelection.map((t) => `${t.connection}.${t.table}`));
   const dqColumnsByKey = new Map(dqSavedSelection.map((t) => [`${t.connection}.${t.table}`, t.columns]));
-  let dqScan = { connections: [] };
-  const dqConnLabel = (key) => (key === "content" ? "מאגר תוכן" : "מאגר ראשי");
+  const dqConnLabel = () => "מאגר תוכן";
   function dqDisplayConnections() {
-    if (dqScan.connections.length) return dqScan.connections;
     const byConn = {};
     for (const t of dqSavedSelection) (byConn[t.connection] ||= []).push({ name: t.table, columns: t.columns });
     return Object.entries(byConn).map(([key, tables]) => ({ key, label: dqConnLabel(key), schema: "public", tables }));
@@ -1066,9 +979,9 @@ function loadSubAgents() {
   function dqUpdateStatus() {
     const statusEl = dqCard.querySelector("#dqTablesStatus");
     const total = dqDisplayConnections().reduce((sum, c) => sum + c.tables.length, 0);
-    statusEl.textContent = dqScan.connections.length
-      ? `נמצאו ${total} טבלאות · נבחרו ${dqCheckedKeys.size}`
-      : (dqSavedSelection.length ? `נבחרו ${dqCheckedKeys.size} טבלאות (לחץ "סרוק את ה-DB" לעדכון הרשימה)` : 'לא נסרק עדיין — לחץ "סרוק את ה-DB" כדי לבחור טבלאות.');
+    statusEl.textContent = dqSavedSelection.length
+      ? `מוגדרות ${total} טבלאות Content · נבחרו ${dqCheckedKeys.size}`
+      : "אין טבלאות Content מאושרות בהגדרות.";
   }
   function dqRenderTablesList() {
     const listEl = dqCard.querySelector("#dqTablesList");
@@ -1108,36 +1021,8 @@ function loadSubAgents() {
     if (!listEl.children.length) listEl.innerHTML = '<div class="dqTablesEmpty">אין טבלאות להצגה.</div>';
   }
   dqCard.querySelector("#dqTableSearch").addEventListener("input", dqRenderTablesList);
-  dqCard.querySelector("#dqScanBtn").addEventListener("click", async () => {
-    const btn = dqCard.querySelector("#dqScanBtn");
-    const statusEl = dqCard.querySelector("#dqTablesStatus");
-    btn.disabled = true; statusEl.textContent = "סורק...";
-    try {
-      const result = await api("/api/subagents/data-query/schema");
-      dqScan = { connections: Array.isArray(result.connections) ? result.connections : [] };
-      for (const c of dqScan.connections) for (const t of c.tables) dqColumnsByKey.set(`${c.key}.${t.name}`, t.columns || []);
-      dqRenderTablesList();
-      dqUpdateStatus();
-      if (result.warnings?.length) showToast(`סריקה הושלמה עם אזהרות: ${result.warnings.join("; ")}`);
-    } catch (error) {
-      statusEl.textContent = `שגיאת סריקה: ${error.message}`;
-    } finally {
-      btn.disabled = false;
-    }
-  });
   dqRenderTablesList();
   dqUpdateStatus();
-
-  dqRenderPipeline();
-  dqCard.querySelector("#dqPipelineReset").addEventListener("click", () => { dqPipeState = {}; dqRenderPipeline(); });
-  dqCard.querySelector("#dqPipelineRunAll").addEventListener("click", async () => {
-    const cards = [...dqCard.querySelectorAll(".dqStepCard")];
-    dqPipeState = {};
-    for (const card of cards) {
-      await dqRunStep(card.dataset.step, card);
-      if (card.querySelector(".dqStepStatus").classList.contains("err")) break;
-    }
-  });
 
   dqCard.querySelector("#dqSaveBtn").addEventListener("click", () => {
     const updated = {
@@ -1149,13 +1034,11 @@ function loadSubAgents() {
       maxRowsPerPlan: Number(dqCard.querySelector("#dqMaxRowsPerPlan").value) || DATA_QUERY_DEFAULTS.maxRowsPerPlan,
       timeoutMsPerPlan: Number(dqCard.querySelector("#dqTimeoutMsPerPlan").value) || DATA_QUERY_DEFAULTS.timeoutMsPerPlan,
       totalTimeoutMs: Number(dqCard.querySelector("#dqTotalTimeoutMs").value) || DATA_QUERY_DEFAULTS.totalTimeoutMs,
+      runCacheEnabled: dqCard.querySelector("#dqRunCacheEnabled").checked,
+      runCacheTtlMs: Number(dqCard.querySelector("#dqRunCacheTtlMs").value) || DATA_QUERY_DEFAULTS.runCacheTtlMs,
       tables: dqCollectSelectedTables(),
       allowedTables: dqCollectSelectedTables().map((item) => item.table),
-      allowedSchemas: [...new Set(dqCollectSelectedTables().map((item) => item.connection))],
-      allowRawSql: false,
-      allowJoins: false,
-      allowAggregations: dqCard.querySelector("#dqAllowAggregations").checked,
-      requireHumanApprovalForRawSql: true
+      allowedSchemas: ["content"]
     };
     state.settings = {
       ...(state.settings || {}),
@@ -1166,31 +1049,6 @@ function loadSubAgents() {
     dqCard.querySelector("#dqSaveStatus").textContent = "✓ עודכן בטופס";
     showToast("Data Query Agent settings were loaded into the draft. Save Settings to persist.");
     setTimeout(() => { dqCard.querySelector("#dqSaveStatus").textContent = ""; }, 2500);
-  });
-  dqCard.querySelector("#dqRunBtn").addEventListener("click", async () => {
-    const resultEl = dqCard.querySelector("#dqResult");
-    resultEl.textContent = "מריץ...";
-    try {
-      const result = await api("/api/subagents/data-query", {
-        method: "POST",
-        body: {
-          question: dqCard.querySelector("#dqTestQuestion").value,
-          context: {
-            dateFrom: dqCard.querySelector("#dqDateFrom").value || null,
-            dateTo: dqCard.querySelector("#dqDateTo").value || null,
-            source: "subagents_ui"
-          }
-        }
-      });
-      resultEl.textContent = JSON.stringify(result, null, 2);
-      if (result.workflowLog) {
-        state.lastWorkflow = result.workflowLog;
-        if (state.runHistory) loadRunHistory();
-        showToast("הריצה נוספה לזרימת העבודה — פתח את הטאב 'זרימת עבודה' כדי לראות את הרכיבים.");
-      }
-    } catch (error) {
-      resultEl.textContent = `Error: ${error.message}`;
-    }
   });
   list.append(dqCard);
   enhanceParameterInfoControls();
@@ -6755,9 +6613,6 @@ function parameterExplanation(id, title) {
     dqMaxRowsPerPlan: "מספר השורות המקסימלי שכל תוכנית שאילתה תמשוך מ-Supabase לפני חישוב מקומי.",
     dqTimeoutMsPerPlan: "כמה זמן לחכות לכל שאילתת Supabase בודדת לפני שמחשיבים אותה ככושלת. נמדד במילישניות.",
     dqTotalTimeoutMs: "תקרת זמן כוללת לכל תוכניות השאילתה יחד באותה ריצה. נמדד במילישניות.",
-    dqAllowAggregations: "כשפעיל, הסוכן רשאי לחשב מדדים מצרפיים (count, avg, min, max, sum) ולא רק לשלוף שורות.",
-    dqAllowRawSql: "מושבת בכוונה: הסוכן לעולם לא מריץ SQL גולמי חופשי, אלא רק תוכניות שאילתה מאושרות מרשימה לבנה. זו שכבת בטיחות.",
-    dqAllowJoins: "מושבת בגרסה הנוכחית: הסוכן לא מבצע JOIN בין טבלאות. שאלות שדורשות חיבור מפוצלות לתוכניות נפרדות."
   };
   return explanations[id] || `הגדרה מתקדמת עבור ${title}.`;
 }

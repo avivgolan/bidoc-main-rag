@@ -472,13 +472,11 @@ const DEFAULT_DATA_QUERY_SETTINGS = {
   maxRowsPerPlan: 200,
   timeoutMsPerPlan: 8000,
   totalTimeoutMs: 20000,
+  runCacheEnabled: true,
+  runCacheTtlMs: 60000,
   allowedTables: [],
   allowedSchemas: ["content"],
   tables: [],
-  allowRawSql: false,
-  allowJoins: false,
-  allowAggregations: true,
-  requireHumanApprovalForRawSql: true,
   plannerEnabled: true,
   plannerModel: "",
   plannerTimeoutMs: 30000
@@ -544,6 +542,14 @@ export function getConfig(settingsOverride = null) {
     supabaseUrl: appSupabaseUrl,
     supabaseServiceRoleKey: appSupabaseServiceRoleKey,
     contentSource,
+    // Managed Supabase Auth service-account credentials. They are kept out of
+    // persisted/public settings and exchange only for short-lived server-side
+    // access tokens carrying app_metadata.data_query_role=bidoc_data_query.
+    dataQueryServiceEmail: String(process.env.DATA_QUERY_SUPABASE_SERVICE_EMAIL || "").trim(),
+    dataQueryServicePassword: String(process.env.DATA_QUERY_SUPABASE_SERVICE_PASSWORD || ""),
+    // Temporary compatibility path for the former manually minted custom-role
+    // JWT. Managed service-account credentials take precedence when configured.
+    dataQueryReadAccessToken: String(process.env.DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN || "").trim(),
     postgresUrl: process.env.POSTGRES_URL || "",
     models: {
       classifier: settings.models?.classifier || process.env.CLASSIFIER_MODEL || "openai/gpt-4o-mini",
@@ -950,20 +956,18 @@ export function normalizeDataQuerySettings(value = {}) {
   // The user's real-DB table picks are the source of truth. They MUST be
   // preserved through normalization (this is what getConfig/publicSettings
   // expose), otherwise the selection silently disappears on every reload.
-  const tables = normalizeDataQueryTables(raw.tables);
+  const tables = normalizeDataQueryTables(raw.tables).filter((item) => item.connection === "content");
   return {
     enabled: raw.enabled !== false,
     maxPlans: clampNumber(raw.maxPlans, 1, 10, d.maxPlans),
     maxRowsPerPlan: clampNumber(raw.maxRowsPerPlan, 1, 1000, d.maxRowsPerPlan),
     timeoutMsPerPlan: clampNumber(raw.timeoutMsPerPlan, 1000, 60000, d.timeoutMsPerPlan),
     totalTimeoutMs: clampNumber(raw.totalTimeoutMs, 1000, 120000, d.totalTimeoutMs),
+    runCacheEnabled: raw.runCacheEnabled !== false,
+    runCacheTtlMs: clampNumber(raw.runCacheTtlMs, 1000, 300000, d.runCacheTtlMs),
     allowedTables: tables.length ? tables.map((item) => item.table) : normalizeStringList(raw.allowedTables, d.allowedTables),
-    allowedSchemas: tables.length ? [...new Set(tables.map((item) => item.connection))] : normalizeStringList(raw.allowedSchemas, d.allowedSchemas),
+    allowedSchemas: ["content"],
     tables,
-    allowRawSql: raw.allowRawSql === true,
-    allowJoins: raw.allowJoins === true,
-    allowAggregations: raw.allowAggregations !== false,
-    requireHumanApprovalForRawSql: raw.requireHumanApprovalForRawSql !== false,
     plannerEnabled: raw.plannerEnabled !== false,
     plannerModel: String(raw.plannerModel || "").trim(),
     plannerTimeoutMs: clampNumber(raw.plannerTimeoutMs, 5000, 90000, d.plannerTimeoutMs)

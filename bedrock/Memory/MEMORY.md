@@ -2,7 +2,7 @@
 note_type: durable-memory-root
 project: bidoc agent
 status: active
-last_updated: 2026-05-09
+last_updated: 2026-07-23
 tags:
   - bedrock
   - memory
@@ -45,7 +45,7 @@ the right branch notes.
 
 - [stack.md](stack.md) - Runtime, deployment, persistence, and test command notes.
 - [chat.md](chat.md) - Main chat pipeline, classifier output, RAG routing, and tool-call flow.
-- [subagents.md](subagents.md) - Alert subagent configuration, endpoint, and date-filter behavior.
+- [subagents.md](subagents.md) - Alert behavior plus the Data Query Agent security, exactness, reusable caller contract, and managed service-account authentication.
 - [timeline.md](timeline.md) - Timeline page frontend behavior and interaction notes.
 - [workflow.md](workflow.md) - Workflow QA inspector UI, run history selection, and node-card debug display.
 - [delay-claims.md](delay-claims.md) - Insights tab, delay claim schema, CRUD/API, and Stage 1 constraints.

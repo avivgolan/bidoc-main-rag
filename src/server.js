@@ -12,8 +12,9 @@ import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventT
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
+import { authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
-import { buildDataQueryWorkflowLog, DATA_QUERY_PIPELINE_STEPS, introspectSupabaseTables, runDataQueryAgent, runDataQueryPipeline, runDataQueryStep } from "./subagents/dataQuery.js";
+import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { consolidateGraphEntities, runGraphEnrichment } from "./subagents/graphEnrichment.js";
@@ -709,92 +710,23 @@ async function handleApi(req, res, url) {
     }
   }
 
-  if (req.method === "POST" && url.pathname === "/api/subagents/data-query/step") {
-    const body = await readJson(req).catch(() => ({}));
-    const step = String(body.step || "").trim();
-    if (!DATA_QUERY_PIPELINE_STEPS.some((s) => s.id === step)) {
-      return sendJson(res, 400, { error: `unknown step "${step}"`, steps: DATA_QUERY_PIPELINE_STEPS });
-    }
-    const state = {
-      ...(body.state && typeof body.state === "object" ? body.state : {}),
-      question: body.question ?? body.state?.question ?? "",
-      context: body.context ?? body.state?.context ?? {}
-    };
-    const calls = [];
-    const telemetry = { step: "data_query", callId: `dq_${step}`, record: (entry) => calls.push(entry) };
-    try {
-      const result = await runDataQueryStep({ step, state, config: config(), telemetry });
-      return sendJson(res, 200, { step, output: result.output, state: result.state, openRouterUsage: summarizeOpenRouterUsage(calls) });
-    } catch (error) {
-      return sendJson(res, 200, { step, status: "error", error: error.message, state, openRouterUsage: summarizeOpenRouterUsage(calls) });
-    }
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/subagents/data-query/pipeline") {
-    const body = await readJson(req).catch(() => ({}));
-    const question = String(body.question || body.query || "").trim();
-    const context = {
-      ...(body.context && typeof body.context === "object" ? body.context : {}),
-      dateFrom: body.dateFrom || body.date_from || body.context?.dateFrom || null,
-      dateTo: body.dateTo || body.date_to || body.context?.dateTo || null,
-      source: body.source || body.context?.source || "api"
-    };
-    const runId = String(body.runId || `dqp_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-    createRun(runId);
-    emitRunEvent(runId, "chat_input", "שאלת בדיקה התקבלה", { question, context });
-    const calls = [];
-    const telemetry = { step: "data_query", callId: "dqp", record: (entry) => { calls.push(entry); emitRunEvent(runId, "data_query", "OpenRouter usage recorded", { openrouter: entry }); } };
-    try {
-      const result = await runDataQueryPipeline({
-        question, context, config: config(), telemetry,
-        onStep: (entry) => emitRunEvent(runId, "data_query", `${entry.label}: ${entry.status}`, { step: entry.id, status: entry.status, error: entry.error || null })
-      });
-      completeRun(runId, { status: result.status });
-      recordRunHistory({ id: runId, title: `סוכן שאילתות (SQL) · ${(question || "בדיקה").slice(0, 40)}`, runEvents: getRunEvents(runId), kind: "data_query" });
-      return sendJson(res, result.status === "error" ? 200 : 200, { ...result, runId, openRouterUsage: summarizeOpenRouterUsage(calls) });
-    } catch (error) {
-      failRun(runId, error);
-      return sendJson(res, 500, { status: "error", error: error.message, steps: [], runId });
-    }
-  }
-
-  if (req.method === "GET" && url.pathname === "/api/subagents/data-query/schema") {
-    const cfg = config();
-    const contentConn = contentSupabaseConfig(cfg);
-    // The Data Query Agent is restricted to the content connection only.
-    const targets = [
-      { key: "content", label: "מאגר תוכן", supabaseUrl: contentConn.supabaseUrl, supabaseServiceRoleKey: contentConn.supabaseServiceRoleKey }
-    ];
-    const connections = [];
-    const warnings = [];
-    const seenUrls = new Set();
-    for (const target of targets) {
-      if (!target.supabaseUrl || !target.supabaseServiceRoleKey) {
-        warnings.push(`${target.key}: Supabase לא מוגדר`);
-        continue;
-      }
-      if (seenUrls.has(target.supabaseUrl)) continue;
-      seenUrls.add(target.supabaseUrl);
-      try {
-        const tables = await introspectSupabaseTables({ supabaseUrl: target.supabaseUrl, supabaseServiceRoleKey: target.supabaseServiceRoleKey });
-        connections.push({ key: target.key, label: target.label, schema: "public", tables });
-      } catch (error) {
-        warnings.push(`${target.key}: ${error.message}`);
-      }
-    }
-    return sendJson(res, connections.length ? 200 : 502, { connections, warnings });
-  }
-
   if (req.method === "POST" && url.pathname === "/api/subagents/data-query") {
+    const access = authorizeDataQueryRequest(req);
+    if (!access.ok) return sendJson(res, access.status, { error: access.error });
     const body = await readJson(req).catch(() => ({}));
     const question = body.question || body.query || "";
+    const runId = String(body.runId || body.run_id || `dq_${Date.now()}_${Math.random().toString(16).slice(2)}`);
     const dqContext = {
       ...(body.context && typeof body.context === "object" ? body.context : {}),
       dateFrom: body.dateFrom || body.date_from || body.context?.dateFrom || body.context?.date_from || null,
       dateTo: body.dateTo || body.date_to || body.context?.dateTo || body.context?.date_to || null,
-      source: body.source || body.context?.source || "api"
+      projectId: body.projectId || body.project_id || body.context?.projectId || body.context?.project_id || null,
+      caseId: body.caseId || body.case_id || body.context?.caseId || body.context?.case_id || null,
+      source: body.source || body.context?.source || "api",
+      runId,
+      callerNodeId: body.callerNodeId || body.caller_node_id || body.context?.callerNodeId || body.context?.caller_node_id || null,
+      budget: body.budget && typeof body.budget === "object" ? body.budget : body.context?.budget || {}
     };
-    const runId = String(body.runId || body.run_id || `dq_${Date.now()}_${Math.random().toString(16).slice(2)}`);
     createRun(runId);
     emitRunEvent(runId, "chat_input", "שאלת בדיקה התקבלה", { question, context: dqContext });
     const dqOpenRouterCalls = [];
@@ -812,9 +744,17 @@ async function handleApi(req, res, url) {
         question,
         context: dqContext,
         requestedMetrics: body.requestedMetrics || body.requested_metrics || [],
+        budget: dqContext.budget,
         maxPlans: body.maxPlans,
         queryPlan: body.queryPlan || body.query_plan || null,
         telemetry: dqTelemetry
+      });
+      emitRunEvent(runId, "data_query", "Capability routing completed", {
+        contractVersion: result.contractVersion || null,
+        source: result.caller?.source || dqContext.source,
+        domain: result.routing?.domain || null,
+        supported: result.routing?.supported !== false,
+        suggestedAgent: result.routing?.suggestedAgent || null
       });
       emitRunEvent(runId, "data_query", `תכנון באמצעות ${result.planner || "unknown"}`, {
         planner: result.planner || "unknown",
@@ -822,7 +762,16 @@ async function handleApi(req, res, url) {
       });
       emitRunEvent(runId, "data_query", "אימות תוכניות שאילתה", { accepted: result.plans?.length || 0 });
       for (const plan of result.plans || []) {
-        emitRunEvent(runId, "data_query", `הרצת ${plan.table}`, { id: plan.id, table: plan.table, status: plan.status, rows: plan.rows });
+        emitRunEvent(runId, "data_query", `הרצת ${plan.table}`, {
+          id: plan.id,
+          table: plan.table,
+          operation: plan.operation,
+          status: plan.status,
+          rows: plan.rows,
+          cardinality: plan.cardinality ?? null,
+          exactness: plan.exactness || null,
+          truncated: plan.truncated === true
+        });
       }
       emitRunEvent(runId, "data_query", "סינתוז תשובה", { metrics: (result.metrics || []).length, status: result.status });
       const workflowLog = buildDataQueryWorkflowLog(result, { question, context: dqContext, openRouterCalls: dqOpenRouterCalls });
