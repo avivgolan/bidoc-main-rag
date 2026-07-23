@@ -23,6 +23,7 @@ import { callInternalContentTool, CONTENT_TOOL_SPECS, isInternalContentTool } fr
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
+import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession } from "./auth.js";
 
 loadEnv();
 
@@ -93,7 +94,7 @@ async function handler(req, res) {
       await handleApi(req, res, url);
       return;
     }
-    serveStatic(res, url.pathname);
+    serveStatic(req, res, url.pathname);
   } catch (error) {
     sendJson(res, 500, { error: error.message });
   }
@@ -127,6 +128,42 @@ async function handleApi(req, res, url) {
     const unsubscribe = subscribeRun(runId, res);
     req.on("close", unsubscribe);
     return;
+  }
+
+  // ─── Login wall (same-origin UI only; cross-tenant bidoc calls are unaffected) ──
+  if (req.method === "POST" && url.pathname === "/api/auth/login") {
+    const body = await readJson(req);
+    try {
+      const user = await authenticateAgainstBidoc(String(body.email || "").trim(), String(body.password || ""));
+      res.setHeader("Set-Cookie", buildSessionSetCookieHeader(user));
+      return sendJson(res, 200, { success: true, email: user.email });
+    } catch (error) {
+      return sendJson(res, 401, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/auth/logout") {
+    res.setHeader("Set-Cookie", buildLogoutSetCookieHeader());
+    return sendJson(res, 200, { success: true });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/auth/session") {
+    const session = getSuperadminSession(req);
+    return sendJson(res, 200, { authenticated: Boolean(session), email: session?.email || null });
+  }
+
+  // Every route is gated here up front (rather than per-route) so routes that
+  // never had their own checkBidocSecretForRead guard (e.g. /api/messages/:id/annotate)
+  // are covered too. Cross-tenant calls (bidoc's BFF) must carry a valid shared
+  // secret — merely sending the content-supabase-url header is not enough to
+  // bypass the login wall. Same-origin calls (the standalone UI) need a session.
+  if (!url.pathname.startsWith("/api/auth/")) {
+    const isCrossTenantApiRequest = Boolean(req.headers["x-content-supabase-url"]);
+    if (isCrossTenantApiRequest) {
+      if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
+    } else if (!getSuperadminSession(req)) {
+      return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
+    }
   }
 
   if (req.method === "POST" && url.pathname === "/api/chat") {
@@ -1237,8 +1274,15 @@ function normalizeChatAttachments(value) {
   })).filter((item) => item.content.trim());
 }
 
-function serveStatic(res, pathname) {
+function serveStatic(req, res, pathname) {
   const safePath = pathname === "/" ? "/index.html" : pathname;
+  // Login wall: any HTML page other than the login page itself requires a
+  // valid superadmin session cookie, otherwise redirect to /login.html.
+  if (safePath.endsWith(".html") && safePath !== "/login.html" && !getSuperadminSession(req)) {
+    res.writeHead(302, { Location: "/login.html" });
+    res.end();
+    return;
+  }
   const fullPath = path.normalize(path.join(PUBLIC_DIR, safePath));
   if (!fullPath.startsWith(PUBLIC_DIR) || !fs.existsSync(fullPath)) {
     sendText(res, 404, "Not found");

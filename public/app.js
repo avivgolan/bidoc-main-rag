@@ -364,6 +364,7 @@ async function init() {
   safeInitStep("delay claims", wireDelayClaims);
   safeInitStep("evaluation", wireEvaluation);
   safeInitStep("reset", wireReset);
+  safeInitStep("logout", wireLogout);
   safeInitStep("project graph", wireProjectGraph);
   safeInitStep("link agent", wireLinkAgent);
   safeInitStep("qa", wireQa);
@@ -1766,6 +1767,19 @@ function wireKnowledge() {
 
 function wireReset() {
   $("restartServer").addEventListener("click", restartServer);
+}
+
+function wireLogout() {
+  const button = $("logoutButton");
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    try {
+      await api("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore — redirect to login regardless
+    }
+    location.href = "/login.html";
+  });
 }
 
 function wireEvaluation() {

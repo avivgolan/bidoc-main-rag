@@ -11,7 +11,11 @@ const DEFAULT_ALERTS_TABLE = "alerts_embeddings_gf";
 const DEFAULT_AI_SETTINGS = {
   classifier: { temperature: 0, maxTokens: 900, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
   knowledgePlanner: { temperature: 0.1, maxTokens: 2200, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
-  main: { temperature: 0.2, maxTokens: 4096, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
+  // Final answer synthesis often has the largest prompt (retrieval context + graph
+  // findings + investigation plan) and the longest generations (Hebrew, cited,
+  // sometimes ranked lists) — give it more headroom than the other stages so it
+  // doesn't get aborted mid-generation and fall back to the crude template answer.
+  main: { temperature: 0.2, maxTokens: 4096, timeoutMs: 120_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
   lite: { temperature: 0.3, maxTokens: 1800, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
   reranker: { temperature: 0, maxTokens: 4096, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },
   alert: { temperature: 0.1, maxTokens: 2200, timeoutMs: 90_000, topP: 1, frequencyPenalty: 0, presencePenalty: 0, seed: null },

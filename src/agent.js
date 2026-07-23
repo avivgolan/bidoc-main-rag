@@ -841,7 +841,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
           model: config.models.main,
           temperature: config.ai?.main?.temperature ?? 0.2,
           maxTokens: config.ai?.main?.maxTokens ?? 4096,
-          timeoutMs: config.ai?.main?.timeoutMs ?? 90_000,
+          timeoutMs: config.ai?.main?.timeoutMs ?? 120_000,
           ...samplingSettings(config, "main"),
           telemetry: telemetryFor("main_agent"),
           messages: [
@@ -849,7 +849,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
             ...memorySummaryMessages(memorySummary),
             {
               role: "user",
-              content: JSON.stringify(mainPayload, null, 2)
+              content: safeJsonStringify(mainPayload)
             }
           ]
         });
@@ -868,9 +868,67 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
     emitRunEvent(runId, "main_agent", "Main Agent response received", { length: answer.length });
     return answer;
   } catch (error) {
+    // Large investigation/RAG payloads can push generation past the per-call
+    // timeout. Retry once with a trimmed context before giving up on a real
+    // grounded answer — a smaller prompt finishes noticeably faster.
+    const isTimeout = /timed out/i.test(error.message || "");
+    if (isTimeout) {
+      try {
+        emitRunEvent(runId, "main_agent", "Main Agent timed out, retrying with reduced context", {});
+        const trimmedContext = formatRetrievalContext(
+          retrievalResults,
+          Math.max(4, Math.floor(retrievalLimit / 2)),
+          Math.min(900, config.rag?.chunkTextLimit || 1800)
+        );
+        const retryAnswer = await chatCompletion({
+          apiKey: config.openRouterApiKey,
+          model: config.models.main,
+          temperature: config.ai?.main?.temperature ?? 0.2,
+          maxTokens: config.ai?.main?.maxTokens ?? 4096,
+          timeoutMs: config.ai?.main?.timeoutMs ?? 120_000,
+          ...samplingSettings(config, "main"),
+          telemetry: telemetryFor("main_agent_retry"),
+          messages: [
+            { role: "system", content: mainSystemPrompt(classification, config) },
+            ...memorySummaryMessages(memorySummary),
+            {
+              role: "user",
+              content: safeJsonStringify({
+                user_message: message,
+                answer_mode: listIntent ? "ranked_entity_list" : "standard_grounded_answer",
+                retrieval_context: trimmedContext,
+                graph_context: graphContext,
+                project_graph_findings: projectGraphFindings,
+                tool_results: toolCalls.filter((call) => !call.skipped),
+                skipped_tools: skipped.map((call) => call.toolName),
+                sources
+              })
+            }
+          ]
+        });
+        if (String(retryAnswer || "").trim()) {
+          emitRunEvent(runId, "main_agent", "Main Agent retry succeeded", { length: retryAnswer.length });
+          return retryAnswer;
+        }
+      } catch (retryError) {
+        trace.push({ step: "mainAgent", ok: false, fallback: true, error: `retry failed: ${retryError.message}` });
+      }
+    }
     trace.push({ step: "mainAgent", ok: false, fallback: true, error: error.message });
     emitRunEvent(runId, "main_agent", "Main Agent failed, using fallback answer", { error: error.message });
     return fallbackRagAnswer({ successful, failed, skipped, sources });
+  }
+}
+
+function safeJsonStringify(value) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    try {
+      return JSON.stringify(value, (key, val) => (typeof val === "bigint" ? val.toString() : val));
+    } catch {
+      return JSON.stringify({ error: "payload could not be serialized" });
+    }
   }
 }
 
@@ -913,7 +971,7 @@ INLINE SOURCE CONTRACT:
 - Put the relevant source link immediately after every factual bullet or finding, using Markdown exactly like: [למסמך לחץ כאן](https://...).
 - Match each claim to the URL from the same retrieval record or tool result. Do not attach an unrelated URL merely because it appears in the general sources list.
 - When one bullet is supported by multiple records, place the relevant links together at the end of that bullet.
-- If a claim has no directly matching URL, write "(ללא קישור ישיר במקור)" instead of borrowing another source.
+- If a claim has no directly matching URL, omit the citation rather than borrowing an unrelated source or writing a placeholder.
 - Do NOT create a separate "**מקורות:**" section or a consolidated list of links at the bottom.
 - Do NOT print raw URLs.`;
 }
@@ -1244,7 +1302,7 @@ function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
       const callSources = uniqueByUrl(call.sources || []);
       const links = callSources.length
         ? ` ${callSources.map((source) => `[למסמך לחץ כאן](${source.url})`).join(" ")}`
-        : " (ללא קישור ישיר במקור)";
+        : "";
       return `- ${call.toolName}: ${summarizeData(call.data)}${links}`;
     }).join("\n")
     : "- לא הצלחתי לאחזר מידע מהפרויקט כרגע.";
