@@ -174,6 +174,52 @@ async function handleApi(req, res, url) {
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const cfg = buildRequestConfig(req, body);
     createRun(runId);
+
+    // Opt-in inline-stream mode (body.stream === true, used by the standalone
+    // UI): subscribes *this same response* to the run's live log before the
+    // pipeline starts, so progress events — emitted from within this very
+    // request/response cycle — always reach this client no matter how the
+    // platform schedules a separate GET /api/runs/:id/events call onto a
+    // different serverless instance later. On Vercel, that second GET and
+    // this POST can land on two isolated instances that don't share the
+    // in-memory run log (see runLog.js), which is why the standalone app's
+    // progress panel could get stuck on the first placeholder step while the
+    // real answer kept computing fine server-side. Folding the log into the
+    // same request/response removes the cross-instance dependency entirely —
+    // no persistence needed. Non-opting-in callers (e.g. bidoc's BFF) are
+    // completely unaffected and keep getting the plain JSON response below.
+    if (body.stream === true) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive"
+      });
+      res.write(`retry: 1000\n\n`);
+      const unsubscribe = subscribeRun(runId, res);
+      try {
+        const output = await runChatPipeline({
+          message: body.message,
+          sessionId,
+          config: cfg,
+          runId,
+          sourcesEnabled: body.sourcesEnabled !== false,
+          deepResearch: body.deepResearch === true,
+          attachments: normalizeChatAttachments(body.attachments)
+        });
+        unsubscribe();
+        res.write(`event: result\n`);
+        res.write(`data: ${JSON.stringify({ ...output, runId })}\n\n`);
+      } catch (error) {
+        failRun(runId, error);
+        unsubscribe();
+        res.write(`event: result-error\n`);
+        res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      } finally {
+        res.end();
+      }
+      return;
+    }
+
     try {
       const output = await runChatPipeline({
         message: body.message,

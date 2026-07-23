@@ -1226,7 +1226,6 @@ function wireChat() {
     event.preventDefault();
     if (state.chatRequest) {
       state.chatRequest.abort();
-      state.eventSource?.close();
       return;
     }
     const message = $("messageInput").value.trim();
@@ -1244,9 +1243,9 @@ function wireChat() {
     const requestController = new AbortController();
     state.chatRequest = requestController;
     setChatRunning(true);
-    startLiveRun(runId);
+    resetLiveRunUi(runId, { openingMessage: "Streaming live log inline (same request)" });
     try {
-      const result = await api("/api/chat", {
+      const result = await apiStream("/api/chat", {
         method: "POST",
         body: {
           message,
@@ -1374,8 +1373,7 @@ function renderComposerContext() {
   container.hidden = !chips.length;
 }
 
-function startLiveRun(runId) {
-  if (state.eventSource) state.eventSource.close();
+function resetLiveRunUi(runId, { openingMessage = "Opening live log" } = {}) {
   document.querySelectorAll(".runHistoryItem.active").forEach((el) => el.classList.remove("active"));
   $("liveRunList").innerHTML = "";
   renderOpenRouterMetrics(null);
@@ -1387,7 +1385,17 @@ function startLiveRun(runId) {
   $("liveRun")?.classList.remove("collapsed");
   resetAgentRuntime();
   renderAgents();
-  appendLiveRunEvent({ step: "client", message: "Opening live log", data: { runId }, time: new Date().toISOString() });
+  appendLiveRunEvent({ step: "client", message: openingMessage, data: { runId }, time: new Date().toISOString() });
+}
+
+// Used by flows (link agent, project insights) that open a standalone
+// GET /api/runs/:id/events stream to watch a run started elsewhere. Chat
+// itself no longer uses this — see apiStream() — because a separate GET
+// connection can land on a different serverless instance than the POST that
+// actually emits the events, leaving the log stuck on this first message.
+function startLiveRun(runId) {
+  if (state.eventSource) state.eventSource.close();
+  resetLiveRunUi(runId);
   state.eventSource = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events`);
   state.eventSource.addEventListener("log", (event) => {
     const item = JSON.parse(event.data);
@@ -10866,4 +10874,100 @@ async function api(path, options = {}) {
     }
     throw error;
   }
+}
+
+// Like api(), but for endpoints that support inline-stream mode (server sets
+// body.stream === true handling to subscribe the response itself to the
+// run's live log — see the /api/chat handler in server.js). Reads the
+// SSE-formatted response body as it arrives, feeding "log" frames straight
+// into appendLiveRunEvent() (same as the EventSource-based live log did), and
+// resolves with the payload from the final "result" frame. This keeps the
+// whole run — progress events and the final answer — inside one HTTP
+// request/response, so progress can never end up split across two isolated
+// serverless instances the way a separate GET /api/runs/:id/events call could.
+async function apiStream(path, options = {}) {
+  const timeoutSignal = options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : null;
+  const signal = options.signal && timeoutSignal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : options.signal || timeoutSignal || undefined;
+  try {
+    const response = await fetch(path, {
+      method: options.method || "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...(options.body || {}), stream: true }),
+      signal
+    });
+    if (!response.ok || !response.body) {
+      const data = await response.json().catch(() => ({}));
+      const httpError = new Error(data.error || `Request failed with status ${response.status}`);
+      httpError.name = "HttpError";
+      httpError.kind = "http";
+      httpError.status = response.status;
+      throw httpError;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result = null;
+    let resultErrorMessage = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separatorIndex;
+      while ((separatorIndex = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, separatorIndex);
+        buffer = buffer.slice(separatorIndex + 2);
+        const { event, data } = parseSseFrame(frame);
+        if (!data) continue;
+        if (event === "result") {
+          try { result = JSON.parse(data); } catch { /* ignore malformed frame */ }
+        } else if (event === "result-error") {
+          try { resultErrorMessage = JSON.parse(data)?.error; } catch { resultErrorMessage = "השרת החזיר שגיאה."; }
+        } else {
+          try {
+            const item = JSON.parse(data);
+            appendLiveRunEvent(item);
+            if (item.step === "complete" || item.step === "error") {
+              $("liveRunStatus").textContent = item.step === "complete" ? "הסתיים" : "שגיאה";
+            }
+          } catch { /* ignore malformed frame */ }
+        }
+      }
+    }
+    if (resultErrorMessage) throw new Error(resultErrorMessage);
+    if (!result) throw new Error("לא התקבלה תשובה מהשרת.");
+    return result;
+  } catch (error) {
+    if (timeoutSignal?.aborted && !options.signal?.aborted) {
+      const timeoutError = new Error("הבקשה נמשכה יותר מדי זמן.");
+      timeoutError.name = "TimeoutError";
+      timeoutError.kind = "timeout";
+      throw timeoutError;
+    }
+    if (error.name === "AbortError" || options.signal?.aborted) {
+      const abortError = new Error("הבקשה בוטלה.");
+      abortError.name = "AbortError";
+      abortError.kind = "cancelled";
+      throw abortError;
+    }
+    if (error.kind === "http") throw error;
+    if (error instanceof TypeError) {
+      const networkError = new Error("לא ניתן להתחבר לשרת.");
+      networkError.name = "NetworkError";
+      networkError.kind = "network";
+      throw networkError;
+    }
+    throw error;
+  }
+}
+
+function parseSseFrame(frame) {
+  let event = null;
+  const dataLines = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  return { event, data: dataLines.join("\n") };
 }
