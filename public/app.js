@@ -1256,7 +1256,13 @@ function wireChat() {
           deepResearch: state.deepResearchEnabled,
           attachments: state.chatAttachments.map(({ name, content }) => ({ name, content }))
         },
-        timeoutMs: 120000,
+        // Must stay comfortably above the server's own main-agent LLM budget
+        // (120s) plus its one timeout retry (another ~120s worst case) — a
+        // client timeout equal to or below the server's meant a slow-but-
+        // legitimate answer would get cancelled client-side right as the
+        // server was about to return it, showing "generation stopped"
+        // instead of the real answer and leaving the progress panel frozen.
+        timeoutMs: 280000,
         signal: requestController.signal
       });
       clearChatProgress(pending);
