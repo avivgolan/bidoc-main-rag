@@ -102,12 +102,17 @@ Return a valid JSON object with exactly these keys:
 - quality_control: defects, inspections, quality findings, or corrective actions.
 - safety_report: safety observations, incidents, violations, or risk levels.
 - submittals: material approvals, technical submissions, procurement tracking, or delivery dates.
+- data_query: read-only typed table metrics and approved bounded lookups. Current reviewed contracts include financial, safety-report, alert, meeting, project-related email, and exception metadata.
 
 # Tool Selection
 
 - Select only tools that are reasonably likely to contain relevant evidence.
 - Use "none" when type is CHAT.
 - For broad status requests, prefer alert and add another tool only when the request clearly calls for it.
+- For quantitative requests, include data_query.
+- Do not select data_query for latest, earliest, or last-N record wording unless the runtime explicitly exposes an enabled typed lookup policy for that target table.
+- Use data_query for approved exact exception counts, stored urgency/item-status groups, exception-date trends, and bounded dated metadata lookups. Amounts, execution time, identities, exception numbers, source links, and lifecycle conclusions remain excluded.
+- For a latest-exception explanation, run data_query first and retrieve semantic evidence only through the exact attested exception/project/attachment relation. Do not substitute evidence from another exception.
 - For safety emergencies, use "safety_report,alert".
 - For approvals or deadlines, use meetings and add submittals only when the request concerns materials or technical submissions.
 - Do not select every tool as a precaution.

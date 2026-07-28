@@ -8,6 +8,50 @@
 public.meetings_documents
 ```
 
+## Current Phase 4D implementation note - 2026-07-26
+
+This note supersedes conflicting future-tense or field-level assumptions in the
+original specification below while preserving it as design history.
+
+- The live evidence key is stored as `source_id`; `meeting_id` is only a
+  normalized internal/output alias. Evidence `primary_date` is not identity:
+  the audit found 18 chunks whose value differs from the authoritative meeting
+  date.
+- Pure semantic meeting questions call Meeting Evidence only. The approved mixed
+  route runs Data Query first, then passes the exact selected meeting/project/
+  attachment identity plus expected date/status into Meeting Evidence. It never
+  performs a parallel broad retrieval.
+- The existing semantic RPC remains the first transport, not a new exact Data
+  Query contract. Its read-only health probe currently fails structurally because
+  it references an absent meeting-key column. No RPC/schema repair was made.
+- Only structural HTTP 400/404 failures may use the temporary compatibility
+  fallback: one fixed bodyless `meetings_documents` read, complete-result cap
+  500, semantic service credential, project/source/attachment/chunk/vector
+  validation, single-project-only unscoped acceptance, configured vector
+  admission threshold, bounded weighted ranking, no adjacency expansion, and
+  fail-closed behavior.
+- Exact mixed evidence requires the same project, `source_id`, attachment,
+  expected meeting date, and stored status. Normalized results carry internal
+  same-meeting/identity-verification state, but browser/workflow projections do
+  not expose IDs, chunk payloads, filenames, URLs, embeddings, scores, or raw
+  provider errors.
+- User citations are dated meeting-record citations. There is no verified exact
+  meeting document link, and filenames or identifier-based citation labels must
+  not be displayed.
+- Configurable table/RPC settings apply to semantic retrieval. Data Query
+  `public.meetings` and the exact mixed handoff remain fixed application
+  contracts.
+- Retained telemetry contains only sanitized route/status/count/presence flags.
+  Raw questions, filters, chunks, source content, identities, locators, scores,
+  and provider errors are excluded.
+- Phase 4D passed 10/10 filtered groups, 99/99 protected Data Query tests, and
+  17/17 authenticated UI cases. Local unscoped acceptance is limited to the
+  audited single-project shape. Production/multi-project use remains blocked on
+  authenticated project membership/RLS and explicit scope; SEC-001 is deferred.
+
+Phase 4D is closed without a database or saved-setting mutation. Phase 4E is
+next and has not started.
+
 הסוכן יחזיר לסוכן הראשי מידע עובדתי בלבד, כולל ציטוט מדויק ופרטי מקור. הסוכן הראשי ינסח את התשובה הסופית למשתמש.
 
 ## 2. מתי הסוכן יופעל

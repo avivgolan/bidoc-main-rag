@@ -1,6 +1,10 @@
 # Data Query Agent - Phase 3.1 managed authentication
 
-Status: local Phase 3.1 acceptance complete. The Kapaim migration, explicit Content connection, managed service-account provisioning, and authenticated HTTP smoke suite are verified. Deployment secrets and a production smoke remain environment-specific release gates.
+Status: local Phase 3.1 RPC claim-gate acceptance completed on 2026-07-23. Later security findings are tracked separately and deferred by product decision.
+
+## Deferred security follow-up - 2026-07-24
+
+A later read-only audit identified credential-boundary and broader project-security issues beyond the Phase 3.1 RPC claim-gate proof. The findings, evidence, and deferred remediation order are maintained in `docs/data-query-agent-deferred-security-register.md`. This document retains the Phase 3.1 functional behavior and verification record.
 
 ## Decision
 
@@ -24,10 +28,12 @@ After applying `supabase/data-query-phase3-1-service-account.sql`:
 
 - `bidoc_data_query` remains `NOLOGIN`, `NOINHERIT`, and `NOBYPASSRLS`;
 - the role has no direct table or sequence privileges;
-- only the guarded wrapper is callable by the managed `authenticated` service token;
+- the guarded wrapper is the intended Data Query RPC callable by the managed `authenticated` service token;
 - the unguarded implementation function is not callable by API roles;
 - three pre-existing `SECURITY DEFINER` functions no longer grant implicit execution through `PUBLIC`;
 - their existing explicit `anon`, `authenticated`, and `service_role` permissions remain unchanged.
+
+These statements describe the wrapper and the `bidoc_data_query` database role. They do not remove the native `authenticated` role's separate table privileges, as recorded in the Phase 4A.0 correction.
 
 The legacy `DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN` route remains a temporary compatibility fallback. New deployments should use the managed service-account variables.
 
@@ -111,7 +117,7 @@ Negative proof is also required: a normal authenticated user without `app_metada
 - the same call with an ordinary authenticated claim and no service marker failed with PostgreSQL `42501`;
 - the three audited pre-existing `SECURITY DEFINER` functions are no longer executable through `PUBLIC`, while their explicit application-role grants remain;
 - the security advisor's one Phase 3.1 warning is the intentionally authenticated-executable wrapper; its claim gate and negative authorization proof are part of the acceptance contract.
-- a missing UI table selection now falls back to the canonical exact `data_index` contract instead of the unrelated hybrid-search embedding table;
+- Phase 3.1 changed the first fallback entry to canonical `data_index` instead of the unrelated hybrid-search embedding table; Phase 4A.0 later found two additional non-exact fallback manifest entries and an allowlist regression-test gap;
 - the local authenticated HTTP probe reaches `data-query.v2` and fails closed specifically on the two missing managed service-account variables.
 - the service-account values are now present locally, but the Content connection audit found `usesAppSupabase=true` and project `pmdnmzuqbcnzgkuhpfnx` (MAIN), not Kapaim `smxibuaowzuxkznuouwj`;
 - the mistakenly provisioned MAIN Auth user was immediately deleted and verified absent from both projects;
@@ -128,4 +134,4 @@ Negative proof is also required: a normal authenticated user without `app_metada
 
 ## Current continuation point
 
-Local Phase 3.1 work is complete. For each deployed environment, set the same five server-only variables (`CONTENT_SUPABASE_URL`, `CONTENT_SUPABASE_SERVICE_ROLE_KEY`, both managed service-account variables, and `BIDOC_API_SECRET`), run provisioning against Kapaim, restart the service, and repeat the authenticated positive and negative HTTP smoke tests. Do not reuse the MAIN project key or expose any of these secrets through browser settings.
+The Phase 3.1 wrapper and local positive/negative RPC smoke are complete. Deferred security work is tracked in `docs/data-query-agent-deferred-security-register.md`. Functional Phase 4A can continue locally; any deployment, migration, or live database change still requires explicit approval. Do not reuse the MAIN project key or expose any secret through browser settings.

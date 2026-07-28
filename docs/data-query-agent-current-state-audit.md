@@ -1,9 +1,16 @@
 # Data Query Agent — Current-State Map, Risk Audit, and Hardening Roadmap
 
-Date: 2026-07-22  
+Historical baseline date: 2026-07-22
 Repository baseline: `cc79b64` (`main`, clean worktree before this document)  
 UI name: **Data Query Agent**  
 Internal tool name: `data_query`
+
+Current-status note (2026-07-26): the opening verdict and source map preserve
+the 2026-07-22 audit baseline. Later implementation-status sections supersede
+that baseline, culminating in the later table-promotion closeouts at the end of
+this file. The reviewed exact runtime now includes `meetings`, `emails`, and
+`exceptions_report`; Phase 4D, Phase 4E, and Phase 4F are complete through their
+authenticated UI closeouts.
 
 ## Executive verdict
 
@@ -344,6 +351,12 @@ Key properties:
 
 ## Improvement roadmap
 
+Historical-roadmap note: this Phase 0-5 sequence was written for the original
+2026-07-22 hardening program. It is preserved as implementation history and is
+not the later per-table Phase 4A-4K naming scheme. Current remaining table phases
+are defined at the end of this file and in
+`docs/data-query-agent-phases4c-4k-roadmap.md`.
+
 ### Phase 0 — freeze the safety boundary and choose the canonical path
 
 1. Temporarily disable/remove the SQL step/pipeline execution routes and UI controls, or place them behind an explicit development-only flag plus authentication.
@@ -560,11 +573,550 @@ Phase 3.1 supersedes the manually minted `role=bidoc_data_query` JWT as the cano
 - A valid synthetic service claim returned the exact live count of 1,248. An ordinary authenticated claim without the service marker failed with PostgreSQL `42501`.
 - Three pre-existing `SECURITY DEFINER` functions no longer inherit execution through `PUBLIC`; their explicit `anon`, `authenticated`, and `service_role` grants remain intact.
 - Supabase's security advisor reports the wrapper as authenticated-executable `SECURITY DEFINER`. This is intentional and is mitigated by the immutable claim gate; the exact contract test and live negative authorization proof cover it.
-- When the persisted Data Query table selection is absent, runtime fallback is now the canonical exact `data_index` table rather than the hybrid-search embedding table.
+- Phase 3.1 intended the absent-selection fallback to use canonical `data_index` rather than the hybrid-search embedding table. Phase 4A.0 later found that the fallback still constructs two extra non-exact manifest entries.
 - Local acceptance is complete: the runtime uses the explicit Kapaim Content host with no App fallback, the confirmed managed identity carries `app_metadata.data_query_role=bidoc_data_query`, and provisioning succeeds.
 - The authenticated HTTP route returned `data-query.v2` and the exact live count of 1,248 through both a provided plan and the live LLM planner. A same-run repeat hit the local cache.
 - Missing or incorrect API secrets returned HTTP `401`; a semantic question routed to `delay_claim` without execution; and an `auth.users` plan was rejected with HTTP `400`.
 - All 36 focused Data Query tests pass. The full suite retains 11 unrelated UI/static-contract failures.
-- The remaining release gate is propagating the server-only variables to each deployed environment and repeating the authenticated smoke suite there.
+- The Phase 3.1 release gate was deployment propagation and an authenticated smoke suite. Phase 4A.0 later added credential isolation as a prerequisite.
 
 The implementation, operator steps, live boundary, and acceptance request are in `docs/data-query-agent-phase3-1-managed-auth.md`.
+
+## Phase 4A.0 structured-capability discovery - 2026-07-24
+
+Phase 4A.0 is complete as a read-only discovery and planning checkpoint. No runtime or database object was changed.
+
+- Exact full-relation analytics remain implemented only for `public.data_index`.
+- The live Content schema was mapped by structured fields, row counts, null coverage, date coverage, source-index consistency, keys, indexes, RLS, policies, and grants.
+- Question families are now separated into Data Query-only, Data Query plus retrieval/evidence, and retrieval-only behavior for financial transactions, safety reports, alerts, meetings, emails, exceptions, WhatsApp analysis, and deferred tables.
+- “Latest,” “earliest,” and “last N” require a new typed lookup contract. Current `top_n` means grouped counts, while the compatibility `select` path is a bounded direct PostgREST read and does not expose a machine-readable record result.
+- The best first business-table target remains `financial_transactions`, but all numeric amount columns are currently empty. Exact money totals must remain `not_computable` until normalization is populated and verified.
+- `data_index` has two orphaned financial source rows and one orphaned safety source row, so indexed-record counts are not automatically source-table counts.
+- At the Phase 4A.0 snapshot, the real no-selection fallback still built manifest entries for `data_index`, the configured alerts table, and `meetings_documents`; Phase 4A.1 subsequently corrected this to exactly `data_index` and added a real-path regression test.
+- All security findings identified during Phase 4A.0 are isolated in `docs/data-query-agent-deferred-security-register.md`. They are deferred by product decision and are no longer mixed into the functional capability roadmap.
+
+The complete capability matrix, live evidence, functional promotion order, and Phase 4A.1 acceptance contract are in `docs/data-query-agent-phase4a-capability-map.md`.
+
+## Phase 4A.1 typed-lookup foundation - 2026-07-24
+
+Phase 4A.1 is complete as a local implementation and test slice. No Supabase query, migration, table change, or business-table promotion was performed.
+
+- The typed plan contract now includes `lookup_latest`, `lookup_earliest`, and `lookup_last_n`.
+- Lookup validation enforces a matching enabled table policy, selectable fields, allowlisted primary order fields, stable-ID tie-breaking, strict direction, bounded limits, and the caller's classified lookup operation/table/cardinality.
+- English and Hebrew parsing recognizes unambiguous table targets while rejecting temporal-window wording, ambiguous generic reports/messages, zero/oversized limits, and semantic explanation/evidence questions.
+- The deterministic fallback can select only the exact target table; it cannot apply an alert or invoice question to the first enabled manifest table.
+- Exact RPC responses must match the requested operation and cannot report `not_computable` as a successful result.
+- Machine output separates bounded lookup records into `machineResult.recordsByRequestId`; workflow history stores only redacted question/provenance structure, record counts, and field names.
+- Canonical execution no longer supports the direct-table `select` compatibility path, and the real missing-selection fallback is exactly `data_index`.
+- Main Agent code can consume structured records from the machine contract, but lookup routing is dormant unless the target table has an enabled typed lookup policy. Therefore invoice lookup is not advertised or executed before Phase 4A.2.
+- All 40 focused Data Query tests pass. The full suite retains the same 11 unrelated UI/static-contract failures.
+- Manual UI regression also passed: exact indexed count used Data Query; latest invoice used `financial_transactions`; latest meeting used `meetings`; and the invoice-rejection explanation used financial/email evidence without Data Query. The user independently confirmed the latest invoice and meeting in their source tables.
+
+The detailed manual run evidence and separate Main Agent token/timeout observations are in `docs/data-query-agent-phase4a1-manual-regression.md`.
+
+## Phase 4A.2 dormant financial policy - 2026-07-25
+
+Phase 4A.2 is complete as local fail-closed policy and fixture work. No Supabase query, migration, RPC proposal or deployment, saved-selection change, direct table read, production activation, or database mutation was performed.
+
+- `financial_transactions` now has a fixed typed metadata policy derived from the Phase 4A.0 catalog evidence.
+- Approved query fields are limited to `id`, project scope, canonical `transaction_date`, category, status, vendor, transaction type, item status, and currency.
+- Content, source locators, people/submitter fields, `created_at`, and text-formatted amount fields remain outside the query allowlist.
+- The unpopulated numeric money fields carry an explicit non-computable reason. Natural-language money requests and attempted numeric `sum`/`avg` plans fail closed as `not_computable`.
+- Supported financial operations are explicitly limited to count, group count, distinct, time series, and bounded latest/earliest/last-N lookup.
+- Invoice lookup has one exact meaning: `transaction_type = 'חשבונית'`. The validator rejects a missing or mismatched discriminator.
+- Canonical lookup order is `transaction_date`, then stable `id`, with null dates last.
+- Policy registration is separate from availability: the local financial policy has no `exactRpc`, so its active operation list is empty and Main/Data Query routing remains dormant.
+- Trusted fixture settings activate the same policy only inside tests. Canonical runtime execution still requires typed exact responses with operation attestation and never falls back to raw PostgREST `select`.
+- The 27-item local acceptance matrix covers bilingual wording, exact filtering, counts, date boundaries, ties/nulls/cardinality, allowlists, attestation, machine-record bounds, redaction, cache behavior, caller scope, semantic precedence, dormant routing, and the original `data_index` fallback.
+- All six requested JavaScript syntax checks and `git diff --check` pass. The focused suite passes all 50 Data Query tests. The full suite retains exactly the same 11 unrelated UI/static-contract failure names; no Data Query test or new test failed.
+
+The repeatable four-question UI checklist is in `docs/data-query-agent-phase4a2-manual-regression.md`. Until a matching financial exact execution contract is separately approved and deployed, the expected user-facing routes remain unchanged: indexed count through Data Query, invoice lookup through financial retrieval, meeting decisions through meeting retrieval, and invoice explanation through financial/email evidence.
+
+Live trusted-SQL comparison, RPC design/deployment, production activation, another table promotion, Phase 4A.3, and Main Agent token/context optimization are all deferred.
+
+## Existing financial read-interface audit - 2026-07-25
+
+A read-only live audit checked whether Phase 4A.2 could be activated by adapting the agent to an already-existing financial interface, without changing any table or database object.
+
+- The configured managed Data Query identity authenticated successfully.
+- Its OpenAPI discovery request returned HTTP 200.
+- The live `match_financial_transactions` RPC is a semantic vector-matching interface with embedding, threshold, count, and filter inputs. It cannot attest exact count/group/distinct/time-series or deterministic latest/earliest/last-N operations.
+- The published `bidoc_data_query_data_index_v1` RPC remains fixed to `data_index`.
+- No financial equivalent of the typed exact Data Query contract is exposed.
+- A no-body managed `HEAD` request against `financial_transactions` returned HTTP 206 with `Content-Range: 0-0/100`.
+
+That direct-table success is evidence of the existing SEC-001 over-broad `authenticated` privilege, not evidence of an approved read-only Data Query interface. The token's raw-table capability is materially wider than the agent contract and may include writes. The canonical agent must not normalize that bypass into production behavior.
+
+Result: no code path was activated and no row values were fetched. The financial policy remains dormant. An agent-only activation is not possible while both of these boundaries remain in force:
+
+- no raw PostgREST table reads; and
+- no new or changed typed database read contract.
+
+The existing semantic financial tool continues to handle financial retrieval questions. Exact structured financial questions remain locally specified and fixture-verified but not live.
+
+## Phase 4A.3 read-only financial activation - 2026-07-25
+
+The user clarified that the agent may read existing tables through structured queries but must never change tables or their contents. Under that clarified boundary, the prior no-direct-PostgREST restriction is superseded for one reviewed adapter only.
+
+Current behavior:
+
+- `financial_transactions` has a credential-gated `managed_postgrest_read_v1` execution transport;
+- the adapter is fixed to Content `financial_transactions` and emits only `GET` or `HEAD`;
+- typed plan validation still controls operations, fields, filter values/operators, ordering, date semantics, and limits;
+- raw SQL, arbitrary table paths, joins, request bodies, and mutation methods are unavailable;
+- count, group count, distinct, time series, and bounded latest/earliest/last-N reads are active;
+- money aggregates remain `not_computable`;
+- semantic/explanation questions continue to use retrieval.
+
+The configured managed identity passed live read-only runs for latest invoice, invoice count, and invoice grouping by status. Each result was exact over 23 matching invoice records and produced no warning. The focused suite passes all 52 Data Query tests. The full suite retains exactly the same 11 unrelated UI/static-contract failures, and `git diff --check` passes.
+
+No database object, table data, permission, RLS policy, role, migration, RPC, saved selection, or Supabase setting changed. SEC-001 remains a deferred credential-level risk because the managed identity's native privileges are broader than this agent-code adapter.
+
+## Phase 4A.3 UI regression correction - 2026-07-25
+
+An authenticated UI run exposed a runtime-settings drift that the earlier
+command-line live checks did not exercise. The saved Data Query picker contained
+only `data_index`; because the saved selection replaced the built-in manifest,
+Main could not schedule the active financial policy. The request instead ran
+Hybrid Search, graph search, a 25,839-token reranker call, and the semantic
+financial tool. Final synthesis then failed with `Unexpected end of JSON input`,
+so the UI displayed the weak fallback source list.
+
+Current behavior after the agent-only correction:
+
+- the saved picker remains unchanged and still reports only the user's selected
+  table;
+- runtime capability settings add the single reviewed credential-gated
+  `financial_transactions` built-in;
+- exact structured invoice lookups bypass Hybrid Search, graph search, and
+  reranking;
+- the deterministic typed lookup planner avoids an unnecessary LLM planner
+  call;
+- Data Query supplies exact record selection while the semantic financial tool
+  remains available for enrichment;
+- final-synthesis fallback preserves both exact fields and the semantic answer.
+
+The authenticated regression run completed successfully. Data Query returned
+one accepted plan with no warnings, the financial tool completed, no conflict
+was detected, the Main Agent completed, and the UI answered with the exact
+2026-02-28 invoice plus supplier, status, type, and currency. The run used
+18,410 total tokens, versus at least 30,851 tokens consumed before final
+synthesis in the failed run.
+
+Focused verification is now 54 passing Data Query tests. The full-suite delta
+remains the same 11 unrelated UI/static-contract failures. No database or
+Supabase mutation was performed.
+
+### Deterministic exact-invoice presentation
+
+The approved follow-up keeps routing and execution unchanged and improves only
+answer construction. When a successful exact latest-invoice machine record and
+the semantic financial result share the same record ID, Main receives and
+appends a bounded display projection containing available date, supplier,
+amount, status, type, category, description, and an HTTP(S) `data_link`.
+
+Data Query fields remain authoritative, while enrichment-only fields come from
+the same-ID financial row. There is no date-only or vendor-only fuzzy match.
+Missing fields are omitted and unsafe URLs are discarded. Focused verification
+is now 57 passing Data Query tests.
+
+If the semantic result set omits the exact row, the answer layer performs one
+fixed, bounded, read-only GET by the exact integer Data Query ID. The live UI
+review used this fallback and returned amount, description, and document name.
+The exact source row's `data_link` was empty or non-HTTP(S), so no document link
+was rendered. The workflow records this distinction as `matched: true` and
+`documentLink: false`.
+
+## Deterministic invoice-answer correction - 2026-07-25
+
+The subsequent three-question UI review showed that the structured route was
+still incomplete for metrics and bounded lists:
+
+- invoice metrics could execute without `transaction_type = 'חשבונית'`, so a
+  status breakdown counted all 100 financial rows instead of invoice rows;
+- a date-scoped invoice count was combined with semantic financial records,
+  which introduced a transfer into an invoice answer;
+- last-N output depended on Main-Agent phrasing and omitted available details;
+- detected cross-source conflicts were not guaranteed to appear in the final
+  answer.
+
+The agent-only correction now carries an invoice metric scope from capability
+classification through deterministic planning and validator enforcement. The
+same exact discriminator is mandatory for lookup and metric operations. Pure
+invoice metrics and bounded lookups schedule only Data Query and use a
+deterministic answer renderer, so semantic financial retrieval and Main-Agent
+generation no longer participate in those answers.
+
+Bounded lookup enrichment reads only the exact returned integer IDs in one
+GET-only batch, preserves Data Query order, and matches by ID. Count and grouped
+count answers consume only `machineResult.metricsByRequestId`. Date scopes still
+come from the normalized caller envelope and retain inclusive end-date
+semantics. Any detected multi-source conflict on a route that combines sources is appended as
+a visible warning.
+
+Focused verification is 61 passing Data Query tests. The full suite retains the
+same 11 unrelated UI/static-contract failures. No database or Supabase object,
+data, permission, role, policy, migration, saved setting, or schema was changed.
+At this historical checkpoint, fresh UI examination of the three reported
+questions was still the next gate; later entries record the completed UI work.
+
+## Phase 4B `safety_reports` promotion - 2026-07-26
+
+Phase 4B.1 through 4B.3 are complete. The work is limited to the existing
+Content table `public.safety_reports`; no other table was activated and no
+database or saved-selection state changed.
+
+Source audit:
+
+- 21 rows use positive unique bigint `id` values and one populated UUID project
+  scope;
+- canonical `report_date` coverage is 2023-10-01 through 2026-02-18, with no
+  live nulls or ties;
+- live canonical risk counts are low 15, medium 5 across two Hebrew spellings,
+  unknown 1, and high 0;
+- typed report-counter totals are life-threatening 2, severe 8, medium 17, and
+  minor 26;
+- `total_workers` is a per-report snapshot and its cross-report aggregate is
+  `not_computable`;
+- `item_status` and `resolved` do not establish trustworthy report-level
+  resolved/unresolved semantics;
+- all 21 rows have an exact attachment/project/mail/filename relationship to
+  one safe attachment URL, but runtime link display additionally requires an
+  authorization-bound caller project scope.
+
+Implemented runtime contract:
+
+- fixed credential-gated `managed_postgrest_read_v1` access to only
+  `safety_reports`, using `HEAD`/`GET`, no body, and no arbitrary path, schema,
+  join, SQL, method, or renamed table;
+- typed count, canonical grouping, day/month series, approved defect-counter
+  sums, and bounded latest/earliest/last-N lookup;
+- deterministic `report_date` then `id` ordering, inclusive final-day scope,
+  undated temporal-row exclusion, bounded limits, and canonical risk drift to
+  `unknown`;
+- deterministic exact answers from `machineResult`; semantic questions remain
+  on safety retrieval, and mixed questions preserve exact values while adding
+  only compatible evidence;
+- explicit worker and resolution `not_computable` answers, exact zero rendering,
+  and a mixed zero-risk guard that keeps report risk distinct from defect
+  severity;
+- exact-route generic retrieval/Main bypass, including high-urgency safety
+  precheck suppression;
+- project-authorized exact-row enrichment using the dedicated Data Query bearer
+  and fail-closed link resolution;
+- workflow telemetry reduced to operations, approved fields, tables, counts,
+  exactness, and presence flags. Raw values, URLs, project/record IDs, plan IDs,
+  request IDs, filenames, and provider errors are not retained.
+
+Verification:
+
+- six JavaScript syntax checks passed;
+- Phase 4B filter: 9/9 passed;
+- complete Data Query suite: 80/80 passed, including all prior financial and
+  invoice regressions;
+- full repository suite: 325/336 passed; the same 11 unrelated Settings,
+  Workflow, and Timeline static-contract tests failed, with no Data Query
+  failure;
+- `git diff --check` passed with line-ending warnings only;
+- authenticated UI verification covered all 13 required English/Hebrew exact,
+  semantic, mixed, date, defect, worker, latest, and last-five questions.
+
+The final UI reruns show latest date 2026-02-18, last-five dates through
+2026-01-16, severe defect occurrences 8, worker aggregation unavailable, high
+risk count 0, and resolution status unavailable. Exact routes skip Hybrid,
+graph, reranking, semantic safety, and Main; the semantic defects question uses
+retrieval/Main; the mixed question uses both Data Query and retrieval but skips
+Main through the zero-risk postcondition. Because the localhost caller has no
+authorization-bound project scope, final exact lookups display no verified
+document link rather than using unscoped service-role enrichment.
+
+The detailed audit, plan shapes, corrected first-pass regressions, and every UI
+result are in
+`docs/data-query-agent-phase4b-safety-reports-manual-regression.md`.
+
+At the Phase 4B closeout, remaining boundaries were explicit: worker
+aggregation, resolution counts, site normalization, unique-defect deduplication,
+and unscoped document links remained unsupported. Caller-project membership
+binding remained part of deferred security work because Phase 4B did not
+authorize grants, RLS, role, or schema changes. The later Phase 4C sections
+supersede that historical stop point after the user separately approved alerts.
+
+## Remaining table roadmap formalization - 2026-07-26
+
+The post-Phase-4B promotion sequence is now formally assigned without starting a
+new runtime checkpoint:
+
+1. Phase 4C - `alerts`;
+2. Phase 4D - `meetings` metadata plus Meeting Evidence handoff;
+3. Phase 4E - `emails`;
+4. Phase 4F - `exceptions_report`;
+5. Phase 4G - `whatsapp_analysis`;
+6. Phase 4H - `consultants_reports`;
+7. Phase 4I - `daily_work_log`;
+8. Phase 4J - `gantt_tasks`;
+9. Phase 4K - `quality_control`.
+
+Each table has a required `.1` read-only audit/typed-policy checkpoint, `.2`
+implementation/automated-verification checkpoint, and `.3` authenticated UI and
+documentation closeout. The zero-row 4H-4K tables cannot progress to
+implementation or production-correctness claims until representative live data
+exists. Retrieval/chunk tables, PII directories, backups, application-internal
+tables, and graph/timeline relationship infrastructure have explicit non-promotion
+dispositions.
+
+The detailed per-table capabilities, blockers, privacy and authorization gates,
+test matrices, document names, and stop rules are in
+`docs/data-query-agent-phases4c-4k-roadmap.md`. This was a documentation-only
+formalization: no application code, database object, data, permission, RLS policy,
+Supabase setting, or saved selection changed. Phase 4C.1 was the next
+approval-gated action at this checkpoint.
+
+## Phase 4C.1 alerts audit and typed policy - 2026-07-26
+
+Status: read-only audit and policy complete. The later Phase 4C.2 and 4C.3
+sections record the completed runtime promotion and authenticated closeout.
+
+The managed-identity audit revalidated 1,676 rows in fixed `public.alerts`.
+`id` and `project_id` are complete; `id` is unique, and the current rows belong
+to one project. `data_date` is the canonical alert date with 1,673 populated and
+3 null values. Its high tie density requires date-plus-ID ordering and prohibits
+the timeline layer's `created_at` fallback in exact Data Query lookups.
+
+The live structured vocabulary is now frozen for the proposed implementation:
+six alert types, four input-data types, one opaque stored severity value (`3`),
+one stored item status (`בטיפול`), and a relevance flag that is true on every
+row. Empty `status` is excluded. Critical/high/medium/low severity and
+open/closed/resolved/unresolved lifecycle questions are `not_computable`, not
+guessed mappings.
+
+Phase 4C.2 implemented exact counts, approved single-field breakdowns,
+reconcilable day/month time series, and bounded dated latest/earliest/last-N
+metadata using only fixed Content `public.alerts` `HEAD`/`GET` requests. It must
+remain separate from the configurable Alert Agent embeddings table and
+`match_*` retrieval RPC. Narrative fields, source identifiers, and links remain
+outside the exact contract; no authorization-bound alert source resolver was
+proven.
+
+Detailed evidence, aliases, fields, filters, null rules, limits, security
+decision, and the implemented automated matrix are in
+`docs/data-query-agent-phase4c-alerts.md`.
+
+## Phase 4C.2 alerts implementation - 2026-07-26
+
+`alerts` is now the fourth reviewed exact-capability table, alongside
+`data_index`, `financial_transactions`, and `safety_reports`. All later table
+policies remain dormant.
+
+The runtime activates only with dedicated Data Query credentials and hardcodes
+the existing Content `public.alerts` relation. It accepts one attested alert
+plan, permits only bodyless `HEAD`/`GET`, caps complete reads at 5,000 rows and
+bounded lists at 25, and rejects table, method, operation, field, vocabulary,
+filter, scope, cardinality, duplicate, null-date, and stable-order drift before
+presenting an exact answer.
+
+Exact capabilities are total and approved filtered counts; one-field breakdowns
+over stored type, opaque severity, technical input type, stored item status, or
+stored relevance; UTC calendar day/month count series with an explicit undated
+bucket; and dated latest, earliest, or last-N metadata. `created_at`, empty
+`status`, narrative, source identifiers, links, critical/high/medium/low labels,
+lifecycle meanings, distinct-source counts, and arbitrary numeric/ranking
+analytics remain excluded or typed `not_computable`.
+
+Alert exactness now requires closed positive bilingual grammar. Whole-clause
+ordinal, negated, random, person/project, unknown-source, and other unsupported
+qualifiers fail closed without a read. An untrusted classifier `data_query` hint
+cannot create an alert metric or isolate retrieval. Pure semantic questions
+remain retrieval-routed; mixed exact-plus-semantic requests run only Data Query
+and add an explicit evidence boundary because no authorization-bound same-record
+alert resolver has been proven.
+
+Deterministic browser answers and workflow projections omit raw IDs, UUIDs,
+source IDs, URLs, plan/request IDs, narratives, and provider details. The final
+automated evidence is 9/9 Phase 4C groups and 89/89 protected Data Query tests.
+The repository-wide suite remains 334/345 because the same 11 unrelated
+Settings, Workflow, and Timeline static-contract checks fail. Syntax and
+`git diff --check` pass; the React build cannot start because `vite` is not
+installed locally. No database object, Content row, schema, RPC, role, grant,
+permission, RLS policy, Supabase setting, Auth user, or saved table selection was
+changed.
+
+## Phase 4C.3 alerts authenticated UI closeout - 2026-07-26
+
+All 13 required authenticated cases passed. Live results reconciled to 1,676
+total alerts, 1,673 alerts in the inclusive 2023-10-01 through 2026-03-31 date
+scope, all 1,676 rows at opaque stored severity level 3 and stored item status
+Being handled, zero rows with stored relevance false, and 142 rows with the
+approved stored Delay type. Latest and last-five lookups preserved dated stable
+ordering and emitted only approved metadata with no verified source link.
+
+Unsupported severity level 4 and unresolved-lifecycle questions returned
+deterministic `not_computable` results without a Data Query fetch. The pure
+semantic explanation used Hybrid Search, graph search, reranking, and Main with
+no Data Query exact claim. The mixed delay-count/explanation request used Data
+Query as the only project-data source for the exact 142 and exposed the explicit
+no-attached-semantic-evidence boundary; planning activity did not supply project
+evidence.
+
+The accepted `from ... to ...` date grammar produced the correct inclusive
+count. An alternate `were recorded ... through ...` formulation failed closed
+without a count and remains a nonblocking positive-grammar limitation. Expanded
+exact/mixed client output did not expose alert IDs, UUIDs, project/source values,
+URLs, filenames, narratives, Data Query plan/request/caller identifiers, or raw
+provider errors. Ordinary framework workflow metadata remained visible.
+
+Focused verification remains 9/9 Phase 4C groups and 89/89 protected Data Query
+tests. Authenticated testing created only ordinary chat/run-history rows and did
+not mutate Content alert data, database objects, permissions, RLS, Supabase/Auth
+settings, or saved selections. Phase 4C is complete. Phase 4D is the next
+separately approval-gated phase and has not started; comprehensive semantic and
+performance regression remains deferred until the remaining Data Query work is
+complete.
+
+After that planned matrix, a user-reported Hebrew mixed query -
+`מה ההתראה האחרונה שעלתה ולמה היא עלתה?` - exposed a closed positive-grammar
+gap. The initial answer failed closed without a fetch. A narrowly anchored
+full-sentence correction now classifies it as mixed `lookup_latest`, with no
+filters and canonical `data_date DESC, id DESC` ordering. Supplemental automated
+coverage preserves fail-closure for project, Slack, person, and ingestion-time
+near-neighbors and preserves identifier/narrative redaction.
+
+The supplemental authenticated UI run returned the 2026-03-31 safe alert
+metadata and a Hebrew evidence boundary. Workflow evidence showed Hybrid Search,
+graph search, and reranking skipped, Data Query completed, and Main skipped for
+the deterministic answer; no unscoped Alert Agent narrative was attached.
+Post-correction evidence remains 9/9 Phase 4C groups and 89/89 protected Data
+Query tests. Phase 4C was reclosed without starting Phase 4D or mutating Content
+data, database objects, authorization, settings, or saved selections.
+
+## Phase 4D.1 meetings audit and typed policy - 2026-07-26
+
+The live read-only audit reconciled 151 positive, uniquely identified meetings
+in one project. Canonical `meeting_date` spans 2024-11-13 through 2025-01-28.
+All nine distinct timestamps are tied and the largest tie contains 48 rows, so
+lookups require meeting date plus stable ID. The six exact stored-status counts
+are 69, 42, 16, 12, 10, and 2. `item_status`, subject, decisions, attendance,
+and lifecycle interpretations are excluded.
+
+The managed Data Query identity sees zero `meetings_documents` rows. The
+semantic identity sees 36 chunks for 11 same-project meeting keys; 140 meetings
+have no chunks and the latest meeting has four. The proven handoff maps meeting
+ID plus project to evidence `source_id` plus project and requires attachment
+equality. Eighteen evidence `primary_date` values differ from the authoritative
+meeting date, so evidence date is not identity.
+
+## Phase 4D.2 meetings implementation - 2026-07-26
+
+The fixed credential-gated `public.meetings` adapter uses only validated,
+bodyless `HEAD`/`GET` requests. It supports exact counts, approved date/stored-
+status groups and series, distinct stored statuses, and bounded dated lookups.
+Pure semantic questions use Meeting Evidence only. The approved mixed route
+runs Data Query first and accepts evidence only for the selected meeting/project/
+attachment relationship. All meeting routes bypass generic Hybrid Search, graph
+search, reranking, investigation planning, and knowledge planning. Workflow and
+client projections redact identities, locators, evidence, scores, and errors.
+
+The deployed Meeting Evidence RPC contract was audited, but its read-only health
+probe returns structural HTTP 400 / PostgreSQL `42703` because it references an
+absent meeting-key column while the live key is `source_id`. No database repair
+was authorized. A temporary RPC-first fallback activates only for structural
+400/404 failures and performs one fixed bodyless evidence read capped at 500
+rows. It validates project/source/attachment/chunk/vector shape, accepts an
+unscoped result only for the complete single-project shape, performs no adjacency
+expansion, and fails closed.
+
+Verification passed the listed syntax checks, 10/10 Phase 4D groups, and 99/99
+protected Data Query tests. The full suite is 344/355 with the same 11 unrelated
+UI/static-contract failures. React build verification is blocked because the
+local Vite executable is absent.
+
+## Phase 4D.3 authenticated UI closeout - 2026-07-26
+
+All 17 authenticated cases passed. Cases 1-13 covered bilingual exact metrics,
+stable lookups, inclusive dates, exact zero, and fail-closed attendee/decision
+counts. Pure semantic English/Hebrew cases used only Meeting Evidence and kept a
+truthful no-specific-evidence boundary with authorized dated citations. Mixed
+English/Hebrew cases selected the exact latest meeting dated 2025-01-28 with
+stored status `לביצוע`, then used evidence only from that same meeting without a
+false conflict. The Hebrew case passed in a fresh isolated run after its planner
+fix, and Main retry input is sanitized.
+
+No project scope was configured in localhost, so this is local single-project
+acceptance, not production authorization. Production/multi-project use remains
+blocked on authenticated project membership/RLS and explicit scope. SEC-001 is
+still deferred. UI verification created only ordinary chat/run-history records;
+Content data, schema, RPCs, permissions, RLS, Auth/Supabase settings, and saved
+selections were unchanged. Work stops before Phase 4E.
+
+## Phase 4E emails promotion closeout - 2026-07-27
+
+Phase 4E.1 through 4E.3 are complete. The live read-only audit found 7,163 source
+email rows, of which exactly 786 have the approved project-related relevance
+scope. The ordinary email total is fixed to `project_related|multi_project` and
+excludes 6,377 `no_clear_project` rows. `received_date` is complete and valid;
+42 timestamp tie groups require stable ID ordering. Nine reviewed categories
+reconcile across the 786 scoped rows.
+
+The credential-gated fixed `public.emails` adapter supports scoped counts,
+approved one-field groups/filters, distinct categories, receipt-date series,
+inclusive dates, and bounded safe metadata lookups. Validator and transport
+both require the fixed relevance predicate. Personal identities, addresses,
+content, internal IDs, attachment documents/counts/links, and ingestion-time
+semantics remain excluded or retrieval-routed. The project-related attachment
+audit found 282 true existence flags but only 214 attachment keys, so only the
+email-row flag is exact.
+
+Verification is 6/6 Phase 4E groups and 106/106 protected Data Query tests. The
+full repository suite is 351 passed and the same 11 unrelated settings/workflow/
+timeline static failures. No Content data, schema, database object, permission,
+RLS, Supabase/Auth setting, or saved selection changed.
+
+The authenticated UI matrix verified exact totals and groups, attachment state,
+latest and last-five safe metadata, inclusive and empty date ranges, English and
+Hebrew exact grammar, semantic email-content routing, and mixed count-plus-content
+behavior. Exact answers exposed no PII, content, internal identifiers, or source
+URLs. Relevance-ranked semantic latest-content answers now receive a deterministic
+boundary stating that they are not an exact same-record latest join. Phase 4F is
+the next approval gate and has not started.
+
+The Phase 4E.3 gate was reopened later on 2026-07-27 after the user found two
+missing ordinary Hebrew forms. `כמה מיילים יש במערכת?` had been rejected by the
+positive grammar, while `מה המייל האחרון שמופיע?` had fallen into semantic
+retrieval. Both now route to deterministic Data Query only, skip generic
+retrieval and Main generation, and passed authenticated Chrome reruns with the
+same 786 count and 31.03.2026 latest metadata. Focused and protected test totals
+remain 6/6 and 106/106; no data or database configuration changed.
+
+## Phase 4F exceptions-report promotion closeout - 2026-07-28
+
+Phase 4F.1 through 4F.3 are complete. The read-only audit confirmed 20 source
+rows in one project scope: 14 valid canonical exception dates and six undated
+rows; incomplete and duplicated exception numbers; one stored urgency value and
+one stored item-status value; 12 requested amounts without reliable row-level
+currency; empty VAT/total/profit fields; and one populated execution-day value.
+Amounts, execution time, identities, companies, exception numbers, source links,
+and lifecycle interpretations therefore fail closed or remain semantic-only.
+
+The fixed credential-gated `public.exceptions_report` adapter supports total,
+dated/undated, and date-scoped counts; stored urgency/item-status groups; UTC
+day/month series with an undated bucket; and dated latest/earliest/last-N safe
+metadata. Exact answers expose only exception date, stored urgency, and stored
+item status. The approved mixed family runs the exact latest lookup first, then
+requires exception/project/attachment attestation before same-record document
+evidence; missing or mismatched evidence cannot be replaced from another row.
+
+The bilingual post-closeout regression now passes 8/8 Phase 4F groups, 115/115
+protected Data Query tests, and 20/20 authenticated UI queries covering the 10
+published capabilities in English and Hebrew. The full repository suite is
+360/371 with the same 11 unrelated settings, workflow, and timeline
+static-contract failures. Authenticated Chrome returned exact count 20, latest
+date 09.03.2025 with only approved stored metadata, the complete monthly series
+with an explicit six-row undated bucket, deliberate amount `not_computable`, and
+a final safe insufficient-evidence answer. A deterministic guard now rejects an
+evidence-model summary if it contains an unrequested monetary value. Telemetry
+exposed no raw exception row, evidence chunk, source identity, amount, or link.
+
+No Content data, schema, RPC, role, grant, permission, RLS, Auth/Supabase setting,
+saved selection, production configuration, or deployment changed. The UI checks
+created only ordinary chat/run-history records. SEC-001 and production/
+multi-project authorization remain deferred. Phase 4G is the next unauthorized
+approval gate; work stops here.

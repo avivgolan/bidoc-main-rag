@@ -1,7 +1,11 @@
 import { resolveToolUrl, TOOL_NAMES } from "./config.js";
 
-export const INTERNAL_PROJECT_TOOLS = ["data_query"];
+export const INTERNAL_PROJECT_TOOLS = ["data_query", "meeting_evidence_search"];
 const ALL_PROJECT_TOOLS = [...TOOL_NAMES, ...INTERNAL_PROJECT_TOOLS];
+
+export function isInternalProjectTool(toolName) {
+  return INTERNAL_PROJECT_TOOLS.includes(String(toolName || ""));
+}
 
 const URL_PATTERN = /https?:\/\/[^\s)"'<>\]]+/g;
 

@@ -7,8 +7,9 @@
 // per-agent answers. data_index is NOT used here — it serves the main RAG.
 
 import { chatCompletion, createEmbedding } from "../openrouter.js";
-import { DEFAULT_CONTENT_TOOL_SETTINGS } from "../config.js";
+import { DEFAULT_CONTENT_TOOL_SETTINGS, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
+import { getDataQueryAccessToken } from "./dataQueryAuth.js";
 import { analyzeEmails, analyzeFinancial, analyzeGeneric, analyzeMeetings, analyzeSafety, analyzeWhatsapp } from "./contentAnalysis.js";
 import { extractSearchTerms, mergeRetrievalRows, resolveTableRoles } from "./contentRetrieval.js";
 import { toDateOnly } from "./indexing.js";
@@ -91,6 +92,48 @@ export const CONTENT_TOOL_SPECS = {
     analyze: analyzeSafety
   }
 };
+
+const FINANCIAL_EXACT_ENRICHMENT_COLUMNS = [
+  ...CONTENT_TOOL_SPECS.financial_transactions.roles.selectColumns,
+  "project_id",
+  "email_attachment_id",
+  "document_filename"
+];
+const EMAIL_ATTACHMENT_LINK_COLUMNS = [
+  "attachment_id",
+  "project_id",
+  "original_file_name",
+  "current_filename",
+  "attachment_link"
+];
+const SAFETY_EXACT_ENRICHMENT_COLUMNS = [
+  "id",
+  "project_id",
+  "report_date",
+  "site_location",
+  "risk_level",
+  "site_grade",
+  "item_status",
+  "total_workers",
+  "life_threatening_defects",
+  "severe_defects",
+  "medium_defects",
+  "minor_defects",
+  "mail_id",
+  "attachment_id",
+  "document_filename"
+];
+const SAFETY_ATTACHMENT_LINK_COLUMNS = [
+  "attachment_id",
+  "project_id",
+  "mail_id",
+  "original_file_name",
+  "current_filename",
+  "attachment_link"
+];
+const PROJECT_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UNSAFE_REFERENCE_CHARACTERS = /[\u0000-\u001f\u007f]/;
+const MAX_ATTACHMENT_REFERENCE_LENGTH = 2048;
 
 // Default synthesis prompts — each agent's phrasing style. Editable per tool
 // from the Subagents card; synthesis is ON by default (spec B2).
@@ -368,6 +411,171 @@ export async function callInternalContentTool({ config, toolName, query, dateFro
   } catch (error) {
     return { toolName, ok: false, internal: true, error: error.message, data: null, sources: [] };
   }
+}
+
+export async function fetchFinancialTransactionsByIds({ config, ids = [], projectId }) {
+  const normalizedIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => String(id ?? "").trim()))];
+  const normalizedProjectId = String(projectId ?? "").trim();
+  if (!normalizedIds.length || normalizedIds.length > 200 || normalizedIds.some((id) => !/^[1-9]\d*$/.test(id))) {
+    throw new Error("Financial transaction IDs must contain 1-200 positive integers");
+  }
+  if (normalizedProjectId && !PROJECT_UUID_PATTERN.test(normalizedProjectId)) {
+    throw new Error("Financial transaction lookup requires a valid project UUID");
+  }
+  const chunks = [];
+  for (let index = 0; index < normalizedIds.length; index += 25) {
+    chunks.push(normalizedIds.slice(index, index + 25));
+  }
+  const rows = [];
+  for (let index = 0; index < chunks.length; index += 4) {
+    const pageRows = await Promise.all(chunks.slice(index, index + 4).map(async (chunk) => {
+      const idFilter = chunk.length === 1
+        ? `eq.${chunk[0]}`
+        : `in.(${chunk.join(",")})`;
+      const query = new URLSearchParams();
+      query.set("select", FINANCIAL_EXACT_ENRICHMENT_COLUMNS.join(","));
+      query.set("id", idFilter);
+      if (normalizedProjectId) query.set("project_id", `eq.${normalizedProjectId}`);
+      query.set("limit", String(chunk.length));
+      const result = await contentSupabaseRequest({
+        config,
+        path: `/rest/v1/financial_transactions?${query.toString()}`
+      });
+      if (!Array.isArray(result)) throw new Error("Financial transaction lookup returned an invalid payload");
+      return result;
+    }));
+    rows.push(...pageRows.flat());
+  }
+  const byId = new Map(rows
+    .filter((row) =>
+      (!normalizedProjectId ||
+        String(row?.project_id ?? "").toLowerCase() === normalizedProjectId.toLowerCase()) &&
+      normalizedIds.includes(String(row?.id ?? ""))
+    )
+    .map((row) => [String(row.id), row]));
+  return normalizedIds.map((id) => byId.get(id)).filter(Boolean);
+}
+
+export async function fetchFinancialTransactionById({ config, id, projectId }) {
+  const rows = await fetchFinancialTransactionsByIds({ config, ids: [id], projectId });
+  return rows[0] || null;
+}
+
+export async function fetchSafetyReportsByIds({ config, ids = [], projectId }) {
+  const normalizedIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => String(id ?? "").trim()))];
+  const normalizedProjectId = String(projectId ?? "").trim();
+  if (!normalizedIds.length || normalizedIds.length > 25 || normalizedIds.some((id) => !/^[1-9]\d*$/.test(id))) {
+    throw new Error("Safety report IDs must contain 1-25 positive integers");
+  }
+  if (!PROJECT_UUID_PATTERN.test(normalizedProjectId)) {
+    throw new Error("Safety report lookup requires an authorized project UUID");
+  }
+  const connection = contentSupabaseConfig(config);
+  const accessToken = await getDataQueryAccessToken(config);
+  const query = new URLSearchParams();
+  query.set("select", SAFETY_EXACT_ENRICHMENT_COLUMNS.join(","));
+  query.set("id", normalizedIds.length === 1
+    ? `eq.${normalizedIds[0]}`
+    : `in.(${normalizedIds.join(",")})`);
+  query.set("project_id", `eq.${normalizedProjectId}`);
+  query.set("limit", String(normalizedIds.length));
+  const rows = await contentSupabaseRequest({
+    config,
+    path: `/rest/v1/safety_reports?${query.toString()}`,
+    options: {
+      method: "GET",
+      headers: {
+        ...supabaseHeaders(connection.supabaseServiceRoleKey),
+        Authorization: `Bearer ${accessToken}`
+      }
+    }
+  });
+  if (!Array.isArray(rows)) throw new Error("Safety report lookup returned an invalid payload");
+  const byId = new Map(rows
+    .filter((row) =>
+      String(row?.project_id ?? "").toLowerCase() === normalizedProjectId.toLowerCase() &&
+      normalizedIds.includes(String(row?.id ?? ""))
+    )
+    .map((row) => [String(row.id), row]));
+  return normalizedIds.map((id) => byId.get(id)).filter(Boolean);
+}
+
+export async function fetchEmailAttachmentByReference({ config, attachmentId, projectId }) {
+  const normalizedAttachmentId = String(attachmentId ?? "").trim();
+  const normalizedProjectId = String(projectId ?? "").trim();
+  if (
+    !normalizedAttachmentId ||
+    normalizedAttachmentId.length > MAX_ATTACHMENT_REFERENCE_LENGTH ||
+    UNSAFE_REFERENCE_CHARACTERS.test(normalizedAttachmentId)
+  ) {
+    throw new Error("Email attachment reference must be a bounded non-empty string");
+  }
+  if (!PROJECT_UUID_PATTERN.test(normalizedProjectId)) {
+    throw new Error("Email attachment lookup requires a valid project UUID");
+  }
+  const query = new URLSearchParams();
+  query.set("select", EMAIL_ATTACHMENT_LINK_COLUMNS.join(","));
+  query.set("attachment_id", `eq.${normalizedAttachmentId}`);
+  query.set("project_id", `eq.${normalizedProjectId}`);
+  query.set("limit", "2");
+  const rows = await contentSupabaseRequest({
+    config,
+    path: `/rest/v1/email_attachments?${query.toString()}`
+  });
+  if (!Array.isArray(rows)) throw new Error("Email attachment lookup returned an invalid payload");
+  if (rows.length !== 1) return null;
+  const row = rows[0];
+  if (
+    String(row?.attachment_id ?? "") !== normalizedAttachmentId ||
+    String(row?.project_id ?? "").toLowerCase() !== normalizedProjectId.toLowerCase()
+  ) {
+    return null;
+  }
+  return row;
+}
+
+export async function fetchSafetyAttachmentByReference({
+  config,
+  attachmentId,
+  projectId,
+  mailId
+}) {
+  const normalizedAttachmentId = String(attachmentId ?? "").trim();
+  const normalizedProjectId = String(projectId ?? "").trim();
+  const normalizedMailId = String(mailId ?? "").trim();
+  if (
+    !normalizedAttachmentId ||
+    normalizedAttachmentId.length > MAX_ATTACHMENT_REFERENCE_LENGTH ||
+    UNSAFE_REFERENCE_CHARACTERS.test(normalizedAttachmentId) ||
+    !normalizedMailId ||
+    normalizedMailId.length > MAX_ATTACHMENT_REFERENCE_LENGTH ||
+    UNSAFE_REFERENCE_CHARACTERS.test(normalizedMailId)
+  ) {
+    throw new Error("Safety attachment references must be bounded non-empty strings");
+  }
+  if (!PROJECT_UUID_PATTERN.test(normalizedProjectId)) {
+    throw new Error("Safety attachment lookup requires a valid project UUID");
+  }
+  const query = new URLSearchParams();
+  query.set("select", SAFETY_ATTACHMENT_LINK_COLUMNS.join(","));
+  query.set("attachment_id", `eq.${normalizedAttachmentId}`);
+  query.set("project_id", `eq.${normalizedProjectId}`);
+  query.set("limit", "2");
+  const rows = await contentSupabaseRequest({
+    config,
+    path: `/rest/v1/email_attachments?${query.toString()}`
+  });
+  if (!Array.isArray(rows)) throw new Error("Safety attachment lookup returned an invalid payload");
+  if (rows.length !== 1) return null;
+  const row = rows[0];
+  if (
+    String(row?.attachment_id ?? "") !== normalizedAttachmentId ||
+    String(row?.project_id ?? "").toLowerCase() !== normalizedProjectId.toLowerCase() ||
+    String(row?.mail_id ?? "") !== normalizedMailId
+  ) {
+    return null;
+  }
+  return row;
 }
 
 function rowSource(toolName, row) {

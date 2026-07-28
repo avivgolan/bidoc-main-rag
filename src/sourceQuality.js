@@ -5,6 +5,7 @@ const QUALITY_BY_TOOL = {
   submittals: { score: 88, level: "HIGH", label: "אישורי חומרים/מעקב מסירות" },
   financial_transactions: { score: 86, level: "HIGH", label: "מסמך פיננסי" },
   meetings: { score: 78, level: "MEDIUM_HIGH", label: "סיכום ישיבה/החלטות" },
+  meeting_evidence_search: { score: 78, level: "MEDIUM_HIGH", label: "ראיות מתועדות מישיבה" },
   emails: { score: 74, level: "MEDIUM_HIGH", label: "תכתובת מייל" },
   alert: { score: 70, level: "MEDIUM", label: "התראה/תקציר מערכת" },
   hybrid_search: { score: 68, level: "MEDIUM", label: "אינדקס פרויקט" },
