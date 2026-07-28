@@ -382,6 +382,36 @@ async function handleApi(req, res, url) {
     createRun(runId);
     const excludedSourceKeys = Array.isArray(body.excludeSourceKeys) ? body.excludeSourceKeys : [];
     const parentRunId = body.parentRunId || body.parent_run_id || null;
+    // Persist a "running" row immediately so clients that leave/return can show
+    // the run in history as in-progress while analysis continues.
+    await saveProjectInsightRun({
+      config: cfg,
+      run: {
+        runId,
+        parentRunId,
+        projectId: body.projectId || body.project_id || null,
+        focusQuery: body.focusQuery || body.query || "",
+        dateFrom: body.dateFrom || body.date_from || null,
+        dateTo: body.dateTo || body.date_to || null,
+        limit: body.limit || 350,
+        expansion: Boolean(body.expansion),
+        excludedSourceKeys,
+        scannedSourceKeys: [],
+        summary: {
+          focusQuery: body.focusQuery || body.query || "",
+          dateFrom: body.dateFrom || body.date_from || null,
+          dateTo: body.dateTo || body.date_to || null
+        },
+        insights: [],
+        toolContext: {},
+        workflowLog: null,
+        runEvents: [],
+        status: "running",
+        metadata: { hasMore: false, findings: [] }
+      }
+    }).catch((error) => {
+      emitRunEvent(runId, "persistence_warning", "Insight run start persistence failed", { error: error.message, status: "warning" });
+    });
     try {
       const result = await runProjectInsightsAnalysis({
         config: effectiveCfg,
