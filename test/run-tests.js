@@ -7,11 +7,11 @@ import { buildToolOrder, isInternalProjectTool } from "../src/tools.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, parseKnowledgeAgentMarkdown, readKnowledgeDocument, routeKnowledgeAgents, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
 import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality.js";
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
-import { appendConflictWarnings, appendEmailSemanticLatestBoundary, appendExactInvoiceEnrichment, buildAlertAgentRequest, buildDeterministicAlertAnswer, buildDeterministicDateScopedMeetingDecisionAnswer, buildDeterministicEmailAnswer, buildDeterministicExceptionAnswer, buildDeterministicFinancialDataQueryFailureAnswer, buildDeterministicFinancialDocumentAnswer, buildDeterministicInvoiceAnswer, buildDeterministicMeetingAnswer, buildDeterministicMeetingEvidenceUnavailableAnswer, buildDeterministicMeetingFallbackEvidenceAnswer, buildDeterministicSafetyAnswer, buildExactInvoiceDocumentSources, buildExactInvoiceEnrichment, buildExactInvoiceEnrichments, buildExactSafetyDocumentSources, buildExactSafetyEnrichments, buildMainDataQueryWorkflowProjection, buildMainProjectTools, buildSafetyPrecheckTools, dataQueryClassifierDateScopeForQuestion, enforceAlertDataQueryTrustedOrigin, enforceProfessionalKnowledgeMode, exactAlertLookupRecords, exactEmailLookupRecords, exactExceptionLookupRecords, exactInvoiceAttachmentProjectId, exactInvoiceLookupProjectId, exactInvoiceLookupProjectScope, exactMeetingLookupRecords, hasVerifiedMeetingEvidence, isDeterministicAlertCapability, isDeterministicAlertMixedCapability, isDeterministicAlertNotComputableCapability, isDeterministicEmailCapability, isDeterministicEmailMixedCapability, isDeterministicEmailNotComputableCapability, isDeterministicExceptionCapability, isDeterministicExceptionMixedCapability, isDeterministicExceptionNotComputableCapability, isDeterministicFinancialDocumentMetricCapability, isDeterministicFinancialTransactionTypeCapability, isDeterministicInvoiceCapability, isDeterministicMeetingCapability, isDeterministicMeetingMixedCapability, isDeterministicMeetingNotComputableCapability, isDeterministicSafetyCapability, isDeterministicSafetyNotComputableCapability, isMeetingSemanticFallbackCapability, isPureEmailSemanticCapability, isPureMeetingEvidenceCapability, KNOWLEDGE_PLANNER_RESPONSE_FORMAT, normalizeDataQueryClassifierDate, projectChatToolCallsForClient, projectMeetingEvidenceConflicts, resolveExactInvoiceAttachmentLinks, resolveExactSafetyAttachmentLinks, shouldBypassGenericRetrieval, shouldRunDataQuery, summarizeMeetingEvidenceErrorForWorkflow } from "../src/agent.js";
+import { appendConflictWarnings, appendEmailSemanticLatestBoundary, appendExactInvoiceEnrichment, buildAlertAgentRequest, buildDeterministicAlertAnswer, buildDeterministicDateScopedMeetingDecisionAnswer, buildDeterministicEmailAnswer, buildDeterministicExceptionAnswer, buildDeterministicFinancialDataQueryFailureAnswer, buildDeterministicFinancialDocumentAnswer, buildDeterministicInvoiceAnswer, buildDeterministicMeetingAnswer, buildDeterministicMeetingEvidenceUnavailableAnswer, buildDeterministicMeetingFallbackEvidenceAnswer, buildDeterministicSafetyAnswer, buildExactInvoiceDocumentSources, buildExactInvoiceEnrichment, buildExactInvoiceEnrichments, buildExactSafetyDocumentSources, buildExactSafetyEnrichments, buildExceptionApprovalFallbackAnswer, buildMainDataQueryWorkflowProjection, buildMainProjectTools, buildSafetyPrecheckTools, dataQueryClassifierDateScopeForQuestion, enforceAlertDataQueryTrustedOrigin, enforceProfessionalKnowledgeMode, exactAlertLookupRecords, exactEmailLookupRecords, exactExceptionLookupRecords, exactInvoiceAttachmentProjectId, exactInvoiceLookupProjectId, exactInvoiceLookupProjectScope, exactMeetingLookupRecords, hasVerifiedMeetingEvidence, isDeterministicAlertCapability, isDeterministicAlertMixedCapability, isDeterministicAlertNotComputableCapability, isDeterministicEmailCapability, isDeterministicEmailMixedCapability, isDeterministicEmailNotComputableCapability, isDeterministicExceptionCapability, isDeterministicExceptionMixedCapability, isDeterministicExceptionNotComputableCapability, isDeterministicFinancialDocumentMetricCapability, isDeterministicFinancialTransactionTypeCapability, isDeterministicInvoiceCapability, isDeterministicMeetingCapability, isDeterministicMeetingMixedCapability, isDeterministicMeetingNotComputableCapability, isDeterministicSafetyCapability, isDeterministicSafetyNotComputableCapability, isExceptionCountApprovalMixedCapability, isMeetingSemanticFallbackCapability, isPureEmailSemanticCapability, isPureMeetingEvidenceCapability, KNOWLEDGE_PLANNER_RESPONSE_FORMAT, normalizeDataQueryClassifierDate, prefixExactExceptionApprovalAnchor, projectChatToolCallsForClient, projectMeetingEvidenceConflicts, resolveExactInvoiceAttachmentLinks, resolveExactSafetyAttachmentLinks, sanitizeCustomerFacingAnswer, shouldBypassGenericRetrieval, shouldRunDataQuery, summarizeMeetingEvidenceErrorForWorkflow } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { applyDataQueryCallerScope, buildHeuristicQueryPlan, buildDataQueryMachineResult, buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryMetrics, buildDataQueryWorkflowLog, classifyDataQueryCapability, clearDataQueryRunCache, DATA_QUERY_CONTRACT_VERSION, dataQueryPlanSignature, dataQuerySettings, dataQuerySupabaseHeaders, executeQueryPlans, fetchExactPlan, introspectSupabaseTables, normalizeDataQueryCaller, normalizeExactExecution, parseDataQueryLookupIntent, parseDataQueryMetricScope, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, summarizeDataQueryMetricsForWorkflow, validateQueryPlan } from "../src/subagents/dataQuery.js";
 import { clearDataQueryAccessTokenCache, getDataQueryAccessToken, validateDataQueryAccessToken } from "../src/subagents/dataQueryAuth.js";
-import { canonicalizeDataQueryAlertInputType, canonicalizeDataQueryAlertType, canonicalizeDataQuerySafetyRisk, DATA_QUERY_ALERT_INPUT_TYPE_VALUES, DATA_QUERY_ALERT_ITEM_STATUS, DATA_QUERY_ALERT_SEVERITY_LEVEL, DATA_QUERY_ALERT_TYPE_VALUES, DATA_QUERY_EMAIL_ALLOWED_RELEVANCE_VALUES, DATA_QUERY_EMAIL_CATEGORY_VALUES, DATA_QUERY_EMAIL_DIRECTION_VALUES, DATA_QUERY_EMAIL_ITEM_STATUS, DATA_QUERY_EMAIL_NO_CLEAR_RELEVANCE, DATA_QUERY_EMAIL_RELEVANCE_VALUES, DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES, DATA_QUERY_EXCEPTION_URGENCY_VALUES, DATA_QUERY_EXACT_OPERATIONS, DATA_QUERY_EXACT_RPC, DATA_QUERY_FINANCIAL_INVOICE_TYPE, DATA_QUERY_MANAGED_READ_TRANSPORT, DATA_QUERY_MEETING_STATUS_VALUES, dataQuerySafetyRiskRawValues, dataQueryTablePolicy } from "../src/subagents/dataQueryMetadata.js";
+import { canonicalizeDataQueryAlertInputType, canonicalizeDataQueryAlertType, canonicalizeDataQuerySafetyRisk, DATA_QUERY_ALERT_INPUT_TYPE_VALUES, DATA_QUERY_ALERT_ITEM_STATUS, DATA_QUERY_ALERT_SEVERITY_LEVEL, DATA_QUERY_ALERT_TYPE_VALUES, DATA_QUERY_EMAIL_ALLOWED_RELEVANCE_VALUES, DATA_QUERY_EMAIL_CATEGORY_VALUES, DATA_QUERY_EMAIL_DIRECTION_VALUES, DATA_QUERY_EMAIL_ITEM_STATUS, DATA_QUERY_EMAIL_NO_CLEAR_RELEVANCE, DATA_QUERY_EMAIL_RELEVANCE_VALUES, DATA_QUERY_EXCEPTION_CURRENCY, DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES, DATA_QUERY_EXCEPTION_URGENCY_VALUES, DATA_QUERY_EXCEPTION_VAT_RATE, DATA_QUERY_EXACT_OPERATIONS, DATA_QUERY_EXACT_RPC, DATA_QUERY_FINANCIAL_INVOICE_TYPE, DATA_QUERY_MANAGED_READ_TRANSPORT, DATA_QUERY_MEETING_STATUS_VALUES, dataQuerySafetyRiskRawValues, dataQueryTablePolicy } from "../src/subagents/dataQueryMetadata.js";
 import { analyzeHebrewEmailRelevance, analyzeHebrewExceptionIntent, DATA_QUERY_HEBREW_LEXICON, normalizeDataQueryHebrewQuestion, normalizeHebrewEmailMetricQuestion, normalizeHebrewExceptionMetricQuestion } from "../src/subagents/dataQueryHebrewLexicon.js";
 import { analyzeDataQueryFinancialTransactionType, DATA_QUERY_FINANCIAL_ALL_ROWS_LIMIT, DATA_QUERY_FINANCIAL_TRANSACTION_TYPE_VALUES, DATA_QUERY_FINANCIAL_TYPE_LEXICON, dataQueryFinancialTransactionTypeFilter, dataQueryFinancialTypeForStoredValue, isDataQueryFinancialAllListIntent } from "../src/subagents/dataQueryFinancialLexicon.js";
 import { extractExplicitMeetingDate, isMeetingDecisionDetailRequest, runMeetingEvidenceAgent } from "../src/subagents/meeting.js";
@@ -12539,19 +12539,21 @@ test("data query Phase 4F exception policy is fixed, project-scoped, dormant by 
   assert.deepEqual(dormant.executionContract.methods, ["GET", "HEAD"]);
   assert.equal(dormant.executionContract.table, "exceptions_report");
   assert.equal(dormant.defaultDateField, "exception_date");
-  assert.deepEqual(dormant.declaredExactOperations, ["count", "group_count", "timeseries"]);
+  assert.deepEqual(dormant.declaredExactOperations, ["count", "group_count", "aggregate", "timeseries"]);
   assert.deepEqual(dormant.lookupPolicy.operations, ["lookup_latest", "lookup_earliest", "lookup_last_n"]);
   assert.deepEqual([...dormant.allowedFields].sort(), [
-    "exception_date", "id", "item_status", "project_id", "urgency_level"
+    "exception_date", "id", "item_status", "project_id", "requested_amount_ex_vat", "urgency_level"
   ]);
   for (const excluded of [
     "created_at", "project_name", "exception_number", "supervision_company", "inspector",
-    "project_manager", "exception_subject", "execution_days", "requested_amount_ex_vat",
+    "project_manager", "exception_subject", "execution_days",
     "vat_amount", "total_amount_incl_vat", "main_contractor_profit", "mail_id",
     "attachment_id", "processed_for_insights", "hashtags", "summary", "content", "metadata", "embedding"
   ]) assert.ok(!dormant.allowedFields.includes(excluded), excluded);
   assert.deepEqual(DATA_QUERY_EXCEPTION_URGENCY_VALUES, ["לא צוין"]);
   assert.deepEqual(DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES, ["בטיפול"]);
+  assert.equal(DATA_QUERY_EXCEPTION_CURRENCY, "ILS");
+  assert.equal(DATA_QUERY_EXCEPTION_VAT_RATE, 0.18);
 
   const active = buildDataQueryManifest({
     dataQueryServiceEmail: "data-query@example.invalid",
@@ -12560,7 +12562,7 @@ test("data query Phase 4F exception policy is fixed, project-scoped, dormant by 
   assert.equal(active.exactTransport, DATA_QUERY_MANAGED_READ_TRANSPORT);
   assert.equal(active.executionContract.status, "active");
   assert.deepEqual(active.exactOperations, [
-    "count", "group_count", "timeseries", "lookup_latest", "lookup_earliest", "lookup_last_n"
+    "count", "group_count", "aggregate", "timeseries", "lookup_latest", "lookup_earliest", "lookup_last_n"
   ]);
 });
 
@@ -12668,10 +12670,10 @@ test("data query Phase 4F published UI matrix is complete in English and Hebrew"
       granularity: "month"
     },
     {
-      name: "amount fail closure",
+      name: "requested amount coverage subtotal",
       queries: ["How much money was requested in all exceptions?", "כמה כסף התבקש בכל החריגים?"],
-      kind: "not_computable",
-      warning: "exception_amount_not_computable"
+      kind: "metric",
+      operation: "aggregate"
     },
     {
       name: "latest same-record summary",
@@ -12774,7 +12776,6 @@ test("data query Phase 4F Hebrew lexicon, semantic split, same-record mixed rout
   }), ["data_query"]);
 
   for (const [question, warning] of [
-    ["What is the total requested amount for exceptions?", "exception_amount_not_computable"],
     ["What is the average execution time for exceptions?", "exception_execution_days_not_computable"],
     ["Break down exceptions by inspector", "exception_identity_grouping_not_computable"],
     ["Break down exceptions by company", "exception_identity_grouping_not_computable"],
@@ -12796,6 +12797,208 @@ test("data query Phase 4F Hebrew lexicon, semantic split, same-record mixed rout
     assert.equal(result.status, "not_computable", question);
     assert.equal(fetches, 0, question);
   }
+});
+
+test("data query Phase 4F manager questions combine exact exception counts with approval evidence and return live amount coverage", () => {
+  const settings = dataQueryExceptionsTestSettings({ plannerEnabled: false });
+  const runtimeConfig = { dataQuery: { enabled: true }, n8n: { runtime: { enabled: true, parallelLimit: 4 } } };
+  const classification = { type: "RAG", complexity: "SPECIFIC", urgency: "NORMAL", tool_hint: "data_query" };
+
+  for (const question of [
+    "What was the total number of exceptions submitted, and which of them were approved?",
+    "How many exceptions were submitted and how many of them were approved?",
+    "מה היה סה\"כ החריגים שהוגשו, ומה מתוכם אושר?",
+    "כמה חריגים הוגשו וכמה מתוכם אושרו?"
+  ]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.supported, true, `${question}: ${JSON.stringify(route)}`);
+    assert.equal(route.domain, "content_mixed_exact_semantic", question);
+    assert.equal(route.mixed, true, question);
+    assert.equal(route.mixedKind, "exception_count_approval_evidence", question);
+    assert.equal(route.metricScope?.operation, "count", question);
+    assert.equal(isExceptionCountApprovalMixedCapability(route), true, question);
+    assert.equal(shouldBypassGenericRetrieval({ message: question, classification, config: runtimeConfig, settings, routing: route }), false, question);
+    assert.deepEqual(buildMainProjectTools({
+      message: question,
+      classification,
+      config: runtimeConfig,
+      dataQuerySettingsOverride: settings,
+      dataQueryRoutingOverride: route
+    }), ["data_query"], question);
+    const plan = buildHeuristicQueryPlan({ question, settings });
+    assert.equal(plan.plans[0]?.operation, "count", question);
+  }
+
+  const approvalRoute = classifyDataQueryCapability("כמה חריגים הוגשו וכמה מתוכם אושרו?", { settings });
+  const approvalCall = {
+    toolName: "data_query",
+    ok: true,
+    data: {
+      status: "ok",
+      routing: approvalRoute,
+      plans: [{ id: "exception_count", table: "exceptions_report", operation: "count" }],
+      machineResult: {
+        metricsByRequestId: {
+          exception_count: [{ operation: "count", value: 21, exactness: "exact", group: {} }]
+        },
+        recordsByRequestId: {}
+      }
+    }
+  };
+  const anchored = prefixExactExceptionApprovalAnchor({
+    answer: "נמצאו שתי דוגמאות עם ראיית אישור במסמכים שסופקו.",
+    routing: approvalRoute,
+    toolCalls: [approvalCall],
+    hebrew: true
+  });
+  assert.match(anchored, /סה״כ הוגשו 21 חריגים/);
+  assert.match(anchored, /לא ניתן לקבוע מהמידע הזמין כמה מהם אושרו/);
+  assert.match(anchored, /מסמכי הפרויקט/);
+  assert.match(anchored, /שתי דוגמאות/);
+  assert.doesNotMatch(anchored, /Data Query|גבול אישורים|סטטוס השמור|ראיות סמנטיות/);
+
+  const anchoredEnglish = prefixExactExceptionApprovalAnchor({
+    answer: "Two documented examples were found.",
+    routing: approvalRoute,
+    toolCalls: [approvalCall],
+    hebrew: false
+  });
+  assert.match(anchoredEnglish, /A total of 21 exceptions were submitted/);
+  assert.match(anchoredEnglish, /available project information does not provide a complete count/);
+  assert.doesNotMatch(anchoredEnglish, /Data Query|Approval boundary|stored status|semantic evidence/);
+
+  const customerHebrew = sanitizeCustomerFacingAnswer(
+    "Data Query מצא 21 חריגים. Main Agent השתמש ב-Hybrid Search, Project Graph Search וב-Reranker.",
+    { hebrew: true }
+  );
+  assert.match(customerHebrew, /נמצאו 21 חריגים/);
+  assert.doesNotMatch(customerHebrew, /Data Query|Main Agent|Hybrid Search|Project Graph Search|Reranker/);
+  const customerEnglish = sanitizeCustomerFacingAnswer(
+    "Data Query found 21 exceptions. Main Agent used Hybrid Search, Project Graph Search, and Reranker.",
+    { hebrew: false }
+  );
+  assert.match(customerEnglish, /available project information contains 21 exceptions/i);
+  assert.doesNotMatch(customerEnglish, /Data Query|Main Agent|Hybrid Search|Project Graph Search|Reranker/);
+
+  const approvalFallback = buildExceptionApprovalFallbackAnswer({
+    message: "כמה חריגים הוגשו וכמה מתוכם אושרו?",
+    routing: approvalRoute,
+    retrievalResults: [
+      {
+        title: "חריגה 3 - תוספת חיזוקים",
+        content: "אלה החריגים שאושרו ושולמו ע\"פ השיעורים בדף – לא 100% – בעת החשבונות עידו טען שאישר לפי שיעור ביצוע.",
+        source_url: "https://example.test/approved"
+      },
+      {
+        title: "חריגה 4 - ממתינה",
+        content: "החריגה טרם אושרה ונדרש אישור מנהל.",
+        source_url: "https://example.test/pending"
+      },
+      {
+        title: "חריגה 5 - נדחתה",
+        content: "בקשת האישור נדחתה.",
+        source_url: "https://example.test/rejected"
+      },
+      {
+        title: "חשבון חלקי מאושר",
+        content: "החשבון אושר לתשלום.",
+        source_url: "https://example.test/unrelated-approved-account"
+      }
+    ]
+  });
+  assert.match(approvalFallback, /נמצא מסמך אחד/);
+  assert.match(approvalFallback, /חריגה 3 - תוספת חיזוקים/);
+  assert.match(approvalFallback, /https:\/\/example\.test\/approved/);
+  assert.match(approvalFallback, /אושרו ושולמו לפי שיעורי הביצוע, ולא במלואם/);
+  assert.doesNotMatch(approvalFallback, /עידו/);
+  assert.doesNotMatch(approvalFallback, /חריגה 4|pending|חריגה 5|rejected|חשבון חלקי|unrelated-approved-account/);
+  assert.match(approvalFallback, /אין להסיק ממספר המסמכים כמה חריגים אושרו/);
+  assert.doesNotMatch(approvalFallback, /חיפוש משלים|חיפוש במסמכי הפרויקט|מיון תוצאות/);
+  assert.doesNotMatch(approvalFallback, /Data Query|ראיות סמנטיות|מקורות שאוחזרו/);
+
+  const approvalFallbackEnglish = buildExceptionApprovalFallbackAnswer({
+    message: "How many exceptions were submitted, and which were approved?",
+    routing: approvalRoute,
+    retrievalResults: [{
+      title: "Exception approvals",
+      content: "The listed exceptions were approved and paid according to completion percentages, not in full, by Dana.",
+      source_url: "https://example.test/approved"
+    }]
+  });
+  assert.match(approvalFallbackEnglish, /approved and paid according to the recorded completion percentages, rather than in full/);
+  assert.doesNotMatch(approvalFallbackEnglish, /Dana/);
+
+  const noApprovalFallback = buildExceptionApprovalFallbackAnswer({
+    message: "כמה חריגים הוגשו וכמה מתוכם אושרו?",
+    routing: approvalRoute,
+    retrievalResults: [{ title: "חריגה ממתינה", content: "ממתינה לאישור", source_url: "https://example.test/waiting" }]
+  });
+  assert.match(noApprovalFallback, /לא נמצא במסמכים שנבדקו/);
+  assert.doesNotMatch(noApprovalFallback, /waiting/);
+
+  for (const question of [
+    "What is the monetary amount of the exceptions?",
+    "What is the total requested amount for exceptions?",
+    "מה הסכום הכספי של החריגים?",
+    "מה הסכום הכסף של החריגים"
+  ]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.supported, true, `${question}: ${JSON.stringify(route)}`);
+    assert.equal(route.mixed, false, question);
+    assert.equal(route.metricScope?.operation, "aggregate", question);
+    const plan = buildHeuristicQueryPlan({ question, settings });
+    assert.equal(plan.plans[0]?.operation, "aggregate", question);
+    assert.deepEqual(plan.plans[0]?.metrics, route.metricScope.metrics, question);
+    assert.equal(validateQueryPlan(plan, { ...settings, expectedMetricScope: route.metricScope }).ok, true, question);
+  }
+
+  const amountRoute = classifyDataQueryCapability("מה הסכום הכסף של החריגים", { settings });
+  const amountCall = {
+    toolName: "data_query",
+    ok: true,
+    data: {
+      status: "ok",
+      routing: amountRoute,
+      plans: [{ id: "exception_requested_amount_coverage", table: "exceptions_report", operation: "aggregate" }],
+      machineResult: {
+        metricsByRequestId: {
+          exception_requested_amount_coverage: [
+            { operation: "aggregate", value: 21, definition: { as: "total_exception_rows" } },
+            { operation: "aggregate", value: 12, definition: { as: "exceptions_with_requested_amount" } },
+            { operation: "aggregate", value: 123456, definition: { as: "partial_requested_amount_ex_vat" } }
+          ]
+        },
+        recordsByRequestId: {}
+      }
+    }
+  };
+  const amountAnswer = buildDeterministicExceptionAnswer({
+    message: "מה הסכום הכסף של החריגים",
+    routing: amountRoute,
+    toolCalls: [amountCall]
+  });
+  assert.match(amountAnswer, /123,456/);
+  assert.match(amountAnswer, /לפני מע״מ/);
+  assert.match(amountAnswer, /כולל מע״מ \(18%\)/);
+  assert.match(amountAnswer, /145,678\.08/);
+  assert.match(amountAnswer, /₪/);
+  assert.match(amountAnswer, /12 מתוך 21/);
+  assert.match(amountAnswer, /ב-9 חריגים לא קיים סכום/);
+  assert.ok(amountAnswer.indexOf("145,678.08") < amountAnswer.indexOf("12 מתוך 21"));
+  assert.doesNotMatch(amountAnswer, /אין מטבע|מטבע שמור|שדות המע״מ.*אינם זמינים/);
+
+  const amountAnswerEnglish = buildDeterministicExceptionAnswer({
+    message: "What is the monetary amount of the exceptions?",
+    routing: amountRoute,
+    toolCalls: [amountCall]
+  });
+  assert.match(amountAnswerEnglish, /Before VAT/);
+  assert.match(amountAnswerEnglish, /Including VAT \(18%\)/);
+  assert.match(amountAnswerEnglish, /₪123,456/);
+  assert.match(amountAnswerEnglish, /₪145,678\.08/);
+  assert.match(amountAnswerEnglish, /12 of 21 exceptions/);
+  assert.ok(amountAnswerEnglish.indexOf("145,678.08") < amountAnswerEnglish.indexOf("12 of 21"));
+  assert.doesNotMatch(amountAnswerEnglish, /currency.*(?:unavailable|not stored)|VAT.*unavailable/i);
 });
 
 test("data query Phase 4F validates and derives sparse-date metrics and stable exception lookups", async () => {
@@ -12899,7 +13102,9 @@ test("data query Phase 4F managed exception transport is fixed, bodyless, scoped
 
   for (const badPlan of [
     { ...lookupPlan, select: ["id", "exception_date", "exception_number"] },
+    { ...lookupPlan, select: ["id", "exception_date", "requested_amount_ex_vat"] },
     { ...lookupPlan, filters: [{ field: "inspector", op: "eq", value: "private" }] },
+    { ...lookupPlan, filters: [{ field: "requested_amount_ex_vat", op: "gt", value: 0 }] },
     { ...lookupPlan, orderBy: [{ field: "created_at", direction: "desc" }] }
   ]) {
     let fetches = 0;
@@ -12988,7 +13193,7 @@ test("data query Phase 4F same-record exception evidence attests all keys and sa
   assert.deepEqual(mismatch, { status: "not_computable", same_exception_match: false, evidence_count: 0, answer: "" });
 });
 
-test("data query Phase 4F deterministic answers and client projections expose no identifiers, identities, amounts, links, or raw evidence", () => {
+test("data query Phase 4F deterministic answers and client projections expose no identifiers, identities, row-level amounts, links, or raw evidence", () => {
   for (const [message, groupField, expectedLabel] of [
     ["Group exceptions by urgency.", "urgency_level", /Breakdown by stored urgency/],
     ["Group exceptions by status.", "item_status", /Breakdown by stored item status/],
@@ -13028,6 +13233,7 @@ test("data query Phase 4F deterministic answers and client projections expose no
     });
     assert.match(metricAnswer, expectedLabel, message);
     assert.doesNotMatch(metricAnswer, /UTC period|תקופת UTC/, message);
+    assert.doesNotMatch(metricAnswer, /Data Query/, message);
   }
 
   const routing = {
@@ -13119,7 +13325,9 @@ test("data query Phase 4F deterministic answers and client projections expose no
   const amountAnswer = buildDeterministicExceptionAnswer({
     message: "What is the total requested amount for exceptions?", routing: amountRoute, toolCalls: []
   });
-  assert.match(amountAnswer, /deliberately not computable/);
+  assert.equal(amountRoute.supported, true);
+  assert.equal(amountRoute.metricScope.operation, "aggregate");
+  assert.match(amountAnswer, /exact exception query did not complete/);
   assert.doesNotMatch(amountAnswer, /7654321|₪|NIS|USD|EUR/);
 });
 

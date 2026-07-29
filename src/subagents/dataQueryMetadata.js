@@ -45,6 +45,8 @@ export const DATA_QUERY_EMAIL_ALLOWED_RELEVANCE_VALUES = [
 export const DATA_QUERY_EMAIL_ITEM_STATUS = "בטיפול";
 export const DATA_QUERY_EXCEPTION_URGENCY_VALUES = ["לא צוין"];
 export const DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES = ["בטיפול"];
+export const DATA_QUERY_EXCEPTION_CURRENCY = "ILS";
+export const DATA_QUERY_EXCEPTION_VAT_RATE = 0.18;
 
 const DATA_QUERY_ALERT_TYPE_ALIASES = {
   עדכון: ["עדכון", "update", "updates"],
@@ -540,9 +542,8 @@ const EXCEPTION_REPORT_FIELDS = [
     notComputableReason: "execution_days is populated in only one audited row"
   }),
   field("requested_amount_ex_vat", "numeric", {
-    queryable: false,
-    sensitivity: "sensitive_business_data",
-    notComputableReason: "the source has no stored row-level currency and eight of twenty values are missing"
+    aggregations: ["sum"],
+    sensitivity: "sensitive_business_data"
   }),
   field("vat_amount", "numeric", { queryable: false, sensitivity: "sensitive_business_data" }),
   field("total_amount_incl_vat", "numeric", { queryable: false, sensitivity: "sensitive_business_data" }),
@@ -757,8 +758,8 @@ const TABLE_POLICIES = {
       methods: ["GET", "HEAD"],
       table: "exceptions_report"
     },
-    declaredExactOperations: ["count", "group_count", "timeseries"],
-    allowedOperations: ["count", "group_count", "timeseries", ...DATA_QUERY_LOOKUP_OPERATIONS],
+    declaredExactOperations: ["count", "group_count", "aggregate", "timeseries"],
+    allowedOperations: ["count", "group_count", "aggregate", "timeseries", ...DATA_QUERY_LOOKUP_OPERATIONS],
     defaultDateField: "exception_date",
     maxLimit: 200,
     lookupPolicy: {
@@ -772,10 +773,12 @@ const TABLE_POLICIES = {
     },
     valueNormalization: {
       urgencyValues: DATA_QUERY_EXCEPTION_URGENCY_VALUES,
-      itemStatusValues: DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES
+      itemStatusValues: DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES,
+      currency: DATA_QUERY_EXCEPTION_CURRENCY,
+      vatRate: DATA_QUERY_EXCEPTION_VAT_RATE
     },
     notComputableCapabilities: {
-      requestedAmount: "no stored row-level currency and incomplete amount coverage",
+      requestedAmount: "only a coverage-qualified subtotal of populated requested_amount_ex_vat values is computable in ILS; an including-VAT display value may be calculated at the fixed 18% rate, but neither figure is an authoritative all-exception total while rows are missing amounts",
       executionDays: "execution_days is populated in only one audited row",
       identityGrouping: "inspector and manager are personal data; company groups are identifying in the small dataset",
       category: "the source has no approved stored category field"

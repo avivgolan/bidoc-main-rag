@@ -25,6 +25,7 @@ import {
   summarizeDataQueryWarningsForWorkflow
 } from "./subagents/dataQuery.js";
 import { dataQueryFinancialTypeForStoredValue } from "./subagents/dataQueryFinancialLexicon.js";
+import { DATA_QUERY_EXCEPTION_CURRENCY, DATA_QUERY_EXCEPTION_VAT_RATE } from "./subagents/dataQueryMetadata.js";
 import { formatMeetingCitation, runMeetingEvidenceAgent } from "./subagents/meeting.js";
 import { runExceptionEvidenceAgent } from "./subagents/exceptionEvidence.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
@@ -128,6 +129,8 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     emitRunEvent(runId, "switch", "Routing to Main RAG Agent", { type: classification.type });
     result = await runRagAgent({ message: sanitized, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext, telemetryFor });
   }
+
+  result.answer = sanitizeCustomerFacingAnswer(result.answer, { hebrew: isHebrew(sanitized) });
 
   appendLocalMemory(sessionId, message, result.answer);
   emitRunEvent(runId, "local_memory", "Local memory updated", {});
@@ -954,13 +957,21 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     conflicts,
     { hebrew: isHebrew(message) }
   );
-  const answer = isDeterministicMeetingMixedCapability(dataQueryRouting) && hasVerifiedSameMeetingEvidence(toolCalls)
+  const meetingAnchoredAnswer = isDeterministicMeetingMixedCapability(dataQueryRouting) && hasVerifiedSameMeetingEvidence(toolCalls)
     ? prefixExactMeetingAnchor({
         answer: groundedAnswer,
         records: exactMeetingLookupRecords(toolCalls),
         hebrew: isHebrew(message)
       })
     : groundedAnswer;
+  const answer = isExceptionCountApprovalMixedCapability(dataQueryRouting)
+    ? prefixExactExceptionApprovalAnchor({
+        answer: meetingAnchoredAnswer,
+        routing: dataQueryRouting,
+        toolCalls,
+        hebrew: isHebrew(message)
+      })
+    : meetingAnchoredAnswer;
   return { answer, sources: uniqueSources, toolCalls, knowledgePlan, investigationPlan, sourceQuality, conflicts, graphContext };
 }
 
@@ -1415,7 +1426,8 @@ export function buildMainProjectTools({
       isDeterministicEmailNotComputableCapability(dataQueryRouting) ||
       isDeterministicExceptionCapability(dataQueryRouting) ||
       isDeterministicExceptionNotComputableCapability(dataQueryRouting) ||
-      isDeterministicExceptionMixedCapability(dataQueryRouting)
+      isDeterministicExceptionMixedCapability(dataQueryRouting) ||
+      isExceptionCountApprovalMixedCapability(dataQueryRouting)
     )
   ) {
     return dataQueryTool;
@@ -1649,6 +1661,14 @@ export function isDeterministicExceptionMixedCapability(capability = null) {
   return capability?.supported === true &&
     capability?.mixed === true &&
     capability?.lookup?.targetTable === "exceptions_report";
+}
+
+export function isExceptionCountApprovalMixedCapability(capability = null) {
+  return capability?.supported === true &&
+    capability?.mixed === true &&
+    capability?.mixedKind === "exception_count_approval_evidence" &&
+    capability?.metricScope?.targetTable === "exceptions_report" &&
+    capability?.metricScope?.operation === "count";
 }
 
 export function isDeterministicExceptionNotComputableCapability(capability = null) {
@@ -1961,6 +1981,28 @@ function projectToolCallsForMain(toolCalls = []) {
             sources: []
           };
         }
+        const targetsExceptions = data.routing?.lookup?.targetTable === "exceptions_report" ||
+          data.routing?.metricScope?.targetTable === "exceptions_report" ||
+          data.tablesUsed?.includes("exceptions_report") ||
+          data.plans?.some((plan) => plan?.table === "exceptions_report");
+        if (targetsExceptions) {
+          return {
+            toolName: "data_query",
+            ok: call.ok === true,
+            data: {
+              status: data.status || null,
+              routing: {
+                domain: data.routing?.domain || null,
+                intent: data.routing?.intent || null,
+                mixed: data.routing?.mixed === true,
+                mixedKind: data.routing?.mixedKind || null
+              },
+              metrics: summarizeDataQueryMetricsForWorkflow(data.metrics || []),
+              warnings: summarizeDataQueryWarningsForWorkflow(data.warnings || [])
+            },
+            sources: []
+          };
+        }
       }
       return call;
     });
@@ -1990,7 +2032,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
     console.warn("[main_agent] OPENROUTER_API_KEY is missing — cannot call LLM, returning structured fallback.");
     trace.push({ step: "mainAgent", ok: false, fallback: true, error: "OPENROUTER_API_KEY is missing" });
     emitRunEvent(runId, "main_agent", "Missing OpenRouter key, using fallback answer", {});
-    return fallbackRagAnswer({ successful, failed, skipped, sources });
+    return fallbackRagAnswer({ successful, failed, skipped, sources, message, retrievalResults, config });
   }
 
   try {
@@ -2063,7 +2105,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
       console.warn("[main_agent] Model returned empty string — using structured fallback.");
       trace.push({ step: "mainAgent", ok: false, fallback: true, error: "Main Agent returned an empty answer" });
       emitRunEvent(runId, "main_agent", "Main Agent returned empty answer, using fallback", {});
-      return fallbackRagAnswer({ successful, failed, skipped, sources });
+      return fallbackRagAnswer({ successful, failed, skipped, sources, message, retrievalResults, config });
     }
     emitRunEvent(runId, "main_agent", "Main Agent response received", { length: answer.length });
     return appendEmailSemanticLatestBoundary(linkifyCitations(answer, sources), { message });
@@ -2117,7 +2159,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
     }
     trace.push({ step: "mainAgent", ok: false, fallback: true, error: error.message });
     emitRunEvent(runId, "main_agent", "Main Agent failed, using fallback answer", { error: error.message });
-    return fallbackRagAnswer({ successful, failed, skipped, sources });
+    return fallbackRagAnswer({ successful, failed, skipped, sources, message, retrievalResults, config });
   }
 }
 
@@ -2143,6 +2185,7 @@ function mainSystemPrompt(classification, config) {
   return `${rendered}
 
 CRITICAL KNOWLEDGE BOUNDARY:
+- The final answer is customer-facing. Never mention internal component, agent, tool, route, model, prompt, database-table, or retrieval-stage names such as Data Query, Main Agent, Hybrid Search, Project Graph Search, or Reranker. Describe only the project facts, available documents, and honest information limits in natural business language.
 - knowledge_plan is planning guidance only. It is not project evidence.
 - Use knowledge_plan to decide what to look for and how to reason.
 - Final factual claims must come only from retrieval_context, retrieval_results, tool_results, graph_context/project_graph_findings when they are connected to retrieved records, or explicit user input from the current request.
@@ -2160,6 +2203,9 @@ CRITICAL KNOWLEDGE BOUNDARY:
 - Never include \`no_clear_project\` rows in an ordinary email total. Never expose or infer sender/recipient names or addresses, subject/body content, mail/conversation/project IDs, attachment filenames, or links from Data Query.
 - In a mixed email request, preserve the exact scoped count or metadata separately. Email retrieval may explain content, requests, approvals, or rejections, but it must not change the exact number or imply that \`received_date\` is the date of an event described in the message body.
 - A relevance-ranked email result is not proof of the overall latest email. Unless an authorization-bound same-record match to the exact Data Query latest record is supplied, describe it only as the most recent matching email returned by semantic retrieval, explicitly state that it may not be the overall latest project email, and do not answer what "the exact latest email" requested as a verified fact.
+- For exceptions, Data Query is authoritative for exact row counts, exception dates and ordering, stored urgency, opaque stored item status, and the coverage-qualified requested-amount subtotal.
+- Never treat the stored exception item status as approval, rejection, open/closed, resolution, or completion truth. For an exception_count_approval_evidence request, state the exact submitted-row count first. Retrieved approval evidence may identify supported examples only; it is not an exhaustive approved count. Explicitly say that an exact approved count is unavailable from the stored lifecycle metadata.
+- A requested-amount aggregate is only the subtotal of populated \`requested_amount_ex_vat\` values. Present the ILS subtotal before VAT first, then its calculated value including VAT at the fixed 18% rate, and only afterward state the populated-row coverage and missing-row count. Never call either figure the total value of all exceptions when rows are missing amounts.
 - Conversation memory is only for understanding follow-up wording. Never repeat an earlier assistant answer when current retrieval/tool results contradict it or provide newer evidence.
 - Never cite Knowledge Base excerpts as project sources unless they also appear in retrieval/tool results.
 
@@ -3442,6 +3488,29 @@ function prefixExactMeetingAnchor({ answer = "", records = [], hebrew = false } 
   return `${exact}\n\n${boundary}\n\n${String(answer || "").trim()}`.trim();
 }
 
+export function prefixExactExceptionApprovalAnchor({
+  answer = "",
+  routing = null,
+  toolCalls = [],
+  hebrew = false
+} = {}) {
+  if (!isExceptionCountApprovalMixedCapability(routing)) return answer;
+  const dataQueryCall = (Array.isArray(toolCalls) ? toolCalls : [])
+    .find((call) => call?.toolName === "data_query" && call?.ok);
+  if (!dataQueryCall?.data) return answer;
+  const count = Number(Object.values(dataQueryCall.data.machineResult?.metricsByRequestId || {})
+    .flatMap((value) => Array.isArray(value) ? value : [])
+    .find((metric) => metric?.operation === "count")?.value);
+  if (!Number.isFinite(count)) return answer;
+  const exact = hebrew
+    ? `**סה״כ הוגשו ${formatInvoiceNumber(count)} חריגים.**`
+    : `**A total of ${formatInvoiceNumber(count)} exceptions were submitted.**`;
+  const boundary = hebrew
+    ? "לא ניתן לקבוע מהמידע הזמין כמה מהם אושרו. הרשימה להלן כוללת רק מקרים שבהם נמצא במסמכי הפרויקט תיעוד מפורש של אישור לחריג."
+    : "The available project information does not provide a complete count of how many were approved. The list below includes only cases where project documents explicitly record approval of an exception.";
+  return `${exact}\n\n${boundary}${String(answer || "").trim() ? `\n\n${String(answer).trim()}` : ""}`;
+}
+
 export function buildDeterministicAlertAnswer({
   message = "",
   routing = null,
@@ -4105,11 +4174,11 @@ export function buildDeterministicExceptionAnswer({
   if (isDeterministicExceptionNotComputableCapability(routing)) {
     const messages = {
       exception_amount_not_computable: hebrew
-        ? "לא ניתן לחשב סכומי חריגים באופן מדויק: אין בטבלה מטבע שמור לכל שורה, 8 מתוך 20 סכומים מבוקשים חסרים, ושדות המע״מ, הסכום הכולל והרווח ריקים."
-        : "Exception amounts are deliberately not computable: no row-level currency is stored, 8 of 20 requested amounts are missing, and the VAT, total, and profit columns are empty.",
+        ? "לא ניתן לחשב את הסכום של כלל החריגים משום שבחלק מהרשומות חסר סכום מבוקש. כאשר קיים סכום חלקי, הוא מוצג בש״ח לפני מע״מ ולאחר חישוב מע״מ בשיעור 18%, יחד עם היקף הכיסוי."
+        : "The amount for all exceptions cannot be calculated because some records have no requested amount. When a partial subtotal is available, it is shown in ILS before VAT and after applying 18% VAT, together with its coverage.",
       exception_execution_days_not_computable: hebrew
-        ? "לא ניתן לחשב זמן ביצוע מייצג משום שהשדה `execution_days` מאוכלס רק בשורה אחת מתוך 20."
-        : "Execution time is not computable because `execution_days` is populated in only 1 of 20 rows.",
+        ? "לא ניתן לחשב זמן ביצוע מייצג משום שהשדה `execution_days` מאוכלס רק ברשומה מבוקרת אחת וחסר בשאר הרשומות."
+        : "Execution time is not computable because `execution_days` is populated in only one audited record and is missing from the rest.",
       exception_identity_grouping_not_computable: hebrew
         ? "פילוח לפי מפקח או מנהל חושף מידע אישי, ופילוח החברות מזהה צדדים עסקיים בקבוצה קטנה; לכן הוא מחוץ לחוזה המדויק."
         : "Inspector and manager breakdowns expose personal data, while company groups identify business parties in a small dataset; those groupings are excluded.",
@@ -4191,6 +4260,23 @@ function formatDeterministicExceptionMetrics({ data = {}, metricScope = null, he
   const plan = (data.plans || []).find((item) => item?.table === "exceptions_report");
   if (!plan) return null;
   const scope = formatInvoiceDateScope(data.caller || {}, hebrew);
+  if (plan.operation === "aggregate") {
+    const metricValue = (alias) => Number(metrics.find((item) =>
+      item?.definition?.as === alias || String(item?.label || "").includes(`.${alias}`)
+    )?.value);
+    const totalRows = metricValue("total_exception_rows");
+    const populatedRows = metricValue("exceptions_with_requested_amount");
+    const partialSubtotal = metricValue("partial_requested_amount_ex_vat");
+    if (![totalRows, populatedRows, partialSubtotal].every(Number.isFinite)) return null;
+    const missingRows = Math.max(0, totalRows - populatedRows);
+    const includingVat = Math.round((partialSubtotal * (1 + DATA_QUERY_EXCEPTION_VAT_RATE) + Number.EPSILON) * 100) / 100;
+    const beforeVat = formatExceptionCurrency(partialSubtotal, hebrew);
+    const afterVat = formatExceptionCurrency(includingVat, hebrew);
+    const vatPercent = formatInvoiceNumber(DATA_QUERY_EXCEPTION_VAT_RATE * 100);
+    return hebrew
+      ? `**לפני מע״מ:** **${beforeVat}**${scope}\n\n**כולל מע״מ (${vatPercent}%):** **${afterVat}**\n\nהסכומים מבוססים על **${formatInvoiceNumber(populatedRows)} מתוך ${formatInvoiceNumber(totalRows)} חריגים**. ב-${formatInvoiceNumber(missingRows)} חריגים לא קיים סכום, ולכן הם אינם מייצגים את כלל החריגים.`
+      : `**Before VAT:** **${beforeVat}**${scope}\n\n**Including VAT (${vatPercent}%):** **${afterVat}**\n\nThese amounts are based on **${formatInvoiceNumber(populatedRows)} of ${formatInvoiceNumber(totalRows)} exceptions**. ${formatInvoiceNumber(missingRows)} exceptions have no recorded amount, so the figures do not represent all exceptions.`;
+  }
   if (plan.operation === "count") {
     const value = Number(metrics.find((item) => item.operation === "count")?.value);
     if (!Number.isFinite(value)) return null;
@@ -4198,8 +4284,8 @@ function formatDeterministicExceptionMetrics({ data = {}, metricScope = null, he
       ? (hebrew ? " ללא תאריך" : " without a date")
       : "";
     return hebrew
-      ? `Data Query מצא **${formatInvoiceNumber(value)} חריגים${filtered}**${scope}.`
-      : `Data Query found **${formatInvoiceNumber(value)} exceptions${filtered}**${scope}.`;
+      ? `נמצאו **${formatInvoiceNumber(value)} חריגים${filtered}**${scope}.`
+      : `**${formatInvoiceNumber(value)} exceptions${filtered}** were found${scope}.`;
   }
   if (!["group_count", "timeseries"].includes(plan.operation)) return null;
   const groupField = plan.operation === "timeseries" ? "period" : metricScope?.groupField || plan.groupBy?.[0];
@@ -4219,8 +4305,8 @@ function formatDeterministicExceptionMetrics({ data = {}, metricScope = null, he
     .map((item) => `- **${escapeInvoiceDisplayValue(item.label === "undated" ? (hebrew ? "ללא תאריך" : "Undated") : String(item.label))}:** ${formatInvoiceNumber(item.value)}`)
     .join("\n");
   const heading = hebrew
-    ? `Data Query מצא **${formatInvoiceNumber(total)} חריגים**${scope}. פילוח לפי ${label}:`
-    : `Data Query found **${formatInvoiceNumber(total)} exceptions**${scope}. Breakdown by ${label}:`;
+    ? `נמצאו **${formatInvoiceNumber(total)} חריגים**${scope}. פילוח לפי ${label}:`
+    : `**${formatInvoiceNumber(total)} exceptions** were found${scope}. Breakdown by ${label}:`;
   const boundary = plan.operation === "timeseries"
     ? (hebrew ? "\n\n> סדרת הזמן משתמשת בגבולות UTC וכוללת דלי מפורש לרשומות ללא תאריך." : "\n\n> The time series uses UTC boundaries and includes an explicit undated bucket.")
     : "";
@@ -4968,6 +5054,13 @@ function formatInvoiceNumber(value) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 }).format(Number(value));
 }
 
+function formatExceptionCurrency(value, hebrew = false) {
+  const amount = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(Number(value));
+  return DATA_QUERY_EXCEPTION_CURRENCY === "ILS"
+    ? (hebrew ? `${amount} ₪` : `₪${amount}`)
+    : `${amount} ${DATA_QUERY_EXCEPTION_CURRENCY}`;
+}
+
 export function appendConflictWarnings(answer, conflicts = [], { hebrew = false } = {}) {
   const value = String(answer || "").trim();
   if (!value || !Array.isArray(conflicts) || !conflicts.length) return value;
@@ -4978,6 +5071,34 @@ export function appendConflictWarnings(answer, conflicts = [], { hebrew = false 
   const labels = [...new Set(conflicts.map((conflict) => conflict?.label || conflict?.type).filter(Boolean))];
   if (!labels.length) return value;
   return `${value}\n\n> **${heading}:** ${prefix} ${labels.map(escapeInvoiceDisplayValue).join(", ")}.`;
+}
+
+export function sanitizeCustomerFacingAnswer(answer = "", { hebrew = false } = {}) {
+  const replacements = hebrew
+    ? [
+        [/Data Query לא מצא/gi, "לא נמצאה"],
+        [/Data Query מצא/gi, "נמצאו"],
+        [/Data Query Agent/gi, "המידע הזמין בפרויקט"],
+        [/Data Query/gi, "המידע הזמין בפרויקט"],
+        [/Main Agent/gi, "מערכת המענה"],
+        [/Hybrid Search/gi, "חיפוש במסמכי הפרויקט"],
+        [/Project Graph Search/gi, "מידע מקושר מהפרויקט"],
+        [/Reranker/gi, "בדיקת רלוונטיות"]
+      ]
+    : [
+        [/Data Query found no/gi, "No"],
+        [/Data Query found/gi, "The available project information contains"],
+        [/Data Query Agent/gi, "the available project information"],
+        [/Data Query/gi, "the available project information"],
+        [/Main Agent/gi, "the response service"],
+        [/Hybrid Search/gi, "project-document search"],
+        [/Project Graph Search/gi, "related project information"],
+        [/Reranker/gi, "relevance review"]
+      ];
+  return replacements.reduce(
+    (text, [pattern, replacement]) => text.replace(pattern, replacement),
+    String(answer || "")
+  );
 }
 
 export function appendExactInvoiceEnrichment(answer, enrichment) {
@@ -5067,12 +5188,127 @@ function escapeInvoiceDisplayValue(value) {
     .replace(/[\\`*_[\]<>]/g, "\\$&");
 }
 
+const EXPLICIT_APPROVAL_POSITIVE_RE = /(?:\bapproved\b|\bapproval\s+(?:was\s+)?granted\b|אושר(?:ה|ו)?|מאושר(?:ת|ים|ות)?|אישר(?:ה|ו)?|(?:התקבל|ניתן|קיבל)\s+אישור)/i;
+const EXPLICIT_APPROVAL_NEGATIVE_RE = /(?:\bnot\s+approved\b|\b(?:unapproved|rejected|denied)\b|\b(?:pending|awaiting)\s+approval\b|\bapproval\s+(?:is\s+)?required\b|לא\s+אושר|טרם\s+אושר|אינ(?:ו|ה|ם|ן)\s+מאושר|לא\s+התקבל\s+אישור|ממתינ(?:ה|ים|ות)?\s+לאישור|נדרש(?:ת)?\s+אישור|דרוש(?:ה)?\s+אישור|בקשת\s+אישור|נדח(?:ה|ו))/i;
+const EXCEPTION_APPROVAL_CONTEXT_RE = /(?:\bexception(?:s|\s+report(?:s)?)?\b|חריג(?:ה|ים|ות)?)/i;
+const EXCEPTION_APPROVAL_PAID_RE = /(?:\bpaid\b|\bpayment\s+(?:was\s+)?made\b|שול(?:ם|מה|מו))/i;
+const EXCEPTION_APPROVAL_PARTIAL_RE = /(?:\bnot\s+(?:in\s+full|100\s*%)\b|\bpartial(?:ly)?\b|\b(?:completion|performance)\s+percent(?:age)?s?\b|לא\s*100\s*%|לא\s+במלוא(?:ו|ה|ם)?|לפי\s+(?:ה)?שיעור(?:י)?\s+ביצוע|שיעור(?:י)?\s+ביצוע|חלקי(?:ת|ים|ות)?)/i;
+
+function exceptionApprovalFacts(row = {}) {
+  const title = String(row?.title || row?.metadata?.title || "").normalize("NFKC");
+  const titleHasExceptionContext = EXCEPTION_APPROVAL_CONTEXT_RE.test(title);
+  const text = [
+    title,
+    row?.content,
+    row?.index_text,
+    row?.summary,
+    row?.text,
+    row?.chunk,
+    row?.page_content,
+    row?.document,
+    row?.metadata?.title,
+    row?.metadata?.text,
+    row?.metadata?.content
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .normalize("NFKC");
+  const matchingParts = text
+    .split(/[\n.!?;]+/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .filter((part) =>
+      EXPLICIT_APPROVAL_POSITIVE_RE.test(part) &&
+      !EXPLICIT_APPROVAL_NEGATIVE_RE.test(part) &&
+      (titleHasExceptionContext || EXCEPTION_APPROVAL_CONTEXT_RE.test(part))
+    );
+  if (!matchingParts.length) return null;
+  const relevantText = matchingParts.join(" ");
+  return {
+    paid: EXCEPTION_APPROVAL_PAID_RE.test(relevantText),
+    partial: EXCEPTION_APPROVAL_PARTIAL_RE.test(relevantText)
+  };
+}
+
+function describeExceptionApprovalFacts(facts = {}, hebrew = false) {
+  if (hebrew) {
+    if (facts.paid && facts.partial) return "המסמך מציין כי החריגים המופיעים בו אושרו ושולמו לפי שיעורי הביצוע, ולא במלואם.";
+    if (facts.paid) return "המסמך מציין כי החריגים המופיעים בו אושרו ושולמו.";
+    if (facts.partial) return "המסמך מציין כי החריגים המופיעים בו אושרו באופן חלקי או לפי שיעורי הביצוע.";
+    return "המסמך מציין כי החריגים המופיעים בו אושרו.";
+  }
+  if (facts.paid && facts.partial) return "The document states that the listed exceptions were approved and paid according to the recorded completion percentages, rather than in full.";
+  if (facts.paid) return "The document states that the listed exceptions were approved and paid.";
+  if (facts.partial) return "The document states that the listed exceptions were approved partially or according to recorded completion percentages.";
+  return "The document states that the listed exceptions were approved.";
+}
+
+export function buildExceptionApprovalFallbackAnswer({
+  message = "",
+  routing = null,
+  retrievalResults = null,
+  config = null
+} = {}) {
+  if (!isExceptionCountApprovalMixedCapability(routing)) return "";
+  const hebrew = isHebrew(message);
+  const evidence = [];
+  const seen = new Set();
+  for (const row of normalizeRows(retrievalResults)) {
+    const facts = exceptionApprovalFacts(row);
+    if (!facts) continue;
+    const source = extractLinks([row], config)[0] || null;
+    const title = escapeInvoiceDisplayValue(source?.title || row?.title || row?.summary || "");
+    if (!title) continue;
+    const key = String(source?.url || title).trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    evidence.push({ title, url: source?.url || "", date: source?.date || "", facts });
+    if (evidence.length >= 5) break;
+  }
+
+  const boundary = hebrew
+    ? "> ייתכן שקיימים אישורים נוספים שלא תועדו במסמכים שנבדקו. כמה מסמכים עשויים להתייחס לאותו חריג, ולכן אין להסיק ממספר המסמכים כמה חריגים אושרו."
+    : "> Additional approvals may exist without documentation in the reviewed sources. Multiple documents may refer to the same exception, so the document count must not be interpreted as the number of approved exceptions.";
+  if (!evidence.length) {
+    return hebrew
+      ? `**אישורים מתועדים:** לא נמצא במסמכים שנבדקו תיעוד מפורש הקושר אישור לחריג.\n\n${boundary}`
+      : `**Documented approvals:** The reviewed documents did not contain an explicit record tying approval to an exception.\n\n${boundary}`;
+  }
+
+  const heading = hebrew
+    ? evidence.length === 1
+      ? "**אישורים מתועדים:** נמצא מסמך אחד המתעד במפורש אישור של חריג:"
+      : `**אישורים מתועדים:** נמצאו ${evidence.length} מסמכים המתעדים במפורש אישור של חריג:`
+    : evidence.length === 1
+      ? "**Documented approvals:** One document explicitly records approval of an exception:"
+      : `**Documented approvals:** ${evidence.length} documents explicitly record approval of an exception:`;
+  const items = evidence.map((item) => {
+    const date = item.date ? ` (${escapeInvoiceDisplayValue(item.date)})` : "";
+    const sourceLabel = item.url
+      ? `- [${item.title}${date}](${item.url})`
+      : `- ${item.title}${date}`;
+    return `${sourceLabel} — ${describeExceptionApprovalFacts(item.facts, hebrew)}`;
+  });
+  return `${heading}\n\n${items.join("\n")}\n\n${boundary}`;
+}
+
 // Last-resort answer used only when the main LLM synthesis call itself fails
 // (missing key, timeout, provider error). Renders the *already retrieved*
 // records directly as clean bullet points with real links — never the raw
 // row/tool-call objects (those are large nested JSON blobs meant for
 // debugging, not for display) and never a raw error string.
-function fallbackRagAnswer({ successful, failed, skipped = [], sources }) {
+function fallbackRagAnswer({ successful, failed, skipped = [], sources, message = "", retrievalResults = null, config = null }) {
+  const dataQueryRouting = successful
+    .find((call) => call?.toolName === "data_query" && call?.ok)
+    ?.data?.routing || null;
+  const exceptionApprovalFallback = buildExceptionApprovalFallbackAnswer({
+    message,
+    routing: dataQueryRouting,
+    retrievalResults,
+    config
+  });
+  if (exceptionApprovalFallback) return exceptionApprovalFallback;
+
   const sections = successful
     .map((call) => {
       const label = toolDisplayLabel(call.toolName);

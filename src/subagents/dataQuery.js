@@ -102,7 +102,7 @@ const DATA_QUERY_EMAIL_INGESTION_TIME_PATTERN = /\b(?:created_at|creation|ingest
 const DATA_QUERY_EMAIL_SCOPE_FIELD_PATTERN = /\b(?:project_id|project\s+id|email\s+id|record\s+id|mail\s+id|conversation\s+id)\b|מזהה\s+(?:פרויקט|מייל|רשומה|שיחה)/iu;
 const DATA_QUERY_EXCEPTION_REPORT_PATTERN = /\b(?:exception|exceptions|exception\s+reports?|change\s+orders?|additional\s+work|extra\s+costs?|contract\s+deviations?|irregularit(?:y|ies))\b|(?:[בלמכושה])?(?:ה)?חריגים(?=\s|[?.!,;]|$)/iu;
 const DATA_QUERY_EXCEPTION_SEMANTIC_DETAIL_PATTERN = /\b(?:why|explain|describe|evidence|reason|cause|consequence|impact|responsib|approv|reject|narrative|summary|subject)\w*\b.{0,70}\b(?:exceptions?|change\s+orders?)\b|\b(?:exceptions?|change\s+orders?)\b.{0,70}\b(?:why|explain|describe|evidence|reason|cause|consequence|impact|responsib|approv|reject|narrative|summary|subject)\w*\b|(?:למה|מדוע|הסבר|תאר(?=\s|[?.!,;]|$)|ראיות|סיבה|גורם|השלכה|השפעה|אחריות|אישור|דחייה|נושא|סיכום|תמצת|תמצית).{0,70}חריגים|חריגים.{0,70}(?:למה|מדוע|הסבר|תאר(?=\s|[?.!,;]|$)|ראיות|סיבה|גורם|השלכה|השפעה|אחריות|אישור|דחייה|נושא|סיכום|תמצת|תמצית)/iu;
-const DATA_QUERY_EXCEPTION_AMOUNT_PATTERN = /\b(?:amount|amounts|sum|total|average|avg|money|cost|costs|price|prices|currency|vat|profit)\b.{0,60}\b(?:exceptions?|change\s+orders?)\b|\b(?:exceptions?|change\s+orders?)\b.{0,60}\b(?:amount|amounts|sum|total|average|avg|money|cost|costs|price|prices|currency|vat|profit)\b|(?:סכום|סכומים|עלות|עלויות|מחיר|כסף|מטבע|מע[״"]?מ|רווח).{0,60}חריגים|חריגים.{0,60}(?:סכום|סכומים|עלות|עלויות|מחיר|כסף|מטבע|מע[״"]?מ|רווח)/iu;
+const DATA_QUERY_EXCEPTION_AMOUNT_PATTERN = /\b(?:(?:total|average|avg|sum(?:\s+of)?)\s+)?(?:requested\s+)?(?:amount|amounts|money|cost|costs|price|prices|currency|vat|profit)\b.{0,60}\b(?:exceptions?|change\s+orders?)\b|\b(?:exceptions?|change\s+orders?)\b.{0,60}\b(?:(?:total|average|avg|sum(?:\s+of)?)\s+)?(?:requested\s+)?(?:amount|amounts|money|cost|costs|price|prices|currency|vat|profit)\b|(?:סכום|סכומים|עלות|עלויות|מחיר|כסף|מטבע|מע[״"]?מ|רווח).{0,60}חריגים|חריגים.{0,60}(?:סכום|סכומים|עלות|עלויות|מחיר|כסף|מטבע|מע[״"]?מ|רווח)/iu;
 const DATA_QUERY_EXCEPTION_EXECUTION_DAYS_PATTERN = /\b(?:execution|completion|implementation)\s+(?:days?|time|duration)\b.{0,50}\b(?:exceptions?|change\s+orders?)\b|\b(?:exceptions?|change\s+orders?)\b.{0,50}\b(?:execution|completion|implementation)\s+(?:days?|time|duration)\b|(?:ימי\s+ביצוע|זמן\s+ביצוע|משך\s+ביצוע).{0,50}חריגים|חריגים.{0,50}(?:ימי\s+ביצוע|זמן\s+ביצוע|משך\s+ביצוע)/iu;
 const DATA_QUERY_EXCEPTION_IDENTITY_PATTERN = /\b(?:exceptions?|change\s+orders?)\b.{0,45}\b(?:by|per|for\s+each|from)\s+(?:inspectors?|managers?|contractors?|compan(?:y|ies)|vendors?)\b|\b(?:inspectors?|managers?|contractors?|compan(?:y|ies)|vendors?)\b.{0,45}\b(?:exceptions?|change\s+orders?)\b|חריגים.{0,45}(?:לפי|של)\s+(?:מפקח|מפקחת|מפקחים|מנהל|מנהלת|קבלן|קבלנית|קבלנים|חברה|חברות|ספק|ספקים)|(?:מפקח|מפקחת|מפקחים|מנהל|מנהלת|קבלן|קבלנית|קבלנים|חברה|חברות|ספק|ספקים).{0,45}חריגים/iu;
 const DATA_QUERY_EXCEPTION_CATEGORY_PATTERN = /\b(?:exceptions?|change\s+orders?)\b.{0,35}\b(?:by\s+category|categories|category\s+breakdown)\b|\b(?:category|categories)\b.{0,35}\b(?:exceptions?|change\s+orders?)\b|חריגים.{0,35}(?:לפי\s+קטגור|קטגוריות|פילוח\s+קטגור)|(?:קטגוריה|קטגוריות).{0,35}חריגים/iu;
@@ -1132,6 +1132,14 @@ export function buildHeuristicQueryPlan({ question, context = {}, requestedMetri
           dateField: "exception_date",
           granularity: metricScope.granularity || "day"
         });
+      } else if (metricScope.operation === "aggregate") {
+        add({
+          ...base,
+          id: "exception_requested_amount_coverage",
+          operation: "aggregate",
+          metrics: (metricScope.metrics || []).map((metric) => ({ ...metric })),
+          reason: "Exact coverage-qualified subtotal of populated requested amount values."
+        });
       } else {
         add({
           ...base,
@@ -2137,7 +2145,7 @@ export function classifyDataQueryCapability(question, {
     ["count", "group_count", "distinct", "timeseries"].includes(metricScope?.operation) &&
     dataQueryEmailMetricGrammar(text, metricScope);
   const approvedExceptionMetricGrammar = quantitativeTarget === "exceptions_report" &&
-    ["count", "group_count", "timeseries"].includes(metricScope?.operation) &&
+    ["count", "group_count", "aggregate", "timeseries"].includes(metricScope?.operation) &&
     dataQueryExceptionMetricGrammar(text, metricScope);
   const quantitative = hasExplicitPlan ||
     explicitlyQuantitative ||
@@ -2145,6 +2153,7 @@ export function classifyDataQueryCapability(question, {
     approvedMeetingMetricGrammar ||
     approvedEmailMetricGrammar ||
     approvedExceptionMetricGrammar ||
+    (quantitativeTarget === "exceptions_report" && dataQueryExceptionCountApprovalMixed(text)) ||
     (hasDataQueryHint && !["alerts", "meetings", "emails", "exceptions_report"].includes(quantitativeTarget));
   const exactSafetyDefectAggregate = quantitativeTarget === "safety_reports" &&
     metricScope?.operation === "aggregate" &&
@@ -2177,9 +2186,12 @@ export function classifyDataQueryCapability(question, {
   const mixedEmailQuestion = semantic &&
     quantitativeTarget === "emails" &&
     dataQueryEmailMixedExactSemantic(text, lookupCandidate);
-  const mixedExceptionQuestion = semantic &&
+  const mixedExceptionSameRecordQuestion = semantic &&
     quantitativeTarget === "exceptions_report" &&
     dataQueryExceptionMixedExactSemantic(text, lookupCandidate);
+  const mixedExceptionApprovalQuestion = quantitativeTarget === "exceptions_report" &&
+    dataQueryExceptionCountApprovalMixed(text);
+  const mixedExceptionQuestion = mixedExceptionSameRecordQuestion || mixedExceptionApprovalQuestion;
 
   if (
     financialTypeAnalysis.ambiguous &&
@@ -2325,23 +2337,6 @@ export function classifyDataQueryCapability(question, {
       suggestedAgent: null
     };
   }
-  if (
-    quantitativeTarget === "exceptions_report" &&
-    DATA_QUERY_EXCEPTION_AMOUNT_PATTERN.test(text) &&
-    !DATA_QUERY_EXCEPTION_EXECUTION_DAYS_PATTERN.test(text)
-  ) {
-    return {
-      supported: false,
-      status: "not_computable",
-      domain: "content_metadata_metrics",
-      intent: "metrics",
-      lookup: null,
-      metricScope,
-      reason: "Exception amount aggregates are not computable: the table has no stored row-level currency, eight requested amounts are missing, and the other amount columns are empty.",
-      warning: "exception_amount_not_computable",
-      suggestedAgent: null
-    };
-  }
   if (quantitativeTarget === "exceptions_report" && explicitlyQuantitative && DATA_QUERY_EXCEPTION_EXECUTION_DAYS_PATTERN.test(text)) {
     return {
       supported: false,
@@ -2350,7 +2345,7 @@ export function classifyDataQueryCapability(question, {
       intent: "metrics",
       lookup: null,
       metricScope,
-      reason: "Execution-time metrics are not computable because execution_days is populated in only one of twenty rows.",
+      reason: "Execution-time metrics are not computable because execution_days is populated in only one audited row and is otherwise missing.",
       warning: "exception_execution_days_not_computable",
       suggestedAgent: null
     };
@@ -2381,7 +2376,12 @@ export function classifyDataQueryCapability(question, {
       suggestedAgent: "hybrid_search"
     };
   }
-  if (quantitativeTarget === "exceptions_report" && explicitlyQuantitative && DATA_QUERY_EXCEPTION_LIFECYCLE_PATTERN.test(text)) {
+  if (
+    quantitativeTarget === "exceptions_report" &&
+    explicitlyQuantitative &&
+    DATA_QUERY_EXCEPTION_LIFECYCLE_PATTERN.test(text) &&
+    !mixedExceptionApprovalQuestion
+  ) {
     return {
       supported: false,
       status: "not_computable",
@@ -3022,6 +3022,11 @@ export function classifyDataQueryCapability(question, {
       lookup: null,
       metricScope,
       mixed,
+      mixedKind: mixedExceptionApprovalQuestion
+        ? "exception_count_approval_evidence"
+        : mixedExceptionSameRecordQuestion
+          ? "exception_latest_same_record_evidence"
+          : null,
       reason: mixedSafetyQuestion
         ? "The request combines an approved exact safety metric with semantic defect evidence."
         : mixedAlertQuestion
@@ -3332,6 +3337,8 @@ function dataQueryEmailMixedExactSemantic(text, lookupCandidate) {
 
 function dataQueryExceptionMetricScope(text) {
   const normalized = normalizeHebrewExceptionMetricQuestion(text);
+  const requestedAmountCoverage = DATA_QUERY_EXCEPTION_AMOUNT_PATTERN.test(normalized.normalizedText) &&
+    !DATA_QUERY_EXCEPTION_EXECUTION_DAYS_PATTERN.test(normalized.normalizedText);
   const groupField = /\b(?:break\s+down|breakdown|distribution|group)\b.{0,35}\b(?:exceptions?|exception\s+reports?|change\s+orders?)\b.{0,20}\bby\s+(?:stored\s+)?urgency\b|\b(?:exceptions?|exception\s+reports?|change\s+orders?)\s+by\s+(?:stored\s+)?urgency\b|פילוח\s+חריגים\s+לפי\s+דחיפות/iu.test(normalized.grammarText)
     ? "urgency_level"
     : /\b(?:break\s+down|breakdown|distribution|group)\b.{0,35}\b(?:exceptions?|exception\s+reports?|change\s+orders?)\b.{0,20}\bby\s+(?:(?:stored\s+)?item\s+)?status\b|\b(?:exceptions?|exception\s+reports?|change\s+orders?)\s+by\s+(?:(?:stored\s+)?item\s+)?status\b|פילוח\s+חריגים\s+לפי\s+סטטוס/iu.test(normalized.grammarText)
@@ -3345,14 +3352,18 @@ function dataQueryExceptionMetricScope(text) {
   const storedStatus = /\b(?:stored\s+item\s+status\s+)?being[-\s]?handled\b|חריגים.{0,25}בטיפול/iu.test(normalized.grammarText)
     ? DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES[0]
     : null;
-  const operation = wantsTimeSeries ? "timeseries" : groupField ? "group_count" : "count";
+  const operation = requestedAmountCoverage ? "aggregate" : wantsTimeSeries ? "timeseries" : groupField ? "group_count" : "count";
   return {
     targetTable: "exceptions_report",
     recordKind: "exception_report",
     operation,
     groupField: operation === "group_count" ? groupField : null,
     granularity: operation === "timeseries" && /\bmonth(?:ly)?\b|חודש/iu.test(normalized.grammarText) ? "month" : "day",
-    metrics: [],
+    metrics: requestedAmountCoverage ? [
+      { type: "count", field: null, as: "total_exception_rows" },
+      { type: "count", field: "requested_amount_ex_vat", as: "exceptions_with_requested_amount" },
+      { type: "sum", field: "requested_amount_ex_vat", as: "partial_requested_amount_ex_vat" }
+    ] : [],
     requiredFilters: [
       ...(storedUrgency ? [{ field: "urgency_level", op: "eq", value: storedUrgency }] : []),
       ...(storedStatus ? [{ field: "item_status", op: "eq", value: storedStatus }] : []),
@@ -3380,6 +3391,9 @@ function dataQueryExceptionMetricGrammar(text, metricScope = null) {
   const grammarText = normalized.grammarText
     .replace(/[?.!,;]+$/u, "")
     .trim();
+  if (metricScope?.operation === "aggregate") {
+    return DATA_QUERY_EXCEPTION_AMOUNT_PATTERN.test(normalized.normalizedText);
+  }
   if (metricScope?.operation === "group_count") {
     return /^(?:group|break\s+down|show\s+(?:the\s+)?(?:breakdown|distribution|counts?)\s+of)\s+(?:the\s+)?(?:exceptions?|exception\s+reports?|change\s+orders?)\s+by\s+(?:stored\s+)?(?:urgency|item\s+status|status)$|^פילוח\s+חריגים\s+לפי\s+(?:דחיפות|סטטוס)$/iu.test(grammarText);
   }
@@ -3391,6 +3405,15 @@ function dataQueryExceptionMetricGrammar(text, metricScope = null) {
 
 function dataQueryExceptionMixedExactSemantic(text, lookupCandidate) {
   return Boolean(lookupCandidate) && DATA_QUERY_EXCEPTION_MIXED_LATEST_PATTERN.test(String(text || "").trim());
+}
+
+function dataQueryExceptionCountApprovalMixed(text) {
+  const value = String(text || "").trim();
+  const hasEntity = /\b(?:exceptions?|change\s+orders?)\b|חריגים/iu.test(value);
+  const hasSubmittedMeaning = /\b(?:submitted|filed|raised)\b|הוגש(?:ו|ה)?/iu.test(value);
+  const hasApprovalMeaning = /\b(?:approved|accepted|approval)\b|(?:אושר|אושרה|אושרו|מאושר|מאושרים)/iu.test(value);
+  const hasCountMeaning = /\b(?:how\s+many|total(?:\s+number)?|number\s+of|which|what)\b|(?:כמה|אילו|מה\s+מתוכם|סך\s*הכל|סהכ)/iu.test(value);
+  return hasEntity && hasSubmittedMeaning && hasApprovalMeaning && hasCountMeaning;
 }
 
 function dataQueryAlertMetricScope(text) {
@@ -3878,7 +3901,24 @@ function validatePlanFields(plan, table) {
     }
     if (plan.select.length) errors.push(`exceptions_report operation ${plan.operation} does not accept selected output fields`);
     if (plan.orderBy.length) errors.push(`exceptions_report operation ${plan.operation} does not accept caller-defined ordering`);
-    if (plan.metrics.length) errors.push("exceptions_report does not support numeric aggregate metrics");
+    const approvedAmountMetrics = [
+      { type: "count", field: null, as: "total_exception_rows" },
+      { type: "count", field: "requested_amount_ex_vat", as: "exceptions_with_requested_amount" },
+      { type: "sum", field: "requested_amount_ex_vat", as: "partial_requested_amount_ex_vat" }
+    ];
+    if (plan.operation === "aggregate") {
+      const expected = approvedAmountMetrics.map((metric) => stableStringify(metric)).sort();
+      const actual = plan.metrics.map((metric) => stableStringify({
+        type: metric.type,
+        field: metric.field ?? null,
+        as: metric.as
+      })).sort();
+      if (stableStringify(actual) !== stableStringify(expected)) {
+        errors.push("exceptions_report aggregate requires the fixed requested-amount coverage metrics");
+      }
+    } else if (plan.metrics.length) {
+      errors.push("exceptions_report supports numeric metrics only for the fixed requested-amount coverage aggregate");
+    }
   }
   for (const field of plan.groupBy || []) if (!groupable.has(field)) errors.push(`group field ${field} is not allowed`);
   for (const filter of plan.filters || []) {
@@ -3908,7 +3948,10 @@ function validatePlanFields(plan, table) {
   for (const metric of plan.metrics || []) {
     if (!["count", "avg", "min", "max", "sum"].includes(metric.type)) errors.push(`metric ${metric.type} is not allowed`);
     if (metric.as && !/^[a-z][a-z0-9_]{0,62}$/i.test(metric.as)) errors.push(`metric alias ${metric.as} is invalid`);
-    if (metric.type !== "count") {
+    if (metric.type === "count" && metric.field) {
+      const definition = fieldMap.get(metric.field);
+      if (!definition || definition.queryable === false) errors.push(`metric count field ${metric.field} is not allowed`);
+    } else if (metric.type !== "count") {
       const definition = fieldMap.get(metric.field);
       if (definition?.notComputableReason) {
         errors.push(`metric ${metric.type} is not computable for field ${metric.field}: ${definition.notComputableReason}`);
@@ -4410,17 +4453,21 @@ function assertEmailManagedReadPlan(plan) {
 }
 
 function assertExceptionManagedReadPlan(plan) {
-  const approvedFields = new Set(["id", "exception_date", "urgency_level", "item_status"]);
+  const approvedMetadataFields = new Set(["id", "exception_date", "urgency_level", "item_status"]);
+  const approvedMetricFields = new Set(["requested_amount_ex_vat"]);
   const internalExecutionFields = new Set(["project_id", "attachment_id"]);
-  const planFields = [
+  const projectionFields = [
     ...(plan.select || []),
     ...(plan.groupBy || []),
-    ...(plan.metrics || []).map((metric) => metric.field).filter(Boolean),
     ...(plan.orderBy || []).map((order) => order.field).filter(Boolean),
     plan.dateField
   ].filter(Boolean);
-  if (planFields.some((field) => !approvedFields.has(field))) {
+  const metricFields = (plan.metrics || []).map((metric) => metric.field).filter(Boolean);
+  if (projectionFields.some((field) => !approvedMetadataFields.has(field))) {
     throw new Error("Exception managed read requested a field outside the approved metadata projection");
+  }
+  if (metricFields.some((field) => !approvedMetricFields.has(field))) {
+    throw new Error("Exception managed read requested an unapproved aggregate field");
   }
   for (const filter of plan.filters || []) {
     if (filter.field === "project_id") {
@@ -4429,7 +4476,7 @@ function assertExceptionManagedReadPlan(plan) {
       }
       continue;
     }
-    if (!approvedFields.has(filter.field) || internalExecutionFields.has(filter.field)) {
+    if (!approvedMetadataFields.has(filter.field) || internalExecutionFields.has(filter.field)) {
       throw new Error("Exception managed read requested an unapproved filter field");
     }
   }
@@ -4538,7 +4585,10 @@ function normalizeManagedReadRows(tableName, rows) {
       const validDate = hasDate && (row.exception_date === null || row.exception_date === "" || !Number.isNaN(Date.parse(String(row.exception_date))));
       const validUrgency = Object.prototype.hasOwnProperty.call(row || {}, "urgency_level") && DATA_QUERY_EXCEPTION_URGENCY_VALUES.includes(row.urgency_level);
       const validStatus = Object.prototype.hasOwnProperty.call(row || {}, "item_status") && DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES.includes(row.item_status);
-      if (!validId || !validProjectId || !validAttachmentId || !validDate || !validUrgency || !validStatus) {
+      const amountPresent = Object.prototype.hasOwnProperty.call(row || {}, "requested_amount_ex_vat");
+      const amountValue = row?.requested_amount_ex_vat;
+      const validAmount = !amountPresent || amountValue === null || amountValue === "" || (Number.isFinite(Number(amountValue)) && Number(amountValue) >= 0);
+      if (!validId || !validProjectId || !validAttachmentId || !validDate || !validUrgency || !validStatus || !validAmount) {
         throw new Error("Exception row is outside the approved typed vocabulary");
       }
       return {
@@ -4810,7 +4860,11 @@ function groupRows(rows, fields = [], reducer) {
 }
 
 function computeMetric(metric, rows) {
-  if (metric.type === "count") return rows.length;
+  if (metric.type === "count") {
+    return metric.field
+      ? rows.filter((row) => row?.[metric.field] !== null && row?.[metric.field] !== undefined && row?.[metric.field] !== "").length
+      : rows.length;
+  }
   const values = rows.map((row) => Number(row[metric.field])).filter(Number.isFinite);
   if (metric.type === "sum" && rows.length === 0) return 0;
   if (!values.length) return null;
