@@ -257,6 +257,23 @@ async function runLiteAgent({ message, memory, memorySummary, config, trace, run
   }
 }
 
+const MEETING_EVIDENCE_INTENT_RE = /(?:\bmeeting(?:s|\s+minutes)?\b|\bminutes\b|\bmeeting\s+(?:decision|quote|evidence)\b|ישיב(?:ה|ות)|פגיש(?:ה|ות)|פרוטוקול|סיכום\s+ישיבה|החלט(?:ה|ות)\s+מישיבה|ציטוט\s+מישיבה)/iu;
+
+export function shouldRunMeetingEvidenceForRequest({
+  enabled = true,
+  message = "",
+  classification = null,
+  routing = null
+} = {}) {
+  if (!enabled) return false;
+  if (routing?.suggestedAgent === "meeting_evidence") return true;
+  const toolHint = String(classification?.tool_hint || "").toLowerCase();
+  if (toolHint.split(",").map((item) => item.trim()).some((item) => ["meetings", "meeting_evidence"].includes(item))) {
+    return true;
+  }
+  return MEETING_EVIDENCE_INTENT_RE.test(String(message || ""));
+}
+
 async function runRagAgent({ message, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext, telemetryFor }) {
   const toolCalls = [];
   const sources = [];
@@ -489,12 +506,12 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
 
   const plannerTools = pureMeetingEvidenceRoute ? [] : recommendedProjectTools(knowledgePlan);
   const meetingsEvidenceEnabled = config.meetingsEvidence?.enabled !== false;
-  const shouldRunMeetingEvidence = meetingsEvidenceEnabled && (
-    dataQueryRouting?.suggestedAgent === "meeting_evidence" ||
-    (classification.tool_hint || "").includes("meetings") ||
-    (rerankedResults && normalizeRows(rerankedResults).some((r) => r.meeting_id || r.source_table === "meetings_documents")) ||
-    Boolean(classification.investigation)
-  );
+  const shouldRunMeetingEvidence = shouldRunMeetingEvidenceForRequest({
+    enabled: meetingsEvidenceEnabled,
+    message,
+    classification,
+    routing: dataQueryRouting
+  });
   const meetingsEvidenceTool = shouldRunMeetingEvidence ? ["meeting_evidence_search"] : [];
   const tools = buildMainProjectTools({
     message,
@@ -2008,6 +2025,64 @@ function projectToolCallsForMain(toolCalls = []) {
     });
 }
 
+function compactToolCallsForMainRetry(toolCalls = []) {
+  return projectToolCallsForMain(toolCalls)
+    .map((call) => {
+      if (call?.toolName === "meeting_evidence_search") {
+        return {
+          ...call,
+          data: {
+            status: call.data?.status || null,
+            same_meeting_match: call.data?.same_meeting_match === true,
+            insufficient_evidence: call.data?.insufficient_evidence !== false,
+            evidence: (Array.isArray(call.data?.evidence) ? call.data.evidence : [])
+              .slice(0, 3)
+              .map((item) => ({
+                quote: String(item?.quote || "").slice(0, 500),
+                meeting_date: item?.meeting_date || null,
+                citation: item?.citation || null
+              }))
+          }
+        };
+      }
+      const serialized = safeJsonStringify(call);
+      if (serialized.length <= 3200) return call;
+      return {
+        toolName: call?.toolName || "project_source",
+        ok: call?.ok === true,
+        data: { status: call?.data?.status || null },
+        sources: []
+      };
+    });
+}
+
+export function mainSynthesisRetryPolicy(error, config = {}) {
+  const message = String(error?.message || "");
+  const configuredMainTokens = Number(config.ai?.main?.maxTokens || 4096);
+  if (/timed out/i.test(message)) {
+    return {
+      reason: "timeout",
+      model: config.models?.main,
+      maxTokens: Math.max(512, Math.min(1600, configuredMainTokens)),
+      recordLimit: 5,
+      chunkTextLimit: 700
+    };
+  }
+  const providerCapacityFailure = Number(error?.httpStatus) === 402 || /more credits|can only afford/i.test(message);
+  if (!providerCapacityFailure) return null;
+  const parsedAffordable = Number(error?.affordableMaxTokens || String(message).match(/can\s+only\s+afford\s+([\d,]+)/i)?.[1]?.replaceAll(",", ""));
+  const affordable = Number.isFinite(parsedAffordable) ? parsedAffordable : 900;
+  const retryTokens = Math.min(1200, Math.max(0, affordable - Math.max(64, Math.floor(affordable * 0.08))));
+  if (retryTokens < 256) return null;
+  return {
+    reason: "provider_capacity",
+    model: config.models?.lite || config.models?.main,
+    maxTokens: retryTokens,
+    recordLimit: 5,
+    chunkTextLimit: 700
+  };
+}
+
 export function buildAlertAgentRequest({ message, classification }) {
   return {
     query: message,
@@ -2110,27 +2185,31 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
     emitRunEvent(runId, "main_agent", "Main Agent response received", { length: answer.length });
     return appendEmailSemanticLatestBoundary(linkifyCitations(answer, sources), { message });
   } catch (error) {
-    // Large investigation/RAG payloads can push generation past the per-call
-    // timeout. Retry once with a trimmed context before giving up on a real
-    // grounded answer — a smaller prompt finishes noticeably faster.
-    const isTimeout = /timed out/i.test(error.message || "");
-    if (isTimeout) {
+    // Retry once with compact, deduplicated context when the provider times out
+    // or rejects the requested output budget. The retry uses the configured
+    // lite model for credit/capacity failures and never loops.
+    const retryPolicy = mainSynthesisRetryPolicy(error, config);
+    if (retryPolicy) {
       try {
-        emitRunEvent(runId, "main_agent", "Main Agent timed out, retrying with reduced context", {});
+        emitRunEvent(runId, "main_agent", "Main Agent retrying with compact context", {
+          reason: retryPolicy.reason,
+          model: retryPolicy.model,
+          maxTokens: retryPolicy.maxTokens
+        });
         const trimmedContext = formatRetrievalContext(
           retrievalResults,
-          Math.max(4, Math.floor(retrievalLimit / 2)),
-          Math.min(900, config.rag?.chunkTextLimit || 1800),
+          retryPolicy.recordLimit,
+          retryPolicy.chunkTextLimit,
           config
         );
         const retryAnswer = await chatCompletion({
           apiKey: config.openRouterApiKey,
-          model: config.models.main,
+          model: retryPolicy.model,
           temperature: config.ai?.main?.temperature ?? 0.2,
-          maxTokens: config.ai?.main?.maxTokens ?? 4096,
+          maxTokens: retryPolicy.maxTokens,
           timeoutMs: config.ai?.main?.timeoutMs ?? 120_000,
           ...samplingSettings(config, "main"),
-          telemetry: telemetryFor("main_agent_retry"),
+          telemetry: telemetryFor("main_agent_compact_retry"),
           messages: [
             { role: "system", content: mainSystemPrompt(classification, config) },
             ...memorySummaryMessages(memorySummary),
@@ -2140,17 +2219,21 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
                 user_message: message,
                 answer_mode: listIntent ? "ranked_entity_list" : "standard_grounded_answer",
                 retrieval_context: trimmedContext,
-                graph_context: graphContext,
-                project_graph_findings: projectGraphFindings,
-                tool_results: projectToolCallsForMain(toolCalls.filter((call) => !call.skipped)),
+                graph_context: (Array.isArray(graphContext) ? graphContext : []).slice(0, 4),
+                project_graph_findings: (Array.isArray(projectGraphFindings) ? projectGraphFindings : []).slice(0, 4),
+                tool_results: compactToolCallsForMainRetry(toolCalls.filter((call) => !call.skipped)),
                 skipped_tools: skipped.map((call) => call.toolName),
-                sources
+                potential_conflicts: conflicts,
+                sources: uniqueByUrl(sources).slice(0, 8)
               })
             }
           ]
         });
         if (String(retryAnswer || "").trim()) {
-          emitRunEvent(runId, "main_agent", "Main Agent retry succeeded", { length: retryAnswer.length });
+          emitRunEvent(runId, "main_agent", "Main Agent compact retry succeeded", {
+            reason: retryPolicy.reason,
+            length: retryAnswer.length
+          });
           return appendEmailSemanticLatestBoundary(linkifyCitations(retryAnswer, sources), { message });
         }
       } catch (retryError) {
@@ -5098,7 +5181,10 @@ export function sanitizeCustomerFacingAnswer(answer = "", { hebrew = false } = {
   return replacements.reduce(
     (text, [pattern, replacement]) => text.replace(pattern, replacement),
     String(answer || "")
-  );
+  )
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function appendExactInvoiceEnrichment(answer, enrichment) {
@@ -5293,11 +5379,37 @@ export function buildExceptionApprovalFallbackAnswer({
 }
 
 // Last-resort answer used only when the main LLM synthesis call itself fails
-// (missing key, timeout, provider error). Renders the *already retrieved*
-// records directly as clean bullet points with real links — never the raw
-// row/tool-call objects (those are large nested JSON blobs meant for
-// debugging, not for display) and never a raw error string.
-function fallbackRagAnswer({ successful, failed, skipped = [], sources, message = "", retrievalResults = null, config = null }) {
+// (missing key, timeout, provider error). Renders deterministic Data Query
+// facts plus sanitized, deduplicated document links — never retrieved excerpts,
+// raw row/tool-call objects, contact details, or provider error strings.
+function safeFallbackSourceTitle(value, hebrew = false) {
+  const contactPlaceholder = hebrew ? "פרטי קשר הוסרו" : "Contact details removed";
+  const sourcePlaceholder = hebrew ? "מסמך מהפרויקט" : "Project document";
+  const sanitized = String(value || "")
+    .normalize("NFKC")
+    .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, contactPlaceholder)
+    .replace(/https?:\/\/\S+/gi, "")
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "")
+    .replace(/[|]+/g, " · ")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return escapeInvoiceDisplayValue(sanitized || sourcePlaceholder);
+}
+
+function safeFallbackSources({ sources = [], retrievalResults = null, config = null, hebrew = false } = {}) {
+  const retrievedSources = extractLinks(normalizeRows(retrievalResults), config);
+  return uniqueByUrl([...(Array.isArray(sources) ? sources : []), ...retrievedSources])
+    .map((source) => ({
+      title: safeFallbackSourceTitle(source?.title || source?.label || source?.name, hebrew),
+      url: normalizeInvoiceDocumentUrl(source?.url)
+    }))
+    .filter((source) => source.title && source.url)
+    .slice(0, 5);
+}
+
+export function fallbackRagAnswer({ successful = [], failed = [], skipped = [], sources = [], message = "", retrievalResults = null, config = null }) {
   const dataQueryRouting = successful
     .find((call) => call?.toolName === "data_query" && call?.ok)
     ?.data?.routing || null;
@@ -5309,54 +5421,34 @@ function fallbackRagAnswer({ successful, failed, skipped = [], sources, message 
   });
   if (exceptionApprovalFallback) return exceptionApprovalFallback;
 
-  const sections = successful
-    .map((call) => {
-      const label = toolDisplayLabel(call.toolName);
-      if (call.toolName === "data_query") {
-        return dataQueryFallbackSection(call);
-      }
-      if (typeof call.answer === "string" && call.answer.trim()) {
-        return `- **${label}**:\n${call.answer.trim().slice(0, 2200)}`;
-      }
-      const callSources = uniqueByUrl(call.sources || []);
-      if (callSources.length) {
-        const items = callSources
-          .slice(0, 6)
-          .map((source) => {
-            const title = (source.title || source.label || "מסמך").slice(0, 120);
-            const date = source.date ? ` (${source.date})` : "";
-            return `  - [${title}${date}](${source.url})`;
-          })
-          .join("\n");
-        return `- **${label}**:\n${items}`;
-      }
-      if (typeof call.data === "string" && call.data.trim()) {
-        return `- **${label}**: ${call.data.trim().slice(0, 400)}`;
-      }
-      const count = Array.isArray(call.data) ? call.data.length : call.data ? 1 : 0;
-      return count
-        ? `- **${label}**: נמצאו ${count} רשומות רלוונטיות בפרויקט, ללא קישור ישיר זמין.`
-        : null;
-    })
+  const hebrew = isHebrew(message);
+  const exactSections = successful
+    .filter((call) => call?.toolName === "data_query" && call?.ok)
+    .map(dataQueryFallbackSection)
     .filter(Boolean);
-
-  const found = sections.length ? sections.join("\n") : "- לא הצלחתי לאחזר מידע רלוונטי מהפרויקט כרגע.";
-
-  const missingItems = [
-    ...failed.map((call) => `- ${toolDisplayLabel(call.toolName)}: לא ניתן היה להשלים את הבדיקה כרגע.`),
-    ...skipped.map((call) => `- ${toolDisplayLabel(call.toolName)}: לא מוגדר במערכת.`)
-  ];
-  const missing = missingItems.length ? missingItems.join("\n") : "- אין.";
-
+  const safeSources = safeFallbackSources({ sources, retrievalResults, config, hebrew });
+  const sourceItems = safeSources.map((source) => `- [${source.title}](<${source.url}>)`);
+  const hasExactFacts = exactSections.length > 0;
+  if (hebrew) {
+    return [
+      "**לא ניתן היה להשלים כרגע תשובה מהימנה.**",
+      hasExactFacts
+        ? "המידע המאומת שניתן להציג מופיע להלן. עיבוד התוכן הנוסף לא הושלם, ולכן לא נוספה מסקנה משוערת."
+        : "נמצאו מקורות שעשויים להיות רלוונטיים, אך עיבוד התוכן לא הושלם. כדי להימנע מהצגת טקסט גולמי או מסקנה לא מבוססת, לא מוצג סיכום משוער.",
+      exactSections.length ? `\n${exactSections.join("\n\n")}` : "",
+      sourceItems.length ? `\n**מסמכים שעשויים להיות רלוונטיים:**\n\n${sourceItems.join("\n")}` : "",
+      "\n> אפשר לנסות שוב מאוחר יותר. טקסט גולמי, פרטי קשר ושלבי עיבוד פנימיים אינם מוצגים."
+    ].filter(Boolean).join("\n").trim();
+  }
   return [
-    "**תשובה:**",
-    "לא הצלחתי להרכיב תשובה מנוסחת באמצעות מנוע ה-AI כרגע, אך הנה המידע שנמצא ישירות במקורות הפרויקט:",
-    "",
-    found,
-    "",
-    "**מה לא נמצא:**",
-    missing
-  ].join("\n");
+    "**A reliable answer could not be completed right now.**",
+    hasExactFacts
+      ? "The verified information available for display appears below. Additional content processing did not complete, so no estimated conclusion was added."
+      : "Potentially relevant sources were found, but content processing did not complete. To avoid showing raw text or an unsupported conclusion, no estimated summary is displayed.",
+    exactSections.length ? `\n${exactSections.join("\n\n")}` : "",
+    sourceItems.length ? `\n**Potentially relevant documents:**\n\n${sourceItems.join("\n")}` : "",
+    "\n> Please try again later. Raw excerpts, contact details, and internal processing stages are not displayed."
+  ].filter(Boolean).join("\n").trim();
 }
 
 function liteFallback(message) {

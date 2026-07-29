@@ -3,11 +3,11 @@ import fs from "node:fs";
 import { sanitizeMessage } from "../src/sanitize.js";
 import { normalizeClassification } from "../src/classifier.js";
 import { heuristicClassification } from "../src/heuristics.js";
-import { buildToolOrder, isInternalProjectTool } from "../src/tools.js";
+import { buildToolOrder, callN8nTool, isInternalProjectTool } from "../src/tools.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, parseKnowledgeAgentMarkdown, readKnowledgeDocument, routeKnowledgeAgents, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
 import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality.js";
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
-import { appendConflictWarnings, appendEmailSemanticLatestBoundary, appendExactInvoiceEnrichment, buildAlertAgentRequest, buildDeterministicAlertAnswer, buildDeterministicDateScopedMeetingDecisionAnswer, buildDeterministicEmailAnswer, buildDeterministicExceptionAnswer, buildDeterministicFinancialDataQueryFailureAnswer, buildDeterministicFinancialDocumentAnswer, buildDeterministicInvoiceAnswer, buildDeterministicMeetingAnswer, buildDeterministicMeetingEvidenceUnavailableAnswer, buildDeterministicMeetingFallbackEvidenceAnswer, buildDeterministicSafetyAnswer, buildExactInvoiceDocumentSources, buildExactInvoiceEnrichment, buildExactInvoiceEnrichments, buildExactSafetyDocumentSources, buildExactSafetyEnrichments, buildExceptionApprovalFallbackAnswer, buildMainDataQueryWorkflowProjection, buildMainProjectTools, buildSafetyPrecheckTools, dataQueryClassifierDateScopeForQuestion, enforceAlertDataQueryTrustedOrigin, enforceProfessionalKnowledgeMode, exactAlertLookupRecords, exactEmailLookupRecords, exactExceptionLookupRecords, exactInvoiceAttachmentProjectId, exactInvoiceLookupProjectId, exactInvoiceLookupProjectScope, exactMeetingLookupRecords, hasVerifiedMeetingEvidence, isDeterministicAlertCapability, isDeterministicAlertMixedCapability, isDeterministicAlertNotComputableCapability, isDeterministicEmailCapability, isDeterministicEmailMixedCapability, isDeterministicEmailNotComputableCapability, isDeterministicExceptionCapability, isDeterministicExceptionMixedCapability, isDeterministicExceptionNotComputableCapability, isDeterministicFinancialDocumentMetricCapability, isDeterministicFinancialTransactionTypeCapability, isDeterministicInvoiceCapability, isDeterministicMeetingCapability, isDeterministicMeetingMixedCapability, isDeterministicMeetingNotComputableCapability, isDeterministicSafetyCapability, isDeterministicSafetyNotComputableCapability, isExceptionCountApprovalMixedCapability, isMeetingSemanticFallbackCapability, isPureEmailSemanticCapability, isPureMeetingEvidenceCapability, KNOWLEDGE_PLANNER_RESPONSE_FORMAT, normalizeDataQueryClassifierDate, prefixExactExceptionApprovalAnchor, projectChatToolCallsForClient, projectMeetingEvidenceConflicts, resolveExactInvoiceAttachmentLinks, resolveExactSafetyAttachmentLinks, sanitizeCustomerFacingAnswer, shouldBypassGenericRetrieval, shouldRunDataQuery, summarizeMeetingEvidenceErrorForWorkflow } from "../src/agent.js";
+import { appendConflictWarnings, appendEmailSemanticLatestBoundary, appendExactInvoiceEnrichment, buildAlertAgentRequest, buildDeterministicAlertAnswer, buildDeterministicDateScopedMeetingDecisionAnswer, buildDeterministicEmailAnswer, buildDeterministicExceptionAnswer, buildDeterministicFinancialDataQueryFailureAnswer, buildDeterministicFinancialDocumentAnswer, buildDeterministicInvoiceAnswer, buildDeterministicMeetingAnswer, buildDeterministicMeetingEvidenceUnavailableAnswer, buildDeterministicMeetingFallbackEvidenceAnswer, buildDeterministicSafetyAnswer, buildExactInvoiceDocumentSources, buildExactInvoiceEnrichment, buildExactInvoiceEnrichments, buildExactSafetyDocumentSources, buildExactSafetyEnrichments, buildExceptionApprovalFallbackAnswer, buildMainDataQueryWorkflowProjection, buildMainProjectTools, buildSafetyPrecheckTools, dataQueryClassifierDateScopeForQuestion, enforceAlertDataQueryTrustedOrigin, enforceProfessionalKnowledgeMode, exactAlertLookupRecords, exactEmailLookupRecords, exactExceptionLookupRecords, exactInvoiceAttachmentProjectId, exactInvoiceLookupProjectId, exactInvoiceLookupProjectScope, exactMeetingLookupRecords, fallbackRagAnswer, hasVerifiedMeetingEvidence, isDeterministicAlertCapability, isDeterministicAlertMixedCapability, isDeterministicAlertNotComputableCapability, isDeterministicEmailCapability, isDeterministicEmailMixedCapability, isDeterministicEmailNotComputableCapability, isDeterministicExceptionCapability, isDeterministicExceptionMixedCapability, isDeterministicExceptionNotComputableCapability, isDeterministicFinancialDocumentMetricCapability, isDeterministicFinancialTransactionTypeCapability, isDeterministicInvoiceCapability, isDeterministicMeetingCapability, isDeterministicMeetingMixedCapability, isDeterministicMeetingNotComputableCapability, isDeterministicSafetyCapability, isDeterministicSafetyNotComputableCapability, isExceptionCountApprovalMixedCapability, isMeetingSemanticFallbackCapability, isPureEmailSemanticCapability, isPureMeetingEvidenceCapability, KNOWLEDGE_PLANNER_RESPONSE_FORMAT, mainSynthesisRetryPolicy, normalizeDataQueryClassifierDate, prefixExactExceptionApprovalAnchor, projectChatToolCallsForClient, projectMeetingEvidenceConflicts, resolveExactInvoiceAttachmentLinks, resolveExactSafetyAttachmentLinks, sanitizeCustomerFacingAnswer, shouldBypassGenericRetrieval, shouldRunDataQuery, shouldRunMeetingEvidenceForRequest, summarizeMeetingEvidenceErrorForWorkflow } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { applyDataQueryCallerScope, buildHeuristicQueryPlan, buildDataQueryMachineResult, buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryMetrics, buildDataQueryWorkflowLog, classifyDataQueryCapability, clearDataQueryRunCache, DATA_QUERY_CONTRACT_VERSION, dataQueryPlanSignature, dataQuerySettings, dataQuerySupabaseHeaders, executeQueryPlans, fetchExactPlan, introspectSupabaseTables, normalizeDataQueryCaller, normalizeExactExecution, parseDataQueryLookupIntent, parseDataQueryMetricScope, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, summarizeDataQueryMetricsForWorkflow, validateQueryPlan } from "../src/subagents/dataQuery.js";
 import { clearDataQueryAccessTokenCache, getDataQueryAccessToken, validateDataQueryAccessToken } from "../src/subagents/dataQueryAuth.js";
@@ -145,6 +145,38 @@ test("heuristicClassification marks professional questions", () => {
   assert.equal(output.type, "RAG");
   assert.equal(output.professional, true);
   assert.ok(output.knowledge_tags.length);
+});
+
+test("n8n tools time out at the shared HTTP boundary", async () => {
+  const originalFetch = globalThis.fetch;
+  const keepAlive = setInterval(() => {}, 25);
+  let receivedSignal = null;
+  globalThis.fetch = (_url, options = {}) => new Promise((_resolve, reject) => {
+    receivedSignal = options.signal;
+    options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+  });
+  try {
+    const startedAt = Date.now();
+    const result = await callN8nTool({
+      toolName: "alert",
+      query: "test timeout",
+      sessionId: "timeout_test",
+      config: {
+        n8n: {
+          baseUrl: "",
+          tools: { alert: "https://n8n.test/webhook/alert" },
+          runtime: { timeoutMs: 100 }
+        }
+      }
+    });
+    assert.ok(receivedSignal instanceof AbortSignal);
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "Tool request timed out");
+    assert.ok(Date.now() - startedAt < 1_000);
+  } finally {
+    clearInterval(keepAlive);
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("heuristicClassification treats project blockers as professional concept questions", () => {
@@ -6000,7 +6032,7 @@ test("main agent requires inline source links instead of a consolidated footer",
   assert.match(agentSource, /INLINE SOURCE CONTRACT/);
   assert.match(agentSource, /Do NOT create a separate "\*\*מקורות:\*\*" section/);
   assert.match(agentSource, /source_url: unavailable/);
-  assert.match(agentSource, /uniqueByUrl\(call\.sources \|\| \[\]\)/);
+  assert.match(agentSource, /return uniqueByUrl\(\[\.\.\.\(Array\.isArray\(sources\) \? sources : \[\]\), \.\.\.retrievedSources\]\)/);
   assert.match(mainPrompt, /End each factual bullet with its directly matching Markdown source link/);
   assert.match(mainPrompt, /Do not create a separate sources section at the bottom/);
   assert.match(mainPrompt, /identify the single latest dated supported record first/);
@@ -7020,6 +7052,118 @@ test("alert timeline events map alerts schema fields", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("chatCompletion exposes provider capacity metadata without leaking it into an answer", async () => {
+  const previousFetch = global.fetch;
+  const telemetry = [];
+  global.fetch = async () => ({
+    ok: false,
+    status: 402,
+    json: async () => ({
+      error: { message: "This request requires more credits. You can only afford 1,581 tokens." }
+    })
+  });
+  try {
+    await assert.rejects(
+      () => chatCompletion({
+        apiKey: "sk-test",
+        model: "google/gemini-2.5-pro",
+        messages: [{ role: "user", content: "hello" }],
+        maxTokens: 8192,
+        telemetry: { step: "main_agent", callId: "main_agent_1", record: (entry) => telemetry.push(entry) }
+      }),
+      (error) => {
+        assert.equal(error.httpStatus, 402);
+        assert.equal(error.affordableMaxTokens, 1581);
+        return true;
+      }
+    );
+    assert.equal(telemetry.length, 1);
+    assert.equal(telemetry[0].status, "error");
+    assert.equal(telemetry[0].http_status, 402);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("main synthesis credit failures use one compact lower-cost retry policy", () => {
+  const policy = mainSynthesisRetryPolicy(Object.assign(
+    new Error("This request requires more credits, but can only afford 1,581 tokens"),
+    { httpStatus: 402, affordableMaxTokens: 1581 }
+  ), {
+    models: { main: "google/gemini-2.5-pro", lite: "openai/gpt-4o-mini" },
+    ai: { main: { maxTokens: 8192 } }
+  });
+  assert.deepEqual(policy, {
+    reason: "provider_capacity",
+    model: "openai/gpt-4o-mini",
+    maxTokens: 1200,
+    recordLimit: 5,
+    chunkTextLimit: 700
+  });
+  assert.equal(mainSynthesisRetryPolicy(new Error("provider exploded"), {}), null);
+  assert.equal(mainSynthesisRetryPolicy(Object.assign(new Error("can only afford 200 tokens"), { httpStatus: 402 }), {}), null);
+});
+
+test("meeting evidence requires explicit meeting intent rather than generic investigation mode", () => {
+  assert.equal(shouldRunMeetingEvidenceForRequest({
+    enabled: true,
+    message: "אפשר פירוט על החריגים הקריטיים?",
+    classification: { investigation: true, tool_hint: "exceptions_report" },
+    routing: { suggestedAgent: "hybrid_search" }
+  }), false);
+  assert.equal(shouldRunMeetingEvidenceForRequest({
+    enabled: true,
+    message: "מה הוחלט בישיבה האחרונה?",
+    classification: { investigation: false, tool_hint: "" }
+  }), true);
+  assert.equal(shouldRunMeetingEvidenceForRequest({
+    enabled: true,
+    message: "Show the supporting quote",
+    classification: { tool_hint: "exceptions_report" },
+    routing: { suggestedAgent: "meeting_evidence" }
+  }), true);
+});
+
+test("global RAG fallback deduplicates sources and never renders raw evidence or contact details", () => {
+  const duplicatedSource = {
+    title: "סיכום | ido@yfpm.co.il | חריגים קריטיים",
+    url: "https://example.test/project-document"
+  };
+  const answer = fallbackRagAnswer({
+    message: "אפשר פירוט על החריגים הקריטיים?",
+    successful: [
+      { toolName: "hybrid_search", ok: true, sources: [duplicatedSource] },
+      { toolName: "reranker", ok: true, sources: [duplicatedSource] },
+      {
+        toolName: "meeting_evidence_search",
+        ok: true,
+        answer: "[ישיבה: 19.11.2024, צ'אנק 2]\nido@yfpm.co.il\n| 15 | 19.11.24 | raw-private-canary |",
+        data: { status: "found" }
+      }
+    ],
+    failed: [{ toolName: "main_agent", ok: false, error: "credit-provider-canary" }],
+    sources: [duplicatedSource, duplicatedSource],
+    retrievalResults: [{ ...duplicatedSource, source_url: duplicatedSource.url, index_text: "raw-index-canary" }]
+  });
+  assert.match(answer, /לא ניתן היה להשלים כרגע תשובה מהימנה/);
+  assert.match(answer, /מסמכים שעשויים להיות רלוונטיים/);
+  assert.equal((answer.match(/https:\/\/example\.test\/project-document/g) || []).length, 1);
+  assert.doesNotMatch(answer, /ido@yfpm\.co\.il|raw-private-canary|raw-index-canary|credit-provider-canary/);
+  assert.doesNotMatch(answer, /Hybrid Search|Reranker|meeting_evidence|Main Agent|חיפוש ראיות מישיבות/);
+  assert.doesNotMatch(answer, /\|/);
+  const rendered = renderChatMarkdown(answer);
+  assert.doesNotMatch(rendered, /<table|ido@yfpm\.co\.il|raw-private-canary/);
+
+  const english = fallbackRagAnswer({
+    message: "Please explain the critical exceptions.",
+    successful: [{ toolName: "meeting_evidence_search", ok: true, answer: "dana@example.test raw-private-canary" }],
+    sources: [{ title: "Critical exceptions dana@example.test", url: "https://example.test/en" }]
+  });
+  assert.match(english, /A reliable answer could not be completed right now/);
+  assert.match(english, /Contact details removed/);
+  assert.doesNotMatch(english, /dana@example\.test|raw-private-canary|meeting_evidence/);
 });
 
 test("source quality prefers official reports over whatsapp", () => {
@@ -11238,11 +11382,11 @@ test("data query Phase 4D isolates pure meeting semantics and fails closed witho
   assert.equal(isPureMeetingEvidenceCapability(mixedRoute), false);
 
   const agentSource = fs.readFileSync(new URL("../src/agent.js", import.meta.url), "utf8");
-  const retryStart = agentSource.indexOf("Main Agent timed out, retrying with reduced context");
+  const retryStart = agentSource.indexOf("Main Agent retrying with compact context");
   const retryEnd = agentSource.indexOf("trace.push({ step: \"mainAgent\"", retryStart);
   const retrySource = agentSource.slice(retryStart, retryEnd);
   assert.ok(retryStart >= 0 && retryEnd > retryStart);
-  assert.match(retrySource, /tool_results:\s*projectToolCallsForMain\(/);
+  assert.match(retrySource, /tool_results:\s*compactToolCallsForMainRetry\(/);
   assert.doesNotMatch(retrySource, /tool_results:\s*toolCalls\s*\.\s*filter/);
   assert.match(agentSource, /allowedTables:\s*dataQuerySettings\(config\)\.allowedTables/);
   assert.match(agentSource, /const investigationPlan = structuredDataQueryRoute\s*\? null/);

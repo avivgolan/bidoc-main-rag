@@ -59,7 +59,14 @@ export async function chatCompletion({
       throw error;
     });
     if (!response.ok) {
-      throw new Error(data?.error?.message || `OpenRouter request failed: ${response.status}`);
+      const providerMessage = data?.error?.message || `OpenRouter request failed: ${response.status}`;
+      const providerError = new Error(providerMessage);
+      providerError.httpStatus = response.status;
+      const affordableMatch = String(providerMessage).match(/can\s+only\s+afford\s+([\d,]+)(?:\s+tokens?)?/i);
+      if (affordableMatch) {
+        providerError.affordableMaxTokens = Number(affordableMatch[1].replaceAll(",", ""));
+      }
+      throw providerError;
     }
     recordTelemetry(telemetry, buildTelemetryEntry({
       kind: "chat",

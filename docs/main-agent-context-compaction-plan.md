@@ -471,3 +471,29 @@ For each phase, record:
 - pass/fail result,
 - measured token/cost changes,
 - whether to proceed or repeat the phase.
+
+## Global Answer Hardening Closeout - 2026-07-29
+
+This post-calibration change applies to every Main RAG answer, not only exception queries.
+
+Implemented:
+
+- OpenRouter HTTP/capacity failures expose typed internal retry metadata without placing provider errors in customer answers.
+- Main synthesis receives one bounded compact retry. Capacity failures move to the configured lite model with a reduced token budget; timeouts retry the same model with compact context.
+- The last-resort RAG answer renders only deterministic Data Query facts and up to five deduplicated safe project links. It never renders raw tool payloads, retrieval excerpts, contact details, provider errors, or internal workflow labels.
+- Meeting evidence runs only for explicit meeting intent or an explicit meeting-evidence route. Generic investigation mode no longer activates it.
+- Every external n8n tool request has a shared 30-second default timeout, configurable from `toolsRuntime.timeoutMs`, so a stalled workflow cannot block the answer indefinitely.
+- Final customer text receives a control-character and whitespace cleanup pass.
+
+Verification:
+
+- Focused global hardening tests: `7/7` passed.
+- Protected Data Query suite: `122/122` passed.
+- Full repository suite: `372/383` passed. The remaining 11 failures are the pre-existing settings, workflow UI, and timeline mobile group; this change introduced no additional full-suite failure.
+- Syntax checks passed for all modified JavaScript files.
+- `git diff --check` passed (line-ending warnings only).
+
+Live limitation:
+
+- A one-off run of `אפשר פירוט על החריגים הקריטיים?` reached the RAG route without activating Meeting Evidence, but an external retrieval stage did not return, so no final customer answer was available for a visual UI assertion in this closeout.
+- The backend remains local-only; no deployment, production-data change, schema change, commit, or push was performed.

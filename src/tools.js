@@ -82,10 +82,15 @@ export async function callN8nTool({ toolName, query, dateFilter = "", dateFrom =
   }
 
   try {
+    const configuredTimeout = Number(config?.n8n?.runtime?.timeoutMs);
+    const timeoutMs = Number.isFinite(configuredTimeout)
+      ? Math.max(100, Math.min(configuredTimeout, 120_000))
+      : 30_000;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, date_filter: dateFilter, date_from: dateFrom, date_to: dateTo, session_id: sessionId })
+      body: JSON.stringify({ query, date_filter: dateFilter, date_from: dateFrom, date_to: dateTo, session_id: sessionId }),
+      signal: AbortSignal.timeout(timeoutMs)
     });
     const text = await response.text();
     const data = tryJson(text);
@@ -97,10 +102,11 @@ export async function callN8nTool({ toolName, query, dateFilter = "", dateFrom =
       sources: extractLinks(data)
     };
   } catch (error) {
+    const timedOut = error?.name === "TimeoutError" || error?.name === "AbortError";
     return {
       toolName,
       ok: false,
-      error: error.message,
+      error: timedOut ? "Tool request timed out" : error.message,
       data: null,
       sources: []
     };

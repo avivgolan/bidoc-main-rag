@@ -35,6 +35,7 @@ const DEFAULT_GRAPH_SETTINGS = {
 const DEFAULT_TOOL_RUNTIME_SETTINGS = {
   enabled: true,
   parallelLimit: 6,
+  timeoutMs: 30_000,
   alertAgentEnabled: true,
   safetyPrecheckEnabled: true
 };
@@ -800,6 +801,7 @@ function normalizeToolRuntimeSettings(value = {}) {
   return {
     enabled: raw.enabled !== false,
     parallelLimit: clampNumber(raw.parallelLimit, 1, 20, DEFAULT_TOOL_RUNTIME_SETTINGS.parallelLimit),
+    timeoutMs: clampNumber(raw.timeoutMs, 1_000, 120_000, DEFAULT_TOOL_RUNTIME_SETTINGS.timeoutMs),
     alertAgentEnabled: raw.alertAgentEnabled !== false,
     safetyPrecheckEnabled: raw.safetyPrecheckEnabled !== false,
     // Task B1: route tools with an internal implementation (contentTools.js)
