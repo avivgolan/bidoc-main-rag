@@ -28,6 +28,7 @@ import { dataQueryFinancialTypeForStoredValue } from "./subagents/dataQueryFinan
 import { DATA_QUERY_EXCEPTION_CURRENCY, DATA_QUERY_EXCEPTION_VAT_RATE } from "./subagents/dataQueryMetadata.js";
 import { formatMeetingCitation, runMeetingEvidenceAgent } from "./subagents/meeting.js";
 import { runExceptionEvidenceAgent } from "./subagents/exceptionEvidence.js";
+import { runConsultantReportEvidenceAgent } from "./subagents/consultantReportEvidence.js";
 import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
 import { completeRun, emitRunEvent, getRunEvents } from "./runLog.js";
 import { renderPrompt, defaultPrompts } from "./prompts.js";
@@ -646,6 +647,20 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
       });
     }
   }
+  if (isDeterministicConsultantReportMixedCapability(dataQueryRouting)) {
+    const records = exactConsultantReportLookupRecords(toolCalls);
+    const report = records.length === 1 ? records[0] : null;
+    if (report) {
+      const evidence = await runConsultantReportEvidenceAgent({
+        config,
+        question: message,
+        scope: { reportId: report.id, projectId: report.project_id, attachmentId: report.attachment_id },
+        telemetry: telemetryFor("consultant_report_evidence")
+      });
+      toolCalls.push(annotateToolCall({ toolName: "consultant_report_evidence_search", ok: ["ok", "not_found"].includes(evidence.status), data: evidence, sources: [] }));
+      emitRunEvent(runId, "consultant_report_evidence", "Same-report consultant evidence handoff completed", { status: evidence.status, sameReportMatch: evidence.same_report_match === true, evidenceCount: Number(evidence.evidence_count || 0) });
+    }
+  }
 
   const exactInvoiceRecords = exactInvoiceLookupRecords(toolCalls);
   let exactInvoiceEnrichments = buildExactInvoiceEnrichments(toolCalls);
@@ -843,6 +858,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     toolCalls,
     conflicts
   });
+  const deterministicConsultantReportAnswer = buildDeterministicConsultantReportAnswer({ message, routing: dataQueryRouting, toolCalls, conflicts });
   const deterministicMeetingEvidenceAnswer = buildDeterministicMeetingEvidenceUnavailableAnswer({
     message,
     routing: dataQueryRouting,
@@ -865,6 +881,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     deterministicMeetingAnswer ||
     deterministicEmailAnswer ||
     deterministicExceptionAnswer ||
+    deterministicConsultantReportAnswer ||
     deterministicMeetingDateDecisionAnswer ||
     deterministicMeetingFallbackEvidenceAnswer ||
     deterministicMeetingEvidenceAnswer;
@@ -1328,7 +1345,8 @@ export function shouldRunDataQuery({ message, classification, config, settings =
     isDeterministicAlertNotComputableCapability(capability) ||
     isDeterministicMeetingNotComputableCapability(capability) ||
     isDeterministicEmailNotComputableCapability(capability) ||
-    isDeterministicExceptionNotComputableCapability(capability);
+    isDeterministicExceptionNotComputableCapability(capability) ||
+    isDeterministicConsultantReportNotComputableCapability(capability);
 }
 
 export function normalizeDataQueryClassifierDate(value) {
@@ -1377,6 +1395,8 @@ export function shouldBypassGenericRetrieval({ message, classification, config, 
     isDeterministicEmailNotComputableCapability(capability) ||
     isDeterministicExceptionNotComputableCapability(capability) ||
     isDeterministicExceptionMixedCapability(capability) ||
+    isDeterministicConsultantReportNotComputableCapability(capability) ||
+    isDeterministicConsultantReportMixedCapability(capability) ||
     isPureMeetingEvidenceCapability(capability);
 }
 
@@ -1407,7 +1427,7 @@ export function buildMainProjectTools({
     hasDataQueryHint: hintedTools(classification).includes("data_query"),
     settings: dataQuerySettingsOverride || dataQuerySettings(config)
   });
-  const originWarnings = ["alert_content_origin_not_approved", "meeting_content_origin_not_approved", "email_content_origin_not_approved", "exception_content_origin_not_approved"];
+  const originWarnings = ["alert_content_origin_not_approved", "meeting_content_origin_not_approved", "email_content_origin_not_approved", "exception_content_origin_not_approved", "consultant_content_origin_not_approved"];
   const runDataQuery = originWarnings.includes(dataQueryRouting?.warning)
     ? false
     : shouldRunDataQuery({
@@ -1444,6 +1464,9 @@ export function buildMainProjectTools({
       isDeterministicExceptionCapability(dataQueryRouting) ||
       isDeterministicExceptionNotComputableCapability(dataQueryRouting) ||
       isDeterministicExceptionMixedCapability(dataQueryRouting) ||
+      isDeterministicConsultantReportCapability(dataQueryRouting) ||
+      isDeterministicConsultantReportNotComputableCapability(dataQueryRouting) ||
+      isDeterministicConsultantReportMixedCapability(dataQueryRouting) ||
       isExceptionCountApprovalMixedCapability(dataQueryRouting)
     )
   ) {
@@ -1713,6 +1736,27 @@ export function isDeterministicExceptionNotComputableCapability(capability = nul
     ].includes(capability?.warning);
 }
 
+export function isDeterministicConsultantReportCapability(capability = null) {
+  return capability?.supported === true && capability?.mixed !== true && (capability.lookup?.targetTable === "consultants_reports" || capability.metricScope?.targetTable === "consultants_reports");
+}
+
+export function isDeterministicConsultantReportMixedCapability(capability = null) {
+  return capability?.supported === true && capability?.mixed === true && capability?.lookup?.targetTable === "consultants_reports";
+}
+
+export function isDeterministicConsultantReportNotComputableCapability(capability = null) {
+  const target = capability?.lookup?.targetTable === "consultants_reports" || capability?.metricScope?.targetTable === "consultants_reports";
+  const peopleCountAmbiguity = capability?.warning === "consultant_people_count_not_computable";
+  return capability?.supported === false && (target || peopleCountAmbiguity) && capability?.status === "not_computable" && [
+    "consultant_people_count_not_computable",
+    "consultant_ingestion_time_not_computable", "consultant_identity_field_not_queryable",
+    "consultant_identity_grouping_not_computable", "consultant_category_not_computable",
+    "consultant_implementation_status_not_computable", "consultant_multidimensional_timeseries_not_computable",
+    "consultant_unapproved_lookup_not_computable", "consultant_unapproved_metric_not_computable",
+    "invalid_lookup_limit", "consultant_content_origin_not_approved", "structured_metrics_not_available", "structured_lookup_not_available"
+  ].includes(capability?.warning);
+}
+
 export function enforceAlertDataQueryTrustedOrigin(routing = null, requestConfig = {}, trustedConfig = getConfig()) {
   const alertTarget = routing?.lookup?.targetTable === "alerts" ||
     routing?.metricScope?.targetTable === "alerts";
@@ -1722,7 +1766,8 @@ export function enforceAlertDataQueryTrustedOrigin(routing = null, requestConfig
     routing?.metricScope?.targetTable === "emails";
   const exceptionTarget = routing?.lookup?.targetTable === "exceptions_report" ||
     routing?.metricScope?.targetTable === "exceptions_report";
-  if (!alertTarget && !meetingTarget && !emailTarget && !exceptionTarget) return routing;
+  const consultantTarget = routing?.lookup?.targetTable === "consultants_reports" || routing?.metricScope?.targetTable === "consultants_reports";
+  if (!alertTarget && !meetingTarget && !emailTarget && !exceptionTarget && !consultantTarget) return routing;
   const requestUrl = normalizeDataQueryContentOrigin(
     requestConfig?.contentSource?.supabaseUrl || requestConfig?.contentSupabaseUrl
   );
@@ -1730,8 +1775,8 @@ export function enforceAlertDataQueryTrustedOrigin(routing = null, requestConfig
     trustedConfig?.contentSource?.supabaseUrl || trustedConfig?.contentSupabaseUrl
   );
   if (requestUrl && trustedUrl && requestUrl === trustedUrl) return routing;
-  const targetTable = meetingTarget ? "meetings" : emailTarget ? "emails" : exceptionTarget ? "exceptions_report" : "alerts";
-  const recordKind = meetingTarget ? "meeting" : emailTarget ? "email" : exceptionTarget ? "exception" : "alert";
+  const targetTable = meetingTarget ? "meetings" : emailTarget ? "emails" : exceptionTarget ? "exceptions_report" : consultantTarget ? "consultants_reports" : "alerts";
+  const recordKind = meetingTarget ? "meeting" : emailTarget ? "email" : exceptionTarget ? "exception" : consultantTarget ? "consultant report" : "alert";
   return {
     ...routing,
     supported: false,
@@ -1748,6 +1793,8 @@ export function enforceAlertDataQueryTrustedOrigin(routing = null, requestConfig
         ? "email_content_origin_not_approved"
         : exceptionTarget
           ? "exception_content_origin_not_approved"
+        : consultantTarget
+          ? "consultant_content_origin_not_approved"
         : "alert_content_origin_not_approved",
     suggestedAgent: null
   };
@@ -1804,8 +1851,9 @@ export function buildMainDataQueryWorkflowProjection({
     data.tablesUsed?.includes("exceptions_report") ||
     plans.some((plan) => plan?.table === "exceptions_report") ||
     data.queryPlan?.plans?.some((plan) => plan?.table === "exceptions_report");
+  const targetsConsultants = data.routing?.lookup?.targetTable === "consultants_reports" || data.routing?.metricScope?.targetTable === "consultants_reports" || data.tablesUsed?.includes("consultants_reports") || plans.some((plan) => plan?.table === "consultants_reports") || data.queryPlan?.plans?.some((plan) => plan?.table === "consultants_reports");
   const machineResult = summarizeDataQueryMachineResultForWorkflow(data.machineResult || {});
-  if (targetsMeetings || targetsEmails || targetsExceptions) {
+  if (targetsMeetings || targetsEmails || targetsExceptions || targetsConsultants) {
     machineResult.recordFields = (machineResult.recordFields || [])
       .filter((field) => !["id", "project_id", "attachment_id", "mail_id", "conversationid"].includes(field));
   }
@@ -1857,6 +1905,12 @@ export function projectChatToolCallsForClient(toolCalls = [], { question = "" } 
         sources: []
       };
     }
+    if (call?.toolName === "consultant_report_evidence_search") {
+      return {
+        toolName: "consultant_report_evidence_search", ok: call.ok === true, skipped: call.skipped === true,
+        data: { status: call.data?.status || null, same_report_match: call.data?.same_report_match === true, evidence_count: Number(call.data?.evidence_count || 0) }, sources: []
+      };
+    }
     if (call?.toolName === "meeting_evidence_search") {
       const data = call.data && typeof call.data === "object" ? call.data : {};
       return {
@@ -1905,7 +1959,8 @@ export function projectChatToolCallsForClient(toolCalls = [], { question = "" } 
       data.tablesUsed?.includes("exceptions_report") ||
       data.plans?.some((plan) => plan?.table === "exceptions_report") ||
       data.queryPlan?.plans?.some((plan) => plan?.table === "exceptions_report");
-    if (!targetsAlerts && !targetsMeetings && !targetsEmails && !targetsExceptions) return call;
+    const targetsConsultants = data.routing?.lookup?.targetTable === "consultants_reports" || data.routing?.metricScope?.targetTable === "consultants_reports" || data.tablesUsed?.includes("consultants_reports") || data.plans?.some((plan) => plan?.table === "consultants_reports") || data.queryPlan?.plans?.some((plan) => plan?.table === "consultants_reports");
+    if (!targetsAlerts && !targetsMeetings && !targetsEmails && !targetsExceptions && !targetsConsultants) return call;
     return {
       toolName: "data_query",
       ok: call.ok === true,
@@ -1941,6 +1996,9 @@ function projectToolCallsForMain(toolCalls = []) {
           },
           sources: []
         };
+      }
+      if (call?.toolName === "consultant_report_evidence_search") {
+        return { toolName: "consultant_report_evidence_search", ok: call.ok === true, data: { status: call.data?.status || null, same_report_match: call.data?.same_report_match === true, evidence_count: Number(call.data?.evidence_count || 0), answer: String(call.data?.answer || "").slice(0, 2400) }, sources: [] };
       }
       if (call?.toolName === "data_query") {
         const data = call.data && typeof call.data === "object" ? call.data : {};
@@ -2019,6 +2077,10 @@ function projectToolCallsForMain(toolCalls = []) {
             },
             sources: []
           };
+        }
+        const targetsConsultants = data.routing?.lookup?.targetTable === "consultants_reports" || data.routing?.metricScope?.targetTable === "consultants_reports" || data.tablesUsed?.includes("consultants_reports") || data.plans?.some((plan) => plan?.table === "consultants_reports");
+        if (targetsConsultants) {
+          return { toolName: "data_query", ok: call.ok === true, data: { status: data.status || null, routing: { domain: data.routing?.domain || null, intent: data.routing?.intent || null, mixed: data.routing?.mixed === true }, exact_consultant_reports: exactConsultantReportLookupRecords([call]).map((record) => ({ report_date: record.report_date || null, item_status: record.item_status || null })), metrics: summarizeDataQueryMetricsForWorkflow(data.metrics || []), warnings: summarizeDataQueryWarningsForWorkflow(data.warnings || []) }, sources: [] };
         }
       }
       return call;
@@ -3199,6 +3261,16 @@ export function exactExceptionLookupRecords(toolCalls = []) {
       record.project_id &&
       record.attachment_id
     );
+}
+
+export function exactConsultantReportLookupRecords(toolCalls = []) {
+  return (Array.isArray(toolCalls) ? toolCalls : [])
+    .filter((call) => call?.toolName === "data_query" && call?.ok)
+    .flatMap((call) => Object.values(call?.data?.machineResult?.recordsByRequestId || {}))
+    .flatMap((records) => Array.isArray(records) ? records : [])
+    .filter((item) => item?.source?.table === "consultants_reports")
+    .map((item) => item?.record || {})
+    .filter((record) => record.id !== null && record.id !== undefined && record.report_date && record.project_id && record.attachment_id);
 }
 
 export function exactMeetingLookupRecords(toolCalls = []) {
@@ -4394,6 +4466,77 @@ function formatDeterministicExceptionMetrics({ data = {}, metricScope = null, he
     ? (hebrew ? "\n\n> סדרת הזמן משתמשת בגבולות UTC וכוללת דלי מפורש לרשומות ללא תאריך." : "\n\n> The time series uses UTC boundaries and includes an explicit undated bucket.")
     : "";
   return `${heading}\n\n${items}${boundary}`;
+}
+
+export function buildDeterministicConsultantReportAnswer({ message = "", routing = null, toolCalls = [], conflicts = [] } = {}) {
+  const hebrew = isHebrew(message);
+  if (isDeterministicConsultantReportNotComputableCapability(routing)) {
+    const messages = {
+      consultant_people_count_not_computable: hebrew ? "לא ניתן לספק ספירה מדויקת של יועצים כאנשים. המדד המאושר סופר דוחות יועצים, לא אנשים, ולכן לא הוחזרה רשימת שמות." : "An exact count of consultant people is not available. The approved metric counts consultant reports, not people, so no names were returned.",
+      consultant_ingestion_time_not_computable: hebrew ? "זמן היצירה או הקליטה אינו תאריך עסקי מאושר. השאילתה המדויקת משתמשת רק בתאריך הדוח." : "Creation or ingestion time is not an approved business date. The exact query uses only the report date.",
+      consultant_identity_field_not_queryable: hebrew ? "מזהי פרויקט, דוח, קובץ ומייל ושם הקובץ אינם זמינים להצגה או לסינון." : "Project, report, attachment, mail, and filename identifiers are unavailable for display or filtering.",
+      consultant_identity_grouping_not_computable: hebrew ? "לא ניתן לבצע פילוח מדויק לפי שם היועץ, משום שזהו מידע מזהה שאינו חלק מחוזה המדדים." : "Exact grouping by consultant identity is outside the approved metrics contract.",
+      consultant_category_not_computable: hebrew ? "תחום ההתמחות ונושא הדוח הם טקסט חופשי ודורשים חיפוש סמנטי, ולכן אינם זמינים כפילוח מדויק." : "Specialization and report topic are free text and require semantic retrieval, so they are unavailable as exact groups.",
+      consultant_implementation_status_not_computable: hebrew ? "לא ניתן לקבוע יישום, אישור או השלמה: שדה סטטוס היישום ריק, והסטטוס השמור מציין טיפול בלבד." : "Implementation, approval, or completion cannot be determined: implementation status is blank and the stored item status indicates processing only."
+    };
+    return appendConflictWarnings(messages[routing.warning] || routing.reason, conflicts, { hebrew });
+  }
+  if (!isDeterministicConsultantReportCapability(routing) && !isDeterministicConsultantReportMixedCapability(routing)) return null;
+  const dataQueryCall = toolCalls.find((call) => call?.toolName === "data_query");
+  if (!dataQueryCall?.ok || !["ok", "partial"].includes(dataQueryCall?.data?.status || "ok")) {
+    return hebrew ? "שאילתת דוחות היועצים המדויקת לא הושלמה, ולכן לא הוחלפה בהערכה סמנטית." : "The exact consultant-report query did not complete, so no semantic estimate was substituted.";
+  }
+  let answer = routing.intent === "lookup"
+    ? formatDeterministicConsultantReportLookup({ operation: routing.lookup?.operation, records: exactConsultantReportLookupRecords(toolCalls), hebrew })
+    : formatDeterministicConsultantReportMetrics({ data: dataQueryCall.data, metricScope: routing.metricScope, hebrew });
+  if (!answer) return null;
+  if (isDeterministicConsultantReportMixedCapability(routing)) {
+    const evidence = toolCalls.find((call) => call?.toolName === "consultant_report_evidence_search")?.data;
+    answer += evidence?.status === "ok" && evidence?.same_report_match === true && evidence?.answer
+      ? (hebrew ? `\n\n## המלצות מתוך אותו דוח\n\n${evidence.answer}` : `\n\n## Recommendations from that same report\n\n${evidence.answer}`)
+      : (hebrew ? "\n\n> לא נמצאו באותו דוח ראיות מספיקות לתמצית בטוחה; לא צורף מידע מדוח אחר." : "\n\n> Evidence from that same report was insufficient for a safe summary; another report was not substituted.");
+  }
+  return appendConflictWarnings(answer, conflicts, { hebrew });
+}
+
+function formatDeterministicConsultantReportLookup({ operation, records = [], hebrew = false }) {
+  if (!records.length) return hebrew ? "לא נמצאו דוחות יועצים מתוארכים התואמים לבקשה." : "No dated consultant reports matched the request.";
+  const heading = records.length > 1
+    ? (hebrew ? `${records.length} דוחות היועצים המתוארכים האחרונים:` : `The ${records.length} latest dated consultant reports:`)
+    : operation === "lookup_earliest"
+      ? (hebrew ? "דוח היועץ המתוארך הראשון" : "Earliest dated consultant report")
+      : (hebrew ? "דוח היועץ המתוארך האחרון" : "Latest dated consultant report");
+  const blocks = records.map((record, index) => {
+    const lines = [
+      [hebrew ? "תאריך הדוח" : "Report date", formatInvoiceDate(record.report_date)],
+      [hebrew ? "סטטוס שמור" : "Stored item status", record.item_status]
+    ].map(([label, value]) => `- **${label}:** ${escapeInvoiceDisplayValue(String(value))}`);
+    return records.length === 1 ? lines.join("\n") : `### ${index + 1}. ${formatInvoiceDate(record.report_date)}\n\n${lines.join("\n")}`;
+  });
+  return `## ${heading}\n\n${blocks.join("\n\n")}`;
+}
+
+function formatDeterministicConsultantReportMetrics({ data = {}, metricScope = null, hebrew = false }) {
+  const metrics = Object.values(data.machineResult?.metricsByRequestId || {}).flatMap((value) => Array.isArray(value) ? value : []);
+  const plan = (data.plans || []).find((item) => item?.table === "consultants_reports");
+  if (!plan) return null;
+  const scope = formatInvoiceDateScope(data.caller || {}, hebrew);
+  if (plan.operation === "count") {
+    const value = Number(metrics.find((item) => item.operation === "count")?.value);
+    if (!Number.isFinite(value)) return null;
+    const undated = (metricScope?.requiredFilters || []).some((filter) => filter.field === "report_date" && filter.op === "is");
+    if (value === 1) {
+      return hebrew
+        ? `נמצא **דוח יועץ אחד${undated ? " ללא תאריך" : ""}**${scope}.`
+        : `**1 consultant report${undated ? " without a date" : ""}** was found${scope}.`;
+    }
+    return hebrew ? `נמצאו **${formatInvoiceNumber(value)} דוחות יועצים${undated ? " ללא תאריך" : ""}**${scope}.` : `**${formatInvoiceNumber(value)} consultant reports${undated ? " without a date" : ""}** were found${scope}.`;
+  }
+  const groups = metrics.map((metric) => ({ label: firstPresent(...Object.values(metric.group || {})), value: Number(metric.value) })).filter((item) => item.label !== null && item.label !== undefined && Number.isFinite(item.value));
+  if (!groups.length) return hebrew ? `לא נמצאו דוחות יועצים${scope}.` : `No consultant reports were found${scope}.`;
+  const items = groups.sort((a, b) => String(a.label).localeCompare(String(b.label))).map((item) => `- **${escapeInvoiceDisplayValue(item.label === "undated" ? (hebrew ? "ללא תאריך" : "Undated") : String(item.label))}:** ${formatInvoiceNumber(item.value)}`).join("\n");
+  const heading = plan.operation === "timeseries" ? (hebrew ? "מגמת דוחות יועצים" : "Consultant-report trend") : (hebrew ? "פילוח לפי סטטוס שמור" : "Breakdown by stored item status");
+  return `## ${heading}\n\n${items}`;
 }
 
 export function buildDeterministicSafetyAnswer({

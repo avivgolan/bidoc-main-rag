@@ -14,6 +14,7 @@ import {
   DATA_QUERY_EMAIL_ITEM_STATUS,
   DATA_QUERY_EMAIL_NO_CLEAR_RELEVANCE,
   DATA_QUERY_EMAIL_RELEVANCE_VALUES,
+  DATA_QUERY_CONSULTANT_REPORT_ITEM_STATUS_VALUES,
   DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES,
   DATA_QUERY_EXCEPTION_URGENCY_VALUES,
   DATA_QUERY_LOOKUP_OPERATIONS,
@@ -30,9 +31,11 @@ import {
 import {
   analyzeHebrewEmailRelevance,
   analyzeHebrewExceptionIntent,
+  analyzeHebrewConsultantReportIntent,
   normalizeDataQueryHebrewQuestion,
   normalizeHebrewEmailMetricQuestion,
-  normalizeHebrewExceptionMetricQuestion
+  normalizeHebrewExceptionMetricQuestion,
+  normalizeHebrewConsultantReportMetricQuestion
 } from "./dataQueryHebrewLexicon.js";
 import {
   DATA_QUERY_FINANCIAL_ALL_ROWS_LIMIT,
@@ -101,6 +104,14 @@ const DATA_QUERY_EMAIL_ATTACHMENT_FLAG_METRIC_PATTERN = /\b(?:how\s+many|count|n
 const DATA_QUERY_EMAIL_INGESTION_TIME_PATTERN = /\b(?:created_at|creation|ingestion|ingested|created)\b.{0,60}\bemails?\b|\bemails?\b.{0,60}\b(?:created_at|creation|ingestion|ingested|created)\b|(?:created_at|יצירה|קליטה|נקלט).{0,60}מייל|מייל.{0,60}(?:created_at|יצירה|קליטה|נקלט)/iu;
 const DATA_QUERY_EMAIL_SCOPE_FIELD_PATTERN = /\b(?:project_id|project\s+id|email\s+id|record\s+id|mail\s+id|conversation\s+id)\b|מזהה\s+(?:פרויקט|מייל|רשומה|שיחה)/iu;
 const DATA_QUERY_EXCEPTION_REPORT_PATTERN = /\b(?:exception|exceptions|exception\s+reports?|change\s+orders?|additional\s+work|extra\s+costs?|contract\s+deviations?|irregularit(?:y|ies))\b|(?:[בלמכושה])?(?:ה)?חריגים(?=\s|[?.!,;]|$)/iu;
+const DATA_QUERY_CONSULTANT_REPORT_PATTERN = /\bconsultant(?:'s)?\s+reports?\b|\bconsultancy\s+reports?\b|(?:דוח(?:ות)?|דו[״"']?ח(?:ות)?)\s+(?:ה)?יוע(?:ץ|צים)|חוות\s+דעת\s+(?:של\s+)?(?:ה)?יוע(?:ץ|צים)/iu;
+const DATA_QUERY_CONSULTANT_SEMANTIC_DETAIL_PATTERN = /\b(?:recommendations?|recommended|proposed\s+actions?|topic|speciali[sz]ation|summari[sz]e|summary|what\s+did\s+the\s+consultant\s+say)\b|(?:המלצות?|המליץ|המליצה|פעולות?\s+מוצעות?|נושא\s+הדוח|תחום\s+התמחות|סכ(?:ם|מי)|תקציר)/iu;
+const DATA_QUERY_CONSULTANT_MIXED_LATEST_PATTERN = /(?:latest|most\s+recent|last|אחרון|האחרון|אחרונה|האחרונה).{0,60}(?:consultant|יועץ).{0,80}(?:summari[sz]|recommend|סכ|המלצ)|(?:consultant|יועץ).{0,60}(?:latest|most\s+recent|last|אחרון|האחרון|אחרונה|האחרונה).{0,80}(?:summari[sz]|recommend|סכ|המלצ)/iu;
+const DATA_QUERY_CONSULTANT_INGESTION_TIME_PATTERN = /\b(?:created_at|creation|ingestion|ingested|created)\b.{0,60}\bconsultant\s+reports?\b|\bconsultant\s+reports?\b.{0,60}\b(?:created_at|creation|ingestion|ingested|created)\b|(?:created_at|זמן\s+קליטה|יצירה|קליטה|נקלט).{0,60}(?:דוח|דוחות).{0,20}יוע(?:ץ|צים)|(?:דוח|דוחות).{0,20}יוע(?:ץ|צים).{0,60}(?:created_at|זמן\s+קליטה|יצירה|קליטה|נקלט)/iu;
+const DATA_QUERY_CONSULTANT_IDENTITY_PATTERN = /\b(?:consultant|company|vendor)\s+(?:name|names)|\b(?:group|count|break\s*down).{0,40}\bby\s+consultant\b|שם\s+(?:ה)?יועץ|לפי\s+(?:ה)?יועץ/iu;
+const DATA_QUERY_CONSULTANT_CATEGORY_PATTERN = /\b(?:group|count|break\s*down).{0,45}\bby\s+(?:speciali[sz]ation|topic)\b|לפי\s+(?:תחום\s+התמחות|נושא)/iu;
+const DATA_QUERY_CONSULTANT_IMPLEMENTATION_PATTERN = /\b(?:implementation\s+status|implemented|completed|approved|rejected|open|closed|resolved)\b|סטטוס\s+יישום|יוש(?:ם|מה|מו)|בוצע(?:ה|ו)?|הושל(?:ם|מה|מו)|אושר(?:ה|ו)?|נדח(?:ה|ו)|פתוח|סגור/iu;
+const DATA_QUERY_CONSULTANT_SCOPE_FIELD_PATTERN = /\b(?:project_id|report\s+id|record\s+id|attachment\s+id|mail\s+id|filename|file\s+name)\b|מזהה\s+(?:פרויקט|דוח|רשומה|מצורף|מייל)|שם\s+קובץ/iu;
 const DATA_QUERY_EXCEPTION_SEMANTIC_DETAIL_PATTERN = /\b(?:why|explain|describe|evidence|reason|cause|consequence|impact|responsib|approv|reject|narrative|summary|subject)\w*\b.{0,70}\b(?:exceptions?|change\s+orders?)\b|\b(?:exceptions?|change\s+orders?)\b.{0,70}\b(?:why|explain|describe|evidence|reason|cause|consequence|impact|responsib|approv|reject|narrative|summary|subject)\w*\b|(?:למה|מדוע|הסבר|תאר(?=\s|[?.!,;]|$)|ראיות|סיבה|גורם|השלכה|השפעה|אחריות|אישור|דחייה|נושא|סיכום|תמצת|תמצית).{0,70}חריגים|חריגים.{0,70}(?:למה|מדוע|הסבר|תאר(?=\s|[?.!,;]|$)|ראיות|סיבה|גורם|השלכה|השפעה|אחריות|אישור|דחייה|נושא|סיכום|תמצת|תמצית)/iu;
 const DATA_QUERY_EXCEPTION_AMOUNT_PATTERN = /\b(?:(?:total|average|avg|sum(?:\s+of)?)\s+)?(?:requested\s+)?(?:amount|amounts|money|cost|costs|price|prices|currency|vat|profit)\b.{0,60}\b(?:exceptions?|change\s+orders?)\b|\b(?:exceptions?|change\s+orders?)\b.{0,60}\b(?:(?:total|average|avg|sum(?:\s+of)?)\s+)?(?:requested\s+)?(?:amount|amounts|money|cost|costs|price|prices|currency|vat|profit)\b|(?:סכום|סכומים|עלות|עלויות|מחיר|כסף|מטבע|מע[״"]?מ|רווח).{0,60}חריגים|חריגים.{0,60}(?:סכום|סכומים|עלות|עלויות|מחיר|כסף|מטבע|מע[״"]?מ|רווח)/iu;
 const DATA_QUERY_EXCEPTION_EXECUTION_DAYS_PATTERN = /\b(?:execution|completion|implementation)\s+(?:days?|time|duration)\b.{0,50}\b(?:exceptions?|change\s+orders?)\b|\b(?:exceptions?|change\s+orders?)\b.{0,50}\b(?:execution|completion|implementation)\s+(?:days?|time|duration)\b|(?:ימי\s+ביצוע|זמן\s+ביצוע|משך\s+ביצוע).{0,50}חריגים|חריגים.{0,50}(?:ימי\s+ביצוע|זמן\s+ביצוע|משך\s+ביצוע)/iu;
@@ -129,14 +140,15 @@ const DATA_QUERY_ALERT_SCOPE_FIELD_PATTERN = /\b(?:project_id|project\s+id|alert
 const DATA_QUERY_ALERT_AMBIGUOUS_QUALIFIER_PATTERN = /\bsafety\s+alerts?\b|\breport\s+alerts?\b|\balerts?\s+from\s+reports?\b|התראות\s+בטיחות(?!\s+מסוג\s+אירוע)|התראות\s+מדוחות/iu;
 const DATA_QUERY_ALERT_UNDATED_PATTERN = /\bundated\s+alerts?\b|\balerts?\b.{0,30}\b(?:(?:have|with)\s+no|without|missing|null)\b.{0,12}\b(?:data_)?date\b|\balerts?\b.{0,20}\bdata_date\s+(?:is\s+)?null\b|התרא(?:ה|ות).{0,30}(?:ללא|חסר|חסרות).{0,12}תאריך|התרא(?:ה|ות).{0,20}data_date\s+null/iu;
 const DATA_QUERY_ALERT_DATED_COUNT_PATTERN = /\b(?:how\s+many|count|number\s+of|total)\b.{0,30}\bdated\s+alerts?\b|\b(?:how\s+many|count|number\s+of|total)\b.{0,30}\balerts?\b.{0,20}\b(?:have|with)\b.{0,10}\b(?:a\s+)?date\b|כמה.{0,30}התראות.{0,20}(?:עם|בעלות)\s+תאריך/iu;
-const DATA_QUERY_MANAGED_READ_TABLES = new Set(["financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report"]);
+const DATA_QUERY_MANAGED_READ_TABLES = new Set(["financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report", "consultants_reports"]);
 const DATA_QUERY_MANAGED_READ_PATHS = new Map([
   ["financial_transactions", "financial_transactions"],
   ["safety_reports", "safety_reports"],
   ["alerts", "alerts"],
   ["meetings", "meetings"],
   ["emails", "emails"],
-  ["exceptions_report", "exceptions_report"]
+  ["exceptions_report", "exceptions_report"],
+  ["consultants_reports", "consultants_reports"]
 ]);
 const DATA_QUERY_PROJECT_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATA_QUERY_UNSAFE_IDENTITY_CHARACTERS = /[\u0000-\u001f\u007f]/;
@@ -328,6 +340,7 @@ export function buildDataQueryManifest(config = getConfig()) {
   const meetingsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("meetings"), config);
   const emailsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("emails"), config);
   const exceptionsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("exceptions_report"), config);
+  const consultantsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("consultants_reports"), config);
 
   return [
     contentTable(indexTable, "Content index records", ["id", "created_at", "primary_date", "title", "summary", "source_table", "source_id", "project_id", "item_status", "severity_or_risk", "mail_id", "attachment_id", "source_url"], dataQueryTablePolicy(indexTable) || {
@@ -368,6 +381,12 @@ export function buildDataQueryManifest(config = getConfig()) {
       "Exception-report metadata; identities, monetary values, and narrative remain excluded",
       (exceptionsPolicy?.fields || []).map((field) => field.name),
       exceptionsPolicy || {}
+    ),
+    contentTable(
+      "consultants_reports",
+      "Consultant-report metadata; identity and narrative remain excluded",
+      (consultantsPolicy?.fields || []).map((field) => field.name),
+      consultantsPolicy || {}
     )
   ];
 }
@@ -1149,6 +1168,21 @@ export function buildHeuristicQueryPlan({ question, context = {}, requestedMetri
       }
     }
   }
+  if (!lookupIntent && metricScope?.targetTable === "consultants_reports") {
+    const table = settings.manifest.find((item) => item.schemaAlias === "content" && item.tableName === "consultants_reports" && dataQueryExactAvailable(item));
+    if (table && !metricScope.notComputableReason) {
+      const base = {
+        schema: table.schemaAlias,
+        table: table.tableName,
+        filters: [...dateFilters("report_date"), ...(metricScope.requiredFilters || []).map((filter) => ({ ...filter }))],
+        limit: Math.min(table.maxLimit, settings.maxRowsPerPlan),
+        reason: "Deterministic consultant-report metadata metric requested."
+      };
+      if (metricScope.operation === "group_count") add({ ...base, id: "consultants_by_item_status", operation: "group_count", groupBy: ["item_status"] });
+      else if (metricScope.operation === "timeseries") add({ ...base, id: "consultant_report_time_series", operation: "timeseries", dateField: "report_date", granularity: metricScope.granularity || "day" });
+      else add({ ...base, id: "consultant_report_count", operation: "count" });
+    }
+  }
   return {
     question,
     intent: plans.length > 1 ? "multi_metric_summary" : "metric_lookup",
@@ -1174,9 +1208,9 @@ export function validateQueryPlan(queryPlan = {}, settings = dataQuerySettings()
     ["invoice", "financial_transaction_type"].includes(settings.expectedLookup?.recordKind);
   const expectedFinancialTypeMetric = settings.expectedMetricScope?.targetTable === "financial_transactions" &&
     ["invoice", "financial_transaction_type"].includes(settings.expectedMetricScope?.recordKind);
-  const expectedAttestedIntent = (["alerts", "meetings", "emails", "exceptions_report"].includes(settings.expectedLookup?.targetTable) || expectedFinancialTypeLookup)
+  const expectedAttestedIntent = (["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(settings.expectedLookup?.targetTable) || expectedFinancialTypeLookup)
     ? settings.expectedLookup
-    : (["alerts", "meetings", "emails", "exceptions_report"].includes(settings.expectedMetricScope?.targetTable) || expectedFinancialTypeMetric)
+    : (["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(settings.expectedMetricScope?.targetTable) || expectedFinancialTypeMetric)
       ? settings.expectedMetricScope
       : null;
   if (expectedAttestedIntent && rawPlans.length !== 1) {
@@ -1294,6 +1328,10 @@ export function validateQueryPlan(queryPlan = {}, settings = dataQuerySettings()
           planErrors.push(`exception timeseries intent requires granularity ${expectedMetricScope.granularity || "day"}`);
         }
       }
+      if (expectedMetricScope.targetTable === "consultants_reports" && expectedMetricScope.operation === "timeseries") {
+        if (plan.dateField !== "report_date") planErrors.push("consultant-report timeseries intent requires report_date");
+        if ((plan.granularity || "day") !== (expectedMetricScope.granularity || "day")) planErrors.push(`consultant-report timeseries intent requires granularity ${expectedMetricScope.granularity || "day"}`);
+      }
       if (expectedMetricScope.targetTable === "emails" && expectedMetricScope.operation === "distinct") {
         if (
           expectedMetricScope.distinctField !== "mail_category" ||
@@ -1322,9 +1360,9 @@ export function validateQueryPlan(queryPlan = {}, settings = dataQuerySettings()
         }
       }
     }
-    const expectedManagedFilters = (["alerts", "meetings", "emails", "exceptions_report"].includes(expectedLookup?.targetTable) || expectedFinancialTypeLookup)
+    const expectedManagedFilters = (["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(expectedLookup?.targetTable) || expectedFinancialTypeLookup)
       ? expectedLookup.requiredFilters || []
-      : (["alerts", "meetings", "emails", "exceptions_report"].includes(expectedMetricScope?.targetTable) || expectedFinancialTypeMetric)
+      : (["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(expectedMetricScope?.targetTable) || expectedFinancialTypeMetric)
         ? expectedMetricScope.requiredFilters || []
         : null;
     if (expectedManagedFilters) {
@@ -1555,8 +1593,8 @@ export function applyDataQueryCallerScope(queryPlan = {}, caller = {}, settings 
     const schema = String(plan.schema || plan.schemaAlias || "content").trim();
     const table = settings.manifest?.find((item) => item.schemaAlias === schema && item.tableName === tableName);
     if (!table) return plan;
-    const callerScopedManagedTable = ["alerts", "meetings", "financial_transactions", "exceptions_report"].includes(tableName);
-    const callerScopedDateTable = ["alerts", "meetings", "emails", "financial_transactions", "exceptions_report"].includes(tableName);
+    const callerScopedManagedTable = ["alerts", "meetings", "financial_transactions", "exceptions_report", "consultants_reports"].includes(tableName);
+    const callerScopedDateTable = ["alerts", "meetings", "emails", "financial_transactions", "exceptions_report", "consultants_reports"].includes(tableName);
 
     if (caller.projectId) {
       if (!table.allowedFields.includes("project_id")) {
@@ -1569,6 +1607,8 @@ export function applyDataQueryCallerScope(queryPlan = {}, caller = {}, settings 
               ? "financial_transaction"
               : tableName === "exceptions_report"
                 ? "exception"
+              : tableName === "consultants_reports"
+                ? "consultant_report"
                 : "alert";
           errors.push(`${plan.id || tableName}: ${scopeName}_project_scope_must_come_from_caller`);
           plan.filters = plan.filters.filter((filter) => filter.field !== "project_id");
@@ -1584,6 +1624,8 @@ export function applyDataQueryCallerScope(queryPlan = {}, caller = {}, settings 
           ? "financial_transaction"
           : tableName === "exceptions_report"
             ? "exception"
+          : tableName === "consultants_reports"
+            ? "consultant_report"
             : "alert";
       errors.push(`${plan.id || tableName}: ${scopeName}_project_scope_must_come_from_caller`);
     }
@@ -1810,10 +1852,12 @@ export function parseDataQueryLookupIntent(question) {
     explicitLimit === null &&
     (/\b(?:exceptions|change\s+orders)\b/iu.test(text) ||
       (/חריגים/iu.test(text) && !/דוח\s+(?:ה)?חריגים/iu.test(text)));
+  const pluralConsultantDefault = targetTable === "consultants_reports" &&
+    direction === "latest" && explicitLimit === null && /\bconsultant\s+reports\b|דוחות\s+(?:ה)?יועצים/iu.test(text);
   const limit = allRequested
     ? DATA_QUERY_FINANCIAL_ALL_ROWS_LIMIT
     : explicitLimit === null
-      ? (pluralAlertDefault || pluralEmailDefault || pluralExceptionDefault ? 5 : 1)
+      ? (pluralAlertDefault || pluralEmailDefault || pluralExceptionDefault || pluralConsultantDefault ? 5 : 1)
       : explicitLimit;
   const recordKind = targetTable === "safety_reports"
     ? "safety_report"
@@ -1825,6 +1869,8 @@ export function parseDataQueryLookupIntent(question) {
           ? "email"
         : targetTable === "exceptions_report"
           ? "exception_report"
+        : targetTable === "consultants_reports"
+          ? "consultant_report"
         : dataQueryFinancialRecordKind(text, financialType);
   const alertMetricScope = recordKind === "alert" ? dataQueryAlertMetricScope(text) : null;
   const alertGroupedLookup = recordKind === "alert" && Boolean(alertMetricScope?.groupField);
@@ -1904,6 +1950,12 @@ export function parseDataQueryLookupIntent(question) {
               "metadata",
               "embedding"
             ]
+        : recordKind === "consultant_report"
+          ? [
+              "created_at", "project_id", "consultant_name", "specialization", "report_topic",
+              "main_recommendations", "proposed_actions", "implementation_status", "mail_id",
+              "attachment_id", "document_name", "hashtags", "summary", "content", "metadata", "embedding"
+            ]
         : [],
     unsupportedReason: DATA_QUERY_LOOKUP_UNPARSED_NUMBER_PATTERN.test(text)
       ? "unparsed_lookup_limit"
@@ -1919,6 +1971,13 @@ export function parseDataQueryLookupIntent(question) {
         ? "unapproved_email_lookup_qualifier"
       : recordKind === "exception_report" && dataQueryExceptionLookupHasUnapprovedModifier(text)
         ? "unapproved_exception_lookup_qualifier"
+      : recordKind === "consultant_report" && (
+          DATA_QUERY_CONSULTANT_IDENTITY_PATTERN.test(text) ||
+          DATA_QUERY_CONSULTANT_CATEGORY_PATTERN.test(text) ||
+          DATA_QUERY_CONSULTANT_IMPLEMENTATION_PATTERN.test(text) ||
+          DATA_QUERY_CONSULTANT_SCOPE_FIELD_PATTERN.test(text)
+        )
+        ? "unapproved_consultant_lookup_qualifier"
       : direction === "earliest" && explicitLimit !== null && explicitLimit > 1
         ? "earliest_n_not_supported"
         : null
@@ -2147,14 +2206,18 @@ export function classifyDataQueryCapability(question, {
   const approvedExceptionMetricGrammar = quantitativeTarget === "exceptions_report" &&
     ["count", "group_count", "aggregate", "timeseries"].includes(metricScope?.operation) &&
     dataQueryExceptionMetricGrammar(text, metricScope);
+  const approvedConsultantMetricGrammar = quantitativeTarget === "consultants_reports" &&
+    ["count", "group_count", "timeseries"].includes(metricScope?.operation) &&
+    dataQueryConsultantMetricGrammar(text, metricScope);
   const quantitative = hasExplicitPlan ||
     explicitlyQuantitative ||
     approvedAlertMetricGrammar ||
     approvedMeetingMetricGrammar ||
     approvedEmailMetricGrammar ||
     approvedExceptionMetricGrammar ||
+    approvedConsultantMetricGrammar ||
     (quantitativeTarget === "exceptions_report" && dataQueryExceptionCountApprovalMixed(text)) ||
-    (hasDataQueryHint && !["alerts", "meetings", "emails", "exceptions_report"].includes(quantitativeTarget));
+    (hasDataQueryHint && !["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(quantitativeTarget));
   const exactSafetyDefectAggregate = quantitativeTarget === "safety_reports" &&
     metricScope?.operation === "aggregate" &&
     Array.isArray(metricScope.metrics) &&
@@ -2168,6 +2231,7 @@ export function classifyDataQueryCapability(question, {
     (quantitativeTarget === "emails" && DATA_QUERY_EMAIL_SEMANTIC_DETAIL_PATTERN.test(text)) ||
     (quantitativeTarget === "emails" && DATA_QUERY_EMAIL_TIMELINE_IMPACT_PATTERN.test(text)) ||
     (quantitativeTarget === "exceptions_report" && DATA_QUERY_EXCEPTION_SEMANTIC_DETAIL_PATTERN.test(text)) ||
+    (quantitativeTarget === "consultants_reports" && DATA_QUERY_CONSULTANT_SEMANTIC_DETAIL_PATTERN.test(text)) ||
     (
       quantitativeTarget === "safety_reports" &&
       DATA_QUERY_SAFETY_SEMANTIC_DEFECT_PATTERN.test(text) &&
@@ -2192,6 +2256,33 @@ export function classifyDataQueryCapability(question, {
   const mixedExceptionApprovalQuestion = quantitativeTarget === "exceptions_report" &&
     dataQueryExceptionCountApprovalMixed(text);
   const mixedExceptionQuestion = mixedExceptionSameRecordQuestion || mixedExceptionApprovalQuestion;
+  const mixedConsultantQuestion = semantic && quantitativeTarget === "consultants_reports" &&
+    dataQueryConsultantMixedExactSemantic(text, lookupCandidate);
+
+  if (!quantitativeTarget && /\b(?:how\s+many|count|number\s+of)\s+consultants?\b|^כמה\s+יועצים(?:\s+יש)?[?.!]*$/iu.test(text)) {
+    return { supported: false, status: "not_computable", recognized: true, domain: "unsupported_question", intent: null, lookup: null, metricScope: null, reason: "The question asks about consultant people, not consultant-report rows; no approved personnel count exists.", warning: "consultant_people_count_not_computable", suggestedAgent: null };
+  }
+
+  const consultantReportQuestion = quantitativeTarget === "consultants_reports" || DATA_QUERY_CONSULTANT_REPORT_PATTERN.test(text) || analyzeHebrewConsultantReportIntent(text).intent === "consultant_report";
+  if (consultantReportQuestion && DATA_QUERY_CONSULTANT_INGESTION_TIME_PATTERN.test(text)) {
+    const ingestionMetricScope = metricScope?.targetTable === "consultants_reports" ? metricScope : dataQueryConsultantMetricScope(text);
+    return { supported: false, status: "not_computable", domain: lookupCandidate ? "content_structured_lookup" : "content_metadata_metrics", intent: lookupCandidate ? "lookup" : "metrics", lookup: lookupCandidate, metricScope: lookupCandidate ? null : ingestionMetricScope, reason: "Consultant-report created_at and ingestion time are excluded; report_date is the only canonical business date.", warning: "consultant_ingestion_time_not_computable", suggestedAgent: null };
+  }
+  if (quantitativeTarget === "consultants_reports" && DATA_QUERY_CONSULTANT_SCOPE_FIELD_PATTERN.test(text)) {
+    return { supported: false, status: "not_computable", domain: "content_metadata_metrics", intent: lookupCandidate ? "lookup" : "metrics", lookup: null, metricScope, reason: "Project, report, attachment, mail, and filename identifiers are internal and unavailable as exact filters or display values.", warning: "consultant_identity_field_not_queryable", suggestedAgent: null };
+  }
+  if (quantitativeTarget === "consultants_reports" && DATA_QUERY_CONSULTANT_IDENTITY_PATTERN.test(text)) {
+    return { supported: false, status: "not_computable", domain: "content_metadata_metrics", intent: "metrics", lookup: null, metricScope, reason: "Consultant identity is excluded from exact grouping and filtering.", warning: "consultant_identity_grouping_not_computable", suggestedAgent: null };
+  }
+  if (quantitativeTarget === "consultants_reports" && DATA_QUERY_CONSULTANT_CATEGORY_PATTERN.test(text)) {
+    return { supported: false, status: "not_computable", domain: "content_metadata_metrics", intent: "metrics", lookup: null, metricScope, reason: "Specialization and report topic are free text and require semantic interpretation.", warning: "consultant_category_not_computable", suggestedAgent: "consultants_reports" };
+  }
+  if (quantitativeTarget === "consultants_reports" && DATA_QUERY_CONSULTANT_IMPLEMENTATION_PATTERN.test(text)) {
+    return { supported: false, status: "not_computable", domain: "content_metadata_metrics", intent: "metrics", lookup: null, metricScope, reason: "Implementation status is blank in the audited source and the stored item status does not prove approval, completion, or implementation.", warning: "consultant_implementation_status_not_computable", suggestedAgent: "consultants_reports" };
+  }
+  if (quantitativeTarget === "consultants_reports" && lookupCandidate?.unsupportedReason === "unapproved_consultant_lookup_qualifier" && !mixedConsultantQuestion) {
+    return { supported: false, status: "not_computable", domain: "content_structured_lookup", intent: "lookup", lookup: null, metricScope, reason: "The consultant-report lookup contains a qualifier outside the approved metadata contract.", warning: "consultant_unapproved_lookup_not_computable", suggestedAgent: "consultants_reports" };
+  }
 
   if (
     financialTypeAnalysis.ambiguous &&
@@ -2791,7 +2882,7 @@ export function classifyDataQueryCapability(question, {
       suggestedAgent: null
     };
   }
-  if (semantic && !mixedSafetyQuestion && !mixedAlertQuestion && !mixedMeetingQuestion && !mixedEmailQuestion && !mixedExceptionQuestion) {
+  if (semantic && !mixedSafetyQuestion && !mixedAlertQuestion && !mixedMeetingQuestion && !mixedEmailQuestion && !mixedExceptionQuestion && !mixedConsultantQuestion) {
     const suggestedAgent = /עיכוב|תביעה|אחריות|delay|claim|responsib|root cause|גורם שורש/i.test(text)
       ? "delay_claim"
       : /פגישה|ישיבה|meeting|minutes|quote|ציטוט/i.test(text)
@@ -2804,6 +2895,8 @@ export function classifyDataQueryCapability(question, {
             ? "emails"
           : quantitativeTarget === "exceptions_report" || DATA_QUERY_EXCEPTION_SEMANTIC_DETAIL_PATTERN.test(text)
             ? "hybrid_search"
+          : quantitativeTarget === "consultants_reports" || DATA_QUERY_CONSULTANT_SEMANTIC_DETAIL_PATTERN.test(text)
+            ? "consultants_reports"
           : "hybrid_search";
     return {
       supported: false,
@@ -2890,6 +2983,9 @@ export function classifyDataQueryCapability(question, {
       suggestedAgent: null
     };
   }
+  if (quantitativeTarget === "consultants_reports" && quantitative && ["count", "group_count", "timeseries"].includes(metricScope?.operation) && !mixedConsultantQuestion && !dataQueryConsultantMetricGrammar(text, metricScope)) {
+    return { supported: false, status: "not_computable", domain: "content_metadata_metrics", intent: "metrics", lookup: null, metricScope, reason: "The request does not match the approved positive grammar for consultant-report metadata.", warning: "consultant_unapproved_metric_not_computable", suggestedAgent: null };
+  }
   if (
     dataQueryLookupTargetTable(text) === "financial_transactions" &&
     /\b(?:amount|sum|average|avg|money|value)\b|סכום|ממוצע/iu.test(text)
@@ -2927,14 +3023,14 @@ export function classifyDataQueryCapability(question, {
     if (!lookup.targetTable) {
       return {
         supported: false,
-        ...(["alerts", "meetings", "emails", "exceptions_report"].includes(lookup.targetTable) ? { status: "not_computable" } : {}),
+        ...(["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(lookup.targetTable) ? { status: "not_computable" } : {}),
         recognized: true,
         domain: "content_structured_lookup",
         intent: "lookup",
         lookup,
         reason: "The lookup target is ambiguous and does not map to one approved table contract.",
         warning: "ambiguous_lookup_target",
-        suggestedAgent: ["alerts", "meetings", "emails", "exceptions_report"].includes(lookup.targetTable) ? null : suggestedAgent
+        suggestedAgent: ["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(lookup.targetTable) ? null : suggestedAgent
       };
     }
     const effectiveMaxRows = dataQueryLookupMaxRows(settings, lookup, lookupMaxRows);
@@ -2946,14 +3042,14 @@ export function classifyDataQueryCapability(question, {
     ) {
       return {
         supported: false,
-        ...(["alerts", "meetings", "emails", "exceptions_report"].includes(lookup.targetTable) ? { status: "not_computable" } : {}),
+        ...(["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(lookup.targetTable) ? { status: "not_computable" } : {}),
         recognized: true,
         domain: "content_structured_lookup",
         intent: "lookup",
         lookup,
         reason: `The requested lookup cardinality is unsupported; use a latest/earliest record or 1-${effectiveMaxRows} latest records.`,
         warning: "invalid_lookup_limit",
-        suggestedAgent: ["alerts", "meetings", "emails", "exceptions_report"].includes(lookup.targetTable) ? null : suggestedAgent
+        suggestedAgent: ["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(lookup.targetTable) ? null : suggestedAgent
       };
     }
     const available = settings
@@ -2974,10 +3070,10 @@ export function classifyDataQueryCapability(question, {
     return {
       supported: true,
       recognized: true,
-      domain: (mixedAlertQuestion || mixedMeetingQuestion || mixedEmailQuestion || mixedExceptionQuestion) ? "content_mixed_exact_semantic" : "content_structured_lookup",
+      domain: (mixedAlertQuestion || mixedMeetingQuestion || mixedEmailQuestion || mixedExceptionQuestion || mixedConsultantQuestion) ? "content_mixed_exact_semantic" : "content_structured_lookup",
       intent: "lookup",
       lookup,
-      mixed: mixedAlertQuestion || mixedMeetingQuestion || mixedEmailQuestion || mixedExceptionQuestion,
+      mixed: mixedAlertQuestion || mixedMeetingQuestion || mixedEmailQuestion || mixedExceptionQuestion || mixedConsultantQuestion,
       reason: mixedAlertQuestion
         ? "The request combines an approved exact alert lookup with semantic alert evidence."
         : mixedMeetingQuestion
@@ -3078,6 +3174,9 @@ export function parseDataQueryMetricScope(question) {
   }
   if (targetTable === "exceptions_report") {
     return dataQueryExceptionMetricScope(text);
+  }
+  if (targetTable === "consultants_reports") {
+    return dataQueryConsultantMetricScope(text);
   }
   const recordKind = targetTable === "financial_transactions"
     ? dataQueryFinancialRecordKind(text, financialType)
@@ -3416,6 +3515,54 @@ function dataQueryExceptionCountApprovalMixed(text) {
   return hasEntity && hasSubmittedMeaning && hasApprovalMeaning && hasCountMeaning;
 }
 
+function dataQueryConsultantMetricScope(text) {
+  const normalized = normalizeHebrewConsultantReportMetricQuestion(text);
+  const value = normalized.grammarText;
+  const groupField = /\b(?:group|break\s*down|distribution).{0,40}\bconsultant\s+reports?\b.{0,25}\bby\s+(?:stored\s+)?(?:item\s+)?status\b|פילוח\s+דוחות\s+(?:ה)?יועצים\s+לפי\s+סטטוס/iu.test(value)
+    ? "item_status" : null;
+  const wantsTimeSeries = /\b(?:trend|time\s*series|over\s+time|by\s+date|per\s+(?:day|month)|daily|monthly)\b|מגמה|לאורך\s+זמן|לפי\s+(?:תאריך|יום|חודש)/iu.test(value);
+  const undated = /\bundated\s+consultant\s+reports?\b|\bconsultant\s+reports?\b.{0,25}\b(?:without|missing|no)\s+(?:a\s+)?date\b|דוחות\s+(?:ה)?יועצים.{0,25}(?:ללא|חסר)\s+תאריך/iu.test(value);
+  const storedStatus = /\bconsultant\s+reports?\b.{0,25}\bbeing[-\s]?handled\b|דוחות\s+(?:ה)?יועצים.{0,25}בטיפול/iu.test(value)
+    ? DATA_QUERY_CONSULTANT_REPORT_ITEM_STATUS_VALUES[0] : null;
+  return {
+    targetTable: "consultants_reports",
+    recordKind: "consultant_report",
+    operation: wantsTimeSeries ? "timeseries" : groupField ? "group_count" : "count",
+    groupField,
+    granularity: wantsTimeSeries && /\bmonth(?:ly)?\b|חודש/iu.test(value) ? "month" : "day",
+    requiredFilters: [
+      ...(storedStatus ? [{ field: "item_status", op: "eq", value: storedStatus }] : []),
+      ...(undated ? [{ field: "report_date", op: "is", value: null }] : [])
+    ],
+    dateScopeRequirement: dataQueryAlertDateScopeRequirement(value),
+    forbiddenFilterFields: [
+      "created_at", "project_id", "consultant_name", "specialization", "report_topic",
+      "main_recommendations", "proposed_actions", "implementation_status", "mail_id",
+      "attachment_id", "document_name", "hashtags", "summary", "content", "metadata", "embedding"
+    ],
+    notComputableReason: normalized.intent === "exclude" || normalized.ambiguous
+      ? "consultant_ambiguous_or_negative_scope_not_computable"
+      : wantsTimeSeries && groupField ? "consultant_multidimensional_timeseries_not_computable" : null
+  };
+}
+
+function dataQueryConsultantMetricGrammar(text, scope = null) {
+  const normalized = normalizeHebrewConsultantReportMetricQuestion(text);
+  const value = normalized.grammarText.replace(/[?.!,;]+$/u, "").trim();
+  if (normalized.intent === "exclude" || normalized.ambiguous || !DATA_QUERY_CONSULTANT_REPORT_PATTERN.test(value)) return false;
+  if (scope?.operation === "group_count") {
+    return /^(?:group|break\s*down|show\s+(?:the\s+)?(?:breakdown|distribution))\s+(?:the\s+)?consultant\s+reports?\s+by\s+(?:stored\s+)?(?:item\s+)?status$|^פילוח\s+דוחות\s+(?:ה)?יועצים\s+לפי\s+סטטוס$/iu.test(value);
+  }
+  if (scope?.operation === "timeseries") {
+    return /^(?:show\s+)?(?:the\s+)?(?:daily|monthly)?\s*consultant\s+reports?\s+(?:trend|time\s*series|over\s+time|by\s+date)$|^(?:הצג\s+)?(?:מגמה|סדרת\s+זמן)\s+של\s+דוחות\s+(?:ה)?יועצים(?:\s+לפי\s+(?:יום|חודש|תאריך))?$/iu.test(value);
+  }
+  return /^(?:how\s+many|count|number\s+of|total\s+number\s+of)\s+(?:the\s+)?consultant\s+reports?(?:\s+(?:are\s+there|exist))?(?:\s+(?:are\s+)?(?:without|missing)\s+(?:a\s+)?date)?(?:\s+(?:in|during|on|since|after|before|between|from).+)?$|^כמה\s+דוחות\s+(?:ה)?יועצים(?:\s+(?:יש|קיימים|בטיפול|ללא\s+תאריך))?(?:\s+(?:במהלך|מאז|אחרי|לפני|בין)\s+.+)?$/iu.test(value);
+}
+
+function dataQueryConsultantMixedExactSemantic(text, lookupCandidate) {
+  return Boolean(lookupCandidate) && DATA_QUERY_CONSULTANT_MIXED_LATEST_PATTERN.test(String(text || ""));
+}
+
 function dataQueryAlertMetricScope(text) {
   const groupField = dataQueryAlertGroupField(text);
   const wantsTimeSeries = /\btime\s*series\b|\btrend\b|\bover\s+time\b|\bby\s+date\b|\b(?:by|per)\s+(?:day|month)\b|\b(?:daily|monthly)\s+(?:alerts?|breakdown|counts?|distribution)\b|\balerts?\s+(?:daily|monthly)\b|מגמה|לאורך\s+זמן|לפי\s+תאריך|לפי\s+יום|לפי\s+חודש/iu.test(text);
@@ -3639,6 +3786,9 @@ function dataQueryFinancialLookupDirection(text) {
 }
 
 function dataQueryLookupTargetTable(text, financialType = null) {
+  if (DATA_QUERY_CONSULTANT_REPORT_PATTERN.test(text) && !DATA_QUERY_SAFETY_REPORT_PATTERN.test(text) && !DATA_QUERY_EXCEPTION_REPORT_PATTERN.test(text)) {
+    return "consultants_reports";
+  }
   const targets = new Set();
   const financialDocumentTarget = DATA_QUERY_FINANCIAL_DOCUMENT_PATTERN.test(text);
   const alertTarget = /\balerts?\b|התרא(?:ה|ות)/iu.test(text);
@@ -3652,6 +3802,7 @@ function dataQueryLookupTargetTable(text, financialType = null) {
   if (!alertInputQualifier && /\bmeetings?\b|ישיב(?:ה|ות)|פגיש(?:ה|ות)/iu.test(text)) targets.add("meetings");
   if (!alertInputQualifier && /\bemails?\b|מייל(?:ים)?/iu.test(text)) targets.add("emails");
   if (!financialType && !alertInputQualifier && DATA_QUERY_EXCEPTION_REPORT_PATTERN.test(text)) targets.add("exceptions_report");
+  if (!alertInputQualifier && (DATA_QUERY_CONSULTANT_REPORT_PATTERN.test(text) || analyzeHebrewConsultantReportIntent(text).intent === "consultant_report")) targets.add("consultants_reports");
   if (/\bconversations?\b|שיח(?:ה|ות)/iu.test(text)) targets.add("whatsapp_analysis");
   if (!alertTarget && !financialDocumentTarget && /\b(?:records?|documents?)\b|רשומ(?:ה|ות)|מסמ(?:ך|כים)/iu.test(text)) targets.add("data_index");
   return targets.size === 1 ? [...targets][0] : null;
@@ -3671,6 +3822,7 @@ function dataQueryLookupSuggestedAgent(targetTable) {
     meetings: "meetings",
     emails: "emails",
     exceptions_report: "hybrid_search",
+    consultants_reports: "consultants_reports",
     whatsapp_analysis: "whatsapp_messages",
     safety_reports: "safety_report",
     alerts: "alert",
@@ -3920,6 +4072,13 @@ function validatePlanFields(plan, table) {
       errors.push("exceptions_report supports numeric metrics only for the fixed requested-amount coverage aggregate");
     }
   }
+  if (table.tableName === "consultants_reports" && !DATA_QUERY_LOOKUP_OPERATIONS.has(plan.operation)) {
+    if (plan.operation === "group_count" && (plan.groupBy.length !== 1 || plan.groupBy[0] !== "item_status")) errors.push("consultants_reports group_count requires the approved stored item-status field");
+    if (plan.operation !== "group_count" && plan.groupBy.length) errors.push(`consultants_reports operation ${plan.operation} does not accept group fields`);
+    if (plan.select.length) errors.push(`consultants_reports operation ${plan.operation} does not accept selected output fields`);
+    if (plan.orderBy.length) errors.push(`consultants_reports operation ${plan.operation} does not accept caller-defined ordering`);
+    if (plan.metrics.length) errors.push("consultants_reports does not support numeric aggregate metrics");
+  }
   for (const field of plan.groupBy || []) if (!groupable.has(field)) errors.push(`group field ${field} is not allowed`);
   for (const filter of plan.filters || []) {
     if (!allowed.has(filter.field)) errors.push(`filter field ${filter.field} is not allowed`);
@@ -3929,7 +4088,7 @@ function validatePlanFields(plan, table) {
       const valueError = validateDataQueryFilterValue(fieldMap.get(filter.field), filter.op, filter.value);
       if (valueError) errors.push(`filter ${filter.field}: ${valueError}`);
       if (
-        ["alerts", "meetings", "emails", "exceptions_report"].includes(table.tableName) &&
+        ["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(table.tableName) &&
         fieldMap.get(filter.field)?.runtimeScopeOnly === true &&
         filter[DATA_QUERY_CALLER_SCOPE_FILTER] !== true
       ) {
@@ -4076,7 +4235,7 @@ async function fetchManagedPostgrestRead({ config, connection, table, plan, time
       }, effectivePlan);
     }
     if (DATA_QUERY_LOOKUP_OPERATIONS.has(effectivePlan.operation)) {
-      const executionSelect = ["meetings", "exceptions_report"].includes(approvedTableName)
+      const executionSelect = ["meetings", "exceptions_report", "consultants_reports"].includes(approvedTableName)
         ? [...new Set([...(effectivePlan.select || []), "project_id", "attachment_id"])]
         : effectivePlan.select;
       const response = await fetchManagedPostgrestPage({
@@ -4100,6 +4259,8 @@ async function fetchManagedPostgrestRead({ config, connection, table, plan, time
         attestEmailLookupRows(effectivePlan, normalizedRows, response.total);
       } else if (approvedTableName === "exceptions_report") {
         attestExceptionLookupRows(effectivePlan, normalizedRows, response.total);
+      } else if (approvedTableName === "consultants_reports") {
+        attestConsultantReportLookupRows(effectivePlan, normalizedRows, response.total);
       }
       const truncated = effectivePlan.allRequested === true && response.total > normalizedRows.length;
       return normalizeExactExecution({
@@ -4128,6 +4289,8 @@ async function fetchManagedPostgrestRead({ config, connection, table, plan, time
             ? ["received_date", "mail_category", "direction", "has_attachments", "relevance_status", "item_status"]
           : approvedTableName === "exceptions_report"
             ? ["exception_date", "urgency_level", "item_status", "project_id", "attachment_id"]
+          : approvedTableName === "consultants_reports"
+            ? ["report_date", "item_status", "project_id", "attachment_id"]
           : [])
     ])];
     const pageSize = 1000;
@@ -4166,7 +4329,7 @@ async function fetchManagedPostgrestRead({ config, connection, table, plan, time
     if (rows.length !== total) {
       throw new Error("not computable: managed read did not reconcile with its exact total");
     }
-    if (["alerts", "meetings", "emails", "exceptions_report"].includes(approvedTableName)) {
+    if (["alerts", "meetings", "emails", "exceptions_report", "consultants_reports"].includes(approvedTableName)) {
       const stableIds = rows.map((row) => row?.id);
       if (stableIds.some((id) => id === null || id === undefined || id === "") || new Set(stableIds.map(String)).size !== stableIds.length) {
         throw new Error("not computable: managed read stable identities are missing or duplicated");
@@ -4254,6 +4417,17 @@ function attestExceptionLookupRows(plan, rows, total) {
   }
 }
 
+function attestConsultantReportLookupRows(plan, rows, total) {
+  const expectedRows = Math.min(Number(total), Number(plan.limit));
+  if (rows.length !== expectedRows) throw new Error("not computable: consultant-report lookup did not return the expected bounded cardinality");
+  const ids = rows.map((row) => row?.id);
+  if (new Set(ids.map(String)).size !== ids.length) throw new Error("not computable: consultant-report stable identities are duplicated");
+  if (rows.some((row) => row?.report_date === null || row?.report_date === undefined || row?.report_date === "")) throw new Error("not computable: consultant-report lookup returned an undated row");
+  for (let index = 1; index < rows.length; index += 1) {
+    if (compareDataQueryLookupRows(rows[index - 1], rows[index], plan.orderBy) > 0) throw new Error("not computable: consultant-report lookup rows violate the approved stable ordering");
+  }
+}
+
 async function fetchManagedPostgrestPage({
   connection,
   tableName,
@@ -4281,6 +4455,7 @@ async function fetchManagedPostgrestPage({
     if (tableName === "meetings") params.append("meeting_date", "not.is.null");
     if (tableName === "emails") params.append("received_date", "not.is.null");
     if (tableName === "exceptions_report") params.append("exception_date", "not.is.null");
+    if (tableName === "consultants_reports") params.append("report_date", "not.is.null");
   }
   if (plan.orderBy?.length) {
     params.set("order", plan.orderBy.map((order) =>
@@ -4364,6 +4539,10 @@ function normalizeManagedReadPlan(tableName, plan) {
   }
   if (tableName === "exceptions_report") {
     assertExceptionManagedReadPlan(plan);
+    return { ...plan, filters: (plan.filters || []).map((filter) => ({ ...filter })) };
+  }
+  if (tableName === "consultants_reports") {
+    assertConsultantReportManagedReadPlan(plan);
     return { ...plan, filters: (plan.filters || []).map((filter) => ({ ...filter })) };
   }
   if (tableName === "alerts") {
@@ -4479,6 +4658,23 @@ function assertExceptionManagedReadPlan(plan) {
     if (!approvedMetadataFields.has(filter.field) || internalExecutionFields.has(filter.field)) {
       throw new Error("Exception managed read requested an unapproved filter field");
     }
+  }
+}
+
+function assertConsultantReportManagedReadPlan(plan) {
+  const approvedMetadataFields = new Set(["id", "report_date", "item_status"]);
+  const projectionFields = [
+    ...(plan.select || []), ...(plan.groupBy || []),
+    ...(plan.orderBy || []).map((order) => order.field).filter(Boolean), plan.dateField
+  ].filter(Boolean);
+  if (projectionFields.some((field) => !approvedMetadataFields.has(field))) throw new Error("Consultant-report managed read requested a field outside the approved metadata projection");
+  if ((plan.metrics || []).some((metric) => metric.field)) throw new Error("Consultant-report managed read does not support numeric aggregate fields");
+  for (const filter of plan.filters || []) {
+    if (filter.field === "project_id") {
+      if (filter[DATA_QUERY_CALLER_SCOPE_FILTER] !== true) throw new Error("Consultant-report project scope must come from validated caller scope");
+      continue;
+    }
+    if (!approvedMetadataFields.has(filter.field)) throw new Error("Consultant-report managed read requested an unapproved filter field");
   }
 }
 
@@ -4598,6 +4794,22 @@ function normalizeManagedReadRows(tableName, rows) {
       };
     });
   }
+  if (tableName === "consultants_reports") {
+    return (Array.isArray(rows) ? rows : []).map((row) => {
+      const validId = Object.prototype.hasOwnProperty.call(row || {}, "id") && /^\d+$/.test(String(row.id)) && Number(row.id) > 0;
+      const normalizedProjectId = typeof row?.project_id === "string" ? row.project_id.trim().toLowerCase() : "";
+      const projectPresent = Object.prototype.hasOwnProperty.call(row || {}, "project_id");
+      const validProjectId = !projectPresent || DATA_QUERY_PROJECT_UUID_PATTERN.test(normalizedProjectId);
+      const normalizedAttachmentId = typeof row?.attachment_id === "string" ? row.attachment_id.trim() : "";
+      const attachmentPresent = Object.prototype.hasOwnProperty.call(row || {}, "attachment_id");
+      const validAttachmentId = !attachmentPresent || (normalizedAttachmentId.length > 0 && normalizedAttachmentId.length <= DATA_QUERY_MAX_ATTACHMENT_ID_LENGTH && !DATA_QUERY_UNSAFE_IDENTITY_CHARACTERS.test(normalizedAttachmentId));
+      const hasDate = Object.prototype.hasOwnProperty.call(row || {}, "report_date");
+      const validDate = hasDate && (row.report_date === null || row.report_date === "" || !Number.isNaN(Date.parse(String(row.report_date))));
+      const validStatus = Object.prototype.hasOwnProperty.call(row || {}, "item_status") && DATA_QUERY_CONSULTANT_REPORT_ITEM_STATUS_VALUES.includes(row.item_status);
+      if (!validId || !validProjectId || !validAttachmentId || !validDate || !validStatus) throw new Error("Consultant-report row is outside the approved typed vocabulary");
+      return { ...row, ...(projectPresent ? { project_id: normalizedProjectId } : {}), ...(attachmentPresent ? { attachment_id: normalizedAttachmentId } : {}) };
+    });
+  }
   if (tableName !== "safety_reports") return rows;
   return (Array.isArray(rows) ? rows : []).map((row) => {
     if (!Object.prototype.hasOwnProperty.call(row || {}, "risk_level")) return row;
@@ -4655,6 +4867,8 @@ function derivePlanRows(plan, rows = []) {
         ? "received_date"
       : plan.table === "exceptions_report"
         ? "exception_date"
+      : plan.table === "consultants_reports"
+        ? "report_date"
       : null;
   const data = lookupDateField && DATA_QUERY_LOOKUP_OPERATIONS.has(plan.operation)
     ? sourceRows.filter((row) => row?.[lookupDateField] !== null && row?.[lookupDateField] !== undefined && row?.[lookupDateField] !== "")
@@ -4662,7 +4876,7 @@ function derivePlanRows(plan, rows = []) {
   if (DATA_QUERY_LOOKUP_OPERATIONS.has(plan.operation)) {
     const executionSelect = [
       ...(plan.select || []),
-      ...(["meetings", "exceptions_report"].includes(plan.table) ? ["project_id", "attachment_id"] : [])
+      ...(["meetings", "exceptions_report", "consultants_reports"].includes(plan.table) ? ["project_id", "attachment_id"] : [])
     ];
     return [...data]
       .sort((left, right) => compareDataQueryLookupRows(left, right, plan.orderBy))
@@ -4696,7 +4910,7 @@ function derivePlanRows(plan, rows = []) {
         ? "undated"
         : dataQueryUtcCalendarPeriod(row[dateField], plan.granularity)
     })), ["period"], (items) => ({ count: items.length }));
-    if (["alerts", "exceptions_report"].includes(plan.table)) {
+    if (["alerts", "exceptions_report", "consultants_reports"].includes(plan.table)) {
       if (!grouped.some((row) => row.period === "undated")) grouped.push({ period: "undated", count: 0 });
       grouped.sort((left, right) => {
         if (left.period === "undated") return 1;
@@ -4953,7 +5167,7 @@ export function buildDataQueryMachineResult({ requestedMetrics = [], planResults
       .flatMap((plan) => {
         const selected = new Set([
           ...(plan.provenance?.select || []),
-          ...(["meetings", "exceptions_report"].includes(plan.table) ? ["project_id", "attachment_id"] : [])
+          ...(["meetings", "exceptions_report", "consultants_reports"].includes(plan.table) ? ["project_id", "attachment_id"] : [])
         ]);
         return (plan.rows || []).map((row, index) => ({
           id: `${requestId}__${plan.id}__record_${index + 1}`,

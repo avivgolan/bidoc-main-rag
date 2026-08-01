@@ -115,6 +115,11 @@ export const DATA_QUERY_HEBREW_LEXICON = Object.freeze({
     entities: EXCEPTION_ENTITY_ALIASES,
     intents: EXCEPTION_INTENT_ALIASES,
     negative: Object.freeze(["לא כולל", "בלי", "ללא", "חוץ מ", "מלבד", "שאינם", "שאינן"])
+  }),
+  consultantReport: Object.freeze({
+    entities: Object.freeze(["דוח יועץ", "דוח היועץ", "דוחות יועצים", "דוחות היועצים", "דו״ח יועץ", "חוות דעת יועץ", "חוות דעת של היועץ"]),
+    negative: Object.freeze(["לא כולל דוחות יועצים", "בלי דוחות יועצים", "ללא דוחות יועצים"]),
+    ambiguousPeople: Object.freeze(["כמה יועצים", "מספר היועצים"])
   })
 });
 
@@ -224,5 +229,26 @@ export function normalizeHebrewExceptionMetricQuestion(text) {
     .replace(/(?:מועד\s+חריגה|תאריך\s+הדוח|מועד\s+הדוח)/gu, "תאריך חריגה")
     .replace(/\s+/gu, " ")
     .trim();
+  return { ...analysis, grammarText };
+}
+
+const CONSULTANT_REPORT_ENTITY = /(?:דוח(?:ות)?|דו[״"']?ח(?:ות)?)\s+(?:ה)?יוע(?:ץ|צים)|חוות\s+דעת\s+(?:של\s+)?(?:ה)?יוע(?:ץ|צים)/iu;
+const CONSULTANT_REPORT_NEGATIVE = /(?:לא\s+כולל|בלי|ללא|חוץ\s+מ|מלבד)\s+(?:דוח(?:ות)?|דו[״"']?ח(?:ות)?)\s+(?:ה)?יוע(?:ץ|צים)/iu;
+const CONSULTANT_PEOPLE_COUNT = /^(?:כמה|מספר)\s+(?:ה)?יועצים?(?:\s+יש)?[?.!]*$/iu;
+
+export function analyzeHebrewConsultantReportIntent(text) {
+  const normalizedText = normalizeDataQueryHebrewQuestion(text);
+  if (CONSULTANT_REPORT_NEGATIVE.test(normalizedText)) return { intent: "exclude", normalizedText, grammarText: normalizedText, ambiguous: false };
+  const ambiguous = CONSULTANT_PEOPLE_COUNT.test(normalizedText);
+  return { intent: !ambiguous && CONSULTANT_REPORT_ENTITY.test(normalizedText) ? "consultant_report" : null, normalizedText, grammarText: normalizedText, ambiguous };
+}
+
+export function normalizeHebrewConsultantReportMetricQuestion(text) {
+  const analysis = analyzeHebrewConsultantReportIntent(text);
+  const grammarText = analysis.grammarText
+    .replace(/^מה\s+(?:ה)?(?:כמות|מספר|סך)\s+(?:ה)?דוחות\s+(?:ה)?יועצים/iu, "כמה דוחות יועצים")
+    .replace(/^כמה\s+(?:יש|קיימים)\s+דוחות\s+(?:ה)?יועצים/iu, "כמה דוחות יועצים")
+    .replace(/^(?:פלח|חלק|פילוח|חלוקה|התפלגות)\s+(?:את\s+|של\s+)?(?:ה)?דוחות\s+(?:ה)?יועצים/iu, "פילוח דוחות יועצים")
+    .replace(/\s+/gu, " ").trim();
   return { ...analysis, grammarText };
 }

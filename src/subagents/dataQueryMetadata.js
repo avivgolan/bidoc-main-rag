@@ -47,6 +47,7 @@ export const DATA_QUERY_EXCEPTION_URGENCY_VALUES = ["לא צוין"];
 export const DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES = ["בטיפול"];
 export const DATA_QUERY_EXCEPTION_CURRENCY = "ILS";
 export const DATA_QUERY_EXCEPTION_VAT_RATE = 0.18;
+export const DATA_QUERY_CONSULTANT_REPORT_ITEM_STATUS_VALUES = ["בטיפול"];
 
 const DATA_QUERY_ALERT_TYPE_ALIASES = {
   עדכון: ["עדכון", "update", "updates"],
@@ -558,6 +559,43 @@ const EXCEPTION_REPORT_FIELDS = [
   field("embedding", "vector", { queryable: false, sensitivity: "derived_content" })
 ];
 
+const CONSULTANT_REPORT_FIELDS = [
+  field("id", "bigint", { selectable: true, orderable: true, filterOps: [], sensitivity: "internal_identifier" }),
+  field("project_id", "uuid", { filterOps: ["eq"], runtimeScopeOnly: true, sensitivity: "internal_identifier" }),
+  field("report_date", "timestamptz", {
+    selectable: true,
+    orderable: true,
+    groupable: true,
+    filterOps: ["eq", "gt", "gte", "lt", "lte", "is"],
+    dateSemantics: "canonical_consultant_report_time"
+  }),
+  field("item_status", "text", {
+    selectable: true,
+    groupable: true,
+    filterOps: ["eq", "in"],
+    allowedValues: DATA_QUERY_CONSULTANT_REPORT_ITEM_STATUS_VALUES
+  }),
+  field("created_at", "timestamptz", { queryable: false, dateSemantics: "ingestion_time" }),
+  field("consultant_name", "text", { queryable: false, sensitivity: "business_counterparty" }),
+  field("specialization", "text", { queryable: false, sensitivity: "content" }),
+  field("report_topic", "text", { queryable: false, sensitivity: "content" }),
+  field("main_recommendations", "text", { queryable: false, sensitivity: "content" }),
+  field("proposed_actions", "text", { queryable: false, sensitivity: "content" }),
+  field("implementation_status", "text", {
+    queryable: false,
+    notComputableReason: "implementation_status is blank in the audited source row"
+  }),
+  field("mail_id", "text", { queryable: false, sensitivity: "source_identifier" }),
+  field("attachment_id", "text", { queryable: false, sensitivity: "source_identifier" }),
+  field("processed_for_insights", "boolean", { queryable: false }),
+  field("document_name", "text", { queryable: false, sensitivity: "source_identifier" }),
+  field("hashtags", "text[]", { queryable: false, sensitivity: "content" }),
+  field("summary", "text", { queryable: false, sensitivity: "content" }),
+  field("content", "text", { queryable: false, sensitivity: "content" }),
+  field("metadata", "jsonb", { queryable: false, sensitivity: "content" }),
+  field("embedding", "vector", { queryable: false, sensitivity: "derived_content" })
+];
+
 const TABLE_POLICIES = {
   data_index: {
     exactRpc: DATA_QUERY_EXACT_RPC,
@@ -784,6 +822,38 @@ const TABLE_POLICIES = {
       category: "the source has no approved stored category field"
     },
     fields: EXCEPTION_REPORT_FIELDS
+  },
+  consultants_reports: {
+    exactRpc: null,
+    managedReadTransport: DATA_QUERY_MANAGED_READ_TRANSPORT,
+    executionContract: {
+      status: "dormant",
+      requiredTransport: DATA_QUERY_MANAGED_READ_TRANSPORT,
+      deploymentRequired: false,
+      readOnly: true,
+      methods: ["GET", "HEAD"],
+      table: "consultants_reports"
+    },
+    declaredExactOperations: ["count", "group_count", "timeseries"],
+    allowedOperations: ["count", "group_count", "timeseries", ...DATA_QUERY_LOOKUP_OPERATIONS],
+    defaultDateField: "report_date",
+    maxLimit: 200,
+    lookupPolicy: {
+      enabled: true,
+      operations: [...DATA_QUERY_LOOKUP_OPERATIONS],
+      defaultOrderField: "report_date",
+      orderableFields: ["report_date"],
+      stableIdField: "id",
+      maxRows: 25,
+      cacheable: false
+    },
+    valueNormalization: { itemStatusValues: DATA_QUERY_CONSULTANT_REPORT_ITEM_STATUS_VALUES },
+    notComputableCapabilities: {
+      implementationStatus: "implementation_status is blank in the audited source row",
+      identityGrouping: "consultant identity is excluded from exact grouping and filtering",
+      semanticContent: "topic, specialization, recommendations, actions, summary, and content require retrieval"
+    },
+    fields: CONSULTANT_REPORT_FIELDS
   }
 };
 

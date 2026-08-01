@@ -7,7 +7,7 @@ import { buildToolOrder, callN8nTool, isInternalProjectTool } from "../src/tools
 import { deleteKnowledgeDocument, listKnowledgeAgents, parseKnowledgeAgentMarkdown, readKnowledgeDocument, routeKnowledgeAgents, sanitizeKnowledgeFilename, saveKnowledgeDocument, searchKnowledgeBase } from "../src/knowledge.js";
 import { buildSourceQualitySummary, detectConflicts } from "../src/sourceQuality.js";
 import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../src/memory.js";
-import { appendConflictWarnings, appendEmailSemanticLatestBoundary, appendExactInvoiceEnrichment, buildAlertAgentRequest, buildDeterministicAlertAnswer, buildDeterministicDateScopedMeetingDecisionAnswer, buildDeterministicEmailAnswer, buildDeterministicExceptionAnswer, buildDeterministicFinancialDataQueryFailureAnswer, buildDeterministicFinancialDocumentAnswer, buildDeterministicInvoiceAnswer, buildDeterministicMeetingAnswer, buildDeterministicMeetingEvidenceUnavailableAnswer, buildDeterministicMeetingFallbackEvidenceAnswer, buildDeterministicSafetyAnswer, buildExactInvoiceDocumentSources, buildExactInvoiceEnrichment, buildExactInvoiceEnrichments, buildExactSafetyDocumentSources, buildExactSafetyEnrichments, buildExceptionApprovalFallbackAnswer, buildMainDataQueryWorkflowProjection, buildMainProjectTools, buildSafetyPrecheckTools, dataQueryClassifierDateScopeForQuestion, enforceAlertDataQueryTrustedOrigin, enforceProfessionalKnowledgeMode, exactAlertLookupRecords, exactEmailLookupRecords, exactExceptionLookupRecords, exactInvoiceAttachmentProjectId, exactInvoiceLookupProjectId, exactInvoiceLookupProjectScope, exactMeetingLookupRecords, fallbackRagAnswer, hasVerifiedMeetingEvidence, isDeterministicAlertCapability, isDeterministicAlertMixedCapability, isDeterministicAlertNotComputableCapability, isDeterministicEmailCapability, isDeterministicEmailMixedCapability, isDeterministicEmailNotComputableCapability, isDeterministicExceptionCapability, isDeterministicExceptionMixedCapability, isDeterministicExceptionNotComputableCapability, isDeterministicFinancialDocumentMetricCapability, isDeterministicFinancialTransactionTypeCapability, isDeterministicInvoiceCapability, isDeterministicMeetingCapability, isDeterministicMeetingMixedCapability, isDeterministicMeetingNotComputableCapability, isDeterministicSafetyCapability, isDeterministicSafetyNotComputableCapability, isExceptionCountApprovalMixedCapability, isMeetingSemanticFallbackCapability, isPureEmailSemanticCapability, isPureMeetingEvidenceCapability, KNOWLEDGE_PLANNER_RESPONSE_FORMAT, mainSynthesisRetryPolicy, normalizeDataQueryClassifierDate, prefixExactExceptionApprovalAnchor, projectChatToolCallsForClient, projectMeetingEvidenceConflicts, resolveExactInvoiceAttachmentLinks, resolveExactSafetyAttachmentLinks, sanitizeCustomerFacingAnswer, shouldBypassGenericRetrieval, shouldRunDataQuery, shouldRunMeetingEvidenceForRequest, summarizeMeetingEvidenceErrorForWorkflow } from "../src/agent.js";
+import { appendConflictWarnings, appendEmailSemanticLatestBoundary, appendExactInvoiceEnrichment, buildAlertAgentRequest, buildDeterministicAlertAnswer, buildDeterministicDateScopedMeetingDecisionAnswer, buildDeterministicEmailAnswer, buildDeterministicExceptionAnswer, buildDeterministicFinancialDataQueryFailureAnswer, buildDeterministicFinancialDocumentAnswer, buildDeterministicInvoiceAnswer, buildDeterministicMeetingAnswer, buildDeterministicMeetingEvidenceUnavailableAnswer, buildDeterministicMeetingFallbackEvidenceAnswer, buildDeterministicSafetyAnswer, buildExactInvoiceDocumentSources, buildExactInvoiceEnrichment, buildExactInvoiceEnrichments, buildExactSafetyDocumentSources, buildExactSafetyEnrichments, buildExceptionApprovalFallbackAnswer, buildMainDataQueryWorkflowProjection, buildMainProjectTools, buildSafetyPrecheckTools, dataQueryClassifierDateScopeForQuestion, enforceAlertDataQueryTrustedOrigin, enforceProfessionalKnowledgeMode, exactAlertLookupRecords, exactEmailLookupRecords, exactExceptionLookupRecords, exactInvoiceAttachmentProjectId, exactInvoiceLookupProjectId, exactInvoiceLookupProjectScope, exactMeetingLookupRecords, fallbackRagAnswer, hasVerifiedMeetingEvidence, isDeterministicAlertCapability, isDeterministicAlertMixedCapability, isDeterministicAlertNotComputableCapability, isDeterministicConsultantReportNotComputableCapability, isDeterministicEmailCapability, isDeterministicEmailMixedCapability, isDeterministicEmailNotComputableCapability, isDeterministicExceptionCapability, isDeterministicExceptionMixedCapability, isDeterministicExceptionNotComputableCapability, isDeterministicFinancialDocumentMetricCapability, isDeterministicFinancialTransactionTypeCapability, isDeterministicInvoiceCapability, isDeterministicMeetingCapability, isDeterministicMeetingMixedCapability, isDeterministicMeetingNotComputableCapability, isDeterministicSafetyCapability, isDeterministicSafetyNotComputableCapability, isExceptionCountApprovalMixedCapability, isMeetingSemanticFallbackCapability, isPureEmailSemanticCapability, isPureMeetingEvidenceCapability, KNOWLEDGE_PLANNER_RESPONSE_FORMAT, mainSynthesisRetryPolicy, normalizeDataQueryClassifierDate, prefixExactExceptionApprovalAnchor, projectChatToolCallsForClient, projectMeetingEvidenceConflicts, resolveExactInvoiceAttachmentLinks, resolveExactSafetyAttachmentLinks, sanitizeCustomerFacingAnswer, shouldBypassGenericRetrieval, shouldRunDataQuery, shouldRunMeetingEvidenceForRequest, summarizeMeetingEvidenceErrorForWorkflow } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { applyDataQueryCallerScope, buildHeuristicQueryPlan, buildDataQueryMachineResult, buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryMetrics, buildDataQueryWorkflowLog, classifyDataQueryCapability, clearDataQueryRunCache, DATA_QUERY_CONTRACT_VERSION, dataQueryPlanSignature, dataQuerySettings, dataQuerySupabaseHeaders, executeQueryPlans, fetchExactPlan, introspectSupabaseTables, normalizeDataQueryCaller, normalizeExactExecution, parseDataQueryLookupIntent, parseDataQueryMetricScope, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, summarizeDataQueryMetricsForWorkflow, validateQueryPlan } from "../src/subagents/dataQuery.js";
 import { clearDataQueryAccessTokenCache, getDataQueryAccessToken, validateDataQueryAccessToken } from "../src/subagents/dataQueryAuth.js";
@@ -16,6 +16,7 @@ import { analyzeHebrewEmailRelevance, analyzeHebrewExceptionIntent, DATA_QUERY_H
 import { analyzeDataQueryFinancialTransactionType, DATA_QUERY_FINANCIAL_ALL_ROWS_LIMIT, DATA_QUERY_FINANCIAL_TRANSACTION_TYPE_VALUES, DATA_QUERY_FINANCIAL_TYPE_LEXICON, dataQueryFinancialTransactionTypeFilter, dataQueryFinancialTypeForStoredValue, isDataQueryFinancialAllListIntent } from "../src/subagents/dataQueryFinancialLexicon.js";
 import { extractExplicitMeetingDate, isMeetingDecisionDetailRequest, runMeetingEvidenceAgent } from "../src/subagents/meeting.js";
 import { runExceptionEvidenceAgent } from "../src/subagents/exceptionEvidence.js";
+import { runConsultantReportEvidenceAgent, sanitizeConsultantReportEvidenceAnswer } from "../src/subagents/consultantReportEvidence.js";
 import { authorizeDataQueryRequest } from "../src/apiSecurity.js";
 import { buildDelayChronology, buildDelayClaimDashboard, buildDelayClaimPackageWorkflowLog, buildDelayClaimWorkflowLog, buildDelayEventAnalysisWorkflowLog, calculateDelayEventReadiness, collectDelayEvidence, detectDelayEventCandidates, detectDelayGapsAndContradictions, mergeDelayEventCandidates } from "../src/subagents/delayClaim.js";
 import { buildProjectInsightsWorkflowLog, detectProjectFindings, detectProjectSignals, parseInsightJson, projectInsightSourceKey, toProjectInsightEvidence } from "../src/subagents/projectInsights.js";
@@ -864,8 +865,8 @@ test("data query merges the approved financial built-in into legacy data_index-o
     const settings = dataQuerySettings(config);
     assert.equal(settings.usingSelection, true);
     assert.deepEqual(settings.tables.map((table) => table.table), ["data_index"]);
-    assert.deepEqual(settings.manifest.map((table) => table.tableName), ["data_index", "financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report"]);
-    assert.deepEqual(settings.allowedTables, ["data_index", "financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report"]);
+    assert.deepEqual(settings.manifest.map((table) => table.tableName), ["data_index", "financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report", "consultants_reports"]);
+    assert.deepEqual(settings.allowedTables, ["data_index", "financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report", "consultants_reports"]);
     assert.equal(shouldRunDataQuery({
       message: "What is the latest invoice?",
       classification: { type: "RAG", complexity: "SPECIFIC", urgency: "NORMAL", tool_hint: "financial_transactions" },
@@ -3379,8 +3380,8 @@ test("data query missing selection uses reviewed built-ins and keeps financial r
       dataQuery: { ...((originalSubagents || {}).dataQuery || {}), tables: [] }
     };
     const settings = dataQuerySettings(config);
-    assert.deepEqual(settings.manifest.map((table) => table.tableName), ["data_index", "financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report"]);
-    assert.deepEqual(settings.allowedTables, ["data_index", "financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report"]);
+    assert.deepEqual(settings.manifest.map((table) => table.tableName), ["data_index", "financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report", "consultants_reports"]);
+    assert.deepEqual(settings.allowedTables, ["data_index", "financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report", "consultants_reports"]);
     assert.equal(settings.usingSelection, false);
     assert.equal(settings.manifest[0].exactRpc, DATA_QUERY_EXACT_RPC);
     assert.deepEqual(settings.manifest[0].exactOperations.sort(), ["aggregate", "count", "distinct", "group_count", "timeseries", "top_n"]);
@@ -13473,6 +13474,148 @@ test("data query Phase 4F deterministic answers and client projections expose no
   assert.equal(amountRoute.metricScope.operation, "aggregate");
   assert.match(amountAnswer, /exact exception query did not complete/);
   assert.doesNotMatch(amountAnswer, /7654321|₪|NIS|USD|EUR/);
+});
+
+test("data query Phase 4H consultant reports bilingual exact, mixed, privacy, and evidence contract", async () => {
+  const config = {
+    contentSource: { supabaseUrl: "https://content.example", supabaseServiceRoleKey: "service-key" },
+    dataQueryReadAccessToken: "read-token",
+    openRouterApiKey: "openrouter-key",
+    models: { lite: "test-model" }
+  };
+  const settings = dataQuerySettings(config);
+  const table = settings.manifest.find((item) => item.tableName === "consultants_reports");
+  assert.ok(table);
+  assert.equal(table.defaultDateField, "report_date");
+  assert.deepEqual(table.lookupPolicy.orderableFields, ["report_date"]);
+  assert.ok(!table.allowedFields.includes("consultant_name"));
+  assert.ok(!table.allowedFields.includes("implementation_status"));
+
+  for (const question of ["כמה דוחות יועצים יש?", "How many consultant reports are there?"]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.supported, true, question);
+    assert.equal(route.metricScope.targetTable, "consultants_reports", question);
+    assert.equal(route.metricScope.operation, "count", question);
+    const plan = buildHeuristicQueryPlan({ question, settings, context: { metricScope: route.metricScope } });
+    assert.equal(plan.plans[0].table, "consultants_reports", question);
+    assert.equal(plan.plans[0].operation, "count", question);
+  }
+  for (const question of ["פלח דוחות יועצים לפי סטטוס", "Group consultant reports by stored item status."]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.supported, true, question);
+    assert.equal(route.metricScope.operation, "group_count", question);
+    assert.equal(route.metricScope.groupField, "item_status", question);
+  }
+  for (const question of ["כמה דוחות יועצים ללא תאריך?", "How many consultant reports are missing a date?"]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.supported, true, question);
+    assert.equal(route.metricScope.operation, "count", question);
+    assert.deepEqual(route.metricScope.requiredFilters, [{ field: "report_date", op: "is", value: null }], question);
+  }
+  for (const question of ["מהו דוח היועץ האחרון?", "Show the latest consultant report.", "הצג את חמשת דוחות היועצים האחרונים", "Show the earliest consultant report."]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.supported, true, question);
+    assert.equal(route.lookup.targetTable, "consultants_reports", question);
+    assert.ok(["lookup_latest", "lookup_last_n", "lookup_earliest"].includes(route.lookup.operation), question);
+  }
+  for (const question of ["Show the latest consultant report and summarize its recommendations.", "הצג את דוח היועץ האחרון וסכם את ההמלצות שלו"]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.supported, true, question);
+    assert.equal(route.mixed, true, question);
+    assert.equal(route.lookup.targetTable, "consultants_reports", question);
+  }
+  for (const question of [
+    "כמה יועצים יש?", "How many consultants are there?",
+    "Group consultant reports by consultant name.", "פלח דוחות יועצים לפי היועץ",
+    "Group consultant reports by specialization.", "פלח דוחות יועצים לפי תחום התמחות",
+    "How many consultant reports were implemented?", "כמה דוחות יועצים יושמו?",
+    "Show consultant reports by created_at.", "הצג דוחות יועצים לפי זמן קליטה"
+  ]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.supported, false, question);
+  }
+  for (const question of ["How many consultant reports were implemented?", "כמה דוחות יועצים יושמו?"]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.warning, "consultant_implementation_status_not_computable", question);
+  }
+  for (const question of ["Show consultant reports by created_at.", "הצג דוחות יועצים לפי זמן קליטה"]) {
+    const route = classifyDataQueryCapability(question, { settings });
+    assert.equal(route.warning, "consultant_ingestion_time_not_computable", question);
+  }
+
+  const reportId = 6;
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const attachmentId = "consultant-attachment";
+  let requestedUrl = null;
+  let consultantCompletionRequest = null;
+  const evidence = await runConsultantReportEvidenceAgent({
+    config,
+    question: "Summarize the recommendations.",
+    scope: { reportId, projectId, attachmentId },
+    fetchImpl: async (url) => {
+      requestedUrl = new URL(url);
+      return { ok: true, text: async () => JSON.stringify([{ source_id: reportId, project_id: projectId, attachment_id: attachmentId, content: "Use the documented acoustic construction specification.", chunk_index: 0, chunk_total: 1, primary_date: "2024-11-07" }]) };
+    },
+    chatComplete: async (request) => {
+      consultantCompletionRequest = request;
+      return "The report number 513504-2, version 02, recommends the documented acoustic construction specification.";
+    }
+  });
+  assert.equal(evidence.status, "ok");
+  assert.equal(evidence.same_report_match, true);
+  assert.match(consultantCompletionRequest.messages[0].content, /MUST answer entirely in English/);
+  assert.doesNotMatch(evidence.answer, /513504-2|version\s+02/i);
+  assert.match(evidence.answer, /recommends the documented acoustic construction specification/);
+  assert.equal(requestedUrl.pathname, "/rest/v1/consultants_reports_documents");
+  assert.equal(requestedUrl.searchParams.get("source_id"), "eq.6");
+  assert.equal(requestedUrl.searchParams.get("project_id"), `eq.${projectId}`);
+  assert.equal(requestedUrl.searchParams.get("attachment_id"), `eq.${attachmentId}`);
+
+  const { buildDeterministicConsultantReportAnswer } = await import("../src/agent.js");
+  for (const question of ["כמה יועצים יש?", "How many consultants are there?"]) {
+    const peopleRoute = classifyDataQueryCapability(question, { settings });
+    assert.equal(isDeterministicConsultantReportNotComputableCapability(peopleRoute), true, question);
+    assert.equal(shouldBypassGenericRetrieval({ message: question, classification: { type: "RAG", tool_hint: "" }, config, settings, routing: peopleRoute }), true, question);
+    const peopleAnswer = buildDeterministicConsultantReportAnswer({ message: question, routing: peopleRoute });
+    assert.match(peopleAnswer, /לא ניתן לספק ספירה מדויקת|exact count of consultant people is not available/i, question);
+    assert.doesNotMatch(peopleAnswer, /George|Jacobs|Yokoshi|יורם|עידו/, question);
+  }
+  const countDataQueryCall = {
+    toolName: "data_query", ok: true,
+    data: {
+      status: "ok", plans: [{ id: "consultant-count", table: "consultants_reports", operation: "count" }],
+      machineResult: { metricsByRequestId: { count: [{ operation: "count", value: 1 }] } }
+    }
+  };
+  const englishCountAnswer = buildDeterministicConsultantReportAnswer({
+    message: "How many consultant reports are there?",
+    routing: classifyDataQueryCapability("How many consultant reports are there?", { settings }),
+    toolCalls: [countDataQueryCall]
+  });
+  const hebrewCountAnswer = buildDeterministicConsultantReportAnswer({
+    message: "כמה דוחות יועצים יש?",
+    routing: classifyDataQueryCapability("כמה דוחות יועצים יש?", { settings }),
+    toolCalls: [countDataQueryCall]
+  });
+  assert.equal(englishCountAnswer, "**1 consultant report** was found.");
+  assert.equal(hebrewCountAnswer, "נמצא **דוח יועץ אחד**.");
+
+  const routing = classifyDataQueryCapability("Show the latest consultant report and summarize its recommendations.", { settings });
+  const dataQueryCall = {
+    toolName: "data_query", ok: true,
+    data: {
+      status: "ok", plans: [{ id: "consultant-latest", table: "consultants_reports", operation: "lookup_latest" }],
+      machineResult: { recordsByRequestId: { latest: [{ source: { table: "consultants_reports" }, record: { id: 6, report_date: "2024-11-07T00:00:00Z", item_status: "בטיפול", project_id: projectId, attachment_id: attachmentId } }] } }
+    }
+  };
+  const answer = buildDeterministicConsultantReportAnswer({
+    message: "Show the latest consultant report and summarize its recommendations.", routing,
+    toolCalls: [dataQueryCall, { toolName: "consultant_report_evidence_search", ok: true, data: evidence }]
+  });
+  assert.match(answer, /Latest dated consultant report/);
+  assert.match(answer, /07\.11\.2024/);
+  assert.match(answer, /Recommendations from that same report/);
+  assert.doesNotMatch(answer, /11111111|consultant-attachment/);
 });
 
 const filterIndex = process.argv.indexOf("--filter");

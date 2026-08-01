@@ -521,9 +521,11 @@ defined, approved status grouping, bounded metadata lookup, unavailable temporal
 and task questions, one Hebrew exact pair, a semantic chat question, and a mixed
 question that preserves the exact count without exposing JSON content or people.
 
-## Shared zero-row readiness rule for Phases 4H-4K
+## Shared zero-row readiness rule for Phases 4I-4K
 
-The 2026-07-24 audit found no live rows in these four source tables. Synthetic
+The 2026-07-24 audit found no live rows in the remaining source tables. Phase 4H
+was superseded by the 2026-07-30 live audit, which found one consultant report.
+Synthetic
 fixtures can verify validator mechanics, but they cannot prove live vocabulary,
 business semantics, null behavior, relationships, or production correctness.
 
@@ -540,19 +542,23 @@ Dedicated tracker: `docs/data-query-agent-phase4h-consultants-reports.md`.
 
 ### Phase 4H.1 - consultant-report readiness audit and typed policy
 
-Apply the shared zero-row rule and the full common `.1` contract specifically to
-`public.consultants_reports`. When representative data exists, define its own
-exact/mixed/semantic matrix from audited values. No operation is pre-authorized.
+Completed locally on 2026-07-30. The live table contains one row and its document
+table contains 18 attested chunks. The approved exact contract is limited to
+canonical `report_date`, stored `item_status`, counts, groups, series, and bounded
+lookups; narrative and identity fields remain excluded.
 
 ### Phase 4H.2 - consultant-report implementation and tests
 
-If 4H.1 closes, promote only `consultants_reports` through the common `.2`
-contract. Other zero-row candidates remain dormant.
+Completed locally. Only `consultants_reports` was promoted; other candidates
+remain dormant. Protected Data Query verification passes 123/123.
 
 ### Phase 4H.3 - consultant-report UI closeout
 
-Run a table-specific authenticated matrix derived from 4H.1, update its tracker,
-and stop. Success does not activate Phase 4I.
+Completed on 2026-08-01. The authenticated Hebrew/English matrix passed exact
+count, status/date lookup, undated, monthly trend, same-report mixed evidence,
+and fail-closed personnel/category/implementation/ingestion cases. Company names
+are allowed in semantic narrative; internal report/document identifiers remain
+redacted. Completion does not activate Phase 4I.
 
 ## Phase 4I - `daily_work_log`
 

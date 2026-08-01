@@ -1120,3 +1120,22 @@ saved selection, production configuration, or deployment changed. The UI checks
 created only ordinary chat/run-history records. SEC-001 and production/
 multi-project authorization remain deferred. Phase 4G is the next unauthorized
 approval gate; work stops here.
+
+## Phase 4H consultant-report promotion - 2026-07-30
+
+Phase 4H is complete locally through the authenticated 4H.3 UI matrix. The read-only live audit found one
+`consultants_reports` row dated 07.11.2024 and 18 document chunks with matching
+report/project/attachment identity. Exact behavior is limited to count, canonical
+`report_date`, stored `item_status`, groups, series, and bounded lookup. Consultant
+identity, free-text categories, implementation meaning, and source identifiers
+remain excluded; narrative recommendations use only same-report attested evidence.
+
+Focused verification passes 1/1 and the protected Data Query suite passes
+123/123. The full suite retains the same 11 unrelated Settings/Workflow/Timeline
+failures. Authenticated UI checks passed exact metadata, same-report evidence, and
+bilingual fail-closed cases. The UI pass also closed consultant-people semantic
+fallthrough, Hebrew implementation morphology, and bidirectional ingestion-time
+grammar. Company names may appear in semantic narrative, while internal identifiers
+remain redacted.
+No database, schema, RPC, RLS, settings, production, or deployment change occurred.
+Phase 4I remains unauthorized.
