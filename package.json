@@ -12,6 +12,7 @@
     "data-query:provision": "node scripts/provision-data-query-service-account.mjs",
     "test": "node test/run-tests.js",
     "test:data-query": "node test/run-tests.js --filter \"^data query\"",
+    "test:schedule": "node test/schedule-engine.test.js",
     "test:ui": "playwright test",
     "test:ui:headed": "playwright test --headed",
     "test:ui:debug": "playwright test --debug"

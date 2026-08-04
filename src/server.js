@@ -14,6 +14,8 @@ import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
+import { listScheduleAlerts, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
+import { loadScheduleSource, scheduleSettings } from "./scheduleIngestion.js";
 import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
@@ -804,6 +806,139 @@ async function handleApi(req, res, url) {
       config: config()
     });
     return sendJson(res, 200, result);
+  }
+
+  // ─── Schedule Intelligence Service (spec 4.4) ──────────────────────────────
+  // Every route requires an explicit projectId — there is no default project
+  // (acceptance criterion 24). DB routing comes from the schedule source
+  // profile (scheduleSettings), never from this layer.
+
+  if (req.method === "GET" && url.pathname === "/api/schedule/indicator") {
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await runScheduleIndicator({
+        projectId,
+        activityKey: url.searchParams.get("activityKey") || null,
+        milestoneKey: url.searchParams.get("milestoneKey") || null,
+        asOf: url.searchParams.get("asOf") || null,
+        config: buildRequestConfig(req)
+      });
+      if (!result.ok) return sendJson(res, result.notFound ? 404 : 500, result);
+      return sendJson(res, 200, result);
+    } catch (error) {
+      return sendJson(res, /required/.test(error.message) ? 400 : 500, { error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && (url.pathname === "/api/schedule/sweep" || url.pathname === "/api/subagents/schedule")) {
+    const body = await readJson(req).catch(() => ({}));
+    const projectId = body.projectId || body.project_id || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await runScheduleSweep({
+        projectId,
+        asOf: body.asOf || body.as_of || null,
+        filters: body.filters && typeof body.filters === "object" ? body.filters : {},
+        persist: body.persist !== false,
+        config: buildRequestConfig(req, body)
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/schedule/health") {
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const health = await runScheduleHealth({
+        projectId,
+        asOf: url.searchParams.get("asOf") || null,
+        config: buildRequestConfig(req)
+      });
+      return sendJson(res, 200, { ok: true, ...health });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/schedule/recalculate") {
+    const body = await readJson(req).catch(() => ({}));
+    const projectId = body.projectId || body.project_id || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await runScheduleSweep({
+        projectId,
+        asOf: body.asOf || body.as_of || null,
+        filters: {},
+        persist: true,
+        config: buildRequestConfig(req, body)
+      });
+      const snapshot = result.workflowLog.nodes.find((node) => node.id === "snapshot_write")?.output ?? {};
+      return sendJson(res, 200, {
+        ok: true,
+        projectId,
+        asOf: result.asOf,
+        calculatedAt: result.calculatedAt,
+        dataVersion: result.dataVersion,
+        computed: result.total,
+        snapshot,
+        warnings: result.warnings
+      });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/schedule/alert-scan") {
+    const body = await readJson(req).catch(() => ({}));
+    const projectId = body.projectId || body.project_id || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await runScheduleAlertScan({
+        projectId,
+        asOf: body.asOf || body.as_of || null,
+        config: buildRequestConfig(req, body)
+      });
+      return sendJson(res, result.ok ? 200 : 500, result);
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/schedule/alerts") {
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const alerts = await listScheduleAlerts({
+        projectId,
+        lifecycle: url.searchParams.get("lifecycle") || null,
+        baselined: url.searchParams.has("baselined") ? url.searchParams.get("baselined") : null,
+        minSeverity: url.searchParams.get("minSeverity") || null,
+        config: buildRequestConfig(req)
+      });
+      return sendJson(res, 200, { ok: true, projectId, count: alerts.length, alerts });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/schedule/versions") {
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const source = await loadScheduleSource({ config: buildRequestConfig(req), projectId, settings: scheduleSettings() });
+      return sendJson(res, 200, {
+        ok: true,
+        projectId,
+        current: source.scheduleMeta,
+        files: source.files
+      });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
+    }
   }
 
   const subagentConfigMatch = url.pathname.match(/^\/api\/subagents\/([^/]+)\/config$/);
