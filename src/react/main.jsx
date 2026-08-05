@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { SettingsPage } from "./SettingsPage.jsx";
 import { WorkflowPage } from "./WorkflowPage.jsx";
 import { InsightsPage } from "./InsightsPage.jsx";
+import { SchedulePage } from "./SchedulePage.jsx";
 
 const mountedRoots = new WeakMap();
 
@@ -19,6 +20,7 @@ const islands = {
   settings: SettingsPage,
   workflow: WorkflowPage,
   insights: InsightsPage,
+  schedule: SchedulePage,
 };
 
 function mountIsland(element) {

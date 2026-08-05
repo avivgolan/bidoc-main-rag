@@ -15,7 +15,7 @@ import { callN8nTool } from "./tools.js";
 import { authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { listScheduleAlerts, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
-import { loadScheduleSource, scheduleSettings } from "./scheduleIngestion.js";
+import { listScheduleProjects, loadScheduleSource, scheduleSettings } from "./scheduleIngestion.js";
 import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
@@ -889,6 +889,15 @@ async function handleApi(req, res, url) {
       });
     } catch (error) {
       return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/schedule/projects") {
+    try {
+      const projects = await listScheduleProjects({ config: buildRequestConfig(req) });
+      return sendJson(res, 200, { ok: true, projects });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message, projects: [] });
     }
   }
 

@@ -431,6 +431,7 @@ function startNewSession(options = {}) {
 
 const TAB_LOADERS = {
   settings:   () => state.settingsDirty ? Promise.resolve() : loadSettings(),
+  schedule:   () => window.dispatchEvent(new Event("bidoc:schedule-activated")),
   agents:     () => loadAgentsTabData(),
   subagents:  () => loadSubAgents(),
   insights:   () => { loadProjectInsightHistory(); loadHashtagChart(); renderProjectInsightsResults(); renderProjectInsightsStatus(); },

@@ -9941,3 +9941,166 @@ body:has(#timeline.active) .sidebar {
   .riActionRow .riShortcut { display: none; }
   .riBar { grid-template-columns: minmax(82px, 0.8fr) minmax(0, 1fr) auto; }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   SCHEDULE INTELLIGENCE TAB (spec section 15)
+   ══════════════════════════════════════════════════════════════════ */
+
+.schedulePage { display: flex; flex-direction: column; gap: 14px; padding: 4px 2px 40px; }
+.schedToolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.schedTitle { margin: 0; font-size: 1.15rem; color: var(--text-primary); }
+.schedControls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.schedSelect, .schedDate, .schedNum {
+  background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 8px;
+  padding: 6px 10px; font: inherit; color: var(--text-primary);
+}
+.schedNum { width: 70px; }
+.schedBtn {
+  background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: 8px;
+  padding: 6px 14px; font: inherit; cursor: pointer; color: var(--text-primary);
+}
+.schedBtn:hover { background: var(--surface-elevated); }
+.schedBtn:disabled { opacity: 0.55; cursor: default; }
+.schedBtnPrimary { background: var(--brand-500); border-color: var(--brand-600); color: #fff; }
+.schedBtnPrimary:hover { background: var(--brand-600); }
+
+.schedError { background: var(--danger-soft); color: var(--danger); border-radius: 8px; padding: 10px 14px; }
+.schedWarnings { background: var(--amber-soft); color: var(--amber); border-radius: 8px; padding: 8px 14px; display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; }
+
+.schedHealth { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.schedCard { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.schedCardValue { font-size: 1.3rem; font-weight: 700; color: var(--text-primary); }
+.schedCardOf { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
+.schedCardLabel { font-size: 0.78rem; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedCardAlarm { border-color: var(--danger); background: var(--danger-soft); }
+.schedCardAlarm .schedCardValue { color: var(--danger); }
+.schedCardAlarm .schedCardLabel { white-space: normal; }
+
+.schedAlerts { display: flex; flex-direction: column; gap: 8px; }
+.schedAlertRow {
+  display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  background: var(--surface); border: 1px solid var(--line-strong); border-inline-start: 4px solid var(--danger);
+  border-radius: 10px; padding: 10px 14px;
+}
+.schedAlertDesc { color: var(--text-secondary); font-size: 0.85rem; }
+.schedBaselinedToggle {
+  align-self: flex-start; background: none; border: none; color: var(--brand-600);
+  font: inherit; font-size: 0.85rem; cursor: pointer; text-decoration: underline; padding: 0;
+}
+
+.schedFilters { display: flex; gap: 18px; align-items: center; font-size: 0.85rem; color: var(--text-secondary); flex-wrap: wrap; }
+.schedFilters label { display: flex; gap: 6px; align-items: center; }
+.schedCount { margin-inline-start: auto; color: var(--text-muted); }
+
+.schedTableWrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.schedTable { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.schedTable th {
+  text-align: right; padding: 10px 12px; color: var(--text-secondary); font-weight: 600;
+  border-bottom: 1px solid var(--line-strong); white-space: nowrap; background: var(--surface-3);
+}
+.schedTable td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.schedTable tbody tr { cursor: pointer; }
+.schedTable tbody tr:hover { background: var(--brand-50); }
+.schedTable tbody tr.is-selected { background: var(--brand-100); }
+.schedName { font-weight: 600; color: var(--text-primary); max-width: 340px; }
+.schedBasis { color: var(--text-secondary); white-space: nowrap; }
+.schedEmpty { text-align: center; color: var(--text-muted); padding: 24px; }
+
+.schedBadge {
+  display: inline-block; border-radius: 999px; padding: 2px 10px; font-size: 0.74rem; font-weight: 600; white-space: nowrap;
+}
+.schedTone-ok       { background: var(--success-bg); color: var(--success-text); }
+.schedTone-watch    { background: var(--cobalt-soft); color: var(--cobalt); }
+.schedTone-warn     { background: var(--amber-soft); color: var(--amber); }
+.schedTone-bad      { background: var(--danger-soft); color: var(--danger); }
+.schedTone-conflict { background: rgba(140, 92, 205, 0.14); color: #7a4fc0; }
+/* rule 15.5#5: insufficient_data must not read as "fine" */
+.schedTone-unknown  { background: rgba(118, 124, 135, 0.16); color: var(--text-muted); border: 1px dashed var(--line-strong); }
+.schedTone-idle     { background: var(--surface-3); color: var(--text-secondary); }
+.schedConf-high   { background: var(--success-bg); color: var(--success-text); }
+.schedConf-medium { background: var(--cobalt-soft); color: var(--cobalt); }
+.schedConf-low    { background: var(--amber-soft); color: var(--amber); border: 1px solid var(--amber); }
+.schedSeverity { background: var(--danger-soft); color: var(--danger); }
+
+.schedDetail { background: var(--surface-elevated); border: 1px solid var(--line-strong); border-radius: 14px; padding: 16px 18px; }
+.schedDetailHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.schedDetailHead > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.schedClose { background: none; border: none; cursor: pointer; font-size: 1rem; color: var(--text-muted); }
+.schedDetailTitle { margin: 10px 0 2px; font-size: 1.05rem; color: var(--text-primary); }
+.schedDetailMeta { color: var(--text-secondary); font-size: 0.88rem; margin-bottom: 8px; }
+.schedExplanation { background: var(--surface-3); border-radius: 10px; padding: 10px 14px; line-height: 1.6; color: var(--text-primary); font-size: 0.9rem; }
+.schedTimingGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 16px; margin: 12px 0; }
+.schedTimingGrid > div { display: flex; flex-direction: column; gap: 2px; }
+.schedTimingGrid span { font-size: 0.74rem; color: var(--text-muted); }
+.schedTimingGrid b { font-size: 0.88rem; color: var(--text-primary); font-weight: 600; }
+
+.schedGates { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.schedGatesTitle { font-size: 0.78rem; color: var(--text-secondary); font-weight: 600; }
+.schedGate { border-radius: 8px; padding: 3px 9px; font-size: 0.76rem; border: 1px solid var(--line-strong); }
+.schedGate.is-ok      { background: var(--success-bg); color: var(--success-text); }
+.schedGate.is-stale   { background: var(--amber-soft); color: var(--amber); }
+.schedGate.is-missing { background: var(--surface-3); color: var(--text-muted); }
+
+.schedEvidence { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.schedEvidenceRow { display: flex; gap: 10px; align-items: baseline; font-size: 0.84rem; flex-wrap: wrap; }
+.schedEvidenceKind { background: var(--surface-3); border-radius: 6px; padding: 1px 8px; font-size: 0.72rem; color: var(--text-secondary); }
+.schedEvidenceDate { color: var(--text-muted); font-size: 0.78rem; }
+
+/* ── Three-axis timeline view (spec 1.2 / 15) ── */
+.schedSubtitle { font-size: 0.82rem; color: var(--text-secondary); margin-top: 2px; }
+.schedGates.is-compact { margin: 0; }
+.schedBaselinedNote { font-size: 0.83rem; color: var(--text-secondary); background: var(--surface-3); border-radius: 8px; padding: 8px 12px; }
+
+.schedViewToggle { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
+.schedViewToggle button { background: var(--surface-2); border: none; font: inherit; padding: 5px 14px; cursor: pointer; color: var(--text-secondary); }
+.schedViewToggle button.is-active { background: var(--brand-500); color: #fff; }
+
+.axesView { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.axisLegend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.76rem; color: var(--text-secondary); margin-bottom: 10px; }
+.axisLegend span { display: inline-flex; align-items: center; gap: 5px; }
+.axisSwatch { display: inline-block; width: 18px; height: 9px; border-radius: 3px; font-style: normal; line-height: 9px; text-align: center; }
+.swPlan { background: var(--brand-100); border: 1px solid var(--brand-300); }
+.swFill { background: var(--brand-500); }
+.swLate { background: repeating-linear-gradient(45deg, var(--danger-soft), var(--danger-soft) 4px, rgba(216,106,93,0.4) 4px, rgba(216,106,93,0.4) 8px); border: 1px solid var(--danger); }
+.swForecast { color: var(--amber); background: none; font-size: 11px; }
+.swContract { color: var(--brand-700); background: none; font-size: 11px; }
+.swObserved { background: var(--cobalt-soft); border: 1px solid var(--cobalt); }
+.swToday { background: var(--danger); width: 2px; height: 14px; }
+
+.axesBody { position: relative; }
+.axesTimeArea { position: absolute; inset: 0 240px 0 0; pointer-events: none; }
+.axesMonths { position: relative; height: 20px; }
+.axesMonthTick { position: absolute; top: 0; transform: translateX(2px); font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
+.axesRowsOverlay { position: absolute; inset: 20px 0 0 0; }
+.axesGridLine { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.axesTodayLine { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); z-index: 3; }
+.axesTodayLine label { position: absolute; top: -18px; transform: translateX(-50%); background: var(--danger); color: #fff; font-size: 0.68rem; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
+
+.axesRows { position: relative; margin-top: 22px; display: flex; flex-direction: column; }
+.axisRow { display: flex; dir: ltr; flex-direction: row; align-items: stretch; cursor: pointer; border-bottom: 1px solid var(--line); }
+.axisRow:hover { background: var(--brand-50); }
+.axisRow.is-selected { background: var(--brand-100); }
+.axisTrack { flex: 1; position: relative; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 5px 0; min-width: 0; }
+.axisName { width: 240px; flex: none; padding: 4px 10px 4px 6px; display: flex; flex-direction: column; gap: 2px; border-inline-start: 1px solid var(--line); }
+.axisNameText { font-size: 0.8rem; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.axisNameMeta { display: flex; gap: 8px; align-items: center; }
+.axisNameMeta .schedBadge { font-size: 0.66rem; padding: 1px 7px; }
+.axisLateText { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
+
+.axisLane { position: relative; height: 10px; }
+.axisLaneEmpty { position: absolute; inset: 4px 2% ; border-top: 1px dashed var(--line-strong); }
+.axisContractFlag { position: absolute; top: -4px; transform: translateX(-50%); color: var(--brand-700); font-size: 12px; z-index: 2; }
+.axisBarPlan { position: absolute; top: 0; height: 10px; background: var(--brand-100); border: 1px solid var(--brand-300); border-radius: 3px; overflow: hidden; }
+.axisBarPlan.is-milestone { border-radius: 50%; min-width: 10px; }
+.axisBarFill { height: 100%; background: var(--brand-500); opacity: 0.85; }
+.axisBarLate { position: absolute; top: 2px; height: 6px; border-radius: 2px; z-index: 1;
+  background: repeating-linear-gradient(45deg, var(--danger-soft), var(--danger-soft) 4px, rgba(216,106,93,0.45) 4px, rgba(216,106,93,0.45) 8px);
+  border: 1px solid var(--danger); }
+.axisBarObserved { position: absolute; top: 0; height: 10px; background: var(--cobalt-soft); border: 1px solid var(--cobalt); border-radius: 3px; }
+.axisForecast { position: absolute; top: -2px; transform: translateX(-50%); color: var(--amber); font-size: 11px; }
+.axesCapNote { margin-top: 8px; font-size: 0.78rem; color: var(--text-muted); text-align: center; }
+
+@media (max-width: 900px) {
+  .axisName { width: 170px; }
+  .axesTimeArea { inset: 0 170px 0 0; }
+}

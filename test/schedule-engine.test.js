@@ -442,6 +442,9 @@ test("schedule ingestion: gantt row normalizes to the engine task shape", () => 
   // The normalized row feeds the engine directly.
   const ind = computeIndicator({ projectId: PROJECT, task, asOf: AS_OF });
   assert.equal(ind.lateness.daysLate, 226);
+  // Regression: ingestion emits totalFloatDays null; Number(null) is 0, and a
+  // fabricated zero float would claim critical path. Must stay null (15.5#1).
+  assert.equal(ind.variances.remainingFloatDays, null);
 });
 
 test("schedule ingestion: current version follows relevancy_date, not upload time", () => {

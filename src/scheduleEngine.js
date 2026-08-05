@@ -231,8 +231,12 @@ export function computeIndicator(input = {}) {
       ? diffCalendarDays(contractDate, progressFinish)
       : null,
     // null, never false/0: without dependency data the engine cannot assert
-    // float (spec 6.7 — blocked on parser extension, gate 🟠).
-    remainingFloatDays: Number.isFinite(Number(task?.totalFloatDays)) ? Number(task.totalFloatDays) : null
+    // float (spec 6.7 — blocked on parser extension, gate 🟠). The explicit
+    // null check matters: Number(null) is 0, and a fabricated zero float would
+    // falsely claim the activity is on the critical path.
+    remainingFloatDays: task?.totalFloatDays != null && Number.isFinite(Number(task.totalFloatDays))
+      ? Number(task.totalFloatDays)
+      : null
   };
 
   // ── Status classification (spec 6.8) ───────────────────────────────────────

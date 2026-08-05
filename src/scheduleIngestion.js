@@ -258,6 +258,27 @@ export async function loadContractMilestones({ config = null, projectId, setting
   }));
 }
 
+// Discovery for the UI project selector (spec 15.2): which projects have a
+// contractor schedule in the active source profile.
+export async function listScheduleProjects({ config = null, settings: settingsInput = null } = {}) {
+  const settings = settingsInput || scheduleSettings();
+  const rows = await scheduleFetch({
+    config: config || getConfig(), settings,
+    path: `/rest/v1/${settings.filesTable}?select=project_id,relevancy_date&order=relevancy_date.desc`
+  });
+  const byProject = new Map();
+  for (const row of rows) {
+    if (!row?.project_id) continue;
+    const entry = byProject.get(row.project_id) || { projectId: row.project_id, files: 0, latestRelevancyDate: null };
+    entry.files += 1;
+    if (!entry.latestRelevancyDate || String(row.relevancy_date ?? "") > entry.latestRelevancyDate) {
+      entry.latestRelevancyDate = row.relevancy_date ?? null;
+    }
+    byProject.set(row.project_id, entry);
+  }
+  return [...byProject.values()];
+}
+
 // One-call convenience for the orchestrator: everything sweep()/computeIndicator()
 // need, plus warnings about degraded inputs (missing engine tables).
 export async function loadScheduleInputs({ config = null, projectId, settings: settingsInput = null }) {
