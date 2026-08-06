@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, settingsOpenRouterApiKey, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels, summarizeOpenRouterUsage } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
@@ -2188,8 +2188,25 @@ function sendText(res, status, value) {
 
 async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
   const contentCfg = contentSupabaseConfig(cfg);
+  const savedSettings = readLocalSettings();
   const checks = [];
   const add = (id, label, group, fn) => checks.push({ id, label, group, fn });
+  const inactive = (reason) => {
+    const error = new Error(reason);
+    error.diagnosticStatus = "inactive";
+    throw error;
+  };
+  const requireConnection = (connection, label) => {
+    if (!connection?.supabaseUrl || !connection?.supabaseServiceRoleKey) {
+      throw new Error(`${label} URL or Service Role Key is missing`);
+    }
+  };
+  const probeTable = async (connection, table, label) => {
+    requireConnection(connection, label);
+    if (!/^[A-Za-z0-9_]+$/.test(String(table || ""))) throw new Error(`${label} table is missing or invalid`);
+    await rawSupabaseFetch(connection, `/rest/v1/${table}?select=*&limit=1`, { method: "HEAD" });
+    return table;
+  };
 
   add("openrouter_chat", "OpenRouter Chat", "core", async () => {
     if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
@@ -2321,6 +2338,80 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
     });
   }
 
+  add("subagent_alert", "Alert Subagent", "subagents", async () => {
+    const table = savedSettings.subagents?.alert?.table || contentCfg.alertsTable;
+    await probeTable(contentCfg, table, "APP DATA");
+    if (!cfg.openRouterApiKey) inactive("Alert Subagent is inactive: OpenRouter API Key is missing");
+    return { active: true, table, model: savedSettings.subagents?.alert?.model || cfg.models.alert || cfg.models.main };
+  });
+
+  for (const [toolName, spec] of Object.entries(CONTENT_TOOL_SPECS)) {
+    add(`subagent_${toolName}`, spec.label || toolName, "subagents", async () => {
+      if (cfg.n8n?.runtime?.internalTools !== true) inactive("Internal subagents master switch is off");
+      const settings = cfg.contentTools?.perTool?.[toolName] || {};
+      if (settings.enabled === false) inactive(`${spec.label || toolName} is disabled in Settings`);
+      const table = settings.table || spec.defaultTable;
+      await probeTable(contentCfg, table, "APP DATA");
+      if (settings.answerSynthesis !== false && !cfg.openRouterApiKey) {
+        inactive(`${spec.label || toolName} is inactive: OpenRouter API Key is missing`);
+      }
+      return { active: true, table, answerSynthesis: settings.answerSynthesis !== false };
+    });
+  }
+
+  add("subagent_meeting_evidence", "Meeting Evidence Agent", "subagents", async () => {
+    if (cfg.meetingsEvidence?.enabled === false) inactive("Meeting Evidence Agent is disabled in Settings");
+    const table = cfg.meetingsEvidence?.table || "meetings_documents";
+    await probeTable(contentCfg, table, "APP DATA");
+    if (!cfg.openRouterApiKey) inactive("Meeting Evidence Agent is inactive: OpenRouter API Key is missing");
+    return { active: true, table, rpc: cfg.meetingsEvidence?.rpcName || null };
+  });
+
+  add("subagent_data_query", "Data Query Agent", "subagents", async () => {
+    if (cfg.dataQuery?.enabled === false) inactive("Data Query Agent is disabled in Settings");
+    await probeTable(contentCfg, contentCfg.indexTable, "APP DATA");
+    return {
+      active: true,
+      plannerEnabled: cfg.dataQuery?.plannerEnabled !== false,
+      configuredTables: Array.isArray(cfg.dataQuery?.tables) ? cfg.dataQuery.tables.length : 0
+    };
+  });
+
+  add("subagent_indexing", "Indexing Agent", "subagents", async () => {
+    await probeTable(contentCfg, contentCfg.indexTable, "APP DATA");
+    if (!cfg.openRouterApiKey) inactive("Indexing Agent is inactive: OpenRouter API Key is missing");
+    return { active: true, mode: cfg.indexing?.autoIndexing ? "automatic" : "manual", targetTable: contentCfg.indexTable };
+  });
+
+  add("subagent_schedule", "Schedule Agent", "subagents", async () => {
+    const projects = await listScheduleProjects({ config: cfg });
+    return { active: true, source: "MAIN", projects: projects.length, tables: ["gantt_files_test", "gantt_tasks_test"] };
+  });
+
+  add("subagent_schedule_conditions", "Schedule Condition Resolver", "subagents", async () => {
+    const table = scheduleSettings().conditionsTable;
+    await probeTable(contentCfg, table, "APP DATA");
+    if (!settingsOpenRouterApiKey()) inactive("Schedule Condition Resolver is inactive: a Settings-owned OpenRouter API Key is missing");
+    return { active: true, table };
+  });
+
+  add("subagent_project_insights", "Project Insights Agent", "subagents", async () => {
+    if (cfg.insights?.evidencePipeline === false) inactive("Project Insights evidence pipeline is disabled");
+    await probeTable(contentCfg, contentCfg.indexTable, "APP DATA");
+    return { active: true, evidencePipeline: true, rootCauseHypotheses: cfg.insights?.rootCauseHypotheses === true };
+  });
+
+  add("subagent_graph_enrichment", "Graph Enrichment Agent", "subagents", async () => {
+    if (cfg.graph?.enabled === false) inactive("Project Graph is disabled in Settings");
+    await probeTable(cfg, "graph_nodes", "App DB");
+    return { active: true, automatic: cfg.insights?.graphEnrichment === true, mode: cfg.insights?.graphEnrichment ? "automatic" : "manual" };
+  });
+
+  add("subagent_delay_claim", "Delay Claim Agent", "subagents", async () => {
+    await probeTable(cfg, "delay_claim_cases", "App DB");
+    return { active: true, table: "delay_claim_cases", mode: "manual" };
+  });
+
   for (const toolName of TOOL_NAMES) {
     add(`tool_${toolName}`, diagnosticToolLabel(toolName), "tools", async () => {
       const result = isInternalContentTool(toolName, cfg)
@@ -2366,7 +2457,7 @@ async function diagnosticCheck(id, label, group, fn) {
       label,
       group,
       ok: false,
-      status: classifyDiagnosticError(errorText),
+      status: error?.diagnosticStatus || classifyDiagnosticError(errorText),
       ms: Date.now() - startedAt,
       error: errorText
     };

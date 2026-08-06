@@ -13703,6 +13703,30 @@ test("data query Phase 4H consultant reports bilingual exact, mixed, privacy, an
   assert.doesNotMatch(answer, /11111111|consultant-attachment/);
 });
 
+test("connection diagnostics list every operational internal subagent", () => {
+  const appSource = fs.readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
+  const expectedIds = [
+    "alert", "meetings", "emails", "whatsapp_messages", "financial_transactions", "safety_report",
+    "meeting_evidence", "data_query", "indexing", "schedule", "schedule_conditions",
+    "project_insights", "graph_enrichment", "delay_claim"
+  ];
+  assert.match(appSource, /id:\s*"subagents"/);
+  for (const id of expectedIds) assert.match(appSource, new RegExp(`subagent_${id}`));
+  assert.match(appSource, /inactive:\s*"לא פעיל"/);
+});
+
+test("internal subagent diagnostics are read-only readiness probes", () => {
+  const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  const expectedIds = [
+    "alert", "meeting_evidence", "data_query", "indexing", "schedule", "schedule_conditions",
+    "project_insights", "graph_enrichment", "delay_claim"
+  ];
+  for (const id of expectedIds) assert.match(serverSource, new RegExp(`add\\("subagent_${id}"`));
+  assert.match(serverSource, /Object\.entries\(CONTENT_TOOL_SPECS\)/);
+  assert.match(serverSource, /method:\s*"HEAD"/);
+  assert.match(serverSource, /error\?\.diagnosticStatus\s*\|\|\s*classifyDiagnosticError/);
+});
+
 const filterIndex = process.argv.indexOf("--filter");
 const filterPattern = filterIndex >= 0 ? process.argv[filterIndex + 1] : "";
 if (filterIndex >= 0 && !filterPattern) {

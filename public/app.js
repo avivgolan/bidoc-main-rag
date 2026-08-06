@@ -137,6 +137,27 @@ const diagnosticGroups = [
     ]
   },
   {
+    id: "subagents",
+    label: "סוכני משנה פנימיים",
+    description: "בדיקת הפעלה ותלויות בזמן אמת ללא פעולות כתיבה",
+    checks: [
+      ["subagent_alert", "Alert Subagent"],
+      ["subagent_meetings", "Meetings Subagent"],
+      ["subagent_emails", "Emails Subagent"],
+      ["subagent_whatsapp_messages", "WhatsApp Subagent"],
+      ["subagent_financial_transactions", "Financial Subagent"],
+      ["subagent_safety_report", "Safety Subagent"],
+      ["subagent_meeting_evidence", "Meeting Evidence Agent"],
+      ["subagent_data_query", "Data Query Agent"],
+      ["subagent_indexing", "Indexing Agent"],
+      ["subagent_schedule", "Schedule Agent"],
+      ["subagent_schedule_conditions", "Schedule Condition Resolver"],
+      ["subagent_project_insights", "Project Insights Agent"],
+      ["subagent_graph_enrichment", "Graph Enrichment Agent"],
+      ["subagent_delay_claim", "Delay Claim Agent"]
+    ]
+  },
+  {
     id: "tools",
     label: "כלי N8N",
     description: "Webhooks חיצוניים שמופעלים לפי סוג השאלה",
@@ -6218,6 +6239,7 @@ function updateDiagnosticSummary(results) {
 
 function diagnosticStatusLabel(status) {
   return {
+    inactive: "לא פעיל",
     auth_error: "בעיית מפתח / הרשאה",
     billing_or_quota: "קרדיטים / מגבלה",
     missing_rpc_or_schema: "RPC או סכימה חסרים",

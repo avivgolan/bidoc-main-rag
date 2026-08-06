@@ -15,6 +15,7 @@ tags:
 
 ## Current State
 
+- The Tool Testing diagnostics page includes a dedicated internal-subagents group covering 14 operational subagents. Each check is an individual read-only readiness probe, reports active/error/inactive explicitly, and can be rerun without database writes.
 - The Alert subagent lives in `src/subagents/alert.js`.
 - Alert subagent settings are stored under `settings.subagents.alert`; the UI for them lives in the Subagents tab in `public/app.js`.
 - The Alert subagent searches the configured Supabase embeddings table, defaulting to `alerts_embeddings_gf`, through an RPC named `match_<table>`.
@@ -144,6 +145,8 @@ tags:
 - 2026-07-28 -- Added the controlled financial `transaction_type` vocabulary for all 19 live raw values / 18 canonical concepts, exact type-specific counts and complete lists, response-only typo canonicalization, 200-row complete-list and batched enrichment bounds, semantic precedence, ambiguity fail closure, and a published UI matrix. A follow-up regression found that one live process could bypass retrieval using one capability snapshot but re-plan Data Query from another, then substitute semantic fragments after plan rejection. Main now reuses one request-scoped Data Query settings/routing snapshot across scheduling and execution, and exact financial failures stop before semantic synthesis. Verification is 121/121 protected Data Query tests; the full suite retains the same 11 unrelated UI/static-contract failures. No database, table, row, RLS, permission, role, Supabase setting, or deployment changed.
 - 2026-08-01 -- Phase 4H completed through authenticated UI closeout for fixed `public.consultants_reports`: one dated report, 18 same-report chunks, canonical `report_date`, stored `item_status`, exact counts/groups/series/lookups, and report/project/attachment-attested mixed recommendations. The bilingual UI matrix passed exact, mixed, and fail-closed cases after closing people-count semantic fallthrough, Hebrew implementation morphology, and bidirectional ingestion-time grammar. Company names are allowed in semantic narrative; internal report/document identifiers remain redacted. Verification passes 1/1 focused and 123/123 protected Data Query tests; the full suite retains the same 11 unrelated UI failures. Phase 4I remains unauthorized.
 - 2026-08-05 -- Repaired `מהו החריג האחרון?`: singular Hebrew exception grammar now selects exact Data Query, bypasses hybrid/graph/reranking, and schedules only `data_query`. The fixed read-only transport honors the explicit MAIN mapping, adapts to MAIN `exceptions_report` (no `urgency_level`, `DD/MM/YYYY` dates, stored statuses `בטיפול|rejected`), normalizes and sorts all dated rows server-side, and deterministically returns 14.08.2025 / `בטיפול`. Phase 4F is 9/9 green; the full suite retains the same 11 unrelated UI/static-contract failures. No database mutation occurred.
+
+- 2026-08-06 -- Added 14 operational internal subagents to Tool Testing with separate read-only readiness checks, explicit inactive-state reporting for disabled agents or missing dependencies, and focused regression coverage.
 
 ## Gotchas
 
