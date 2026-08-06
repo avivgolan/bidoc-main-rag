@@ -21,17 +21,20 @@ tags:
 - `public/index.html` loads a tiny `public/react-loader.js` module that imports the React bridge only when `[data-react-island]` elements exist, so current screens do not pay the React bundle cost until migrated.
 - Deployment routes all requests through `src/server.js` using `vercel.json`.
 - Persistent mutable state is expected to live in Supabase, not local data files.
-- Runtime config separates App Supabase from optional Content Supabase: App DB stores settings, chat history, QA, timeline links, and graph tables; Content DB serves RAG, timeline event, and alert retrieval.
+- Runtime config separates App / MAIN Supabase from APP DATA (`contentSource`). App / MAIN stores settings, chat history, QA, timeline links, and graph tables; APP DATA is the KAPAIM Supabase project used by every project-information reader, including RAG, timeline events, alerts, Data Query, evidence agents, indexing, and Schedule.
+- The component-to-table Supabase inventory is maintained in `docs/db-table-callers-inventory.md`; it records App/MAIN, Content, and Meta/Auth routing plus configurable table overrides.
 - App Supabase now also owns the general Project Graph tables (`graph_nodes`, `graph_edges`) defined by `supabase/project-graph.sql`.
 - The Project Graph viewer is exposed through `GET /api/graph` and the `#graph` SPA tab, rendering App Supabase graph data with Cytoscape.
 - Project Graph extraction now maps real Content `data_index` fields into semantic graph kinds: hashtags, vendors, people, submitters, categories, transaction types, statuses, source tables, documents, emails, attachments, mentioned dates, risks, quotes, and invoices.
 - Main RAG synthesis receives a dedicated `project_graph_findings` payload and switches to `ranked_entity_list` mode for who/what/which/more style investigation questions.
 - Agent prompts now distinguish true project delays from incidental lateness, avoid invented broad delay hashtags for retrieval, and rerank delay/blocker questions by project impact rather than keyword overlap alone.
 - Content Supabase can be configured with separate URL/key plus custom hybrid RPC, index table, alerts table, and alerts RPC; when omitted, content retrieval falls back to App Supabase and legacy table/RPC names.
+- Content settings support an explicit `useAppSupabase` switch. When enabled, Content retrieval and diagnostics use the MAIN App Supabase URL/key even if stale separate Content credentials remain saved; the Settings UI exposes this as “השתמש ב-App Supabase של MAIN”.
 - The current Content `data_index` schema uses `primary_date` for timeline dates and `index_text`/`summary`/`title` for content text, plus `source_url`, `source_table`, `source_id`, `project_id`, `mail_id`, `attachment_id`, and `mentioned_dates` for provenance.
 - The current Content `alerts` schema uses `data_date` for timeline dates and `summary`/`alert_description`/`content`/`answer` for alert text, plus `alert_type`, `severity_level`, `data_link`, and `item_status`.
 - `.env` and `.env.local` are resolved from the repository root based on `src/config.js`, not from the process working directory.
 - Settings UI displays masked secrets only as placeholders; password fields stay empty so masked values are not submitted as real keys.
+- React Settings secret inputs are text fields masked with `-webkit-text-security`, with `autocomplete=off` and common password-manager ignore attributes; browsers therefore do not classify API/service keys as login-password fields while the reveal control still works.
 - Settings UI can export/import a local JSON settings file; export includes full unmasked API keys and connection fields, so the file must be handled as a secret.
 - Settings export/import controls are wired during Settings initialization; downloads defer object-URL cleanup and imports validate JSON before saving and refreshing the form.
 - Settings saves and imports now report success only after the shared App Supabase write succeeds; failed persistence leaves the prior runtime cache unchanged.
@@ -89,6 +92,10 @@ tags:
 - 2026-06-20 -- Locked `agent_settings` persistence to the main Settings save route only; import, subagent saves, link-agent saves, preset saves, and startup prompt migration are all draft-only or non-persistent.
 - 2026-06-26 -- Added a progressive React/Vite frontend bridge with lazy island loading so individual screens can migrate from vanilla JS without replacing the existing SPA shell.
 - 2026-07-03 -- Reordered the main sidebar navigation so Chat is first, Insights second, and Settings last; fixed the mobile drawer to show labels next to icons.
+- 2026-08-05 -- Prevented browser password autofill on React Settings API/service-key fields without exposing their contents.
+- 2026-08-05 -- Fixed React Content DB field names (`supabaseUrl`/`supabaseServiceRoleKey`), made connection diagnostics refresh persisted MAIN settings before each run, and switched the live Content source from an invalid `smx...` key to the MAIN App project `pmd...`; both content tables and both search RPCs were verified with HTTP 200.
+- 2026-08-05 -- Standardized the user-facing name `APP DATA` for `contentSource` (Supabase project KAPAIM) and routed Schedule through that existing connection without separate credentials.
+- 2026-08-05 -- Added a component-to-Supabase-table inventory covering product agents, shared subsystems, logical database roles, and the current single-project fallback.
 
 ## Recent Changes (continued)
 
@@ -102,3 +109,4 @@ tags:
 - Two events in index fixtures share date 2026-04-20 (`idx-001`, `idx-002`); use `.filter({ hasText })` or `[data-event-id]` selectors instead of `.first()` / `.last()` to avoid sort-order brittleness.
 - If Supabase already contains a masked key from an older save, the next settings save will clear that stored masked value; re-enter the real key if there is no env fallback.
 - Content Supabase diagnostics expose the decoded key role; `anon` keys can return zero content rows under RLS even when the table exists, so timeline/RAG content should use a service-role key or matching read policies.
+- A Content URL and API key are project-bound. A key from another Supabase project returns `401 Invalid API key` for every table and RPC; this is distinct from a missing table/RPC response.

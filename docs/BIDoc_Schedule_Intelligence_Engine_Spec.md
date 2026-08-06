@@ -660,6 +660,8 @@ test/
 | `GetProjectScheduleHealth` | `GET` | `/api/schedule/health` | 🟡 | תמונת לו״ז מצטברת ברמת פרויקט |
 | — | `POST` | `/api/schedule/recalculate` | 🟡 | חישוב מחדש לפרויקט או לתת-קבוצה |
 | — | `GET` | `/api/schedule/versions` | 🟡 | גרסאות לוח שנקלטו |
+| — | `GET` | `/api/schedule/conditions` | 🟢 | התניות חוזיות שממתינות לאירוע מפעיל |
+| — | `POST` | `/api/schedule/conditions/resolve` | 🟢 | איתור אירוע דרך מנוע הצ׳אט וקידום מבוקר לאבן דרך |
 | — | `POST` | `/api/subagents/schedule` | 🟡 | הפעלה ישירה מה-UI, בתבנית `/api/subagents/alert` |
 
 **החלטה — `EvaluateDocument` ו-`EvaluateEmail` הם מסלול אחד.** v1.1 מנה אותם בנפרד. ההבדל ביניהם הוא בסוג המקור בלבד, לא בלוגיקה: שניהם מקבלים מועמדי פעילות מטקסט ומחזירים אינדיקטורים. מסלול נפרד לכל סוג מקור מוביל ל-`evaluate-meeting`, `evaluate-whatsapp` וכן הלאה. במקום זאת:
@@ -841,6 +843,43 @@ create index if not exists schedule_contract_extensions_milestone_idx
 create unique index if not exists schedule_contract_extensions_uk
   on schedule_contract_extensions (project_id, milestone_key, source_document_id, extension_days)
   where source_document_id is not null;
+
+-- ── מאגר התניות ממתינות (סעיף 6.8א) ──────────────────────────────────────────
+-- התחייבויות יחסיות שממתינות לאירוע מפעיל ("אישור תוך שבוע משליחת הצעת
+-- המחיר"). פתרון תאריך מקדם אותן לשורה ב-schedule_contract_milestones;
+-- שורת התניה עצמה לעולם אינה נמדדת על ידי המנוע.
+create table if not exists schedule_contract_conditions (
+  id                     uuid primary key default gen_random_uuid(),
+  project_id             uuid not null,
+  condition_key          text not null,
+  name                   text not null,
+  category               text not null,   -- execution|payment|notice|guarantee|insurance|warranty|other
+  anchor_kind            text not null default 'event',
+                         -- event | schedule_task | milestone | unspecified
+  anchor_description     text not null,   -- העוגן כלשונו: "מרגע שליחת הצעת המחיר"
+  offset_value           numeric,
+  offset_unit            text,            -- hours|working_days|calendar_days|weeks|months
+  recurring              boolean not null default false,
+  status                 text not null default 'pending',
+                         -- pending | resolved | dismissed | expired
+  resolved_milestone_key text,            -- לאן קודמה כשנפתרה
+  trigger_source_table   text,
+  trigger_source_id      text,
+  trigger_event_date     date,
+  is_project_completion  boolean not null default false,
+  penalty_ils_per_day    numeric,
+  source_page            int,
+  source_excerpt         text not null,
+  confidence             numeric not null default 0.8,
+  written_by             text not null,
+  metadata               jsonb not null default '{}',
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+  unique (project_id, condition_key)
+);
+
+create index if not exists schedule_conditions_pending_idx
+  on schedule_contract_conditions (project_id, status, category);
 
 -- ── ציר BIDoc: אירועים נצפים ──────────────────────────────────────────────────
 create table if not exists schedule_observed_events (
@@ -1099,6 +1138,8 @@ create index if not exists schedule_alerts_triage_idx
 כל צעד כולל שאילתת אימות. אין להמשיך לצעד הבא לפני שהאימות עבר.
 
 > **רישום ביצוע — MAIN (פרופיל `dev`), 2026-08-05:** ה-runbook הורץ במלואו כמיגרציה `schedule_intelligence_runbook_v1`. אימות 9a: `7 | 5 | 3 | 7`. צעד 6: `alerts` ללא עמודות מנוע ו-582 שורות ללא שינוי. צעד 7: לוח שנה א׳–ה׳ נזרע לפרויקט `652bf3e0…` עם `holidays_through = null`. צעד 9b/9c: כפילות Snapshot נחסמה ואילוץ הנושא אכף את שני הכיוונים. **Content DB (Kapaim) טרם הורץ** — יידרש לפני מעבר לפרופיל `content`.
+>
+> **תוספת — 2026-08-05 (מאוחר יותר):** מיגרציה `schedule_contract_conditions_pool` הוסיפה את טבלת ההתניות (סעיף 6.8א) — סה"כ 8 טבלאות מנוע ב-MAIN. יובאו 76 התניות מרישום חוזה סמל (חילוץ סוכן חיצוני, `written_by='external_agent_csv'`). בהרצה עתידית של ה-runbook יש לכלול גם טבלה זו (טריגר `updated_at` + RLS).
 
 ---
 
@@ -1710,6 +1751,38 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 - נשמרות גם החריגה המקומית וגם ההשפעה המצטברת.
 
 **עד אז:** `remainingFloatDays`, `affectsMilestone` ו-`affectsProjectFinish` מוחזרים `null` — **לא `false`**. `false` הוא טענה שהמנוע אינו יכול להצדיק.
+
+### 6.8א מאגר התניות חוזיות ממתינות 🟡
+
+**הבעיה:** רוב ההתחייבויות בחוזה אינן תאריך — הן כלל יחסי שממתין לאירוע מפעיל: "אישור תוך שבוע משליחת הצעת המחיר", "תיקון תוך 14 יום מקבלת הודעה", "ערבות חדשה תוך 7 ימים מחילוט". נמדד על חוזה אמיתי: 74 מתוך 78 התחייבויות הזמן הן כאלה. `schedule_contract_milestones` דורשת `contract_date not null` — אין להן מקום שם, ואסור שיהיה: תאריך לא-פתור אינו אבן דרך.
+
+**הפתרון:** טבלת פול — `schedule_contract_conditions`. ההתניה נשמרת כהגדרה יחסית מלאה (עוגן מילולי + offset + יחידה) ויושבת בסטטוס `pending` בלי להשפיע על שום חישוב.
+
+**מחזור החיים:**
+
+```
+סוכן החוזים כותב ─► pending (הפול)
+                       │  אירוע מפעיל: מסמך נכנס / אירוע שטח / משימת גאנט
+                       ▼  שהותאמו לעוגן של ההתניה
+                    resolved
+                       │  פתרון התאריך: אך ורק scheduleCalendar.js (כלל 001)
+                       ▼
+        שורה חדשה ב-schedule_contract_milestones
+        (written_by='condition_resolver', metadata.condition_key)
+                       │
+                       ▼
+        המנוע מודד daysRemaining/daysLate כרגיל ⟵ התראות ⟵ צירים
+```
+
+- `anchor_kind`: `event` (מסמך/אירוע שטח) | `schedule_task` (נקודה בלוח הקבלן) | `milestone` (אבן דרך אחרת) | `unspecified`.
+- התניות מחזוריות (`recurring`) — למשל "פינוי פסולת שבועי" — נשארות בפול לתמיד; כל הפעלה מייצרת מופע.
+- סטטוסים: `pending` | `resolved` | `dismissed` | `expired`.
+- **Resolver סוכני זמין:** `scheduleConditionResolver.js` עובר שורה־שורה, מתכנן שאלת איתור, מעביר אותה למסלול ה-RAG המלא של הצ׳אט במצב אפמרלי, ומאמת תאריך + ציטוט + מקור. רק ראיה בביטחון `>=0.8` מקודמת אוטומטית. החיפוש מחויב ל-`project_id_filter`; מסד ישן שאינו תומך בסינון נכשל סגור ואינו מרחיב את החיפוש לכל החברה.
+- החישוב של ה-offset נשאר דטרמיניסטי ב-`scheduleCalendar.js`/Resolver ואינו מבוצע על ידי LLM. תוצאה עמומה, סותרת, ללא מקור, ללא ציטוט או ללא לוח עבודה נדרָש נשארת `pending` לבדיקה.
+- ההפעלה הראשית נעשית מפורשות מכפתור AI הצמוד לכל שורה בטבלת ההתניות. הבקשה כוללת `conditionId`, השרת טוען ומעבד רק את אותה שורה, ושאלת החיפוש נבנית רק מהעוגן, הכלל והמקור החוזי שלה. ה-API שומר גם יכולת batch מוגבלת ל-25 לשימוש תפעולי עתידי, אך ה-UI אינו מפעיל batch. שאלות פנימיות אינן נשמרות בהיסטוריית הצ׳אט ואינן נכנסות לזיכרון השיחה.
+- מקור ה־OpenRouter של Resolver זה הוא **אך ורק** `MAIN.public.agent_settings` (`data.secrets.openRouterApiKey`). בכל לחיצת שורה השרת מרענן את הרשומה לפני ההפעלה. אין fallback ל־`OPENROUTER_API_KEY` מה־env במסלול זה; מפתח חסר ב־Settings עוצר את ההפעלה במפורש.
+
+**שער:** 🟢 עבור פתרון התניות מבוסס ראיה דרך הצ׳אט. מיפוי אבן־דרך↔פעילות קבלן עדיין נפרד ותלוי בסעיף 6.3; גם בלעדיו אבן הדרך מוצגת כשורת milestone וכדגל חוזי גלובלי.
 
 ### 6.8 Status Classification Engine 🟡
 

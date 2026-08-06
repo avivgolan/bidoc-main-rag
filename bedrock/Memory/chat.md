@@ -45,9 +45,11 @@ tags:
 - Assistant links accept HTTP(S) only, open with `noopener noreferrer`, and hide raw URLs behind safe labels or structured source cards.
 - Main RAG answers attach each source link directly to the factual bullet it supports and prohibit a consolidated sources footer; retrieval context includes each record's own `source_url` to enable correct claim-to-source matching.
 - Workflow rendering falls back from the optional CDN-provided Dagre layout to Cytoscape's built-in breadth-first layout when Dagre is unavailable.
+- Knowledge Base paths are derived directly from `src/knowledge.js` via `import.meta.url`, not from the server process working directory or the settings module. Listing/searching optional uploaded documents is read-only and treats a missing `data/knowledge-base` directory as an empty upload set; only an actual upload creates directories.
 
 ## Recent Changes
 
+- 2026-08-05 -- Fixed the Local Knowledge Base connection check on read-only/serverless runtimes by removing directory creation from document listing and anchoring paths to the module-derived project root. Live diagnostics now report 3 agents and 3 built-in documents.
 - 2026-05-09 -- Main chat now builds a structured alert-agent request with `dateFilter`, `dateFrom`, and `dateTo`.
 - 2026-05-10 -- Workflow logs now show Alert as its own `Alert Agent` node instead of hiding it inside safety/tool steps.
 - 2026-05-10 -- Chat pending state now shows live Hebrew progress text such as project search, Alert, meetings, and source-quality checks.

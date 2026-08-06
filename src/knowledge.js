@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = process.cwd();
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KNOWLEDGE_AGENT_ROOT = path.join(ROOT, "knowledge-base", "agents");
 const KNOWLEDGE_UPLOAD_ROOT = path.join(ROOT, "data", "knowledge-base");
 const ALLOWED_EXTENSIONS = new Set([".md", ".txt"]);
@@ -200,8 +201,15 @@ async function loadKnowledgeDocuments(agentId) {
 async function listUploadedKnowledgeDocuments(agentIds) {
   const documents = [];
   for (const id of agentIds) {
-    await ensureAgentDir(id);
-    const entries = await fsp.readdir(agentDir(id), { withFileTypes: true });
+    let entries;
+    try {
+      entries = await fsp.readdir(agentDir(id), { withFileTypes: true });
+    } catch (error) {
+      // Uploaded documents are optional. Read-only/serverless deployments may
+      // not have a writable data directory, so listing must not create one.
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
     for (const entry of entries) {
       if (!entry.isFile() || !ALLOWED_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
       const filePath = path.join(agentDir(id), entry.name);

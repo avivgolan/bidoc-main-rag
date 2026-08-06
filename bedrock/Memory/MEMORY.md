@@ -51,3 +51,4 @@ the right branch notes.
 - [delay-claims.md](delay-claims.md) - Insights tab, delay claim schema, CRUD/API, and Stage 1 constraints.
 - [insights.md](insights.md) - AI project insights direction, index-first analysis endpoint, and current UI behavior.
 - [n8n-migration.md](n8n-migration.md) - n8n phase-out mapping, migration spec, and the internal indexing agent.
+- [schedule.md](schedule.md) - Schedule engine, contractual milestones, pending-condition resolution through chat RAG, and evidence gates.

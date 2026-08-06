@@ -111,12 +111,12 @@ const diagnosticGroups = [
   {
     id: "data",
     label: "מקורות מידע",
-    description: "Content Supabase, גרף הפרויקט ומאגר הידע",
+    description: "APP DATA (פרויקט KAPAIM), גרף הפרויקט ומאגר הידע",
     checks: [
-      ["content_supabase_index_table", "Content Supabase Index Table"],
-      ["content_supabase_alerts_table", "Content Supabase Alerts Table"],
-      ["content_supabase_hybrid_rpc", "Content Supabase Hybrid RPC"],
-      ["content_supabase_alerts_rpc", "Content Supabase Alerts RPC"],
+      ["content_supabase_index_table", "APP DATA Index Table"],
+      ["content_supabase_alerts_table", "APP DATA Alerts Table"],
+      ["content_supabase_hybrid_rpc", "APP DATA Hybrid RPC"],
+      ["content_supabase_alerts_rpc", "APP DATA Alerts RPC"],
       ["app_graph_tables", "Project Graph Tables"],
       ["app_graph_search_rpc", "Project Graph Search RPC"],
       ["knowledge_base", "Local Knowledge Base"]
@@ -515,7 +515,7 @@ function renderContentToolCards(list, models) {
         <span class="subagent-status ${cfg.enabled !== false ? "status-ok" : "status-warn"}">${cfg.enabled !== false ? "פעיל" : "כבוי"}</span>
       </div>
       <p class="subagent-desc">${tool.desc}</p>
-      <p class="subagent-desc ct-source">קורא ישירות מ: <code>${cfg.table || tool.sourceTable}</code> (המאגר של הסוכן ב-Content DB)</p>
+      <p class="subagent-desc ct-source">קורא ישירות מ: <code>${cfg.table || tool.sourceTable}</code> (המאגר של הסוכן ב-APP DATA)</p>
       <div class="subagent-config">
         <label class="subagent-config-label">
           <input type="checkbox" class="ct-enabled" ${cfg.enabled !== false ? "checked" : ""} /> הפעל סוכן
@@ -6304,7 +6304,7 @@ function applySettingsToForm() {
   $("configStatus").innerHTML = [
     `OpenRouter: ${state.settings.openRouterConfigured ? "מוגדר" : "חסר"}`,
     `App DB: ${state.settings.supabaseConfigured ? "מוגדר" : "חסר"}`,
-    `Content DB: ${state.settings.contentSupabaseConfigured ? "מוגדר" : "חסר"}`,
+    `APP DATA: ${state.settings.contentSupabaseConfigured ? "מוגדר" : "חסר"}`,
     `Tools: ${configured}/${n8nTools.length}`
   ].join("<br>");
   renderSettingsSourceStatus();
@@ -6689,8 +6689,8 @@ function renderSettingsSourceStatus() {
       <span>OpenRouter Key: <b>${secretSourceLabel(source.openRouterApiKey)}</b></span>
       <span>App DB URL: <b>${secretSourceLabel(source.supabaseUrl)}</b></span>
       <span>App DB Service Role: <b>${secretSourceLabel(source.supabaseServiceRoleKey)}</b></span>
-      <span>Content DB URL: <b>${secretSourceLabel(source.contentSupabaseUrl)}</b></span>
-      <span>Content DB Service Role: <b>${secretSourceLabel(source.contentSupabaseServiceRoleKey)}</b></span>
+      <span>APP DATA URL: <b>${secretSourceLabel(source.contentSupabaseUrl)}</b></span>
+      <span>APP DATA Service Role: <b>${secretSourceLabel(source.contentSupabaseServiceRoleKey)}</b></span>
       <span>Content Key Role: <b>${escapeHtml(state.settings.contentSource?.keyRole || "")}</b></span>
       <span>Content RPC: <b>${escapeHtml(state.settings.contentSource?.hybridRpcName || "")}</b></span>
       <span>Content Tables: <b>${escapeHtml([state.settings.contentSource?.indexTable, state.settings.contentSource?.alertsTable].filter(Boolean).join(" / "))}</b></span>

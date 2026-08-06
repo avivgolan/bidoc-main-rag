@@ -13,14 +13,19 @@ import {
   diffCalendarDays, normalizeCalendar, toIsoDate
 } from "../src/scheduleCalendar.js";
 import {
-  buildActivityKey, normalizeGanttTask, pickCurrentVersion,
-  scheduleSettings, SCHEDULE_SOURCE_PROFILES
+  buildActivityKey, MAIN_GANTT_SOURCE, normalizeGanttTask, pickCurrentVersion,
+  scheduleSettings, scheduleSupabaseConfig, SCHEDULE_SOURCE_PROFILES
 } from "../src/scheduleIngestion.js";
 import {
   buildScheduleHealth, scheduleDataVersion, snapshotRowFromIndicator,
   buildScheduleWorkflowLog, planScheduleAlerts, subjectKeyOf,
   BOOTSTRAP_SUMMARY_KEY, SCHEDULE_HEALTH_VERSION
 } from "../src/subagents/schedule.js";
+import {
+  addWorkingDays, milestoneKeyForCondition, normalizeEvidenceResult,
+  promotionRows, resolveConditionDueDate, runScheduleConditionResolver,
+  scheduleResolverError, settingsOwnedAiConfig
+} from "../src/subagents/scheduleConditionResolver.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -463,20 +468,46 @@ test("schedule ingestion: current version follows relevancy_date, not upload tim
 
 test("schedule ingestion: source profiles are a settings switch, not a code change", () => {
   const dev = scheduleSettings({});
-  assert.equal(dev.sourceProfile, "dev");
-  assert.equal(dev.tasksTable, "gantt_tasks_test");
-  assert.equal(dev.useContentDb, false);
+  assert.equal(dev.sourceProfile, "app_data");
+  assert.equal(dev.tasksTable, "gantt_tasks");
+  assert.equal(dev.filesTable, "gantt_files");
   const content = scheduleSettings({ sourceProfile: "content" });
   assert.equal(content.tasksTable, "gantt_tasks");
   assert.equal(content.filesTable, "gantt_files");
-  assert.equal(content.useContentDb, true);
   // Explicit override beats the profile preset.
   const custom = scheduleSettings({ sourceProfile: "content", tasksTable: "gantt_tasks_v2" });
   assert.equal(custom.tasksTable, "gantt_tasks_v2");
-  assert.equal(custom.useContentDb, true);
-  // Unknown profile degrades to dev instead of guessing.
-  assert.equal(scheduleSettings({ sourceProfile: "nope" }).sourceProfile, "dev");
-  assert.deepEqual(Object.keys(SCHEDULE_SOURCE_PROFILES).sort(), ["content", "dev"]);
+  // Unknown profile degrades to the verified APP DATA production tables.
+  assert.equal(scheduleSettings({ sourceProfile: "nope" }).sourceProfile, "app_data");
+  assert.deepEqual(Object.keys(SCHEDULE_SOURCE_PROFILES).sort(), ["app_data", "content", "dev", "kapaim"]);
+});
+
+test("schedule ingestion: source uploads use MAIN while engine tables use APP DATA / KAPAIM", () => {
+  const target = scheduleSupabaseConfig({
+    supabaseUrl: "https://app.example",
+    supabaseServiceRoleKey: "app-key",
+    contentSource: {
+      supabaseUrl: "https://smxibuaowzuxkznuouwj.supabase.co",
+      supabaseServiceRoleKey: "app-data-key"
+    }
+  });
+  assert.deepEqual(target, {
+    label: "APP DATA",
+    supabaseUrl: "https://smxibuaowzuxkznuouwj.supabase.co",
+    supabaseServiceRoleKey: "app-data-key"
+  });
+  assert.deepEqual(MAIN_GANTT_SOURCE, {
+    filesTable: "gantt_files_test",
+    tasksTable: "gantt_tasks_test"
+  });
+  assert.deepEqual(scheduleSupabaseConfig({
+    supabaseUrl: "https://main.example",
+    supabaseServiceRoleKey: "main-key"
+  }, "main", {}), {
+    label: "App / MAIN",
+    supabaseUrl: "https://main.example",
+    supabaseServiceRoleKey: "main-key"
+  });
 });
 
 // ─── orchestrator: pure parts only ───────────────────────────────────────────
@@ -544,6 +575,28 @@ test("schedule orchestrator: workflow log covers source, engine, and snapshot no
   assert.deepEqual(log.nodes.map((n) => n.id), ["schedule_source", "schedule_engine", "snapshot_write", "schedule_warnings"]);
   assert.equal(log.nodes[2].status, "error"); // failed persistence is visible, not silent
   assert.deepEqual(log.edges, [["schedule_source", "schedule_engine"], ["schedule_engine", "snapshot_write"]]);
+});
+
+test("schedule engine: sweep surfaces unlinked contract milestones as milestone-only rows", () => {
+  const milestone = { milestoneKey: "contract-completion-works", name: "השלמת העבודות", contractDate: "2026-02-12", isProjectCompletion: true, activityKey: null };
+  const result = sweep({
+    projectId: PROJECT, tasks: [LIGHTING_TASK], contractMilestones: [milestone],
+    asOf: AS_OF, calendar: CAL, scheduleMeta: { relevancyDate: "2025-12-03", versionCount: 1 }
+  });
+  const milestoneRow = result.indicators.find((ind) => ind.subject.kind === "milestone");
+  assert.ok(milestoneRow, "unlinked contract milestone must appear in the sweep");
+  assert.equal(milestoneRow.subject.milestoneKey, "contract-completion-works");
+  assert.equal(milestoneRow.status, "milestone_delayed");
+  assert.equal(milestoneRow.lateness.basis, "contract_finish");
+  assert.equal(milestoneRow.lateness.daysLate, 173); // Feb 12 -> Aug 4, engine-computed
+  assert.equal(milestoneRow.severity, 5); // breached contract milestone is severity 5
+  // A milestone linked to a present task must NOT get a duplicate row.
+  const linked = sweep({
+    projectId: PROJECT, tasks: [LIGHTING_TASK],
+    contractMilestones: [{ ...milestone, activityKey: LIGHTING_TASK.activityKey }],
+    asOf: AS_OF, calendar: CAL, scheduleMeta: { relevancyDate: "2025-12-03", versionCount: 1 }
+  });
+  assert.equal(linked.indicators.filter((ind) => ind.subject.kind === "milestone").length, 0);
 });
 
 // ─── alert planner (spec 3.3-3.6) — pure decision core ───────────────────────
@@ -622,6 +675,19 @@ test("schedule alerts: a persisting breach refreshes; a worsening one reopens", 
   assert.equal(dormant.updates.length, 0); // still suppressed, untouched
 });
 
+test("schedule alerts: milestone-only breach becomes an alert with a surrogate key", () => {
+  const milestoneInd = computeIndicator({
+    projectId: PROJECT, asOf: AS_OF, calendar: CAL,
+    contractMilestone: { milestoneKey: "m-comp", name: "השלמת העבודות", contractDate: "2026-02-12", isProjectCompletion: true }
+  });
+  const snapshotIds = { [subjectKeyOf(milestoneInd)]: "snap-m" };
+  const plan = planScheduleAlerts({ indicators: [milestoneInd], existingAlerts: [], isBootstrap: false, asOf: AS_OF, snapshotIds });
+  assert.equal(plan.creates.length, 1); // confidence 0.75 (contract basis) passes the medium gate
+  assert.equal(plan.creates[0].activity_key, "milestone:m-comp"); // NOT NULL surrogate
+  assert.equal(plan.creates[0].severity_level, 5);
+  assert.equal(plan.creates[0].occurrence_group_id, "schedule:milestone:m-comp");
+});
+
 test("schedule alerts: alerts close with a reason and are never deleted", () => {
   const done = freshIndicator({ percentComplete: 100, plannedFinish: "2026-09-01" }); // completed_on_time
   const plan = planScheduleAlerts({
@@ -640,6 +706,88 @@ test("schedule alerts: alerts close with a reason and are never deleted", () => 
 });
 
 // ─── runner (mirrors test/run-tests.js) ──────────────────────────────────────
+
+test("schedule condition resolver: computes supported offset units deterministically", () => {
+  assert.equal(resolveConditionDueDate({ offset_value: 14, offset_unit: "calendar_days" }, "2026-08-05").dueDate, "2026-08-19");
+  assert.equal(resolveConditionDueDate({ offset_value: 2, offset_unit: "weeks" }, "2026-08-05").dueDate, "2026-08-19");
+  assert.equal(resolveConditionDueDate({ offset_value: 1, offset_unit: "months" }, "2026-01-31").dueDate, "2026-02-28");
+  assert.equal(addWorkingDays("2026-08-06", 2, CAL), "2026-08-10");
+  assert.equal(resolveConditionDueDate({ offset_value: 7, offset_unit: "working_days" }, "2026-08-05", null).dueDate, null);
+  assert.equal(resolveConditionDueDate({ offset_value: 12, offset_unit: "hours" }, "2026-08-05").reason, "subday_deadline_cannot_be_stored_as_date");
+});
+
+test("schedule condition resolver: rejects an alleged found result without a valid date", () => {
+  const evidence = normalizeEvidenceResult({ status: "found", trigger_date: "sometime", confidence: 0.99 });
+  assert.equal(evidence.status, "ambiguous");
+  assert.equal(evidence.triggerDate, null);
+});
+
+test("schedule condition resolver: exposes an actionable OpenRouter authentication error", () => {
+  assert.deepEqual(scheduleResolverError(Object.assign(new Error("User not found."), { httpStatus: 401 })), {
+    code: "openrouter_auth",
+    message: "מפתח OpenRouter נדחה על ידי הספק (401). יש לעדכן מפתח תקין בהגדרות לפני הפעלת סוכן החיפוש."
+  });
+  assert.equal(scheduleResolverError(new Error("settings_openrouter_key_missing")).code, "settings_openrouter_key_missing");
+});
+
+test("schedule condition resolver: MAIN settings key overrides and never falls back to env config", () => {
+  const config = settingsOwnedAiConfig({ openRouterApiKey: "sk-env-old" }, "sk-main-settings");
+  assert.equal(config.openRouterApiKey, "sk-main-settings");
+  assert.throws(() => settingsOwnedAiConfig({ openRouterApiKey: "sk-env-old" }, ""), /settings_openrouter_key_missing/);
+});
+
+test("schedule condition resolver: promotes only high-confidence dated chat evidence", async () => {
+  const condition = {
+    id: "cond-1", condition_key: "approve-price", name: "אישור הצעת מחיר",
+    anchor_description: "משליחת הצעת המחיר", offset_value: 7, offset_unit: "calendar_days",
+    recurring: false, source_excerpt: "אישור תוך 7 ימים ממשלוח", confidence: 0.9
+  };
+  const result = await runScheduleConditionResolver({
+    projectId: PROJECT, conditions: [condition], calendar: CAL, commit: false, config: { projectId: PROJECT },
+    planSearch: async () => ({ searchQuestion: "מתי נשלחה הצעת המחיר?" }),
+    askChat: async () => ({ answer: "ההצעה נשלחה ב-2026-08-05", sources: [{ url: "https://example.test/doc", title: "הצעה" }] }),
+    verify: async () => ({ status: "found", trigger_date: "2026-08-05", evidence_quote: "נשלחה ביום 5.8.26", source_url: "https://example.test/doc", confidence: 0.92 })
+  });
+  assert.equal(result.summary.ready, 1);
+  assert.equal(result.results[0].dueDate, "2026-08-12");
+  assert.equal(result.results[0].milestoneKey, "condition:approve-price");
+  const rows = promotionRows({ projectId: PROJECT, condition, evidence: result.results[0].evidence, dueDate: result.results[0].dueDate, searchQuestion: result.results[0].searchQuestion });
+  assert.equal(rows.milestone.contract_date, "2026-08-12");
+  assert.equal(rows.milestone.confidence, 0.9);
+  assert.equal(rows.conditionPatch.status, "resolved");
+  assert.equal(milestoneKeyForCondition({ ...condition, recurring: true }, "2026-08-05"), "condition:approve-price:2026-08-05");
+});
+
+test("schedule condition resolver: leaves low-confidence chat evidence for review", async () => {
+  const result = await runScheduleConditionResolver({
+    projectId: PROJECT,
+    conditions: [{ id: "cond-2", condition_key: "notice", name: "הודעה", offset_value: 3, offset_unit: "calendar_days" }],
+    calendar: CAL, commit: false, config: { projectId: PROJECT },
+    planSearch: async () => ({ searchQuestion: "מתי נמסרה ההודעה?" }),
+    askChat: async () => ({ answer: "כנראה באוגוסט", sources: [] }),
+    verify: async () => ({ status: "found", trigger_date: "2026-08-05", confidence: 0.55, reason: "indirect mention" })
+  });
+  assert.equal(result.summary.needs_review, 1);
+  assert.equal(result.results[0].dueDate, undefined);
+});
+
+test("schedule condition resolver: a row action processes only the requested condition id", async () => {
+  const searched = [];
+  const conditions = [
+    { id: "cond-a", condition_key: "a", name: "A", offset_value: 1, offset_unit: "calendar_days", source_excerpt: "A" },
+    { id: "cond-b", condition_key: "b", name: "B", offset_value: 2, offset_unit: "calendar_days", source_excerpt: "B" }
+  ];
+  const result = await runScheduleConditionResolver({
+    projectId: PROJECT, conditionId: "cond-b", conditions, calendar: CAL, commit: false, config: { projectId: PROJECT },
+    planSearch: async ({ condition }) => { searched.push(condition.id); return { searchQuestion: `date for ${condition.id}` }; },
+    askChat: async () => ({ answer: "2026-08-05", sources: [{ url: "https://example.test/b", title: "B" }] }),
+    verify: async () => ({ status: "found", trigger_date: "2026-08-05", evidence_quote: "dated B", source_url: "https://example.test/b", confidence: 0.95 })
+  });
+  assert.deepEqual(searched, ["cond-b"]);
+  assert.equal(result.processed, 1);
+  assert.equal(result.results[0].conditionId, "cond-b");
+  assert.equal(result.results[0].dueDate, "2026-08-07");
+});
 
 const filterIndex = process.argv.indexOf("--filter");
 const filterPattern = filterIndex >= 0 ? process.argv[filterIndex + 1] : "";

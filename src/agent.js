@@ -41,7 +41,7 @@ import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, h
 
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
 
-export async function runChatPipeline({ message, sessionId, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [] }) {
+export async function runChatPipeline({ message, sessionId, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [], ephemeral = false, forceRag = false }) {
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
   const openRouterCalls = [];
   let openRouterCallSequence = 0;
@@ -64,8 +64,10 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
   });
   const sanitized = sanitizeMessage(effectiveMessage);
   emitRunEvent(runId, "sanitize", "Message sanitized", { changed: sanitized !== message, length: sanitized.length });
-  const saved = await saveMessage({ config, userMessage: message, sanitizedMessage: sanitized, sessionId });
-  emitRunEvent(runId, "save_message", "Message saved", { id: saved.id, status: saved.status });
+  const saved = ephemeral
+    ? { id: null, status: "ephemeral" }
+    : await saveMessage({ config, userMessage: message, sanitizedMessage: sanitized, sessionId });
+  emitRunEvent(runId, "save_message", ephemeral ? "Internal query kept out of chat history" : "Message saved", { id: saved.id, status: saved.status });
   const trace = [];
   let classification;
 
@@ -112,14 +114,18 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     };
     emitRunEvent(runId, "investigation", "Deep research requested by user", {});
   }
+  if (forceRag) {
+    classification = { ...classification, type: "RAG" };
+    emitRunEvent(runId, "switch", "RAG route required by internal caller", {});
+  }
 
-  let memory = await recentMemory({ config, sessionId }).catch((error) => {
+  let memory = ephemeral ? [] : await recentMemory({ config, sessionId }).catch((error) => {
     trace.push({ step: "memory", ok: false, error: error.message });
     emitRunEvent(runId, "memory", "Memory load failed", { error: error.message });
     return [];
   });
-  if (!memory.length) memory = getLocalMemory(sessionId);
-  const memorySummary = getMemorySummary(sessionId);
+  if (!ephemeral && !memory.length) memory = getLocalMemory(sessionId);
+  const memorySummary = ephemeral ? null : getMemorySummary(sessionId);
   emitRunEvent(runId, "memory", "Memory loaded", { messages: memory.length, summary: memorySummary });
 
   let result;
@@ -133,8 +139,10 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
 
   result.answer = sanitizeCustomerFacingAnswer(result.answer, { hebrew: isHebrew(sanitized) });
 
-  appendLocalMemory(sessionId, message, result.answer);
-  emitRunEvent(runId, "local_memory", "Local memory updated", {});
+  if (!ephemeral) {
+    appendLocalMemory(sessionId, message, result.answer);
+    emitRunEvent(runId, "local_memory", "Local memory updated", {});
+  }
   const workflowLog = buildWorkflowLog({
     message,
     sanitized,
@@ -150,19 +158,21 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
   workflowLog.cacheMetrics = finalizeCacheMetrics(cacheContext);
 
   const runEvents = getRunEvents(runId);
-  await updateMessage({
-    config,
-    messageId: saved.id,
-    aiResponse: result.answer,
-    status: "done",
-    workflowLog,
-    runEvents
-  }).then(() => {
-    emitRunEvent(runId, "update_message", "Message updated with AI response", { id: saved.id, status: "done" });
-  }).catch((error) => {
-    trace.push({ step: "updateMessage", ok: false, error: error.message });
-    emitRunEvent(runId, "update_message", "DB update failed", { error: error.message });
-  });
+  if (!ephemeral) {
+    await updateMessage({
+      config,
+      messageId: saved.id,
+      aiResponse: result.answer,
+      status: "done",
+      workflowLog,
+      runEvents
+    }).then(() => {
+      emitRunEvent(runId, "update_message", "Message updated with AI response", { id: saved.id, status: "done" });
+    }).catch((error) => {
+      trace.push({ step: "updateMessage", ok: false, error: error.message });
+      emitRunEvent(runId, "update_message", "DB update failed", { error: error.message });
+    });
+  }
 
   const output = {
     messageId: saved.id,
@@ -181,14 +191,14 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     toolCalls: projectChatToolCallsForClient(result.toolCalls, { question: sanitized }),
     knowledgePlan: result.knowledgePlan || null,
     investigationPlan: result.investigationPlan || null,
-    memorySummary: getMemorySummary(sessionId),
+    memorySummary: ephemeral ? null : getMemorySummary(sessionId),
     sourceQuality: result.sourceQuality || null,
     conflicts: result.conflicts || [],
     openRouterUsage: workflowLog.openRouterUsage,
     trace,
     workflowLog
   };
-  completeRun(runId, { messageId: saved.id, type: classification.type });
+  if (!ephemeral) completeRun(runId, { messageId: saved.id, type: classification.type });
   return output;
 }
 
@@ -618,7 +628,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
   if (isDeterministicExceptionMixedCapability(dataQueryRouting)) {
     const exactExceptionRecords = exactExceptionLookupRecords(toolCalls);
     const exactException = exactExceptionRecords.length === 1 ? exactExceptionRecords[0] : null;
-    if (exactException) {
+    if (exactException?.project_id && exactException?.attachment_id) {
       const evidence = await runExceptionEvidenceAgent({
         config,
         question: message,
@@ -3257,9 +3267,7 @@ export function exactExceptionLookupRecords(toolCalls = []) {
     .map((item) => item?.record || {})
     .filter((record) =>
       record.id !== null && record.id !== undefined &&
-      record.exception_date &&
-      record.project_id &&
-      record.attachment_id
+      record.exception_date
     );
 }
 
@@ -4400,7 +4408,9 @@ function formatDeterministicExceptionLookup({ operation, records = [], hebrew = 
       [hebrew ? "תאריך חריגה" : "Exception date", formatInvoiceDate(record.exception_date)],
       [hebrew ? "דחיפות שמורה" : "Stored urgency", record.urgency_level],
       [hebrew ? "סטטוס פריט שמור" : "Stored item status", record.item_status]
-    ].map(([label, value]) => `- **${label}:** ${escapeInvoiceDisplayValue(String(value))}`);
+    ]
+      .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
+      .map(([label, value]) => `- **${label}:** ${escapeInvoiceDisplayValue(String(value))}`);
     return records.length === 1 ? lines.join("\n") : `### ${index + 1}. ${formatInvoiceDate(record.exception_date)}\n\n${lines.join("\n")}`;
   });
   const boundary = hebrew

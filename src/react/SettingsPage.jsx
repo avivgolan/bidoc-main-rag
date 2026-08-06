@@ -6,7 +6,7 @@ const SECTIONS = [
   { id: "connections", label: "חיבורים" },
   { id: "agents",      label: "סוכני AI" },
   { id: "retrieval",   label: "שליפה ו-RAG" },
-  { id: "content",     label: "Content DB" },
+  { id: "content",     label: "APP DATA" },
   { id: "tools",       label: "כלים n8n" },
   { id: "performance", label: "ביצועים ו-Cache" },
   { id: "presets",     label: "פריסטים" },
@@ -126,7 +126,11 @@ function settingsToForm(s) {
     knowledge:     { ...s.knowledge, triggerKeywords: (s.knowledge?.triggerKeywords || []).join("\n") },
     toolsRuntime:  { ...s.toolsRuntime },
     secrets:       { openRouterApiKey: "", supabaseUrl: s.secrets?.supabaseUrl || "", supabaseServiceRoleKey: "" },
-    contentSource: { ...s.contentSource },
+    contentSource: {
+      ...s.contentSource,
+      useAppSupabase: s.contentSource?.usesAppSupabase === true,
+      supabaseServiceRoleKey: ""
+    },
     n8nBaseUrl:    s.n8nBaseUrl || "",
     tools:         s.tools ? Object.fromEntries(Object.entries(s.tools).map(([k, v]) => [k, v?.url || ""])) : {},
     timezone:      s.timezone || "Asia/Jerusalem",
@@ -306,12 +310,16 @@ function InfoHint({ children }) {
 
 const focusRing = "0 0 0 3px rgba(63, 141, 104, .16)";
 
-function Input({ value, onChange, type = "text", placeholder, min, max, step, style }) {
+function Input({ value, onChange, type = "text", placeholder, min, max, step, style,
+  name, autoComplete, spellCheck, autoCapitalize, ...inputProps }) {
   const [focused, setFocused] = useState(false);
   return (
     <input
       type={type} value={value ?? ""} placeholder={placeholder}
       min={min} max={max} step={step}
+      name={name} autoComplete={autoComplete} spellCheck={spellCheck}
+      autoCapitalize={autoCapitalize}
+      {...inputProps}
       onChange={e => onChange(type === "number" ? Number(e.target.value) : e.target.value)}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       style={{ ...s.input,
@@ -383,14 +391,20 @@ function Textarea({ value, onChange, rows = 6, placeholder }) {
   );
 }
 
-function PasswordField({ label, value, onChange, placeholder, hint, info }) {
+function PasswordField({ label, value, onChange, placeholder, hint, info, disabled = false }) {
   const [show, setShow] = useState(false);
+  const fieldName = `bidoc-secret-${String(label).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <Field label={label} hint={hint} info={info}>
       <div style={{ position: "relative" }}>
-        <Input type={show ? "text" : "password"} value={value} onChange={onChange}
-          placeholder={placeholder} style={{ paddingLeft: 36 }} />
-        <button onClick={() => setShow(v => !v)}
+        <Input type="text" value={value} onChange={onChange}
+          name={fieldName} autoComplete="off" spellCheck={false} autoCapitalize="none"
+          data-1p-ignore="true" data-lpignore="true" data-bwignore="true"
+          aria-autocomplete="none"
+          disabled={disabled}
+          placeholder={placeholder}
+          style={{ paddingLeft: 36, WebkitTextSecurity: show ? "none" : "disc" }} />
+        <button type="button" onClick={() => setShow(v => !v)}
           style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)",
             background: "none", border: "none", cursor: "pointer", color: "var(--text-muted)", padding: 2 }}
           title={show ? "הסתר" : "הצג"}>
@@ -681,28 +695,35 @@ function RetrievalSection({ models, form, update }) {
   );
 }
 
-// ─── Section: Content DB ──────────────────────────────────────────────────────
+// ─── Section: APP DATA ───────────────────────────────────────────────────────
 
 function ContentDbSection({ form, update, configStatus }) {
+  const useAppSupabase = form.contentSource?.useAppSupabase === true;
   return (
     <div style={s.section}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <StatusDot ok={configStatus?.contentSupabase} />
         <span style={{ fontSize: 12.5, color: "var(--text-secondary)" }}>
-          {configStatus?.contentSupabase ? "Content DB מוגדר" : "Content DB לא מוגדר — המערכת תשתמש ב-App Supabase"}
+          {configStatus?.contentSupabase ? "APP DATA מוגדר" : "APP DATA לא מוגדר — המערכת תשתמש ב-App Supabase"}
         </span>
       </div>
 
       <div style={{ ...s.card, display: "flex", flexDirection: "column", gap: 12 }}>
-        <Field label="Content Supabase URL">
-          <Input value={form.contentSource?.url} onChange={v => update("contentSource.url", v)}
-            placeholder="https://content-project.supabase.co" />
+        <Toggle
+          label="השתמש ב-App Supabase של MAIN"
+          checked={useAppSupabase}
+          onChange={v => update("contentSource.useAppSupabase", v)}
+        />
+        <Field label="APP DATA Supabase URL">
+          <Input value={form.contentSource?.supabaseUrl} onChange={v => update("contentSource.supabaseUrl", v)}
+            placeholder="https://content-project.supabase.co" disabled={useAppSupabase} />
         </Field>
         <PasswordField
           label="Service Role Key"
-          value={form.contentSource?.serviceRoleKey}
-          onChange={v => update("contentSource.serviceRoleKey", v)}
+          value={form.contentSource?.supabaseServiceRoleKey}
+          onChange={v => update("contentSource.supabaseServiceRoleKey", v)}
           placeholder="sb_secret_..."
+          disabled={useAppSupabase}
         />
         <div style={s.grid2}>
           <Field label="Hybrid RPC Name">
@@ -724,7 +745,7 @@ function ContentDbSection({ form, update, configStatus }) {
         </div>
       </div>
 
-      <InfoHint>Content Supabase משמש רק לשליפת תוכן: RAG, timeline ו-alerts. אם URL או Key ריקים, המערכת תשתמש ב-App Supabase הקיים.</InfoHint>
+      <InfoHint>APP DATA הוא פרויקט KAPAIM ב-Supabase ומשמש את כל סוכני המידע, RAG, timeline, alerts ו-Schedule. כשהמתג פעיל, הכתובת והמפתח נלקחים מחיבור App Supabase של MAIN.</InfoHint>
     </div>
   );
 }
@@ -1096,7 +1117,7 @@ function StatusItem({ label, ok, detail }) {
 
 function StatusBar({ configStatus, form, saveState }) {
   const cs = form.contentSource || {};
-  const urlShort = cs.url ? cs.url.replace(/^https?:\/\//, "").split(".")[0] : null;
+  const urlShort = cs.supabaseUrl ? cs.supabaseUrl.replace(/^https?:\/\//, "").split(".")[0] : null;
   const isSaved = saveState === "saved";
   const isError = saveState === "error";
   const isSaving = saveState === "saving";
@@ -1117,7 +1138,7 @@ function StatusBar({ configStatus, form, saveState }) {
       <Sep />
       <StatusItem label="App DB" ok={configStatus.supabase} />
       <Sep />
-      <StatusItem label="Content DB" ok={configStatus.contentSupabase} detail={urlShort} />
+      <StatusItem label="APP DATA" ok={configStatus.contentSupabase} detail={urlShort} />
       {cs.hybridRpcName && <><Sep /><StatusItem label="Content RPC" detail={cs.hybridRpcName} /></>}
       {(cs.indexTable || cs.alertsTable) && (
         <><Sep /><StatusItem label="Tables" detail={[cs.indexTable, cs.alertsTable].filter(Boolean).join(", ")} /></>

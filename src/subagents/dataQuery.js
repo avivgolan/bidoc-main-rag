@@ -75,12 +75,12 @@ export const DATA_QUERY_QUANTITATIVE_PATTERN = /כמה|מספר|ספור|ספי�
 
 const DATA_QUERY_SEMANTIC_PATTERN = /ציטוט|צטט|מי אמר|מי השתתף|מה נאמר|הצג.{0,20}(?:מקור|ראיה)|ראיות|למה|מדוע|סיבה|הסבר|מה הוחלט|הוחלט|החלט(?:ה|ות)|התחייב|משתתפ|נוכח|נוכחות|נימוק|רציונל|מועד|דדליין|סכם|סיכום|תמצת|תמצית|תובנ(?:ה|ות)|ניתוח|מידע\s+כולל|גורם שורש|אחראי|cite|citation|quote|who (?:said|attended|participated)|what (?:did|was).{0,30}say|what was (?:decided|discussed|raised|covered)|decid(?:e|ed|ing|ion|ions)|commitments?|participants?|attendees?|attendance|rationale|deadlines?|due\s+dates?|reason|cause|show.{0,20}(?:source|evidence)|evidence|why|explain|describ(?:e|ed|ing)|summari[sz]e|insights?|analy[sz](?:e|ed|ing|is)|overview|root cause|responsib/iu;
 const DATA_QUERY_MEETING_SEMANTIC_DETAIL_PATTERN = /מה\s+עלה|על\s+מה\s+דיברו|what\s+was\s+(?:discussed|raised|covered)/iu;
-const DATA_QUERY_LOOKUP_TARGET_PATTERN = /\b(?:invoice|invoices|transaction|transactions|payment|payments|receipt|receipts|meeting|meetings|email|emails|message|messages|conversation|conversations|report|reports|alert|alerts|exception|exceptions|change\s+order|change\s+orders|record|records|document|documents)\b|חשבוני(?:ת|ות)|עסק(?:ה|אות)|תשלו(?:ם|מים)|קבל(?:ה|ות)|ישיב(?:ה|ות)|פגיש(?:ה|ות)|מייל(?:ים)?|הודע(?:ה|ות)|שיח(?:ה|ות)|דוח(?:ות)?|דו["״]?ח(?:ות)?|התרא(?:ה|ות)|חריגים|רשומ(?:ה|ות)|מסמ(?:ך|כים)/iu;
+const DATA_QUERY_LOOKUP_TARGET_PATTERN = /\b(?:invoice|invoices|transaction|transactions|payment|payments|receipt|receipts|meeting|meetings|email|emails|message|messages|conversation|conversations|report|reports|alert|alerts|exception|exceptions|change\s+order|change\s+orders|record|records|document|documents)\b|חשבוני(?:ת|ות)|עסק(?:ה|אות)|תשלו(?:ם|מים)|קבל(?:ה|ות)|ישיב(?:ה|ות)|פגיש(?:ה|ות)|מייל(?:ים)?|הודע(?:ה|ות)|שיח(?:ה|ות)|דוח(?:ות)?|דו["״]?ח(?:ות)?|התרא(?:ה|ות)|חריג(?:ה|ים|ות)?|רשומ(?:ה|ות)|מסמ(?:ך|כים)/iu;
 const DATA_QUERY_LOOKUP_TEMPORAL_WINDOW_PATTERN = /\b(?:last|previous|first)\s+(?:day|week|month|quarter|year)\b|(?:ביום|בשבוע|בחודש|ברבעון|בשנה)\s+(?:ה)?(?:אחרון|אחרונה|ראשון|ראשונה)/iu;
 const DATA_QUERY_LOOKUP_SORT_ONLY_PATTERN = /\b(?:newest|oldest|latest|earliest)\s+first\b/iu;
 const DATA_QUERY_LOOKUP_UNPARSED_NUMBER_PATTERN = /\b(?:twenty[-\s](?:six|seven|eight|nine)|thirty|forty|fifty|sixty|seventy|eighty|ninety|thousand|million)\b|(?:עשרים\s+ו?(?:שש|שישה|שבע|שבעה|שמונה|תשע|תשעה)|שלושים|ארבעים|חמישים|מאה|אלף|מיליון)/iu;
 const DATA_QUERY_LOOKUP_ENGLISH_TARGET = "(?:invoices?|transactions?|payments?|receipts?|meetings?|emails?|messages?|conversations?|reports?|alerts?|exceptions?|change\\s+orders?|records?|documents?)";
-const DATA_QUERY_LOOKUP_HEBREW_TARGET = "(?:חשבוני(?:ת|ות)|עסק(?:ה|אות)|תשלו(?:ם|מים)|קבל(?:ה|ות)|ישיב(?:ה|ות)|פגיש(?:ה|ות)|מייל(?:ים)?|הודע(?:ה|ות)|שיח(?:ה|ות)|דוח(?:ות)?|דו[\"״]?ח(?:ות)?|התרא(?:ה|ות)|חריגים|רשומ(?:ה|ות)|מסמ(?:ך|כים))";
+const DATA_QUERY_LOOKUP_HEBREW_TARGET = "(?:חשבוני(?:ת|ות)|עסק(?:ה|אות)|תשלו(?:ם|מים)|קבל(?:ה|ות)|ישיב(?:ה|ות)|פגיש(?:ה|ות)|מייל(?:ים)?|הודע(?:ה|ות)|שיח(?:ה|ות)|דוח(?:ות)?|דו[\"״]?ח(?:ות)?|התרא(?:ה|ות)|חריג(?:ה|ים|ות)?|רשומ(?:ה|ות)|מסמ(?:ך|כים))";
 const DATA_QUERY_BET_PREFIXED_LATEST_INVOICE_PATTERN = /^\s*מה\s+עלה\s+בחשבונית\s+ה?אחרונה\s*[?.!]?\s*$/iu;
 const DATA_QUERY_BET_PREFIXED_INVOICE_REFERENCE_PATTERN = /בחשבוני(?:ת|ות)(?=\s|[?.!,]|$)/iu;
 const DATA_QUERY_FINANCIAL_SEMANTIC_DETAIL_PATTERN = /מה\s+(?:כתוב|עלה)|אילו\s+(?:פריטים|שורות|סעיפים)|(?:של|מאת)\s+ספק|\bwhat\b.{0,45}\b(?:contain|say|mean|include|items?|details?)\b|\bfrom\s+(?:a\s+)?(?:supplier|vendor)\b/iu;
@@ -103,7 +103,7 @@ const DATA_QUERY_EMAIL_ATTACHMENT_DETAIL_PATTERN = /\b(?:how\s+many|count|list|s
 const DATA_QUERY_EMAIL_ATTACHMENT_FLAG_METRIC_PATTERN = /\b(?:how\s+many|count|number\s+of)\s+(?:the\s+)?(?:project[-\s]?related\s+)?emails?\s+(?:with|without)\s+attachments?(?:\s+are\s+there)?\b|כמה\s+מייל(?:ים)?\s+(?:עם|ללא|בלי)\s+(?:קובץ|קבצים|מצורף|מצורפים)/iu;
 const DATA_QUERY_EMAIL_INGESTION_TIME_PATTERN = /\b(?:created_at|creation|ingestion|ingested|created)\b.{0,60}\bemails?\b|\bemails?\b.{0,60}\b(?:created_at|creation|ingestion|ingested|created)\b|(?:created_at|יצירה|קליטה|נקלט).{0,60}מייל|מייל.{0,60}(?:created_at|יצירה|קליטה|נקלט)/iu;
 const DATA_QUERY_EMAIL_SCOPE_FIELD_PATTERN = /\b(?:project_id|project\s+id|email\s+id|record\s+id|mail\s+id|conversation\s+id)\b|מזהה\s+(?:פרויקט|מייל|רשומה|שיחה)/iu;
-const DATA_QUERY_EXCEPTION_REPORT_PATTERN = /\b(?:exception|exceptions|exception\s+reports?|change\s+orders?|additional\s+work|extra\s+costs?|contract\s+deviations?|irregularit(?:y|ies))\b|(?:[בלמכושה])?(?:ה)?חריגים(?=\s|[?.!,;]|$)/iu;
+const DATA_QUERY_EXCEPTION_REPORT_PATTERN = /\b(?:exception|exceptions|exception\s+reports?|change\s+orders?|additional\s+work|extra\s+costs?|contract\s+deviations?|irregularit(?:y|ies))\b|(?:[בלמכושה])?(?:ה)?חריג(?:ה|ים|ות)?(?=\s|[?.!,;]|$)/iu;
 const DATA_QUERY_CONSULTANT_REPORT_PATTERN = /\bconsultant(?:'s)?\s+reports?\b|\bconsultancy\s+reports?\b|(?:דוח(?:ות)?|דו[״"']?ח(?:ות)?)\s+(?:ה)?יוע(?:ץ|צים)|חוות\s+דעת\s+(?:של\s+)?(?:ה)?יוע(?:ץ|צים)/iu;
 const DATA_QUERY_CONSULTANT_SEMANTIC_DETAIL_PATTERN = /\b(?:recommendations?|recommended|proposed\s+actions?|topic|speciali[sz]ation|summari[sz]e|summary|what\s+did\s+the\s+consultant\s+say)\b|(?:המלצות?|המליץ|המליצה|פעולות?\s+מוצעות?|נושא\s+הדוח|תחום\s+התמחות|סכ(?:ם|מי)|תקציר)/iu;
 const DATA_QUERY_CONSULTANT_MIXED_LATEST_PATTERN = /(?:latest|most\s+recent|last|אחרון|האחרון|אחרונה|האחרונה).{0,60}(?:consultant|יועץ).{0,80}(?:summari[sz]|recommend|סכ|המלצ)|(?:consultant|יועץ).{0,60}(?:latest|most\s+recent|last|אחרון|האחרון|אחרונה|האחרונה).{0,80}(?:summari[sz]|recommend|סכ|המלצ)/iu;
@@ -141,6 +141,7 @@ const DATA_QUERY_ALERT_AMBIGUOUS_QUALIFIER_PATTERN = /\bsafety\s+alerts?\b|\brep
 const DATA_QUERY_ALERT_UNDATED_PATTERN = /\bundated\s+alerts?\b|\balerts?\b.{0,30}\b(?:(?:have|with)\s+no|without|missing|null)\b.{0,12}\b(?:data_)?date\b|\balerts?\b.{0,20}\bdata_date\s+(?:is\s+)?null\b|התרא(?:ה|ות).{0,30}(?:ללא|חסר|חסרות).{0,12}תאריך|התרא(?:ה|ות).{0,20}data_date\s+null/iu;
 const DATA_QUERY_ALERT_DATED_COUNT_PATTERN = /\b(?:how\s+many|count|number\s+of|total)\b.{0,30}\bdated\s+alerts?\b|\b(?:how\s+many|count|number\s+of|total)\b.{0,30}\balerts?\b.{0,20}\b(?:have|with)\b.{0,10}\b(?:a\s+)?date\b|כמה.{0,30}התראות.{0,20}(?:עם|בעלות)\s+תאריך/iu;
 const DATA_QUERY_MANAGED_READ_TABLES = new Set(["financial_transactions", "safety_reports", "alerts", "meetings", "emails", "exceptions_report", "consultants_reports"]);
+const DATA_QUERY_MAIN_EXCEPTION_ITEM_STATUS_VALUES = ["בטיפול", "rejected"];
 const DATA_QUERY_MANAGED_READ_PATHS = new Map([
   ["financial_transactions", "financial_transactions"],
   ["safety_reports", "safety_reports"],
@@ -166,9 +167,10 @@ export function dataQuerySettings(config = getConfig()) {
   // When the user has scanned the real DB and picked tables, the manifest and
   // allowlists are derived from that selection; otherwise fall back to the
   // single canonical exact data_index contract.
-  // This agent is restricted to the CONTENT connection only — it must never touch
-  // the main/app Supabase. Any "app" selection is dropped and the manifest is
-  // filtered to content tables.
+  // Logical Data Query schemas remain restricted to "content". When Settings
+  // explicitly maps Content to MAIN, contentSupabaseConfig resolves that logical
+  // schema to the app connection while the fixed read-only transport below still
+  // enforces approved tables, fields, filters, and GET/HEAD methods.
   const selectionTables = normalizeSelectionTables(raw.tables).filter((item) => item.connection === "content");
   const hasSelection = selectionTables.length > 0;
   const builtInManifest = buildDataQueryManifest(config);
@@ -235,11 +237,15 @@ function dataQueryExactAvailable(table) {
 
 function dataQueryReadCredentialsConfigured(config = {}) {
   const safeConfig = config || {};
+  const appReadConnection = safeConfig.contentSource?.usesAppSupabase === true && Boolean(
+    String(safeConfig.contentSource?.supabaseUrl || safeConfig.supabaseUrl || "").trim() &&
+    String(safeConfig.contentSource?.supabaseServiceRoleKey || safeConfig.supabaseServiceRoleKey || "").trim()
+  );
   const managedIdentity = Boolean(
     String(safeConfig.dataQueryServiceEmail || "").trim() &&
     String(safeConfig.dataQueryServicePassword || "")
   );
-  return managedIdentity || Boolean(String(safeConfig.dataQueryReadAccessToken || "").trim());
+  return appReadConnection || managedIdentity || Boolean(String(safeConfig.dataQueryReadAccessToken || "").trim());
 }
 
 function activateDataQueryPolicy(policy, config) {
@@ -339,7 +345,24 @@ export function buildDataQueryManifest(config = getConfig()) {
   const alertsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("alerts"), config);
   const meetingsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("meetings"), config);
   const emailsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("emails"), config);
-  const exceptionsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("exceptions_report"), config);
+  const baseExceptionsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("exceptions_report"), config);
+  const exceptionsPolicy = config?.contentSource?.usesAppSupabase === true && baseExceptionsPolicy
+    ? {
+        ...baseExceptionsPolicy,
+        declaredExactOperations: ["count", "group_count", ...DATA_QUERY_LOOKUP_OPERATIONS],
+        allowedOperations: ["count", "group_count", ...DATA_QUERY_LOOKUP_OPERATIONS],
+        fields: (baseExceptionsPolicy.fields || [])
+          .filter((field) => !["project_id", "urgency_level", "requested_amount_ex_vat"].includes(field.name))
+          .map((field) => field.name === "item_status"
+            ? { ...field, allowedValues: DATA_QUERY_MAIN_EXCEPTION_ITEM_STATUS_VALUES }
+            : field),
+        valueNormalization: {
+          ...(baseExceptionsPolicy.valueNormalization || {}),
+          urgencyValues: [],
+          itemStatusValues: DATA_QUERY_MAIN_EXCEPTION_ITEM_STATUS_VALUES
+        }
+      }
+    : baseExceptionsPolicy;
   const consultantsPolicy = activateDataQueryPolicy(dataQueryTablePolicy("consultants_reports"), config);
 
   return [
@@ -2169,7 +2192,7 @@ function dataQueryExceptionLookupHasUnapprovedModifier(text) {
     /^(?:when|what)\s+(?:was|is)\s+the\s+(?:latest|newest|most\s+recent|earliest|oldest|first)\s+(?:exception|change\s+order)$/iu
   ];
   const hebrew = new RegExp(
-    `^(?:(?:הצג|הראה|תראה)(?:\\s+לי)?\\s+(?:את\\s+)?(?:${number}\\s+)?(?:(?:דוח|דוחות)\\s+)?(?:ה)?חריגים\\s+(?:ה)?(?:אחרון|אחרונה|אחרונים|אחרונות|ראשון|ראשונה|ראשונים|ראשונות)|(?:מה|מהו|מהי|מתי)\\s+(?:היה|הייתה|הוא|היא)?\\s*(?:(?:דוח|דוחות)\\s+)?(?:ה)?חריגים\\s+(?:ה)?(?:אחרון|אחרונה|ראשון|ראשונה))$`,
+    `^(?:(?:הצג|הראה|תראה)(?:\\s+לי)?\\s+(?:את\\s+)?(?:${number}\\s+)?(?:(?:דוח|דוחות)\\s+)?(?:ה)?חריג(?:ה|ים|ות)?\\s+(?:ה)?(?:אחרון|אחרונה|אחרונים|אחרונות|ראשון|ראשונה|ראשונים|ראשונות)|(?:מה|מהו|מהי|מתי)\\s+(?:היה|הייתה|הוא|היא)?\\s*(?:(?:דוח|דוחות)\\s+)?(?:ה)?חריג(?:ה|ים|ות)?\\s+(?:ה)?(?:אחרון|אחרונה|ראשון|ראשונה))$`,
     "iu"
   );
   return !english.some((pattern) => pattern.test(normalized)) && !hebrew.test(normalized);
@@ -4131,6 +4154,10 @@ function validatePlanFields(plan, table) {
 
 export function dataQuerySupabaseHeaders(config, extra = {}) {
   const connection = contentSupabaseConfig(config);
+  if (config?.contentSource?.usesAppSupabase === true) {
+    if (!connection.supabaseServiceRoleKey) throw new Error("MAIN Supabase service role key is missing");
+    return { ...supabaseHeaders(connection.supabaseServiceRoleKey), ...extra };
+  }
   const accessToken = String(config?.dataQueryReadAccessToken || "").trim();
   if (!accessToken) {
     throw new Error("DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN is missing");
@@ -4148,6 +4175,10 @@ export async function resolveDataQuerySupabaseHeaders(
   { fetchImpl = fetch, now = Date.now } = {}
 ) {
   const connection = contentSupabaseConfig(config);
+  if (config?.contentSource?.usesAppSupabase === true) {
+    if (!connection.supabaseServiceRoleKey) throw new Error("MAIN Supabase service role key is missing");
+    return { ...supabaseHeaders(connection.supabaseServiceRoleKey), ...extra };
+  }
   const accessToken = await getDataQueryAccessToken(config, { fetchImpl, now });
   return {
     ...supabaseHeaders(connection.supabaseServiceRoleKey),
@@ -4235,6 +4266,52 @@ async function fetchManagedPostgrestRead({ config, connection, table, plan, time
       }, effectivePlan);
     }
     if (DATA_QUERY_LOOKUP_OPERATIONS.has(effectivePlan.operation)) {
+      if (approvedTableName === "exceptions_report" && config?.contentSource?.usesAppSupabase === true) {
+        const executionSelect = [...new Set([...(effectivePlan.select || []), "attachment_id"])];
+        const scanPlan = { ...effectivePlan, orderBy: [{ field: "id", direction: "asc" }] };
+        const pageSize = 1000;
+        const maxRows = 5000;
+        const allRows = [];
+        let total = null;
+        for (let offset = 0; ; offset += pageSize) {
+          const response = await fetchManagedPostgrestPage({
+            connection,
+            tableName: approvedTableName,
+            plan: scanPlan,
+            method: "GET",
+            select: executionSelect,
+            limit: pageSize,
+            offset,
+            headers,
+            signal: controller.signal,
+            fetchImpl
+          });
+          if (total !== null && response.total !== total) throw new Error("not computable: exception total changed during lookup");
+          total = response.total;
+          if (total > maxRows) throw new Error(`not computable: exception lookup exceeds ${maxRows} rows`);
+          allRows.push(...normalizeManagedReadRows(approvedTableName, response.rows, { mainMapped: true }));
+          if (allRows.length >= total) break;
+          if (!response.rows.length) throw new Error("not computable: exception lookup ended before the exact total was reached");
+        }
+        const direction = effectivePlan.operation === "lookup_earliest" ? "asc" : "desc";
+        const orderBy = [
+          { field: "exception_date", direction },
+          { field: "id", direction }
+        ];
+        const normalizedRows = [...allRows]
+          .sort((left, right) => compareDataQueryLookupRows(left, right, orderBy))
+          .slice(0, effectivePlan.limit);
+        attestExceptionLookupRows({ ...effectivePlan, orderBy }, normalizedRows, total);
+        return normalizeExactExecution({
+          operation: effectivePlan.operation,
+          rows: normalizedRows,
+          cardinality: total,
+          result_rows: normalizedRows.length,
+          exactness: "exact",
+          truncated: false,
+          sampled: false
+        }, { ...effectivePlan, orderBy });
+      }
       const executionSelect = ["meetings", "exceptions_report", "consultants_reports"].includes(approvedTableName)
         ? [...new Set([...(effectivePlan.select || []), "project_id", "attachment_id"])]
         : effectivePlan.select;
@@ -4678,7 +4755,7 @@ function assertConsultantReportManagedReadPlan(plan) {
   }
 }
 
-function normalizeManagedReadRows(tableName, rows) {
+function normalizeManagedReadRows(tableName, rows, { mainMapped = false } = {}) {
   if (tableName === "alerts") {
     return (Array.isArray(rows) ? rows : []).map((row) => {
       const validId = Object.prototype.hasOwnProperty.call(row || {}, "id") &&
@@ -4778,9 +4855,16 @@ function normalizeManagedReadRows(tableName, rows) {
         !DATA_QUERY_UNSAFE_IDENTITY_CHARACTERS.test(normalizedAttachmentId)
       );
       const hasDate = Object.prototype.hasOwnProperty.call(row || {}, "exception_date");
-      const validDate = hasDate && (row.exception_date === null || row.exception_date === "" || !Number.isNaN(Date.parse(String(row.exception_date))));
-      const validUrgency = Object.prototype.hasOwnProperty.call(row || {}, "urgency_level") && DATA_QUERY_EXCEPTION_URGENCY_VALUES.includes(row.urgency_level);
-      const validStatus = Object.prototype.hasOwnProperty.call(row || {}, "item_status") && DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES.includes(row.item_status);
+      const normalizedExceptionDate = normalizeExceptionBusinessDate(row?.exception_date, { allowDayFirst: mainMapped });
+      const validDate = hasDate && (row.exception_date === null || row.exception_date === "" || Boolean(normalizedExceptionDate));
+      const validUrgency = mainMapped
+        ? !Object.prototype.hasOwnProperty.call(row || {}, "urgency_level")
+        : Object.prototype.hasOwnProperty.call(row || {}, "urgency_level") && DATA_QUERY_EXCEPTION_URGENCY_VALUES.includes(row.urgency_level);
+      const validStatus = Object.prototype.hasOwnProperty.call(row || {}, "item_status") && (
+        mainMapped
+          ? DATA_QUERY_MAIN_EXCEPTION_ITEM_STATUS_VALUES.includes(row.item_status)
+          : DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES.includes(row.item_status)
+      );
       const amountPresent = Object.prototype.hasOwnProperty.call(row || {}, "requested_amount_ex_vat");
       const amountValue = row?.requested_amount_ex_vat;
       const validAmount = !amountPresent || amountValue === null || amountValue === "" || (Number.isFinite(Number(amountValue)) && Number(amountValue) >= 0);
@@ -4789,6 +4873,7 @@ function normalizeManagedReadRows(tableName, rows) {
       }
       return {
         ...row,
+        ...(normalizedExceptionDate ? { exception_date: normalizedExceptionDate } : {}),
         ...(projectPresent ? { project_id: normalizedProjectId } : {}),
         ...(attachmentPresent ? { attachment_id: normalizedAttachmentId } : {})
       };
@@ -4818,6 +4903,24 @@ function normalizeManagedReadRows(tableName, rows) {
       risk_level: canonicalizeDataQuerySafetyRisk(row.risk_level) || "unknown"
     };
   });
+}
+
+function normalizeExceptionBusinessDate(value, { allowDayFirst = false } = {}) {
+  if (value === null || value === undefined || value === "") return null;
+  const raw = String(value).trim();
+  if (allowDayFirst) {
+    const match = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (match) {
+      const day = Number(match[1]);
+      const month = Number(match[2]);
+      const year = Number(match[3]);
+      const date = new Date(Date.UTC(year, month - 1, day));
+      if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+      return date.toISOString();
+    }
+  }
+  const timestamp = Date.parse(raw);
+  return Number.isNaN(timestamp) ? null : new Date(timestamp).toISOString();
 }
 
 function dataQueryManagedReadFields(plan) {

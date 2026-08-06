@@ -1,7 +1,7 @@
 ---
 area: history
 project: bidoc agent
-updated: 2026-07-05
+updated: 2026-08-05
 ---
 
 # Project History
@@ -13,6 +13,7 @@ This is not a git replacement.
 
 ## Timeline Notes
 
+- [2026-08-04-backfill](timeline/2026-08-04-backfill.md)
 - [2026-07-02-backfill](timeline/2026-07-02-backfill.md)
 - [2026-06-17-backfill](timeline/2026-06-17-backfill.md)
 - [2026-06-03-backfill](timeline/2026-06-03-backfill.md)
@@ -20,6 +21,10 @@ This is not a git replacement.
 
 ## Recent Activity
 
+- **2026-08-04** `backfill` — History backfill: 146 commits, 0 releases, 3 integrations
+- **2026-08-04** `integration_codex` — codex integration detected
+- **2026-08-04** `integration_claude` — claude integration detected
+- **2026-08-04** `integration_cursor` — cursor integration detected
 - **2026-07-02** `backfill` — History backfill: 96 commits, 0 releases, 3 integrations
 - **2026-07-02** `integration_codex` — codex integration detected
 - **2026-07-02** `integration_claude` — claude integration detected
@@ -31,7 +36,6 @@ This is not a git replacement.
 - **2026-05-07** `backfill` — History backfill: 23 commits, 0 releases, 2 integrations
 - **2026-05-07** `integration_claude` — claude integration detected
 - **2026-05-07** `integration_cursor` — cursor integration detected
-- **2026-05-07** `project_start` — Project started (first commit: 2026-05-05, 23 total commits)
 
 ## Reference
 

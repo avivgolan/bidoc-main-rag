@@ -284,10 +284,19 @@ export function computeIndicator(input = {}) {
   factors.push({ factor: "contractor_schedule_source", delta: 0.7 });
   if (basis === "contract_finish") { score += 0.05; factors.push({ factor: "contract_basis", delta: 0.05 }); }
   if (scheduleAgeDays == null && task) { score -= 0.05; factors.push({ factor: "unknown_schedule_age", delta: -0.05 }); }
-  if (staleSchedule) {
+  // A stale contractor schedule taints judgments that lean on it — not a
+  // milestone-only indicator measured against a signed contract date.
+  if (task && staleSchedule) {
     const delta = scheduleAgeDays > 180 ? -0.25 : -0.15;
     score += delta;
     factors.push({ factor: "stale_schedule", delta, ageDays: scheduleAgeDays });
+  }
+  // The contract writer's own extraction confidence (spec 14.3): a derived or
+  // interpreted contract date propagates its uncertainty into the indicator.
+  const contractSourceConfidence = Number(contractMilestone?.confidence);
+  if (Number.isFinite(contractSourceConfidence) && contractSourceConfidence < 0.9) {
+    score -= 0.15;
+    factors.push({ factor: "uncertain_contract_date", delta: -0.15, sourceConfidence: contractSourceConfidence });
   }
   if (calendarState !== "ok" && (lateness.workingDaysLate != null || lateness.workingDaysRemaining != null)) {
     score -= 0.05;
@@ -553,6 +562,21 @@ export function sweep(input = {}) {
       contractMilestone: milestoneByActivity.get(task.activityKey) ?? null,
       previousTask: previousByStableKey.get(task.stableKey ?? task.activityKey) ?? null,
       observed: observedByActivity[task.activityKey] ?? null
+    });
+    indicator.severity = deriveSeverity(indicator, thresholds);
+    indicators.push(indicator);
+  }
+
+  // Contract milestones with no linked task still get a milestone-only
+  // indicator — the contract axis must not vanish just because nobody has
+  // mapped it to an activity yet (spec 3.1: sweep answers "what is breaching",
+  // and a breached contractual milestone is the worst kind).
+  const taskKeys = new Set(tasks.map((task) => task?.activityKey).filter(Boolean));
+  for (const milestone of contractMilestones) {
+    if (!milestone?.milestoneKey) continue;
+    if (milestone.activityKey && taskKeys.has(milestone.activityKey)) continue; // shown on its activity row
+    const indicator = computeIndicator({
+      projectId, contractMilestone: milestone, asOf, calendar, scheduleMeta, thresholds, calculatedAt
     });
     indicator.severity = deriveSeverity(indicator, thresholds);
     indicators.push(indicator);

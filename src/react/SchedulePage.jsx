@@ -217,11 +217,14 @@ function AxisRow({ indicator, scale, asOf, selected, onSelect }) {
   return (
     <div className={`axisRow ${selected ? "is-selected" : ""}`} onClick={() => onSelect(indicator)}>
       <div className="axisTrack" dir="ltr">
-        {/* Contract axis — a flag when it exists; honestly absent otherwise */}
+        {/* Contract axis — a flag when it exists. An absent axis renders as an
+            empty lane: full-width dashed "missing" markers on every row merged
+            visually with the breach bars into one unreadable stripe. What was
+            not checked is stated once, in the project-level gates. */}
         <div className="axisLane">
           {contract != null
             ? <span className="axisContractFlag" style={{ left: `${contract}%` }} title={`מועד חוזי: ${t.contractFinish}`}>⚑</span>
-            : <span className="axisLaneEmpty" title="אין ציר חוזי לפעילות זו — ההשוואה מול לוח הקבלן בלבד" />}
+            : null}
         </div>
         {/* Contractor plan axis */}
         <div className="axisLane">
@@ -239,7 +242,9 @@ function AxisRow({ indicator, scale, asOf, selected, onSelect }) {
               title={`${latenessText(l)} — ${basisText(l)}`} />
           )}
         </div>
-        {/* Execution axis (BIDoc): observed when it exists, forecast otherwise */}
+        {/* Execution axis (BIDoc): observed when it exists, forecast otherwise.
+            Nothing at all when neither exists — an empty lane is the honest
+            rendering of "no execution evidence", not a dashed placeholder. */}
         <div className="axisLane">
           {obsStart != null || obsEnd != null ? (
             <div className="axisBarObserved"
@@ -247,9 +252,7 @@ function AxisRow({ indicator, scale, asOf, selected, onSelect }) {
               title={`ביצוע נצפה: ${t.observedStart ?? "?"} → ${t.observedFinish ?? "?"}`} />
           ) : forecast != null ? (
             <span className="axisForecast" style={{ left: `${forecast}%` }} title={`תחזית סיום: ${t.forecastFinish}`}>◆</span>
-          ) : (
-            <span className="axisLaneEmpty" title="אין ציר ביצוע — לא נצפה אירוע שטח ואין תחזית (0% ביצוע)" />
-          )}
+          ) : null}
         </div>
       </div>
       <div className="axisName">
@@ -265,8 +268,26 @@ function AxisRow({ indicator, scale, asOf, selected, onSelect }) {
   );
 }
 
-function ThreeAxesView({ indicators, asOf, selected, onSelect }) {
+function ThreeAxesView({ indicators, allIndicators, asOf, selected, onSelect }) {
   const scale = useMemo(() => makeScale(indicators, asOf), [indicators, asOf]);
+  // The contract axis, chart-wide: every contractual milestone date extracted
+  // from the contract renders as a labeled vertical line across all rows —
+  // the supervisor sees plan and execution against the contract, not a glyph.
+  // Sourced from the unfiltered indicator set: a milestone that isn't itself
+  // late (e.g. "רק באיחור") must not vanish from the contract axis just
+  // because it dropped out of the row list.
+  const contractMarkers = useMemo(() => {
+    const byDate = new Map();
+    for (const ind of allIndicators ?? indicators) {
+      const date = ind.timing?.contractFinish;
+      if (!date || byDate.has(date)) continue;
+      byDate.set(date, {
+        date,
+        name: ind.subject?.milestoneKey ? ind.subject.name : "אבן דרך חוזית"
+      });
+    }
+    return [...byDate.values()];
+  }, [indicators, allIndicators]);
   if (!scale) return <div className="schedEmpty">אין תאריכים להצגה</div>;
   const shown = indicators.slice(0, AXES_ROW_CAP);
   const asOfPos = scale.pos(asOf);
@@ -284,6 +305,15 @@ function ThreeAxesView({ indicators, asOf, selected, onSelect }) {
             {scale.months.map((m) => (
               <span key={m.iso} className="axesGridLine" style={{ left: `${m.left}%` }} />
             ))}
+            {contractMarkers.map((marker) => {
+              const left = scale.pos(marker.date);
+              if (left == null) return null;
+              return (
+                <span key={marker.date} className="axesContractLine" style={{ left: `${left}%` }}>
+                  <label>⚑ {marker.name} · {marker.date}</label>
+                </span>
+              );
+            })}
             {asOfPos != null && (
               <span className="axesTodayLine" style={{ left: `${asOfPos}%` }}>
                 <label>נכון ל-{asOf}</label>
@@ -353,6 +383,118 @@ const IndicatorDetail = ({ indicator, onClose }) => {
   );
 };
 
+// ─── Pending conditions box (spec 6.8א) ──────────────────────────────────────
+//
+// Obligations that have no date yet because their trigger has not arrived.
+// They deliberately do NOT appear on the timeline: a condition without a
+// resolved date has no position in time. This box is where they wait.
+
+const CATEGORY_LABELS = {
+  execution: "ביצוע",
+  payment: "תשלומים",
+  notice: "הודעות",
+  guarantee: "ערבויות",
+  insurance: "ביטוחים",
+  warranty: "בדק ואחריות",
+  other: "אחר"
+};
+
+const UNIT_LABELS = {
+  hours: "שעות",
+  working_days: "ימי עבודה",
+  calendar_days: "ימים",
+  weeks: "שבועות",
+  months: "חודשים"
+};
+
+const ANCHOR_KIND_LABELS = {
+  event: "אירוע נכנס",
+  schedule_task: "נקודה בלוח הקבלן",
+  milestone: "אבן דרך אחרת",
+  unspecified: "לא הוגדר"
+};
+
+function offsetText(condition) {
+  if (condition.offset_value == null) return "ללא כימות";
+  const unit = UNIT_LABELS[condition.offset_unit] ?? condition.offset_unit ?? "";
+  return `${Number(condition.offset_value)} ${unit}`.trim();
+}
+
+const PendingConditionsBox = ({ data, expanded, onToggle, resolvingId, onResolve, rowResults }) => {
+  const conditions = data?.conditions ?? [];
+  if (!conditions.length) return null;
+  const grouped = Object.entries(
+    conditions.reduce((acc, c) => {
+      (acc[c.category] ||= []).push(c);
+      return acc;
+    }, {})
+  );
+  return (
+    <div className="condBox">
+      <button type="button" className="condHead" onClick={onToggle}>
+        <span className="condHeadTitle">
+          ⏳ אבני דרך הממתינות לטריגר
+          <span className="condHeadCount">{conditions.length}</span>
+        </span>
+        <span className="condHeadHint">
+          התחייבויות יחסיות מהחוזה — יקבלו תאריך ויעלו על ציר הזמן ברגע שהאירוע המפעיל ייקלט
+        </span>
+        <span className="condChevron">{expanded ? "▲" : "▼"}</span>
+      </button>
+      {expanded ? (
+        <div className="condBody">
+          <div className="condResolverBar">
+            <div>
+              <strong>סוכן איתור תאריכים</strong>
+              <span>כל כפתור מפעיל חיפוש נפרד שמוגבל להתניה, לאירוע ולתאריך של אותה שורה בלבד.</span>
+            </div>
+          </div>
+          {grouped.map(([category, items]) => (
+            <div key={category} className="condGroup">
+              <div className="condGroupTitle">
+                {CATEGORY_LABELS[category] ?? category}
+                <span className="condGroupCount">{items.length}</span>
+              </div>
+              <div className="condTableWrap">
+                <table className="condTable">
+                  <thead>
+                    <tr><th>אבן הדרך</th><th>הכלל החוזי</th><th>סוג הטריגר</th><th>מקור</th><th>פעולה</th></tr>
+                  </thead>
+                  <tbody>
+                    {items.map((c) => {
+                      const result = rowResults?.[c.id];
+                      const isBusy = resolvingId === c.id;
+                      return (
+                        <tr key={c.id} title={c.source_excerpt}>
+                          <td className="condName">{c.name}</td>
+                          <td className="condRule"><b>{offsetText(c)}</b> מ־{c.anchor_description}</td>
+                          <td><span className={`condAnchor is-${c.anchor_kind}`}>{ANCHOR_KIND_LABELS[c.anchor_kind] ?? c.anchor_kind}</span></td>
+                          <td className="condPage">{c.source_page ? `עמ׳ ${c.source_page}` : "—"}</td>
+                          <td className="condActionCell">
+                            <button type="button" className="condResolveBtn" onClick={() => onResolve(c)} disabled={Boolean(resolvingId)}>
+                              {isBusy ? "סוכן AI מחפש…" : "חפש והשלם עם AI"}
+                            </button>
+                            {result ? (
+                              <span className={`condRowResult is-${result.status}`} title={result.reason || result.evidence?.reason || ""}>
+                                {result.status === "not_found" ? "לא נמצא תאריך" : result.status === "needs_review" ? "נדרשת בדיקה" : result.status === "error" ? result.reason || "החיפוש נכשל" : result.dueDate || "הושלם"}
+                                {result.errorCode === "openrouter_auth" ? <a className="condSettingsLink" href="#settings">עדכון מפתח בהגדרות</a> : null}
+                              </span>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const HealthStrip = ({ health }) => {
   if (!health) return null;
   const age = health.schedule?.ageDays;
@@ -395,6 +537,11 @@ export function SchedulePage() {
   const [sweepResult, setSweepResult] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [baselinedCount, setBaselinedCount] = useState(null);
+  const [conditions, setConditions] = useState(null);
+  const [conditionsOpen, setConditionsOpen] = useState(true);
+  const [resolverBusyId, setResolverBusyId] = useState(null);
+  const [resolverResults, setResolverResults] = useState({});
+  const [resolverNotice, setResolverNotice] = useState("");
   const [view, setView] = useState("axes");
   const [onlyLate, setOnlyLate] = useState(true);
   const [minDaysLate, setMinDaysLate] = useState("");
@@ -416,20 +563,44 @@ export function SchedulePage() {
     setError("");
     try {
       const asOfQuery = asOfValue ? `&asOf=${encodeURIComponent(asOfValue)}` : "";
-      const [healthResult, sweep, visibleAlerts, baselined] = await Promise.all([
+      const optional = (promise, fallback, label) => promise.catch(err => ({
+        ...fallback,
+        warning: `${label}: ${err.message}`
+      }));
+      const [healthResult, sweep, visibleAlerts, baselined, pendingConditions] = await Promise.all([
         api(`/api/schedule/health?projectId=${encodeURIComponent(pid)}${asOfQuery}`),
         api("/api/schedule/sweep", {
           method: "POST",
           body: { projectId: pid, asOf: asOfValue || null, persist: false, filters: { excludeCompleted: false } }
         }),
-        api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=false&lifecycle=open,updated`),
-        api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=true`)
+        optional(
+          api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=false&lifecycle=open,updated`),
+          { alerts: [] },
+          "טעינת התראות"
+        ),
+        optional(
+          api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=true`),
+          { count: 0 },
+          "טעינת היסטוריית התראות"
+        ),
+        optional(
+          api(`/api/schedule/conditions?projectId=${encodeURIComponent(pid)}&status=pending`),
+          { conditions: [] },
+          "טעינת אבני דרך חוזיות"
+        )
       ]);
       setHealth(healthResult);
       setSweepResult(sweep);
       setAlerts(visibleAlerts.alerts ?? []);
       setBaselinedCount(baselined.count ?? 0);
-      setWarnings([...new Set([...(healthResult.warnings ?? []), ...(sweep.warnings ?? [])])]);
+      setConditions(pendingConditions);
+      setWarnings([...new Set([
+        ...(healthResult.warnings ?? []),
+        ...(sweep.warnings ?? []),
+        visibleAlerts.warning,
+        baselined.warning,
+        pendingConditions.warning
+      ].filter(Boolean))]);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -448,6 +619,31 @@ export function SchedulePage() {
       setError(err.message);
     } finally {
       setScanBusy(false);
+    }
+  }, [projectId, asOf, loadData]);
+
+  const resolveCondition = useCallback(async (condition) => {
+    if (!projectId || !condition?.id) return;
+    setResolverBusyId(condition.id);
+    setError("");
+    setResolverNotice("");
+    try {
+      const result = await api("/api/schedule/conditions/resolve", {
+        method: "POST",
+        body: { projectId, conditionId: condition.id, commit: true, minConfidence: 0.8 },
+        timeoutMs: 900_000
+      });
+      const rowResult = result.results?.[0] ?? { status: "error", reason: "הסוכן לא החזיר תוצאה" };
+      setResolverResults((current) => ({ ...current, [condition.id]: rowResult }));
+      if (rowResult.status === "resolved") {
+        setResolverNotice(`הושלם: ${condition.name} — המועד החוזי ${rowResult.dueDate} נשמר בבסיס הנתונים.`);
+        await loadData(projectId, asOf);
+      }
+    } catch (err) {
+      setResolverResults((current) => ({ ...current, [condition.id]: { status: "error", reason: err.message } }));
+      setError(err.message);
+    } finally {
+      setResolverBusyId(null);
     }
   }, [projectId, asOf, loadData]);
 
@@ -470,15 +666,38 @@ export function SchedulePage() {
 
   const rows = useMemo(() => {
     const indicators = sweepResult?.indicators ?? [];
-    return indicators.filter((ind) => {
+    const filtered = indicators.filter((ind) => {
       if (onlyLate && ind.lateness?.isLate !== true) return false;
       if (minDaysLate && !(ind.lateness?.daysLate >= Number(minDaysLate))) return false;
       return true;
     });
+    // Contract milestones pin to the top: the contract axis is the highest
+    // authority and must never fall off the row cap. Stable sort keeps the
+    // engine's most-late-first order within each group.
+    return [...filtered].sort((a, b) =>
+      Number(b.subject.kind === "milestone") - Number(a.subject.kind === "milestone"));
   }, [sweepResult, onlyLate, minDaysLate]);
 
   const meta = sweepResult?.scheduleMeta;
-  const projectGates = sweepResult?.indicators?.[0]?.gates;
+  // Project-level gates: the best state any indicator reached per gate —
+  // one linked contract milestone means the contract axis EXISTS for the
+  // project, even if most activities are not linked to it.
+  const projectGates = useMemo(() => {
+    const indicators = sweepResult?.indicators ?? [];
+    if (!indicators.length) return null;
+    const rank = { ok: 2, stale: 1, missing: 0 };
+    const gates = {};
+    for (const key of Object.keys(GATE_LABELS)) {
+      if (key === "scheduleVersions") {
+        gates[key] = Math.max(...indicators.map((ind) => Number(ind.gates?.scheduleVersions) || 0));
+      } else {
+        gates[key] = indicators.reduce(
+          (best, ind) => ((rank[ind.gates?.[key]] ?? 0) > (rank[best] ?? 0) ? ind.gates[key] : best),
+          "missing");
+      }
+    }
+    return gates;
+  }, [sweepResult]);
 
   return (
     <div className="schedulePage" dir="rtl">
@@ -539,6 +758,16 @@ export function SchedulePage() {
         </div>
       ) : null}
 
+      {resolverNotice ? <div className="condResolverResult" role="status">{resolverNotice}</div> : null}
+      <PendingConditionsBox
+        data={conditions}
+        expanded={conditionsOpen}
+        onToggle={() => setConditionsOpen((v) => !v)}
+        resolvingId={resolverBusyId}
+        onResolve={resolveCondition}
+        rowResults={resolverResults}
+      />
+
       <div className="schedFilters">
         <div className="schedViewToggle">
           <button type="button" className={view === "axes" ? "is-active" : ""} onClick={() => setView("axes")}>צירים</button>
@@ -550,7 +779,7 @@ export function SchedulePage() {
       </div>
 
       {view === "axes" ? (
-        <ThreeAxesView indicators={rows} asOf={sweepResult?.asOf} selected={selected} onSelect={setSelected} />
+        <ThreeAxesView indicators={rows} allIndicators={sweepResult?.indicators} asOf={sweepResult?.asOf} selected={selected} onSelect={setSelected} />
       ) : (
         <div className="schedTableWrap">
           <table className="schedTable">

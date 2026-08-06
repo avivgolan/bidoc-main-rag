@@ -904,8 +904,15 @@ export function normalizeContentSourceSettings(value = {}, fallback = {}) {
   const raw = value && typeof value === "object" ? value : {};
   const fallbackUrl = fallback.fallbackSupabaseUrl || "";
   const fallbackKey = fallback.fallbackSupabaseServiceRoleKey || "";
-  const configuredUrl = raw.supabaseUrl || process.env.CONTENT_SUPABASE_URL || "";
-  const configuredKey = resolveSecret(raw.supabaseServiceRoleKey, process.env.CONTENT_SUPABASE_SERVICE_ROLE_KEY);
+  const useAppSupabase = raw.useAppSupabase === true;
+  // `url` / `serviceRoleKey` were briefly emitted by the React Settings form.
+  // Accept them only as a compatibility read path; all current writes use the
+  // canonical server names below so a URL can never be paired with a key from
+  // a different settings shape.
+  const configuredUrl = useAppSupabase ? "" : (raw.supabaseUrl || raw.url || process.env.CONTENT_SUPABASE_URL || "");
+  const configuredKey = useAppSupabase
+    ? ""
+    : resolveSecret(raw.supabaseServiceRoleKey || raw.serviceRoleKey, process.env.CONTENT_SUPABASE_SERVICE_ROLE_KEY);
   const supabaseUrl = trimSlash(configuredUrl || fallbackUrl);
   const supabaseServiceRoleKey = configuredKey || fallbackKey;
   const indexTable = String(raw.indexTable || process.env.CONTENT_INDEX_TABLE || DEFAULT_INDEX_TABLE).trim();
@@ -917,7 +924,8 @@ export function normalizeContentSourceSettings(value = {}, fallback = {}) {
     indexTable,
     alertsTable,
     alertsRpcName: String(raw.alertsRpcName || process.env.CONTENT_ALERTS_RPC_NAME || `match_${alertsTable}`).trim(),
-    usesAppSupabase: !configuredUrl && !configuredKey
+    useAppSupabase,
+    usesAppSupabase: useAppSupabase || (!configuredUrl && !configuredKey)
   };
 }
 
@@ -1002,6 +1010,14 @@ export function readLocalSettings() {
   return _settingsCache;
 }
 
+// Some internal agents are intentionally SETTINGS-owned: their credentials
+// must come from MAIN.agent_settings and must never silently fall back to an
+// environment variable. The schedule condition resolver uses this boundary.
+export function settingsOpenRouterApiKey() {
+  const value = String(_settingsCache?.secrets?.openRouterApiKey || "").trim();
+  return /^sk-/i.test(value) && !isMaskedSecret(value) ? value : "";
+}
+
 export async function writeLocalSettings(settings, options = {}) {
   const source = String(options.source || "").trim();
   if (!source) {
@@ -1074,8 +1090,12 @@ export async function writeLocalSettings(settings, options = {}) {
       redisUrl: mergeSecret(existing.cache?.redisUrl, has("cache") ? settings.cache?.redisUrl : undefined)
     }),
     contentSource: {
-      supabaseUrl: mergedContentSource.supabaseUrl || "",
-      supabaseServiceRoleKey: mergeSecret(existingContentSource.supabaseServiceRoleKey, has("contentSource") ? incomingContentSource.supabaseServiceRoleKey : undefined),
+      useAppSupabase: mergedContentSource.useAppSupabase === true,
+      supabaseUrl: mergedContentSource.supabaseUrl || mergedContentSource.url || "",
+      supabaseServiceRoleKey: mergeSecret(
+        existingContentSource.supabaseServiceRoleKey || existingContentSource.serviceRoleKey,
+        has("contentSource") ? (incomingContentSource.supabaseServiceRoleKey ?? incomingContentSource.serviceRoleKey) : undefined
+      ),
       hybridRpcName: mergedContentSource.hybridRpcName || mergedRetrieval.rpcName || DEFAULT_HYBRID_RPC_NAME,
       indexTable: mergedContentSource.indexTable || DEFAULT_INDEX_TABLE,
       alertsTable: mergedContentSource.alertsTable || DEFAULT_ALERTS_TABLE,

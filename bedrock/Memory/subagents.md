@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: subagents
-last_updated: 2026-07-26
+last_updated: 2026-08-05
 tags:
   - subagents
   - alert
@@ -46,8 +46,8 @@ tags:
 - The Kapaim `public.exec_read_sql(text, integer)` RPC was dropped in the live Phase 0/1 migration. The tracked `supabase/data-query-exec-read-sql.sql` now decommissions the RPC and provisions the least-privilege `bidoc_data_query` role instead.
 - The canonical Query Plan runtime never emits or executes SQL and cannot join across connections.
 - The `hashtags` column exists in `data_index_embeddings_gf_dor_agent` (text) and many `_gf` tables (emails_gf is an ARRAY type), but NOT in `alerts`/`alerts_gf`. So a "count delays by hashtag" question must target `data_index_...`, not the alerts tables — selecting the right table in the picker matters.
-- The Data Query Agent is restricted to the CONTENT connection ONLY; it has no access to the main/app Supabase (project MAIN `pmdnmzuqbcnzgkuhpfnx`). Config normalization drops non-Content selections, the manifest contains only Content tables, and `allowedSchemas` is always `["content"]`. The schema-scan endpoint was removed.
-- The content connection points to the **Kapaim** Supabase project (`smxibuaowzuxkznuouwj`, ~42 tables: data_index, alerts, meetings, consultants_reports, etc. — most have a `hashtags` text column). MAIN holds the app's own internals (chat_messages_gf, agent_settings, delay_* , graph_*, the index embeddings) and is intentionally off-limits to this agent.
+- The Data Query Agent remains restricted to the logical `content` schema and fixed GET/HEAD table contracts. When Settings explicitly sets `contentSource.useAppSupabase`, that logical connection resolves to MAIN and the approved fixed transport may use the server-side MAIN service key; arbitrary tables, fields, methods, bodies, and SQL remain blocked.
+- The current localhost Settings map Content to MAIN (`pmdnmzuqbcnzgkuhpfnx`). The former separate Kapaim connection (`smxibuaowzuxkznuouwj`) is historical and its saved key was invalid during the 2026-08-05 audit.
 
 - The current-state audit is `docs/data-query-agent-current-state-audit.md`; its Phase 0/1 status section records the implemented security baseline. Operator and deployment instructions are in `docs/data-query-agent-phase0-phase1-operations.md`.
 - The Phase 2 exactness contract and live/gold verification evidence are in `docs/data-query-agent-phase2-correctness.md`.
@@ -57,7 +57,7 @@ tags:
 - Data Query Phase 3.1 uses a dedicated Supabase Auth service account with `app_metadata.data_query_role=bidoc_data_query`. The runtime validates, caches, and refreshes short-lived tokens; the static custom-role JWT is compatibility-only.
 - The live Phase 3.1 wrapper is claim-gated `SECURITY DEFINER` with an empty search path. `bidoc_data_query` remains `NOLOGIN` and has no direct table/sequence privileges; API roles cannot execute the fixed-table implementation function.
 - Phase 3.1 intended a missing optional table selection to fall back to the exact `data_index` contract rather than the hybrid-search embedding table. Phase 4A.0 found that the current fallback still constructs two additional non-exact manifest entries; see the correction below.
-- Data Query managed authentication and provisioning explicitly reject `contentSource.usesAppSupabase=true`. Local Phase 3.1 acceptance uses the explicit Kapaim Content host; never provision against MAIN.
+- Direct managed-service-account token provisioning still rejects `contentSource.usesAppSupabase=true`; the explicit MAIN mapping instead uses only the server-side service key inside the fixed read-only Data Query transport.
 - Phase 3.1 implementation and provisioning instructions are in `docs/data-query-agent-phase3-1-managed-auth.md`.
 - Data Query Phase 4A.0 is a read-only structured-capability map. Exact analytics remain limited to `data_index`; `latest`/`earliest`/`last N` need a typed lookup operation and machine-readable record contract before any business table is promoted.
 - Phase 4A.0 found that the real no-selection fallback built `data_index`, configured alerts, and `meetings_documents`, while the old test manually forced `allowedTables: ["data_index"]`. Phase 4A.1 later corrected this drift and added a real-path regression test.
@@ -143,6 +143,7 @@ tags:
 - 2026-07-28 -- Completed Phase 4F for fixed `public.exceptions_report`: audited 20 source rows, enabled only date/urgency/item-status exact metadata, kept exception numbers, identities, companies, money, execution days, links, and lifecycle interpretation excluded or `not_computable`, and added an exact same-record evidence handoff with exception/project/attachment attestation. Verification passed 7/7 Phase 4F groups, 114/114 protected Data Query tests, and authenticated exact/lookup/mixed/fail-closed UI checks. No Content data, schema, role, grant, RLS, Auth/Supabase setting, production configuration, or deployment changed; Phase 4G is the next unauthorized gate.
 - 2026-07-28 -- Added the controlled financial `transaction_type` vocabulary for all 19 live raw values / 18 canonical concepts, exact type-specific counts and complete lists, response-only typo canonicalization, 200-row complete-list and batched enrichment bounds, semantic precedence, ambiguity fail closure, and a published UI matrix. A follow-up regression found that one live process could bypass retrieval using one capability snapshot but re-plan Data Query from another, then substitute semantic fragments after plan rejection. Main now reuses one request-scoped Data Query settings/routing snapshot across scheduling and execution, and exact financial failures stop before semantic synthesis. Verification is 121/121 protected Data Query tests; the full suite retains the same 11 unrelated UI/static-contract failures. No database, table, row, RLS, permission, role, Supabase setting, or deployment changed.
 - 2026-08-01 -- Phase 4H completed through authenticated UI closeout for fixed `public.consultants_reports`: one dated report, 18 same-report chunks, canonical `report_date`, stored `item_status`, exact counts/groups/series/lookups, and report/project/attachment-attested mixed recommendations. The bilingual UI matrix passed exact, mixed, and fail-closed cases after closing people-count semantic fallthrough, Hebrew implementation morphology, and bidirectional ingestion-time grammar. Company names are allowed in semantic narrative; internal report/document identifiers remain redacted. Verification passes 1/1 focused and 123/123 protected Data Query tests; the full suite retains the same 11 unrelated UI failures. Phase 4I remains unauthorized.
+- 2026-08-05 -- Repaired `מהו החריג האחרון?`: singular Hebrew exception grammar now selects exact Data Query, bypasses hybrid/graph/reranking, and schedules only `data_query`. The fixed read-only transport honors the explicit MAIN mapping, adapts to MAIN `exceptions_report` (no `urgency_level`, `DD/MM/YYYY` dates, stored statuses `בטיפול|rejected`), normalizes and sorts all dated rows server-side, and deterministically returns 14.08.2025 / `בטיפול`. Phase 4F is 9/9 green; the full suite retains the same 11 unrelated UI/static-contract failures. No database mutation occurred.
 
 ## Gotchas
 

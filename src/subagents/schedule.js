@@ -331,10 +331,17 @@ export function subjectKeyOf(indicator) {
   return `${activityKey}|${activityKey ? "" : indicator.subject.milestoneKey ?? ""}`;
 }
 
+// schedule_alerts.activity_key is NOT NULL; a milestone-only indicator (no
+// linked task) uses a stable surrogate so the one-open-alert-per-subject
+// index still applies to it.
+export function alertActivityKey(indicator) {
+  return indicator.subject.activityKey ?? `milestone:${indicator.subject.milestoneKey}`;
+}
+
 function alertRowFromIndicator(indicator, candidate, { asOf, snapshotId, baselined }) {
   return {
     project_id: indicator.projectId,
-    activity_key: indicator.subject.activityKey,
+    activity_key: alertActivityKey(indicator),
     alert_type: candidate.alertType,
     severity_level: candidate.severityLevel,
     days_late: indicator.lateness.daysLate,
@@ -346,7 +353,7 @@ function alertRowFromIndicator(indicator, candidate, { asOf, snapshotId, baselin
       ? `חריגה מלו"ז: ${indicator.subject.name}`
       : `לו"ז מתקרב: ${indicator.subject.name}`,
     description: indicator.explanation,
-    occurrence_group_id: `schedule:${indicator.subject.activityKey}`, // 3.6ב
+    occurrence_group_id: `schedule:${alertActivityKey(indicator)}`, // 3.6ב
     lifecycle_status: "open",
     baselined,
     materiality_bucket: candidate.severityLevel,
@@ -378,7 +385,7 @@ export function planScheduleAlerts({ indicators = [], existingAlerts = [], isBoo
         && (indicator.lateness.daysLate ?? 0) > (worst.indicator.lateness.daysLate ?? 0))) {
       worst = { indicator, candidate };
     }
-    const existing = existingByKey.get(`${indicator.subject.activityKey}|${candidate.alertType}`);
+    const existing = existingByKey.get(`${alertActivityKey(indicator)}|${candidate.alertType}`);
     if (existing) matchedIds.add(existing.id);
 
     const snapshotId = snapshotIds[subjectKeyOf(indicator)] ?? null;
@@ -453,7 +460,7 @@ export function planScheduleAlerts({ indicators = [], existingAlerts = [], isBoo
 
   // 3.6ד: an open alert whose breach no longer exists closes with an
   // explanation and is never deleted.
-  const indicatorsByActivity = new Map(indicators.map((ind) => [ind.subject.activityKey, ind]));
+  const indicatorsByActivity = new Map(indicators.map((ind) => [alertActivityKey(ind), ind]));
   for (const alert of existingAlerts) {
     if (matchedIds.has(alert.id)) continue;
     if (alert.activity_key === BOOTSTRAP_SUMMARY_KEY) continue; // closed by a human, not the scan
@@ -584,6 +591,34 @@ export async function listScheduleAlerts({ projectId, lifecycle = null, baseline
     config: config || getConfig(), settings,
     path: `/rest/v1/${settings.alertsTable}?select=*&${filters.join("&")}&order=severity_level.desc,days_late.desc.nullslast`
   });
+}
+
+// ─── Pending contractual conditions (spec 6.8א) ──────────────────────────────
+//
+// Read side of the waiting pool: relative obligations that have no date yet
+// because their trigger event has not arrived. They are NOT indicators and
+// never reach the engine — a condition without a resolved date cannot be
+// measured. Promotion to schedule_contract_milestones is what makes one
+// countable.
+
+export async function listScheduleConditions({ projectId, conditionId = null, status = "pending", category = null, config = null, settings: settingsInput = null } = {}) {
+  if (!projectId) throw new Error("listScheduleConditions: projectId is required");
+  const settings = settingsInput || scheduleSettings();
+  const filters = [`project_id=eq.${encodeURIComponent(projectId)}`];
+  if (conditionId) filters.push(`id=eq.${encodeURIComponent(conditionId)}`);
+  if (status) filters.push(`status=in.(${encodeURIComponent(status)})`);
+  if (category) filters.push(`category=in.(${encodeURIComponent(category)})`);
+  const rows = await scheduleDataRequest({
+    config: config || getConfig(), settings,
+    path: `/rest/v1/${settings.conditionsTable}?select=*&${filters.join("&")}&order=category.asc,name.asc`
+  });
+  return { conditions: rows, byCategory: countBy(rows, "category"), byAnchorKind: countBy(rows, "anchor_kind") };
+}
+
+function countBy(rows, key) {
+  const counts = {};
+  for (const row of rows) counts[row[key]] = (counts[row[key]] || 0) + 1;
+  return counts;
 }
 
 // GET /api/schedule/health — the aggregate project view (spec 4.4).

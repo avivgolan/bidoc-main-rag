@@ -10067,29 +10067,31 @@ body:has(#timeline.active) .sidebar {
 .swObserved { background: var(--cobalt-soft); border: 1px solid var(--cobalt); }
 .swToday { background: var(--danger); width: 2px; height: 14px; }
 
-.axesBody { position: relative; }
-.axesTimeArea { position: absolute; inset: 0 240px 0 0; pointer-events: none; }
+.axesBody { position: relative; direction: ltr; }
+.axesTimeArea { position: absolute; inset: 0 0 0 240px; pointer-events: none; }
 .axesMonths { position: relative; height: 20px; }
 .axesMonthTick { position: absolute; top: 0; transform: translateX(2px); font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
 .axesRowsOverlay { position: absolute; inset: 20px 0 0 0; }
 .axesGridLine { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.axesContractLine { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--brand-700); z-index: 2; }
+.axesContractLine label { position: absolute; bottom: -20px; transform: translateX(-50%); background: var(--brand-700); color: #fff; font-size: 0.68rem; padding: 1px 8px; border-radius: 6px; white-space: nowrap; direction: rtl; }
 .axesTodayLine { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); z-index: 3; }
 .axesTodayLine label { position: absolute; top: -18px; transform: translateX(-50%); background: var(--danger); color: #fff; font-size: 0.68rem; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
 
-.axesRows { position: relative; margin-top: 22px; display: flex; flex-direction: column; }
-.axisRow { display: flex; dir: ltr; flex-direction: row; align-items: stretch; cursor: pointer; border-bottom: 1px solid var(--line); }
+.axesRows { position: relative; margin-top: 22px; margin-bottom: 24px; display: flex; flex-direction: column; }
+.axisRow { display: flex; flex-direction: row; align-items: stretch; cursor: pointer; border-bottom: 1px solid var(--line); }
 .axisRow:hover { background: var(--brand-50); }
 .axisRow.is-selected { background: var(--brand-100); }
 .axisTrack { flex: 1; position: relative; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 5px 0; min-width: 0; }
-.axisName { width: 240px; flex: none; padding: 4px 10px 4px 6px; display: flex; flex-direction: column; gap: 2px; border-inline-start: 1px solid var(--line); }
+.axisName { order: -1; width: 240px; flex: none; padding: 4px 10px 4px 6px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); direction: rtl; text-align: right; }
 .axisNameText { font-size: 0.8rem; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .axisNameMeta { display: flex; gap: 8px; align-items: center; }
 .axisNameMeta .schedBadge { font-size: 0.66rem; padding: 1px 7px; }
 .axisLateText { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
 
 .axisLane { position: relative; height: 10px; }
-.axisLaneEmpty { position: absolute; inset: 4px 2% ; border-top: 1px dashed var(--line-strong); }
-.axisContractFlag { position: absolute; top: -4px; transform: translateX(-50%); color: var(--brand-700); font-size: 12px; z-index: 2; }
+.axisLane:empty { height: 3px; }
+.axisContractFlag { position: absolute; top: -1px; transform: translateX(-50%); color: var(--brand-700); font-size: 11px; line-height: 1; z-index: 2; }
 .axisBarPlan { position: absolute; top: 0; height: 10px; background: var(--brand-100); border: 1px solid var(--brand-300); border-radius: 3px; overflow: hidden; }
 .axisBarPlan.is-milestone { border-radius: 50%; min-width: 10px; }
 .axisBarFill { height: 100%; background: var(--brand-500); opacity: 0.85; }
@@ -10102,5 +10104,70 @@ body:has(#timeline.active) .sidebar {
 
 @media (max-width: 900px) {
   .axisName { width: 170px; }
-  .axesTimeArea { inset: 0 170px 0 0; }
+  .axesTimeArea { inset: 0 0 0 170px; }
+}
+
+/* ── Pending contractual conditions box (spec 6.8א) ── */
+.condBox { background: var(--surface); border: 1px solid var(--amber); border-radius: 12px; overflow: hidden; }
+.condHead {
+  width: 100%; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--amber-soft); border: none; padding: 10px 14px; cursor: pointer;
+  font: inherit; text-align: right; color: var(--text-primary);
+}
+.condHead:hover { filter: brightness(0.98); }
+.condHeadTitle { font-weight: 700; display: inline-flex; align-items: center; gap: 8px; }
+.condHeadCount { background: var(--amber); color: #fff; border-radius: 999px; padding: 1px 9px; font-size: 0.76rem; }
+.condHeadHint { font-size: 0.78rem; color: var(--text-secondary); font-weight: 400; flex: 1; }
+.condChevron { color: var(--text-muted); font-size: 0.7rem; }
+.condBody { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 14px; max-height: 420px; overflow-y: auto; }
+.condResolverBar {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface-2);
+}
+.condResolverBar > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.condResolverBar strong { color: var(--text-primary); font-size: 0.84rem; }
+.condResolverBar span { color: var(--text-secondary); font-size: 0.76rem; line-height: 1.5; }
+.condResolverBar button {
+  flex: none; min-height: 38px; padding: 7px 13px; border: 1px solid var(--brand-500); border-radius: 8px;
+  color: #fff; background: var(--brand-600); font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer;
+}
+.condResolverBar button:disabled { opacity: 0.62; cursor: wait; }
+.condResolverResult {
+  padding: 7px 10px; border-radius: 7px; background: var(--success-bg); color: var(--success-text); font-size: 0.78rem;
+}
+.condGroup { display: flex; flex-direction: column; gap: 4px; }
+.condGroupTitle {
+  font-size: 0.8rem; font-weight: 700; color: var(--text-secondary);
+  display: inline-flex; align-items: center; gap: 7px;
+  border-bottom: 1px solid var(--line-strong); padding-bottom: 4px; margin-bottom: 2px;
+}
+.condGroupCount { background: var(--surface-3); border-radius: 999px; padding: 0 7px; font-size: 0.72rem; font-weight: 600; }
+.condTableWrap { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.condTable { width: 100%; min-width: 850px; border-collapse: collapse; font-size: 0.8rem; }
+.condTable th { padding: 7px 9px; color: var(--text-secondary); background: var(--surface-2); text-align: right; font-size: 0.72rem; }
+.condTable td { padding: 8px 9px; border-top: 1px solid var(--line); vertical-align: middle; }
+.condTable tbody tr:hover { background: var(--brand-50); }
+.condName { font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; }
+.condRule { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
+.condRule b { color: var(--amber); font-weight: 700; }
+.condAnchor { font-size: 0.72rem; border-radius: 999px; padding: 1px 9px; white-space: nowrap; background: var(--surface-3); color: var(--text-secondary); }
+.condAnchor.is-event { background: var(--cobalt-soft); color: var(--cobalt); }
+.condAnchor.is-schedule_task { background: var(--brand-100); color: var(--brand-700); }
+.condAnchor.is-milestone { background: var(--success-bg); color: var(--success-text); }
+.condPage { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.condActionCell { min-width: 170px; }
+.condResolveBtn {
+  min-height: 36px; padding: 6px 11px; border: 1px solid var(--brand-500); border-radius: 7px;
+  color: #fff; background: var(--brand-600); font: inherit; font-size: 0.75rem; font-weight: 700; cursor: pointer;
+}
+.condResolveBtn:hover:not(:disabled) { filter: brightness(1.05); }
+.condResolveBtn:disabled { opacity: 0.6; cursor: wait; }
+.condRowResult { display: block; margin-top: 4px; color: var(--text-muted); font-size: 0.7rem; }
+.condRowResult.is-needs_review { color: var(--amber); }
+.condRowResult.is-error { color: var(--danger); }
+.condSettingsLink { display: block; width: max-content; margin-top: 3px; color: var(--brand-700); font-weight: 700; text-decoration: underline; }
+
+@media (max-width: 700px) {
+  .condResolverBar { align-items: stretch; flex-direction: column; }
+  .condResolverBar button { width: 100%; }
 }

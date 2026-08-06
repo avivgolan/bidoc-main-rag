@@ -14,7 +14,8 @@ import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
-import { listScheduleAlerts, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
+import { listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
+import { runScheduleConditionResolver } from "./subagents/scheduleConditionResolver.js";
 import { listScheduleProjects, loadScheduleSource, scheduleSettings } from "./scheduleIngestion.js";
 import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
@@ -113,7 +114,7 @@ if (!process.env.VERCEL) {
     console.log(`bidoc agent running at http://localhost:${cfg.port}`);
     console.log(`[startup] OpenRouter : ${cfg.openRouterApiKey ? "✓ configured" : "✗ MISSING — RAG agent will use fallback"}`);
     console.log(`[startup] App DB     : ${cfg.supabaseUrl ? "✓ configured" : "✗ MISSING"}`);
-    console.log(`[startup] Content DB : ${cfg.contentSource?.supabaseUrl ? "✓ configured" : "✗ MISSING"}`);
+    console.log(`[startup] APP DATA   : ${cfg.contentSource?.supabaseUrl && cfg.contentSource?.supabaseServiceRoleKey ? "✓ configured" : "✗ MISSING"}`);
     console.log(`[startup] Timezone   : ${cfg.timezone}`);
   });
 }
@@ -291,6 +292,9 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/diagnostics/connections") {
     const body = await readJson(req).catch(() => ({}));
     const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+    // Diagnostics must report the persisted MAIN settings, not a process-local
+    // Content DB snapshot that may predate the last Settings save.
+    await reloadSettingsFromDb();
     const results = await runConnectionDiagnostics(config(), { ids });
     return sendJson(res, 200, {
       ok: results.every((item) => item.ok),
@@ -931,6 +935,50 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { ok: true, projectId, count: alerts.length, alerts });
     } catch (error) {
       return sendJson(res, 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/schedule/conditions") {
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await listScheduleConditions({
+        projectId,
+        status: url.searchParams.get("status") || "pending",
+        category: url.searchParams.get("category") || null,
+        config: buildRequestConfig(req)
+      });
+      return sendJson(res, 200, { ok: true, projectId, count: result.conditions.length, ...result });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message, conditions: [] });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/schedule/conditions/resolve") {
+    const body = await readJson(req).catch(() => ({}));
+    const projectId = body.projectId || body.project_id || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    const runId = body.runId || `schedule_conditions_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    createRun(runId);
+    try {
+      // This agent is SETTINGS-owned. Refresh MAIN.agent_settings on every
+      // explicit row action so a stale process can never use the env fallback.
+      await reloadSettingsFromDb();
+      const result = await runScheduleConditionResolver({
+        projectId,
+        conditionId: body.conditionId || body.condition_id || null,
+        limit: body.limit,
+        commit: body.commit === true,
+        minConfidence: body.minConfidence,
+        config: buildRequestConfig(req, body),
+        runId
+      });
+      completeRun(runId, { processed: result.processed, summary: result.summary });
+      recordRunHistory({ id: runId, title: `Schedule condition resolver · ${projectId}`, kind: "schedule-condition-resolver" });
+      return sendJson(res, 200, { ...result, runId });
+    } catch (error) {
+      failRun(runId, error);
+      return sendJson(res, 500, { ok: false, error: error.message, runId });
     }
   }
 
@@ -2174,20 +2222,20 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
     return { table: "chat_messages_gf", rows: Array.isArray(rows) ? rows.length : 0 };
   });
 
-  add("content_supabase_index_table", "Content Supabase Index Table", "data", async () => {
-    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
+  add("content_supabase_index_table", "APP DATA Index Table", "data", async () => {
+    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("APP DATA URL or Service Role Key is missing");
     const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/${contentCfg.indexTable}?select=id&limit=1`);
     return { table: contentCfg.indexTable, rows: Array.isArray(rows) ? rows.length : 0, keyRole: supabaseKeyRole(contentCfg.supabaseServiceRoleKey) };
   });
 
-  add("content_supabase_alerts_table", "Content Supabase Alerts Table", "data", async () => {
-    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
+  add("content_supabase_alerts_table", "APP DATA Alerts Table", "data", async () => {
+    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("APP DATA URL or Service Role Key is missing");
     const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/${contentCfg.alertsTable}?select=id&limit=1`);
     return { table: contentCfg.alertsTable, rows: Array.isArray(rows) ? rows.length : 0, keyRole: supabaseKeyRole(contentCfg.supabaseServiceRoleKey) };
   });
 
-  add("content_supabase_hybrid_rpc", "Content Supabase Hybrid RPC", "data", async () => {
-    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
+  add("content_supabase_hybrid_rpc", "APP DATA Hybrid RPC", "data", async () => {
+    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("APP DATA URL or Service Role Key is missing");
     if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing because RPC test needs a query embedding");
     const embedding = await createEmbedding({
       apiKey: cfg.openRouterApiKey,
@@ -2210,8 +2258,8 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
     return { rpc: contentCfg.hybridRpcName, rows: Array.isArray(rows) ? rows.length : 0 };
   });
 
-  add("content_supabase_alerts_rpc", "Content Supabase Alerts RPC", "data", async () => {
-    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("Content Supabase URL or Service Role Key is missing");
+  add("content_supabase_alerts_rpc", "APP DATA Alerts RPC", "data", async () => {
+    if (!contentCfg.supabaseUrl || !contentCfg.supabaseServiceRoleKey) throw new Error("APP DATA URL or Service Role Key is missing");
     if (!cfg.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing because RPC test needs a query embedding");
     const embedding = await createEmbedding({ apiKey: cfg.openRouterApiKey, model: cfg.models.embedding, input: "connection test" });
     const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/rpc/${contentCfg.alertsRpcName}`, {

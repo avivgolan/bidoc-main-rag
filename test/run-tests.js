@@ -3135,6 +3135,24 @@ test("data query reads require a dedicated database-role access token", () => {
   assert.equal("dataQueryServicePassword" in exposed, false);
 });
 
+test("data query uses the explicit MAIN mapping only through the fixed read-only transport", () => {
+  const config = {
+    supabaseUrl: "https://main.example",
+    supabaseServiceRoleKey: "sb_secret_main-server-key",
+    contentSource: {
+      supabaseUrl: "https://main.example",
+      supabaseServiceRoleKey: "sb_secret_main-server-key",
+      usesAppSupabase: true
+    }
+  };
+  const headers = dataQuerySupabaseHeaders(config);
+  assert.equal(headers.apikey, "sb_secret_main-server-key");
+  assert.equal("Authorization" in headers, false);
+  const exceptions = buildDataQueryManifest(config).find((table) => table.tableName === "exceptions_report");
+  assert.equal(exceptions.exactTransport, DATA_QUERY_MANAGED_READ_TRANSPORT);
+  assert.equal(exceptions.executionContract.status, "active");
+});
+
 test("data query managed service account validates, caches, and refreshes short-lived tokens", async () => {
   clearDataQueryAccessTokenCache();
   const baseSeconds = 2_000_000_000;
@@ -4472,6 +4490,36 @@ test("content source accepts separate Supabase and custom content names", () => 
   assert.equal(output.alertsTable, "content_alerts");
   assert.equal(output.alertsRpcName, "content_alerts_match");
   assert.equal(output.usesAppSupabase, false);
+});
+
+test("content source accepts legacy React aliases without splitting URL and key", () => {
+  const output = withContentEnvCleared(() => normalizeContentSourceSettings({
+    url: "https://legacy-content.supabase.co/",
+    serviceRoleKey: "legacy-content-key",
+    indexTable: "legacy_index"
+  }, {
+    fallbackSupabaseUrl: "https://app.supabase.co",
+    fallbackSupabaseServiceRoleKey: "app-key"
+  }));
+  assert.equal(output.supabaseUrl, "https://legacy-content.supabase.co");
+  assert.equal(output.supabaseServiceRoleKey, "legacy-content-key");
+  assert.equal(output.indexTable, "legacy_index");
+  assert.equal(output.usesAppSupabase, false);
+});
+
+test("content source can explicitly force the MAIN App Supabase connection", () => {
+  const output = withContentEnvCleared(() => normalizeContentSourceSettings({
+    useAppSupabase: true,
+    supabaseUrl: "https://stale-content.supabase.co",
+    supabaseServiceRoleKey: "stale-content-key"
+  }, {
+    fallbackSupabaseUrl: "https://app.supabase.co",
+    fallbackSupabaseServiceRoleKey: "app-key"
+  }));
+  assert.equal(output.supabaseUrl, "https://app.supabase.co");
+  assert.equal(output.supabaseServiceRoleKey, "app-key");
+  assert.equal(output.useAppSupabase, true);
+  assert.equal(output.usesAppSupabase, true);
 });
 
 test("delay claim case payload creates a clean DTO", () => {
@@ -12738,6 +12786,8 @@ test("data query Phase 4F classifies and plans exact exception metrics and bound
     ["Show the latest exception report", "lookup_latest", 1],
     ["הצג את דוח החריגים האחרון", "lookup_latest", 1],
     ["מהו דוח החריגים האחרון?", "lookup_latest", 1],
+    ["מהו החריג האחרון?", "lookup_latest", 1],
+    ["מה החריג האחרון?", "lookup_latest", 1],
     ["Show the earliest change order", "lookup_earliest", 1],
     ["Show the last five exceptions", "lookup_last_n", 5]
   ]) {
@@ -12754,6 +12804,28 @@ test("data query Phase 4F classifies and plans exact exception metrics and bound
     ], question);
     assert.equal(validateQueryPlan(plan, { ...settings, expectedLookup: route.lookup }).ok, true, question);
   }
+
+  const exactHebrewQuestion = "מהו החריג האחרון?";
+  const exactHebrewClassification = { type: "RAG", complexity: "SPECIFIC", urgency: "NORMAL", tool_hint: "exceptions_report" };
+  const exactHebrewRouting = classifyDataQueryCapability(exactHebrewQuestion, { settings });
+  const exactHebrewConfig = {
+    dataQuery: { enabled: true },
+    n8n: { runtime: { enabled: true, parallelLimit: 6, alertAgentEnabled: true } }
+  };
+  assert.equal(shouldBypassGenericRetrieval({
+    message: exactHebrewQuestion,
+    classification: exactHebrewClassification,
+    config: exactHebrewConfig,
+    settings,
+    routing: exactHebrewRouting
+  }), true);
+  assert.deepEqual(buildMainProjectTools({
+    message: exactHebrewQuestion,
+    classification: exactHebrewClassification,
+    config: exactHebrewConfig,
+    dataQuerySettingsOverride: settings,
+    dataQueryRoutingOverride: exactHebrewRouting
+  }), ["data_query"]);
 });
 
 test("data query Phase 4F published UI matrix is complete in English and Hebrew", () => {
@@ -13434,6 +13506,19 @@ test("data query Phase 4F deterministic answers and client projections expose no
     "person-canary", "company-canary", "subject-canary", "raw-content-canary",
     "secret.example", "exception-plan-canary", "request-canary", "raw-evidence-canary"
   ]) assert.ok(!answer.includes(secret), secret);
+
+  const mainMappedCall = structuredClone(exceptionCall);
+  const mainMappedRecord = mainMappedCall.data.machineResult.recordsByRequestId["request-canary"][0].record;
+  delete mainMappedRecord.project_id;
+  delete mainMappedRecord.urgency_level;
+  const mainMappedAnswer = buildDeterministicExceptionAnswer({
+    message: "מהו החריג האחרון?",
+    routing: { ...routing, mixed: false, domain: "content_structured_lookup" },
+    toolCalls: [mainMappedCall]
+  });
+  assert.match(mainMappedAnswer, /09\.03\.2025/);
+  assert.doesNotMatch(mainMappedAnswer, /undefined|דחיפות שמורה/);
+  assert.equal(exactExceptionLookupRecords([mainMappedCall]).length, 1);
 
   const insufficientAnswer = buildDeterministicExceptionAnswer({
     message: "Show the latest exception report and summarize its supporting evidence.",

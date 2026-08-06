@@ -6,42 +6,51 @@
 // never sees a table name; switching source profiles is a settings change,
 // not a code change (acceptance criterion 25).
 //
-//   profile "dev"     → MAIN / App DB,   gantt_files_test + gantt_tasks_test
-//   profile "content" → Content DB,      gantt_files      + gantt_tasks
+//   contractor upload source → MAIN, gantt_files_test + gantt_tasks_test
+//   engine-owned tables      → APP DATA/KAPAIM, schedule_*
+//   "content" / "kapaim" are legacy aliases for the APP DATA production tables.
 //
-// The engine's own tables (schedule_calendars, schedule_contract_*) live in
-// the same DB as the active source — a snapshot must sit next to the schedule
-// it describes (spec 5.5).
+// All schedule reads and writes use the existing APP DATA connection
+// (contentSource), whose Supabase project is KAPAIM. There is no second
+// Schedule-specific URL or key.
 
 import { getConfig, readLocalSettings, supabaseHeaders } from "./config.js";
 import { contentSupabaseConfig } from "./supabase.js";
 
 export const SCHEDULE_SOURCE_PROFILES = {
-  dev: { filesTable: "gantt_files_test", tasksTable: "gantt_tasks_test", useContentDb: false },
-  content: { filesTable: "gantt_files", tasksTable: "gantt_tasks", useContentDb: true }
+  app_data: { filesTable: "gantt_files", tasksTable: "gantt_tasks" },
+  kapaim: { filesTable: "gantt_files", tasksTable: "gantt_tasks" },
+  dev: { filesTable: "gantt_files_test", tasksTable: "gantt_tasks_test" },
+  content: { filesTable: "gantt_files", tasksTable: "gantt_tasks" }
+};
+
+export const MAIN_GANTT_SOURCE = {
+  filesTable: "gantt_files_test",
+  tasksTable: "gantt_tasks_test"
 };
 
 export const DEFAULT_SCHEDULE_SETTINGS = {
-  sourceProfile: "dev",
-  ...SCHEDULE_SOURCE_PROFILES.dev,
+  sourceProfile: "app_data",
+  ...SCHEDULE_SOURCE_PROFILES.app_data,
   calendarsTable: "schedule_calendars",
   milestonesTable: "schedule_contract_milestones",
   extensionsTable: "schedule_contract_extensions",
   snapshotsTable: "schedule_indicator_snapshots",
   alertsTable: "schedule_alerts",
+  conditionsTable: "schedule_contract_conditions",
   thresholds: null,
   alertPolicy: null
 };
 
 // Merge order: defaults ← profile preset ← explicit overrides. An explicit
-// filesTable/tasksTable/useContentDb in settings always wins over the profile,
+// filesTable/tasksTable in settings always win over the profile,
 // so a one-off table rename never requires a new profile.
 export function scheduleSettings(saved = undefined) {
   const raw = saved !== undefined ? (saved || {}) : (readLocalSettings().schedule || {});
   const profileName = SCHEDULE_SOURCE_PROFILES[raw.sourceProfile] ? raw.sourceProfile : DEFAULT_SCHEDULE_SETTINGS.sourceProfile;
   const profile = SCHEDULE_SOURCE_PROFILES[profileName];
   const explicit = {};
-  for (const key of ["filesTable", "tasksTable", "useContentDb", "calendarsTable", "milestonesTable", "extensionsTable", "snapshotsTable", "alertsTable", "thresholds", "alertPolicy"]) {
+  for (const key of ["filesTable", "tasksTable", "calendarsTable", "milestonesTable", "extensionsTable", "snapshotsTable", "alertsTable", "conditionsTable", "thresholds", "alertPolicy"]) {
     if (raw[key] !== undefined && raw[key] !== null) explicit[key] = raw[key];
   }
   return { ...DEFAULT_SCHEDULE_SETTINGS, ...profile, sourceProfile: profileName, ...explicit };
@@ -105,20 +114,28 @@ function trimSlash(value) {
   return String(value || "").replace(/\/+$/, "");
 }
 
-function resolveTarget(config, settings) {
-  if (settings.useContentDb) {
-    const content = contentSupabaseConfig(config);
-    return { supabaseUrl: content.supabaseUrl, supabaseServiceRoleKey: content.supabaseServiceRoleKey, label: "Content Supabase" };
+export function scheduleSupabaseConfig(config = getConfig(), database = "app_data", env = process.env) {
+  if (database === "main") {
+    return {
+      supabaseUrl: env.SUPABASE_URL || config.supabaseUrl || "",
+      supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY || config.supabaseServiceRoleKey || "",
+      label: "App / MAIN"
+    };
   }
-  return { supabaseUrl: config.supabaseUrl, supabaseServiceRoleKey: config.supabaseServiceRoleKey, label: "App Supabase" };
+  const appData = contentSupabaseConfig(config);
+  return {
+    supabaseUrl: appData.supabaseUrl,
+    supabaseServiceRoleKey: appData.supabaseServiceRoleKey,
+    label: "APP DATA"
+  };
 }
 
 function isMissingTableError(status, message) {
   return status === 404 || /could not find the table|does not exist|schema cache/i.test(String(message || ""));
 }
 
-async function scheduleFetch({ config, settings, path, options = {} }) {
-  const target = resolveTarget(config, settings);
+async function scheduleFetch({ config, settings, path, options = {}, database = "app_data" }) {
+  const target = scheduleSupabaseConfig(config, database);
   if (!target.supabaseUrl || !target.supabaseServiceRoleKey) {
     throw new Error(`${target.label} is not configured for the schedule source profile "${settings.sourceProfile}"`);
   }
@@ -165,23 +182,24 @@ export async function loadScheduleSource({ config = null, projectId, settings: s
   if (!projectId) throw new Error("loadScheduleSource: projectId is required");
   const cfg = config || getConfig();
   const settings = settingsInput || scheduleSettings();
+  const sourceSettings = { ...settings, ...MAIN_GANTT_SOURCE, sourceProfile: "main_upload" };
 
   const files = await scheduleFetch({
-    config: cfg, settings,
-    path: `/rest/v1/${settings.filesTable}?select=${FILE_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&order=relevancy_date.desc,uploaded_at.desc`
+    config: cfg, settings: sourceSettings, database: "main",
+    path: `/rest/v1/${sourceSettings.filesTable}?select=${FILE_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&order=relevancy_date.desc,uploaded_at.desc`
   });
   const { current, previous, versionConflict } = pickCurrentVersion(files);
   if (!current) {
     return {
       tasks: [], previousTasks: [], files: [],
       scheduleMeta: { relevancyDate: null, versionCount: 0, displayName: null, sourceVersionId: null, versionConflict: false },
-      settings
+      settings: sourceSettings
     };
   }
 
   const loadTasks = (fileId) => scheduleFetch({
-    config: cfg, settings,
-    path: `/rest/v1/${settings.tasksTable}?select=${TASK_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&file_id=eq.${encodeURIComponent(fileId)}&order=task_uid.asc`
+    config: cfg, settings: sourceSettings, database: "main",
+    path: `/rest/v1/${sourceSettings.tasksTable}?select=${TASK_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&file_id=eq.${encodeURIComponent(fileId)}&order=task_uid.asc`
   });
 
   const currentRows = await loadTasks(current.file_id);
@@ -198,7 +216,7 @@ export async function loadScheduleSource({ config = null, projectId, settings: s
       sourceVersionId: current.file_id,
       versionConflict
     },
-    settings
+    settings: sourceSettings
   };
 }
 
@@ -262,9 +280,10 @@ export async function loadContractMilestones({ config = null, projectId, setting
 // contractor schedule in the active source profile.
 export async function listScheduleProjects({ config = null, settings: settingsInput = null } = {}) {
   const settings = settingsInput || scheduleSettings();
+  const sourceSettings = { ...settings, ...MAIN_GANTT_SOURCE, sourceProfile: "main_upload" };
   const rows = await scheduleFetch({
-    config: config || getConfig(), settings,
-    path: `/rest/v1/${settings.filesTable}?select=project_id,relevancy_date&order=relevancy_date.desc`
+    config: config || getConfig(), settings: sourceSettings, database: "main",
+    path: `/rest/v1/${sourceSettings.filesTable}?select=project_id,relevancy_date&order=relevancy_date.desc`
   });
   const byProject = new Map();
   for (const row of rows) {

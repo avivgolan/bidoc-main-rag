@@ -695,6 +695,9 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
         });
       } catch (error) {
         if (!looksLikeRpcSignatureError(error.message)) throw error;
+        // Contractual-date resolution must never widen from one project to the
+        // whole tenant when an older RPC lacks project_id_filter support.
+        if (config.requireProjectScope === true && payload.project_id_filter) throw error;
         // Graceful degradation: strip all optional params that older company DBs
         // may not recognise (project_id_filter requires migration 027, hashtags
         // requires the GIN index from 026). Retry with the minimal required params.
