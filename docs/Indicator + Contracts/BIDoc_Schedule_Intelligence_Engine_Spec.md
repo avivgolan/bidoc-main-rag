@@ -1,4 +1,5 @@
 # BIDoc Schedule Intelligence Engine
+
 ## אפיון מנוע אינדיקציית לוחות זמנים
 
 **גרסה:** 3.0
@@ -11,6 +12,19 @@
 
 > **מקורות שמוזגו למסמך זה:** `BIDoc_Schedule_Intelligence_Engine_Spec.md` v1.0, `..._v1.1.md` (פרק 19 — שירות ליבה וכלל 001), וסקירת קוד ודאטה חיה מ-2026-08-04. זהו המסמך הקנוני היחיד.
 
+## CTO binding implementation addendum — 2026-08-08
+
+This addendum records implementation constraints confirmed by the CTO and overrides conflicting implementation/runbook wording later in this document:
+
+1. The existing Schedule Engine calculation logic is a protected, already implemented baseline. Contracts work is additive and must not rewrite, replace, refactor, or silently change src/scheduleEngine.js, src/scheduleCalendar.js, basis priority, extension behavior, date arithmetic, status, confidence, severity, lookup, or sweep.
+2. The existing eight CTO-created tables are canonical and must be reused: schedule_calendars, schedule_contract_milestones, schedule_contract_extensions, schedule_contract_conditions, schedule_indicator_snapshots, schedule_alerts, schedule_activity_map, and schedule_observed_events.
+3. No duplicate/replacement Schedule table and no unapproved CREATE, ALTER, DROP, TRUNCATE, index, trigger, function, RLS, grant, policy, permission, or backfill operation is authorized.
+4. Before Contracts implementation, perform a read-only live schema/caller audit, approve a field-level reuse matrix, and capture the existing Schedule regression/golden-output baseline.
+5. Contracts facts enter through an additive validator/writer using existing table contracts. If a required fact cannot be represented safely, keep it non-operational and request a separate bounded exception; do not change the Engine or schema automatically.
+6. The historical SQL blocks below are schema-reference material only. They are not an executable provisioning or rollback runbook for the current environment.
+
+Controlling implementation plan: [BIDoc Contracts Agent and Schedule Intelligence Implementation Plan](./BIDoc_Contracts_Agent_and_Schedule_Intelligence_Implementation_Plan.md)
+
 ---
 
 ## 0. מה השתנה
@@ -19,14 +33,14 @@
 
 v1.1 היה ה-v1.0 המקורי בתוספת פרק 19. הפרק הזה נקלט במלואו, ובחלקו הועלה לרמת עיקרון.
 
-| מ-v1.1 | לאן נכנס | הערה |
-|---|---|---|
-| מסגור כ-**Core Service** ו-Single Source of Truth | סעיף 1.1 | חיזק את מה שגרסה 2.0 ניסחה חלש מדי |
-| **כלל 001** — אין חישובי לו״ז מחוץ לשירות | **סעיף 1.4** — הועלה לרמת עיקרון מחייב | v1.1 מיקם אותו כשורה אחת בסוף; הוא חשוב מכדי להיקבר שם |
-| רשימת הצרכנים (Chat / Document / Mail / Meeting / Insight / Dashboard) | סעיף 3.7 | מופתה לקבצים אמיתיים ברפו — חלק מהשמות ב-v1.1 אינם סוכנים קיימים |
-| חובת הצ׳אט לפנות לשירות לפני ניסוח תשובה | סעיף 3.7 | אומצה כלשונה |
-| `EvaluateEmail`, `GetProjectScheduleHealth` | סעיף 4.4 | שני מסלולים שלא היו בגרסה 2.0 |
-| שרשרת ה-Workflow | סעיף 4.6 | "Event Publication" הוחלף — אין תשתית הודעות במערכת |
+| מ-v1.1                                                                            | לאן נכנס                                                       | הערה                                                                                                          |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| מסגור כ-**Core Service** ו-Single Source of Truth                     | סעיף 1.1                                                          | חיזק את מה שגרסה 2.0 ניסחה חלש מדי                                                        |
+| **כלל 001** — אין חישובי לו״ז מחוץ לשירות         | **סעיף 1.4** — הועלה לרמת עיקרון מחייב | v1.1 מיקם אותו כשורה אחת בסוף; הוא חשוב מכדי להיקבר שם                     |
+| רשימת הצרכנים (Chat / Document / Mail / Meeting / Insight / Dashboard) | סעיף 3.7                                                          | מופתה לקבצים אמיתיים ברפו — חלק מהשמות ב-v1.1 אינם סוכנים קיימים |
+| חובת הצ׳אט לפנות לשירות לפני ניסוח תשובה         | סעיף 3.7                                                          | אומצה כלשונה                                                                                           |
+| `EvaluateEmail`, `GetProjectScheduleHealth`                                    | סעיף 4.4                                                          | שני מסלולים שלא היו בגרסה 2.0                                                                |
+| שרשרת ה-Workflow                                                             | סעיף 4.6                                                          | "Event Publication" הוחלף — אין תשתית הודעות במערכת                                     |
 
 **ממצא שנוסף בעקבות כלל 001:** הכלל כבר מופר בקוד היום. הפירוט בסעיף 1.4.
 
@@ -34,18 +48,18 @@ v1.1 היה ה-v1.0 המקורי בתוספת פרק 19. הפרק הזה נקל�
 
 גרסה 1.0 נכתבה כאפיון עצמאי, בלי התייחסות לקוד ולדאטה הקיימים. גרסה 2.0 יישרה אותה.
 
-| # | שינוי |
-|---|---|
-| 1 | **נוספה המטרה הראשית** — שכבת האמת שסוכנים אחרים שואלים. בגרסה 1.0 זה הופיע כמשפט אחד בסעיף המטרה ולא היה לו חוזה, לא צרכנים מוגדרים ולא זרימה. עכשיו זה פרק 3, ליבת המסמך. |
-| 2 | **נוסף הפרימיטיב `daysRemaining` / `daysLate`** — גרסה 1.0 החזירה רק סטיות בדיעבד. אי אפשר היה לענות "כמה ימים נשארו למשימה", שזו השאלה שסוכן ההתראות שואל. |
-| 3 | **נוספו `asOf` וסמנטיקת "נכון לתאריך"** — בלי זה החישוב לא דטרמיניסטי ולא ניתן לשחזור. |
-| 4 | **מודל הנתונים יושר** — `gantt_tasks` כמקור אמת ללוח הקבלן, `delay_schedule_*` כשכבת ניתוח. גרסה 1.0 המציאה סכימה שלישית שמתעלמת משתיהן. |
-| 5 | **ה-API יושר** — `/internal/...` לא קיים במערכת. הכל עובר דרך `/api/...` ב-[`src/server.js`](../src/server.js). |
-| 6 | **TypeScript הוסר** — הפרויקט הוא ESM JS נטו בלי build step. החוזים מוגדרים כ-JSON + `contractVersion`, בתבנית `data-query.v2`. |
-| 7 | **נוסף פיצול App DB / Content DB** — המערכת מולטי-טננטית. גרסה 1.0 לא הזכירה זאת כלל. |
-| 8 | **Event Bus הוחלף** — אין תשתית הודעות במערכת. הוחלף בסריקה מתוזמנת + `runLog`. |
-| 9 | **כל רכיב סומן בשער נתונים** — 🟢 / 🟡 / 🔴 לפי מה שניתן לחשב היום. |
-| 10 | **נוסף פרק בקרת רעש** — בלעדיו ההרצה הראשונה מייצרת מאות התראות ביום אחד. |
+| #  | שינוי                                                                                                                                                                                                                                                                                                       |
+| -- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1  | **נוספה המטרה הראשית** — שכבת האמת שסוכנים אחרים שואלים. בגרסה 1.0 זה הופיע כמשפט אחד בסעיף המטרה ולא היה לו חוזה, לא צרכנים מוגדרים ולא זרימה. עכשיו זה פרק 3, ליבת המסמך. |
+| 2  | **נוסף הפרימיטיב `daysRemaining` / `daysLate`** — גרסה 1.0 החזירה רק סטיות בדיעבד. אי אפשר היה לענות "כמה ימים נשארו למשימה", שזו השאלה שסוכן ההתראות שואל.                                               |
+| 3  | **נוספו `asOf` וסמנטיקת "נכון לתאריך"** — בלי זה החישוב לא דטרמיניסטי ולא ניתן לשחזור.                                                                                                                                                       |
+| 4  | **מודל הנתונים יושר** — `gantt_tasks` כמקור אמת ללוח הקבלן, `delay_schedule_*` כשכבת ניתוח. גרסה 1.0 המציאה סכימה שלישית שמתעלמת משתיהן.                                                                                  |
+| 5  | **ה-API יושר** — `/internal/...` לא קיים במערכת. הכל עובר דרך `/api/...` ב-[`src/server.js`](../src/server.js).                                                                                                                                                          |
+| 6  | **TypeScript הוסר** — הפרויקט הוא ESM JS נטו בלי build step. החוזים מוגדרים כ-JSON + `contractVersion`, בתבנית `data-query.v2`.                                                                                                                               |
+| 7  | **נוסף פיצול App DB / Content DB** — המערכת מולטי-טננטית. גרסה 1.0 לא הזכירה זאת כלל.                                                                                                                                                                         |
+| 8  | **Event Bus הוחלף** — אין תשתית הודעות במערכת. הוחלף בסריקה מתוזמנת + `runLog`.                                                                                                                                                                              |
+| 9  | **כל רכיב סומן בשער נתונים** — 🟢 / 🟡 / 🔴 לפי מה שניתן לחשב היום.                                                                                                                                                                                                 |
+| 10 | **נוסף פרק בקרת רעש** — בלעדיו ההרצה הראשונה מייצרת מאות התראות ביום אחד.                                                                                                                                                                          |
 
 ---
 
@@ -70,11 +84,11 @@ v1.1 היה ה-v1.0 המקורי בתוספת פרק 19. הפרק הזה נקל�
 
 המנוע משווה בין שלושה צירים:
 
-| ציר | מקור | מצב היום |
-|---|---|---|
-| **הציר החוזי** | התחייבויות ואבני דרך מחייבות לפי החוזה ושינויים מאושרים | 🔴 לא קיים בשום טבלה |
-| **לוח הקבלן** | הלוח שהקבלן יצר ומעדכן, כולל היסטוריית גרסאות | 🟡 גרסה אחת בלבד |
-| **ציר BIDoc** | ציר שנבנה משוטף ממסמכים, מיילים, דוחות, ישיבות ודיווחי שטח | 🟡 קיים כטקסט לא מובנה |
+| ציר                        | מקור                                                                                                  | מצב היום                        |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **הציר החוזי** | התחייבויות ואבני דרך מחייבות לפי החוזה ושינויים מאושרים   | 🔴 לא קיים בשום טבלה     |
+| **לוח הקבלן**   | הלוח שהקבלן יצר ומעדכן, כולל היסטוריית גרסאות                       | 🟡 גרסה אחת בלבד            |
+| **ציר BIDoc**        | ציר שנבנה משוטף ממסמכים, מיילים, דוחות, ישיבות ודיווחי שטח | 🟡 קיים כטקסט לא מובנה |
 
 ### 1.3 גבולות אחריות
 
@@ -156,14 +170,14 @@ project_intelligence_status_events  384
 
 #### התראות — 2,178 שורות, אפס אריתמטיקת תאריכים
 
-| `alert_type` | כמות |
-|---|---:|
-| התראה | 908 |
-| עדכון | 563 |
-| **עיכוב** | **272** |
-| חריג | 216 |
-| איכות | 176 |
-| אירוע בטיחות | 43 |
+| `alert_type`          |      כמות |
+| ----------------------- | ------------: |
+| התראה              |           908 |
+| עדכון              |           563 |
+| **עיכוב**    | **272** |
+| חריג                |           216 |
+| איכות              |           176 |
+| אירוע בטיחות |            43 |
 
 `alert_configurations` מכילה **50 תצורות** — מטריצה של `alert_type` × `document_type` (meetings, emails, whatsapp, daily-work-log, safety-reports, consultant-reports, quality-control, exceptions, financial-documents, other). `severity_level` משתנה לפי סוג המסמך, ו-`עיכוב` מקבל 4 בעקביות.
 
@@ -177,15 +191,15 @@ project_intelligence_status_events  384
 
 `alerts` ב-Content DB עשירה משמעותית מ-`alerts_gf`, ומחזיקה שדות שסעיף 3.6 היה אמור להמציא:
 
-| עמודה | שימוש למנוע |
-|---|---|
-| `occurrence_group_id` | קיבוץ הופעות חוזרות — בדיוק "התראה אחת פר פעילות" |
-| `lifecycle_status` | מחזור חיים של התראה — פתיחה, עדכון, סגירה |
-| `analysis_fingerprint` | idempotency על הניתוח |
-| `configuration_fingerprint` | זיהוי שינוי בתצורה שמצדיק חישוב מחדש |
-| `alert_configuration_id` | FK לתצורה שיצרה את ההתראה |
-| `is_relevant` | סינון אנושי |
-| `data_date` | **`timestamptz`** ולא `text` כמו ב-`alerts_gf` |
+| עמודה                    | שימוש למנוע                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `occurrence_group_id`       | קיבוץ הופעות חוזרות — בדיוק "התראה אחת פר פעילות" |
+| `lifecycle_status`          | מחזור חיים של התראה — פתיחה, עדכון, סגירה                |
+| `analysis_fingerprint`      | idempotency על הניתוח                                                            |
+| `configuration_fingerprint` | זיהוי שינוי בתצורה שמצדיק חישוב מחדש                      |
+| `alert_configuration_id`    | FK לתצורה שיצרה את ההתראה                                             |
+| `is_relevant`               | סינון אנושי                                                                    |
+| `data_date`                 | **`timestamptz`** ולא `text` כמו ב-`alerts_gf`                        |
 
 **מסקנה: סעיף 3.6 לא בונה מנגנון דדופליקציה חדש — הוא משתמש בקיים.**
 
@@ -193,13 +207,13 @@ project_intelligence_status_events  384
 
 תת-מערכת שלא הייתה מוכרת לאפיון עד כה, ומחזיקה 383 פריטים:
 
-| `kind` | `status` | סה״כ | עם `due_date` | **תאריך היעד חלף** | `needs_attention` |
-|---|---|---:|---:|---:|---:|
-| commitment | unknown | 325 | 245 | **245** | 80 |
-| commitment | in_progress | 27 | 26 | **26** | 1 |
-| commitment | completed | 17 | 15 | 15 | 2 |
-| commitment | open | 11 | 11 | **10** | 10 |
-| decision | recorded | 3 | 0 | 0 | 1 |
+| `kind`   | `status`  | סה״כ | עם`due_date` | **תאריך היעד חלף** | `needs_attention` |
+| ---------- | ----------- | -------: | ---------------: | -----------------------------------: | ------------------: |
+| commitment | unknown     |      325 |              245 |                        **245** |                  80 |
+| commitment | in_progress |       27 |               26 |                         **26** |                   1 |
+| commitment | completed   |       17 |               15 |                                   15 |                   2 |
+| commitment | open        |       11 |               11 |                         **10** |                  10 |
+| decision   | recorded    |        3 |                0 |                                    0 |                   1 |
 
 **281 התחייבויות פתוחות עברו את תאריך היעד שלהן. רק 91 מסומנות `needs_attention`.** ו-325 מתוך 383 נמצאות בסטטוס `unknown` — המערכת חילצה התחייבות ותאריך יעד, ומעולם לא סגרה את הלולאה.
 
@@ -237,13 +251,13 @@ delay_schedule_activities     0
 
 הקובץ היחיד ב-`gantt_files_test`:
 
-| שדה | ערך |
-|---|---|
-| `display_name` | לוז מעודכן 03.12.25 |
-| `file_id` | `1776105870763_03.12.25.xml` |
-| `start_date` → `end_date` | 2025-09-28 → 2026-04-29 |
-| `relevancy_date` | 2025-12-03 |
-| `task_count` | 382 |
+| שדה                         | ערך                         |
+| ------------------------------ | ------------------------------ |
+| `display_name`               | לוז מעודכן 03.12.25   |
+| `file_id`                    | `1776105870763_03.12.25.xml` |
+| `start_date` → `end_date` | 2025-09-28 → 2026-04-29       |
+| `relevancy_date`             | 2025-12-03                     |
+| `task_count`                 | 382                            |
 
 > **הערה קריטית:** הלוח הסתיים ב-2026-04-29. נכון ל-2026-08-04 — **כשלושה חודשים אחרי** — יש בו משימות עם `percent_complete = 0` שתאריך היעד שלהן חלף מזמן, ולא נוצרה עליהן שום התראה. בצירוף 281 ההתחייבויות שעברו את מועדן בסעיף 2.1, זו ההוכחה המעשית לצורך במנוע.
 
@@ -251,17 +265,17 @@ delay_schedule_activities     0
 
 ### 2.3 מה חסר
 
-| חסר | השלכה |
-|---|---|
-| **טעינת לוח הקבלן ל-Content DB** | ללא זה המנוע רואה לוח ריק. צעד 8 בסעיף 5.5. |
-| טבלת אבני דרך חוזיות | אין ציר חוזי. `contract_variance_days` לא בר-חישוב. |
-| גרסה שנייה של לוח קבלן | `schedule_slippage_days` ו-`hidden_slippage` לא ברי-חישוב. |
-| תלויות בין משימות | `gantt_tasks` בשני המסדים ללא `predecessors`. Float, נתיב קריטי והפצה חסומים. |
-| `daily_work_log` ריקה ב-Content DB | מקור הראיות הישיר ביותר לציר BIDoc אינו זמין במסד היעד. |
-| מיפוי פעילות ↔ מסמך | אי אפשר לקשר "עיכוב באספקת אריח" למשימת לו״ז. |
-| טבלת Snapshots | אין היסטוריית חישובים ואין Audit. |
-| לוח שנה עבודה | חישוב ימי עבודה (א׳–ה׳, חגי ישראל) לא אפשרי. |
-| `days_late` / `days_remaining` על התראות | ההתראה לא נושאת מספרים. |
+| חסר                                               | השלכה                                                                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **טעינת לוח הקבלן ל-Content DB** | ללא זה המנוע רואה לוח ריק. צעד 8 בסעיף 5.5.                                            |
+| טבלת אבני דרך חוזיות                | אין ציר חוזי.`contract_variance_days` לא בר-חישוב.                                            |
+| גרסה שנייה של לוח קבלן             | `schedule_slippage_days` ו-`hidden_slippage` לא ברי-חישוב.                                          |
+| תלויות בין משימות                     | `gantt_tasks` בשני המסדים ללא `predecessors`. Float, נתיב קריטי והפצה חסומים. |
+| `daily_work_log` ריקה ב-Content DB            | מקור הראיות הישיר ביותר לציר BIDoc אינו זמין במסד היעד.                    |
+| מיפוי פעילות ↔ מסמך                  | אי אפשר לקשר "עיכוב באספקת אריח" למשימת לו״ז.                                   |
+| טבלת Snapshots                                   | אין היסטוריית חישובים ואין Audit.                                                           |
+| לוח שנה עבודה                             | חישוב ימי עבודה (א׳–ה׳, חגי ישראל) לא אפשרי.                                      |
+| `days_late` / `days_remaining` על התראות | ההתראה לא נושאת מספרים.                                                                         |
 
 ### 2.4 ממצא אבטחה שהתגלה בסריקה
 
@@ -505,22 +519,22 @@ POST /api/schedule/evaluate-document
 
 מחליף את `severity_level` הקבוע. הספים ניתנים להגדרה ברמת פרויקט.
 
-| תנאי | `severity_level` |
-|---|---|
-| אבן דרך חוזית חרגה, או `affectsProjectFinish = true` | 5 |
-| `workingDaysLate > 14` | 4 |
-| `workingDaysLate` בין 1 ל-14 | 3 |
-| `workingDaysRemaining <= 3` ו-`percentComplete < 50` | 3 |
-| `workingDaysRemaining <= 7` ו-`percentComplete < 25` | 2 |
-| אחרת | לא מייצר התראה |
+| תנאי                                                               | `severity_level`         |
+| ---------------------------------------------------------------------- | -------------------------- |
+| אבן דרך חוזית חרגה, או`affectsProjectFinish = true` | 5                          |
+| `workingDaysLate > 14`                                               | 4                          |
+| `workingDaysLate` בין 1 ל-14                                     | 3                          |
+| `workingDaysRemaining <= 3` ו-`percentComplete < 50`              | 3                          |
+| `workingDaysRemaining <= 7` ו-`percentComplete < 25`              | 2                          |
+| אחרת                                                               | לא מייצר התראה |
 
 ### 3.5 סוגי התראה של המנוע
 
 שני סוגים, ב-`schedule_alerts` בלבד. **`alert_configurations` אינה נוגעת בהם** — הם נוצרים ממנוע דטרמיניסטי ולא מ-LLM שקורא מסמך, ולכן אין להם `query_text` ואין להם מקום בטבלת התצורות.
 
-| `alert_type` | מתי |
-|---|---|
-| `schedule_breach` | `lateness.isLate = true` ועבר סף מהותיות |
+| `alert_type`           | מתי                                                          |
+| ------------------------ | --------------------------------------------------------------- |
+| `schedule_breach`      | `lateness.isLate = true` ועבר סף מהותיות         |
 | `schedule_approaching` | `daysRemaining` מתחת לסף וההתקדמות נמוכה |
 
 הסוג הקיים `עיכוב` ב-`alerts` **נשאר כמות שהוא ואינו נוגע למנוע.** הוא מייצג עיכוב שדווח על ידי בן אדם.
@@ -540,6 +554,7 @@ POST /api/schedule/evaluate-document
 **ב. התראה אחת פר פעילות.** מיושם דרך `occurrence_group_id` — כל החריגות של אותה פעילות חולקות מזהה קבוצה `schedule:{activity_key}`. חריגה שנמשכת אינה מייצרת התראה חדשה בכל יום.
 
 **ג. פתיחה מחדש רק בשינוי מהותי.** התראה קיימת מתעדכנת, ולא נוצרת מחדש, אלא אם:
+
 - החריגה חצתה סף חומרה חדש, **או**
 - `daysLate` גדל ביותר מ-`materialChangeDays` (ברירת מחדל: 7 ימי עבודה), **או**
 - הסטטוס השתנה מהותית (למשל `at_risk` → `milestone_delayed`).
@@ -550,18 +565,18 @@ POST /api/schedule/evaluate-document
 
 v1.1 מנה שישה צרכנים מושגיים. חלקם אינם סוכנים קיימים ברפו — הטבלה ממפה כל אחד לקוד האמיתי שיצרוך את השירות.
 
-| צרכן (v1.1) | הקוד בפועל | מה הוא מקבל | מצב |
-|---|---|---|---|
-| — | [`subagents/alert.js`](../src/subagents/alert.js) | **הצרכן העיקרי** — פרק 3.3 | 🟡 |
-| **Chat Agent** | [`agent.js`](../src/agent.js) | אינדיקטור לכל פעילות שהוזכרה בשאלה, לפני ניסוח התשובה | 🟡 |
-| **Document Agent** | [`subagents/indexing.js`](../src/subagents/indexing.js) + [`contentAnalysis.js`](../src/subagents/contentAnalysis.js) | האם הפעילות שזוהתה במסמך בזמן, בסיכון או באיחור | 🔴 תלוי במיפוי |
-| **Mail Agent** | אין סוכן ייעודי; מיילים נקלטים דרך `indexing` ומוגשים דרך הכלי `emails` | האם תוכן המייל משנה תחזית | 🔴 תלוי במיפוי |
-| **Meeting Agent** | [`subagents/meeting.js`](../src/subagents/meeting.js) | עדכון התחייבויות וחסמים → טריגר לחישוב מחדש | 🔴 תלוי במיפוי |
-| **Insight Agent** | [`subagents/projectInsights.js`](../src/subagents/projectInsights.js), [`insightPipeline.js`](../src/subagents/insightPipeline.js) | **קורא בלבד** — אינו מחשב לו״ז. ראו סעיף 1.4 | 🟡 |
-| **Dashboard** | [`react/InsightsPage.jsx`](../src/react/InsightsPage.jsx), [`healthScore.js`](../src/subagents/healthScore.js) | `GetProjectScheduleHealth` במקום `overdue_commitments` | 🟡 |
-| — | [`subagents/delayClaim.js`](../src/subagents/delayClaim.js) | הציר הכמותי לתיק התביעה; ממלא את `delay_schedule_*` | 🔴 |
-| — | [`subagents/dataQuery.js`](../src/subagents/dataQuery.js) | ראו הסייג להלן | 🟡 |
-| — | [`qaAgent.js`](../src/qaAgent.js) | מאמת שתשובות על לוחות זמנים תואמות את האינדיקטור | 🟡 |
+| צרכן (v1.1)          | הקוד בפועל                                                                                                                  | מה הוא מקבל                                                                               | מצב                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- | ------------------------ |
+| —                       | [`subagents/alert.js`](../src/subagents/alert.js)                                                                                   | **הצרכן העיקרי** — פרק 3.3                                                    | 🟡                       |
+| **Chat Agent**     | [`agent.js`](../src/agent.js)                                                                                                       | אינדיקטור לכל פעילות שהוזכרה בשאלה, לפני ניסוח התשובה | 🟡                       |
+| **Document Agent** | [`subagents/indexing.js`](../src/subagents/indexing.js) + [`contentAnalysis.js`](../src/subagents/contentAnalysis.js)              | האם הפעילות שזוהתה במסמך בזמן, בסיכון או באיחור             | 🔴 תלוי במיפוי |
+| **Mail Agent**     | אין סוכן ייעודי; מיילים נקלטים דרך`indexing` ומוגשים דרך הכלי `emails`                 | האם תוכן המייל משנה תחזית                                                     | 🔴 תלוי במיפוי |
+| **Meeting Agent**  | [`subagents/meeting.js`](../src/subagents/meeting.js)                                                                               | עדכון התחייבויות וחסמים → טריגר לחישוב מחדש                   | 🔴 תלוי במיפוי |
+| **Insight Agent**  | [`subagents/projectInsights.js`](../src/subagents/projectInsights.js), [`insightPipeline.js`](../src/subagents/insightPipeline.js) | **קורא בלבד** — אינו מחשב לו״ז. ראו סעיף 1.4                     | 🟡                       |
+| **Dashboard**      | [`react/InsightsPage.jsx`](../src/react/InsightsPage.jsx), [`healthScore.js`](../src/subagents/healthScore.js)                     | `GetProjectScheduleHealth` במקום `overdue_commitments`                                    | 🟡                       |
+| —                       | [`subagents/delayClaim.js`](../src/subagents/delayClaim.js)                                                                         | הציר הכמותי לתיק התביעה; ממלא את`delay_schedule_*`                     | 🔴                       |
+| —                       | [`subagents/dataQuery.js`](../src/subagents/dataQuery.js)                                                                           | ראו הסייג להלן                                                                         | 🟡                       |
+| —                       | [`qaAgent.js`](../src/qaAgent.js)                                                                                                   | מאמת שתשובות על לוחות זמנים תואמות את האינדיקטור          | 🟡                       |
 
 #### חובת הצ׳אט
 
@@ -599,10 +614,10 @@ test/
 
 ### 4.2 הפרדת AI מחישוב
 
-| שכבה | אחריות | מותר לה |
-|---|---|---|
-| **AI Extraction** | חילוץ מטקסט: שמות פעילויות, תאריכים, התחייבויות, דיווחי התקדמות, חסמים, תלויות מילוליות | להציע ולתת ציון ביטחון |
-| **Deterministic Engine** | השוואת תאריכים, סטיות, ימי עבודה, Float, השפעה על אבני דרך, סיווג סטטוס, שקלול ביטחון | לחשב ולהכריע |
+| שכבה                       | אחריות                                                                                                                                                   | מותר לה                             |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| **AI Extraction**        | חילוץ מטקסט: שמות פעילויות, תאריכים, התחייבויות, דיווחי התקדמות, חסמים, תלויות מילוליות | להציע ולתת ציון ביטחון |
+| **Deterministic Engine** | השוואת תאריכים, סטיות, ימי עבודה, Float, השפעה על אבני דרך, סיווג סטטוס, שקלול ביטחון             | לחשב ולהכריע                   |
 
 ה-AI לעולם אינו קובע את הסטייה הסופית. הוא מייצר קלט מסומן-ביטחון שהמנוע מכריע עליו.
 
@@ -640,6 +655,7 @@ test/
 **החלטה:** כל טבלאות המנוע יושבות ב-**Content DB** של הפרויקט, לצד `gantt_tasks` ו-`alerts`. הן נתוני פרויקט, לא הגדרות מערכת.
 
 **מחייב:**
+
 - כל גישה לדאטה עוברת דרך `contentSupabaseRequest`, לעולם לא דרך `sbFetch` של ה-App DB.
 - כל קריאה נושאת `project_id`. אין ברירת מחדל.
 - אין להשתמש ב-Service Role של ה-App DB לקריאת נתוני פרויקט.
@@ -650,19 +666,19 @@ test/
 
 הכל תחת `/api/`, בהתאם ל-[`server.js`](../src/server.js). אין `/internal/` במערכת.
 
-| שם לוגי (v1.1) | Method | Route | מצב | תיאור |
-|---|---|---|---|---|
-| `GetActivityStatus` | `GET` | `/api/schedule/indicator?kind=activity` | 🟡 | אינדיקטור לפעילות |
-| `GetMilestoneStatus` | `GET` | `/api/schedule/indicator?kind=milestone` | 🔴 | אינדיקטור לאבן דרך |
-| — | `POST` | `/api/schedule/sweep` | 🟡 | סריקת חריגות לפי פילטרים |
-| `EvaluateDocument` | `POST` | `/api/schedule/evaluate-source` | 🔴 | הערכת מסמך מול הלוח |
-| `EvaluateEmail` | `POST` | `/api/schedule/evaluate-source` | 🔴 | אותו מסלול, `sourceType: "email"` |
-| `GetProjectScheduleHealth` | `GET` | `/api/schedule/health` | 🟡 | תמונת לו״ז מצטברת ברמת פרויקט |
-| — | `POST` | `/api/schedule/recalculate` | 🟡 | חישוב מחדש לפרויקט או לתת-קבוצה |
-| — | `GET` | `/api/schedule/versions` | 🟡 | גרסאות לוח שנקלטו |
-| — | `GET` | `/api/schedule/conditions` | 🟢 | התניות חוזיות שממתינות לאירוע מפעיל |
-| — | `POST` | `/api/schedule/conditions/resolve` | 🟢 | איתור אירוע דרך מנוע הצ׳אט וקידום מבוקר לאבן דרך |
-| — | `POST` | `/api/subagents/schedule` | 🟡 | הפעלה ישירה מה-UI, בתבנית `/api/subagents/alert` |
+| שם לוגי (v1.1)         | Method   | Route                                      | מצב | תיאור                                                                               |
+| ---------------------------- | -------- | ------------------------------------------ | ------ | ---------------------------------------------------------------------------------------- |
+| `GetActivityStatus`        | `GET`  | `/api/schedule/indicator?kind=activity`  | 🟡     | אינדיקטור לפעילות                                                        |
+| `GetMilestoneStatus`       | `GET`  | `/api/schedule/indicator?kind=milestone` | 🔴     | אינדיקטור לאבן דרך                                                       |
+| —                           | `POST` | `/api/schedule/sweep`                    | 🟡     | סריקת חריגות לפי פילטרים                                            |
+| `EvaluateDocument`         | `POST` | `/api/schedule/evaluate-source`          | 🔴     | הערכת מסמך מול הלוח                                                      |
+| `EvaluateEmail`            | `POST` | `/api/schedule/evaluate-source`          | 🔴     | אותו מסלול,`sourceType: "email"`                                              |
+| `GetProjectScheduleHealth` | `GET`  | `/api/schedule/health`                   | 🟡     | תמונת לו״ז מצטברת ברמת פרויקט                                   |
+| —                           | `POST` | `/api/schedule/recalculate`              | 🟡     | חישוב מחדש לפרויקט או לתת-קבוצה                                |
+| —                           | `GET`  | `/api/schedule/versions`                 | 🟡     | גרסאות לוח שנקלטו                                                         |
+| —                           | `GET`  | `/api/schedule/conditions`               | 🟢     | התניות חוזיות שממתינות לאירוע מפעיל                       |
+| —                           | `POST` | `/api/schedule/conditions/resolve`       | 🟢     | איתור אירוע דרך מנוע הצ׳אט וקידום מבוקר לאבן דרך |
+| —                           | `POST` | `/api/subagents/schedule`                | 🟡     | הפעלה ישירה מה-UI, בתבנית`/api/subagents/alert`                      |
 
 **החלטה — `EvaluateDocument` ו-`EvaluateEmail` הם מסלול אחד.** v1.1 מנה אותם בנפרד. ההבדל ביניהם הוא בסוג המקור בלבד, לא בלוגיקה: שניהם מקבלים מועמדי פעילות מטקסט ומחזירים אינדיקטורים. מסלול נפרד לכל סוג מקור מוביל ל-`evaluate-meeting`, `evaluate-whatsapp` וכן הלאה. במקום זאת:
 
@@ -751,11 +767,11 @@ POST /api/schedule/evaluate-source
 
 ### 5.1 ההחלטה: מקור מול שכבת ניתוח
 
-| שכבה | טבלאות | תפקיד |
-|---|---|---|
-| **מקור** | `gantt_files`, `gantt_tasks` | הקליטה הגולמית של לוח הקבלן. **לא נגזרת, לא נדרסת.** |
-| **מנוע** | `schedule_*` (חדשות) | ציר חוזי, אירועים נצפים, מיפוי, Snapshots, לוח שנה |
-| **ניתוח** | `delay_schedule_*`, `delay_events` | תיק תביעה. נטענות **מתוך** המנוע, לא במקומו. |
+| שכבה             | טבלאות                           | תפקיד                                                                                     |
+| -------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **מקור**   | `gantt_files`, `gantt_tasks`       | הקליטה הגולמית של לוח הקבלן.**לא נגזרת, לא נדרסת.** |
+| **מנוע**   | `schedule_*` (חדשות)            | ציר חוזי, אירועים נצפים, מיפוי, Snapshots, לוח שנה               |
+| **ניתוח** | `delay_schedule_*`, `delay_events` | תיק תביעה. נטענות**מתוך** המנוע, לא במקומו.               |
 
 המנוע קורא מ-`gantt_tasks`, מחשב, וכותב Snapshot. `delay_schedule_versions` / `delay_schedule_activities` ממשיכות לשרת את [`delayClaim.js`](../src/subagents/delayClaim.js) ומתמלאות מפלט המנוע במקום מ-LLM.
 
@@ -778,10 +794,11 @@ predecessors      = []          ← אין נתון
 **שתי אנומליות שנמדדו ויש לטפל בהן:**
 
 1. **`is_milestone` אינו אמין.** ב-`gantt_tasks_test`, המשימות `צו תחילת עבודה` ו-`קבלת תכנון-אבן דרך א'- בינוי` הן אבני דרך לכל דבר אך מסומנות `is_milestone: false`. **כלל:** פעילות שבה `start_date == finish_date` תטופל כאבן דרך גם אם הדגל כבוי, והמקור לקביעה יירשם ב-`explanation`.
-
 2. **`percent_complete` על משימות סיכום הוא רולאפ משוקלל.** נמדד: `אישורי חשמל` (`is_summary: true`) מציג 9% בעוד ילדיו מציגים 25/0/0/0/23. **כלל:** סטטוס משימת סיכום נגזר מילדיה ולא מחושב ישירות, ומשימות סיכום אינן מייצרות התראות.
 
 ### 5.3 טבלאות חדשות
+
+> **CTO lock — existing tables:** All eight Schedule tables in this section already exist. The SQL below is historical schema-reference material only. Do not run the CREATE statements, recreate/copy the tables, or use this section as deployment instructions. Audit the live schema read-only and reuse it. Any additive DDL requires a separate, exact CTO-approved change request.
 
 > לפי [`CLAUDE.md`](../CLAUDE.md): **מיגרציות לעולם אינן רצות מהקוד.** ה-SQL מיועד להרצה ידנית ב-Supabase SQL Editor.
 
@@ -985,16 +1002,16 @@ create table if not exists schedule_calendars (
 
 **מה הסוכן הכותב מספק — עובדות בלבד:**
 
-| שדה | חובה | הערה |
-|---|:---:|---|
-| `project_id` | ✅ | מזהה Content DB |
-| `milestone_key` | ✅ | מפתח יציב. אותה אבן דרך מאותו חוזה חייבת לקבל אותו מפתח בכל הרצה — זה בסיס ה-idempotency |
-| `name` | ✅ | |
-| `contract_date` | ✅ | התאריך החוזי המקורי |
-| `written_by` | ✅ | מזהה הסוכן. בלעדיו אי אפשר לייחס שורה שגויה למקורה |
-| `source_document_id` + `source_excerpt` | מומלץ | בלי ציטוט אין Auditability (סעיף 9) |
-| `activity_key` | אופציונלי | קישור לפעילות בלוח. **בלעדיו `milestone_impact_days` לא בר-חישוב** |
-| `confidence` | ברירת מחדל 1.0 | להוריד כשהתאריך נגזר מפרשנות ולא מציטוט מפורש |
+| שדה                                      |        חובה        | הערה                                                                                                                                            |
+| ------------------------------------------- | :---------------------: | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project_id`                              |           ✅           | מזהה Content DB                                                                                                                                 |
+| `milestone_key`                           |           ✅           | מפתח יציב. אותה אבן דרך מאותו חוזה חייבת לקבל אותו מפתח בכל הרצה — זה בסיס ה-idempotency |
+| `name`                                    |           ✅           |                                                                                                                                                     |
+| `contract_date`                           |           ✅           | התאריך החוזי המקורי                                                                                                                |
+| `written_by`                              |           ✅           | מזהה הסוכן. בלעדיו אי אפשר לייחס שורה שגויה למקורה                                                         |
+| `source_document_id` + `source_excerpt` |       מומלץ       | בלי ציטוט אין Auditability (סעיף 9)                                                                                                  |
+| `activity_key`                            |   אופציונלי   | קישור לפעילות בלוח.**בלעדיו `milestone_impact_days` לא בר-חישוב**                                            |
+| `confidence`                              | ברירת מחדל 1.0 | להוריד כשהתאריך נגזר מפרשנות ולא מציטוט מפורש                                                                |
 
 **עדכון אבן דרך מתבצע ב-`upsert` על `(project_id, milestone_key)`.** תאריך שהשתנה בעקבות תיקון חוזי אינו יוצר שורה חדשה — הוא מעדכן את הקיימת. שורה שאינה רלוונטית עוד מסומנת `status = 'superseded'` ואינה נמחקת.
 
@@ -1080,11 +1097,11 @@ create index if not exists schedule_alerts_triage_idx
 
 #### מה השתנה בעקבות המדיניות
 
-| היה | עכשיו |
-|---|---|
-| `detected_by = 'schedule_engine'` בטבלת `alerts` | **מיותר.** הפרדה מוחלטת — כל שורה ב-`schedule_alerts` היא מהמנוע, בהגדרה |
-| שימוש חוזר ב-`occurrence_group_id` ו-`lifecycle_status` הקיימים | מוגדרים כאן במלואם |
-| `alerts_activity_idx` על טבלת `alerts` | `schedule_alerts_open_uk` על הטבלה שלנו |
+| היה                                                                                | עכשיו                                                                                                              |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `detected_by = 'schedule_engine'` בטבלת `alerts`                             | **מיותר.** הפרדה מוחלטת — כל שורה ב-`schedule_alerts` היא מהמנוע, בהגדרה |
+| שימוש חוזר ב-`occurrence_group_id` ו-`lifecycle_status` הקיימים | מוגדרים כאן במלואם                                                                                      |
+| `alerts_activity_idx` על טבלת `alerts`                                      | `schedule_alerts_open_uk` על הטבלה שלנו                                                                    |
 
 **סוגי ההתראה עברו לאנגלית** — `schedule_breach` ו-`schedule_approaching` במקום `חריגה מלו״ז` ו-`לו״ז מתקרב`. הערכים העבריים היו נחוצים כדי להשתלב ב-`alert_configurations` הקיימת; משאין שילוב, מפתח יציב עדיף על טקסט מוצג. התרגום לעברית נעשה ב-UI.
 
@@ -1104,13 +1121,13 @@ create index if not exists schedule_alerts_triage_idx
 
 המנוע אינו קשור לטבלה מסוימת (סעיף 14.1). ה-runbook רץ מול **הפרופיל הפעיל**, ואותם צעדים בדיוק חלים על שניהם:
 
-| | פרופיל `dev` | פרופיל `content` |
-|---|---|---|
-| **מסד** | MAIN — `pmdnmzuqbcnzgkuhpfnx` | Content DB של הפרויקט — `smxibuaowzuxkznuouwj` |
-| **טבלת קבצים** | `gantt_files_test` | `gantt_files` |
-| **טבלת משימות** | `gantt_tasks_test` | `gantt_tasks` |
-| **מצב הדאטה** | **382 שורות, זמין היום** | ריק — תלוי בשרשרת קליינט→DB |
-| **מתי** | פיתוח ובדיקות עכשיו | הפעלה בפרודקשן |
+|                                 | פרופיל`dev`                         | פרופיל`content`                                   |
+| ------------------------------- | ------------------------------------------- | --------------------------------------------------------- |
+| **מסד**                | MAIN —`pmdnmzuqbcnzgkuhpfnx`             | Content DB של הפרויקט —`smxibuaowzuxkznuouwj` |
+| **טבלת קבצים**   | `gantt_files_test`                        | `gantt_files`                                           |
+| **טבלת משימות** | `gantt_tasks_test`                        | `gantt_tasks`                                           |
+| **מצב הדאטה**     | **382 שורות, זמין היום** | ריק — תלוי בשרשרת קליינט→DB          |
+| **מתי**                | פיתוח ובדיקות עכשיו        | הפעלה בפרודקשן                               |
 
 **הפרופיל נקבע בהגדרות ולא בקוד:**
 
@@ -1127,11 +1144,11 @@ create index if not exists schedule_alerts_triage_idx
 
 #### כללי הרצה
 
-| | |
-|---|---|
-| **אופן הרצה** | ידנית ב-Supabase SQL Editor. לעולם לא מהקוד ([`CLAUDE.md`](../CLAUDE.md)) |
-| **חזרתיות** | **פר מסד.** להריץ פעם אחת על MAIN לפיתוח, ופעם נוספת על כל Content DB בפרודקשן |
-| **סדר** | הצעדים תלויים זה בזה. אין לדלג |
+|                             |                                                                                                                                   |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **אופן הרצה** | ידנית ב-Supabase SQL Editor. לעולם לא מהקוד ([`CLAUDE.md`](../CLAUDE.md))                                      |
+| **חזרתיות**    | **פר מסד.** להריץ פעם אחת על MAIN לפיתוח, ופעם נוספת על כל Content DB בפרודקשן |
+| **סדר**            | הצעדים תלויים זה בזה. אין לדלג                                                                            |
 
 טבלאות המנוע (`schedule_*`) נוצרות **באותו מסד שבו יושב המקור הפעיל**. Snapshot חייב לשבת ליד הלוח שהוא מתאר; פיצול בין מסדים שובר את ה-FK ואת האפשרות לשאילתת join.
 
@@ -1407,10 +1424,10 @@ from schedule_calendars;
 
 **אין העברת דאטה בין מסדים.** בפרופיל `dev` הלוח כבר קיים; בפרופיל `content` הוא מגיע מהקליינט. בשני המקרים הצעד הזה הוא **אימות בלבד**.
 
-| פרופיל | מצב | פעולה |
-|---|---|---|
-| `dev` | 382 שורות ב-`gantt_tasks_test` | אין פעולה. עבור לאימות. |
-| `content` | ריק | הקליינט מעלה XML, מפרסר וכותב ל-`gantt_files` / `gantt_tasks`. **הצעד ממתין לשרשרת הזו.** |
+| פרופיל | מצב                                 | פעולה                                                                                                                                  |
+| ------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dev`      | 382 שורות ב-`gantt_tasks_test` | אין פעולה. עבור לאימות.                                                                                                   |
+| `content`  | ריק                                 | הקליינט מעלה XML, מפרסר וכותב ל-`gantt_files` / `gantt_tasks`. **הצעד ממתין לשרשרת הזו.** |
 
 > **אין להעביר שורות ידנית מ-`_test` ל-Content DB.** מעבר לכך שזה עוקף את נתיב הפענוח, ה-382 שורות שייכות לפרויקט `652bf3e0…` של חברת "אביב ובניו" — לא לפרויקט של Kapaim (סעיף 14.5). העברה תשייך לוח של פרויקט אחד לפרויקט אחר.
 
@@ -1485,6 +1502,8 @@ values ('<PROJECT_UUID>', 'a', 'm', current_date, 'on_track', '{}'::jsonb, 'sche
 
 #### צעד 10 — Rollback
 
+> **DO NOT EXECUTE THIS HISTORICAL ROLLBACK.** The Schedule tables now exist and may contain configuration, snapshots, alerts, mappings, evidence, and human review state. The DROP statements below are reference-only and are superseded by the CTO lock dated 2026-08-08. Any real rollback requires a new, non-destructive, data-preserving plan and explicit approval.
+
 ```sql
 -- כל טבלאות המנוע. זהו ה-rollback המלא.
 drop table if exists schedule_alerts              cascade;
@@ -1528,13 +1547,13 @@ alter table alerts drop column if exists baselined;
 
 שרשרת הראיות:
 
-| # | ממצא |
-|---|---|
+| # | ממצא                                                                                                                                                                          |
+| - | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1 | העלאה שבוצעה ב-2026-08-04 18:38 UTC יצרה אובייקט ב-**Meta DB**: `assets/gantt/81b1cbac…/1785868733109_MS_Project_24.12.23.xml`, 232,902 בתים |
-| 2 | ל-Meta DB **אין טבלאות gantt כלל** — 12 טבלאות בסך הכל, כולן מישור בקרה |
-| 3 | `gantt_files` / `gantt_tasks` ב-Kapaim: 0 שורות, מעולם לא נכתבו |
-| 4 | `gantt_tasks_test` ב-MAIN: נכתבה לאחרונה 2026-04-13, ללא שינוי מאז |
-| 5 | ה-UI מציג 102 משימות מקובץ שאין לו ולו שורה אחת באף מסד |
+| 2 | ל-Meta DB**אין טבלאות gantt כלל** — 12 טבלאות בסך הכל, כולן מישור בקרה                                                               |
+| 3 | `gantt_files` / `gantt_tasks` ב-Kapaim: 0 שורות, מעולם לא נכתבו                                                                                             |
+| 4 | `gantt_tasks_test` ב-MAIN: נכתבה לאחרונה 2026-04-13, ללא שינוי מאז                                                                                      |
+| 5 | ה-UI מציג 102 משימות מקובץ שאין לו ולו שורה אחת באף מסד                                                                                     |
 
 מבנה הנתיב ב-Storage:
 
@@ -1561,22 +1580,22 @@ path:   gantt/{project_id}/{epoch_ms}_{original_filename}
 
 **נמדד ישירות על `1776105870763_03.12.25.xml` (3.2MB, 383 בלוקי `<Task>`) ב-2026-08-04.** הקובץ הורד מ-Storage ונסרק. זה מה שקיים בו:
 
-| שדה ב-XML | מופעים | נשמר ל-DB? | מה זה פותח |
-|---|---:|:---:|---|
-| `PredecessorLink` + `PredecessorUID` + `LinkLag` | **475** ב-311 משימות | ❌ | **כל סעיף 6.7** — תלויות, הפצת עיכובים |
-| `TotalSlack` | 383 | ❌ | Float כולל, לכל משימה |
-| `FreeSlack` | 383 | ❌ | Float חופשי |
-| `Critical` | 383 | ❌ | **נתיב קריטי מחושב מראש** |
-| `ActualStart` | 170 | ❌ | ציר ביצוע בפועל, ישירות מהלוח |
-| `ActualFinish` | 89 | ❌ | סגירת פעילויות ודאית |
-| `ActualDuration` | 383 | ❌ | קצב ביצוע |
-| `WBS` + `OutlineNumber` | 383 | ❌ | **מיפוי פעילויות** (סעיף 6.3) |
-| `Duration` | 385 | ❌ | משך מתוכנן |
-| `ConstraintType` / `ConstraintDate` | 383 / 48 | ❌ | אילוצי תאריך |
-| `EarlyStart` / `LateFinish` | 383 | ❌ | ערכי CPM |
-| `Calendar` + `WeekDay` + `Exception` | 2 / 16 / 2 | ❌ | **לוח שנה עבודה כולל חגים** (סעיף 6.6) |
-| `Assignment` | 328 | ❌ | משאבים |
-| `Baseline` | **0** | — | **הדבר היחיד שבאמת חסר** |
+| שדה ב-XML                                          |                      מופעים | נשמר ל-DB? | מה זה פותח                                                   |
+| ------------------------------------------------------ | --------------------------------: | :-------------: | -------------------------------------------------------------------- |
+| `PredecessorLink` + `PredecessorUID` + `LinkLag` | **475** ב-311 משימות |       ❌       | **כל סעיף 6.7** — תלויות, הפצת עיכובים |
+| `TotalSlack`                                         |                               383 |       ❌       | Float כולל, לכל משימה                                    |
+| `FreeSlack`                                          |                               383 |       ❌       | Float חופשי                                                     |
+| `Critical`                                           |                               383 |       ❌       | **נתיב קריטי מחושב מראש**                    |
+| `ActualStart`                                        |                               170 |       ❌       | ציר ביצוע בפועל, ישירות מהלוח                |
+| `ActualFinish`                                       |                                89 |       ❌       | סגירת פעילויות ודאית                               |
+| `ActualDuration`                                     |                               383 |       ❌       | קצב ביצוע                                                    |
+| `WBS` + `OutlineNumber`                            |                               383 |       ❌       | **מיפוי פעילויות** (סעיף 6.3)                 |
+| `Duration`                                           |                               385 |       ❌       | משך מתוכנן                                                  |
+| `ConstraintType` / `ConstraintDate`                |                          383 / 48 |       ❌       | אילוצי תאריך                                              |
+| `EarlyStart` / `LateFinish`                        |                               383 |       ❌       | ערכי CPM                                                         |
+| `Calendar` + `WeekDay` + `Exception`             |                        2 / 16 / 2 |       ❌       | **לוח שנה עבודה כולל חגים** (סעיף 6.6)  |
+| `Assignment`                                         |                               328 |       ❌       | משאבים                                                         |
+| `Baseline`                                           |                       **0** |       —       | **הדבר היחיד שבאמת חסר**                      |
 
 **המסקנה משנה את רוב שערי הנתונים במסמך.** מה שסומן עד כה 🔴 "חסום-דאטה" אינו חסום בדאטה — **הדאטה קיימת בקובץ ונזרקת בפענוח.** הפרסר של הקליינט שומר 10 עמודות מתוך עשרות.
 
@@ -1598,15 +1617,15 @@ path:   gantt/{project_id}/{epoch_ms}_{original_filename}
 
 מה שנקלט בפועל, לפי השורה היחידה שנמדדה:
 
-| שדה | ערך | מקור |
-|---|---|---|
-| `file_id` | `1776105870763_03.12.25.xml` | חותמת epoch במילישניות + שם הקובץ המקורי |
-| `display_name` | לוז מעודכן 03.12.25 | תווית אנושית |
-| `task_count` | 382 | דנורמליזציה של מספר המשימות |
-| `start_date` / `end_date` | 2025-09-28 / 2026-04-29 | מעטפת הלוח |
-| `last_saved` | 2026-04-13T17:40Z | חותמת השמירה האחרונה **מתוך** ה-XML של MS Project |
-| `uploaded_at` | 2026-04-13T18:44Z | מתי הקובץ הגיע ל-BiDoc |
-| `relevancy_date` | 2025-12-03 | התאריך שאליו הלוח רלוונטי (Data Date) |
+| שדה                        | ערך                         | מקור                                                                        |
+| ----------------------------- | ------------------------------ | ------------------------------------------------------------------------------- |
+| `file_id`                   | `1776105870763_03.12.25.xml` | חותמת epoch במילישניות + שם הקובץ המקורי            |
+| `display_name`              | לוז מעודכן 03.12.25   | תווית אנושית                                                         |
+| `task_count`                | 382                            | דנורמליזציה של מספר המשימות                             |
+| `start_date` / `end_date` | 2025-09-28 / 2026-04-29        | מעטפת הלוח                                                             |
+| `last_saved`                | 2026-04-13T17:40Z              | חותמת השמירה האחרונה**מתוך** ה-XML של MS Project |
+| `uploaded_at`               | 2026-04-13T18:44Z              | מתי הקובץ הגיע ל-BiDoc                                             |
+| `relevancy_date`            | 2025-12-03                     | התאריך שאליו הלוח רלוונטי (Data Date)                     |
 
 #### הגרסאות כבר נתמכות בסכימה
 
@@ -1628,14 +1647,14 @@ path:   gantt/{project_id}/{epoch_ms}_{original_filename}
 
 זו רשימת הבקשה המדויקת להרחבת נתיב הקליטה:
 
-| חסר | מה נחסם בלעדיו |
-|---|---|
-| `predecessors` / קשרי גומלין | כל סעיף 6.7 — Float, נתיב קריטי, הפצת עיכובים |
-| תאריכי Baseline | הבחנה בין הלוח המקורי לנוכחי בתוך אותה גרסה |
-| `actual_start` / `actual_finish` | ציר הביצוע בפועל מגיע רק ממסמכים במקום מהלוח |
-| `duration` ו-`total_float` / `free_float` | חישוב עצמאי במקום קריאה ישירה |
-| קוד WBS, אזור, קומה, מקצוע | מיפוי פעילויות (סעיף 6.3) נשען על שם בלבד |
-| לוח שנה מתוך ה-XML | ימי העבודה מוגדרים ידנית במקום להגיע מהמקור |
+| חסר                                           | מה נחסם בלעדיו                                                        |
+| ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `predecessors` / קשרי גומלין         | כל סעיף 6.7 — Float, נתיב קריטי, הפצת עיכובים          |
+| תאריכי Baseline                            | הבחנה בין הלוח המקורי לנוכחי בתוך אותה גרסה   |
+| `actual_start` / `actual_finish`             | ציר הביצוע בפועל מגיע רק ממסמכים במקום מהלוח |
+| `duration` ו-`total_float` / `free_float` | חישוב עצמאי במקום קריאה ישירה                            |
+| קוד WBS, אזור, קומה, מקצוע       | מיפוי פעילויות (סעיף 6.3) נשען על שם בלבד            |
+| לוח שנה מתוך ה-XML                    | ימי העבודה מוגדרים ידנית במקום להגיע מהמקור  |
 
 #### השלכה מהכרעה 14.1
 
@@ -1651,14 +1670,14 @@ path:   gantt/{project_id}/{epoch_ms}_{original_filename}
 
 מקורות זמינים **ב-Content DB**, לפי סדר ערך:
 
-| מקור | שורות | הערה |
-|---|---:|---|
-| `project_intelligence_items` | 383 | **המקור הבשל ביותר** — כבר מחולץ, עם `due_date`, `owner_text`, `confidence` ו-`field_confidence` |
-| `emails` | 7,163 | |
-| `data_index` | 2,610 | האינדקס המאוחד |
-| `alerts` | 2,178 | מהן 272 מסוג `עיכוב` |
-| `meetings` | 442 | |
-| `daily_work_log` | **0** | המקור הישיר ביותר לביצוע בשטח — **ריק ב-Content DB** |
+| מקור                       |  שורות | הערה                                                                                                                                 |
+| ------------------------------ | ----------: | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `project_intelligence_items` |         383 | **המקור הבשל ביותר** — כבר מחולץ, עם `due_date`, `owner_text`, `confidence` ו-`field_confidence` |
+| `emails`                     |       7,163 |                                                                                                                                          |
+| `data_index`                 |       2,610 | האינדקס המאוחד                                                                                                              |
+| `alerts`                     |       2,178 | מהן 272 מסוג`עיכוב`                                                                                                        |
+| `meetings`                   |         442 |                                                                                                                                          |
+| `daily_work_log`             | **0** | המקור הישיר ביותר לביצוע בשטח —**ריק ב-Content DB**                                                  |
 
 **`project_intelligence_items` נקלט ולא מחושב מחדש.** מיפוי ישיר:
 
@@ -1705,13 +1724,13 @@ fingerprint          →  מפתח דדופליקציה
 
 מחושב כאשר אין `observedFinish`.
 
-| שיטה | נוסחה | שער |
-|---|---|---|
-| לפי אחוז התקדמות | `משך חזוי כולל = ימים שעברו / אחוז ביצוע` | 🟡 `percent_complete` קיים |
-| לפי קצב ביצוע | `משך נותר = כמות נותרת / קצב ממוצע` | 🔴 אין נתוני כמויות |
-| לפי התחייבות במסמך | תאריך מפורש שחולץ מטקסט | 🟡 תלוי בסעיף 6.2 |
-| לפי חסם | התחלה נדחית עד פתרון החסם | 🟡 תלוי בסעיף 6.2 |
-| לפי פעילות קודמת | `FS` — התחלה לא מקדימה סיום קודמת | 🔴 אין תלויות |
+| שיטה                           | נוסחה                                                               | שער                            |
+| ---------------------------------- | ------------------------------------------------------------------------ | --------------------------------- |
+| לפי אחוז התקדמות     | `משך חזוי כולל = ימים שעברו / אחוז ביצוע` | 🟡`percent_complete` קיים   |
+| לפי קצב ביצוע           | `משך נותר = כמות נותרת / קצב ממוצע`            | 🔴 אין נתוני כמויות |
+| לפי התחייבות במסמך | תאריך מפורש שחולץ מטקסט                              | 🟡 תלוי בסעיף 6.2        |
+| לפי חסם                      | התחלה נדחית עד פתרון החסם                           | 🟡 תלוי בסעיף 6.2        |
+| לפי פעילות קודמת     | `FS` — התחלה לא מקדימה סיום קודמת               | 🔴 אין תלויות            |
 
 כל תחזית מחזירה: תאריך, שיטת חישוב, רמת ביטחון, הנחות, מקורות ראיה, וזמן החישוב.
 
@@ -1746,6 +1765,7 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 **מה שיידרש כשהשדות יישמרו:** תמיכה ב-`FS` / `SS` / `FF` / `SF`, ב-Lag חיובי וב-Lead שלילי, שמירת מקור הקשר וגרסת הלוח, ורמת ביטחון נפרדת לקשר שנגזר ממסמך ולא מלוח פורמלי.
 
 כללי יסוד לכשיאופשר:
+
 - חריגה הקטנה מה-Float אינה מסומנת אוטומטית כעיכוב פרויקט.
 - חריגה מעבר ל-Float מופצת לפעילויות תלויות.
 - נשמרות גם החריגה המקומית וגם ההשפעה המצטברת.
@@ -1786,16 +1806,16 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 
 ### 6.8 Status Classification Engine 🟡
 
-| סטטוס | שער |
-|---|---|
-| `on_track`, `watch`, `at_risk` | 🟡 |
-| `delayed_vs_contractor` | 🟡 |
-| `completed_late`, `completed_on_time` | 🟡 תלוי ב-6.2 |
-| `not_started`, `blocked` | 🟡 תלוי ב-6.2 |
-| `insufficient_data` | 🟢 |
-| `source_conflict` | 🟡 |
-| `delayed_vs_contract`, `milestone_at_risk`, `milestone_delayed` | 🔴 אין ציר חוזי |
-| `hidden_slippage` | 🔴 גרסה אחת בלבד |
+| סטטוס                                                            | שער                      |
+| --------------------------------------------------------------------- | --------------------------- |
+| `on_track`, `watch`, `at_risk`                                  | 🟡                          |
+| `delayed_vs_contractor`                                             | 🟡                          |
+| `completed_late`, `completed_on_time`                             | 🟡 תלוי ב-6.2          |
+| `not_started`, `blocked`                                          | 🟡 תלוי ב-6.2          |
+| `insufficient_data`                                                 | 🟢                          |
+| `source_conflict`                                                   | 🟡                          |
+| `delayed_vs_contract`, `milestone_at_risk`, `milestone_delayed` | 🔴 אין ציר חוזי   |
+| `hidden_slippage`                                                   | 🔴 גרסה אחת בלבד |
 
 כללי סיווג:
 
@@ -1818,16 +1838,16 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 
 ציון בין `0` ל-`1`.
 
-| גורם | השפעה |
-|---|---|
-| מקור רשמי חתום | גבוהה |
-| דוח פיקוח עדכני | גבוהה |
-| לוח קבלן רשמי | גבוהה |
-| מספר מקורות תומכים | מעלה |
-| מקור ישן | מוריד |
-| סתירה בין מקורות | מוריד |
+| גורם                                | השפעה |
+| --------------------------------------- | ---------- |
+| מקור רשמי חתום              | גבוהה |
+| דוח פיקוח עדכני            | גבוהה |
+| לוח קבלן רשמי                | גבוהה |
+| מספר מקורות תומכים      | מעלה   |
+| מקור ישן                         | מוריד |
+| סתירה בין מקורות          | מוריד |
 | הערכה כללית ללא תאריך | מוריד |
-| אישור משתמש | מעלה |
+| אישור משתמש                   | מעלה   |
 | התאמת פעילות לא ודאית | מוריד |
 
 רמות: `high` 0.80–1.00 | `medium` 0.55–0.79 | `low` 0.00–0.54
@@ -1881,6 +1901,7 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 זמן חישוב ממוצע לפרויקט, מספר פעילויות ללא מיפוי, מספר סתירות פתוחות, אחוז פעילויות עם `confidence` נמוך, מספר תחזיות שהשתנו, גודל שינוי תחזית ממוצע, מספר אבני דרך בסיכון, שגיאות Import, זמן שעבר מאז גרסת הלוח האחרונה, זמן שעבר מאז ראיית שטח אחרונה.
 
 **מדדים ייעודיים להתראות:**
+
 - מספר התראות שנוצרו מהמנוע לעומת מ-LLM (`detected_by`).
 - אחוז התראות מנוע שנדחו על ידי משתמש — מדד הרעש המרכזי.
 - מספר פעילויות חורגות שלא הפכו להתראה בגלל `baselined`.
@@ -1996,11 +2017,11 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 
 הכרעה קודמת באותו יום קבעה "Content DB בלבד", אך התברר שהדאטה היחידה שקיימת בפועל יושבת דווקא בטבלאות `_test` שנפסלו. במקום לבחור צד, המקור הופך להגדרה.
 
-| שכבה | יודעת מאיזו טבלה? |
-|---|---|
-| `scheduleEngine.js` | **לא.** מקבלת מערך משימות מנורמל ומחזירה אינדיקטורים. פונקציה טהורה. |
-| `scheduleIngestion.js` | **כן.** הרכיב היחיד שקורא `schedule.filesTable` / `schedule.tasksTable`. |
-| כל השאר | לא. |
+| שכבה                 | יודעת מאיזו טבלה?                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `scheduleEngine.js`    | **לא.** מקבלת מערך משימות מנורמל ומחזירה אינדיקטורים. פונקציה טהורה. |
+| `scheduleIngestion.js` | **כן.** הרכיב היחיד שקורא `schedule.filesTable` / `schedule.tasksTable`.                             |
+| כל השאר            | לא.                                                                                                                           |
 
 שני הפרופילים מוגדרים בסעיף 5.5:
 
@@ -2042,10 +2063,10 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 
 הבדיקה ב-`projects_registry` שב-Meta DB העלתה שמדובר ב**שני פרויקטים שונים של שתי חברות שונות**, ולא בפרויקט אחד עם שני מזהים:
 
-| `projects.id` | שם | חברה | Content DB |
-|---|---|---|---|
-| `652bf3e0-9a1e-47ca-b06f-cd8dc33907f7` | פרויקט כללי | חברת בנייה אביב ובניו | **MAIN** (fallback) |
-| `81b1cbac-8fcf-43c1-acdc-6b5c809de0e5` | סמל - החושלים 15 הרצליה | Kapaim | **Kapaim** |
+| `projects.id`                          | שם                                    | חברה                                | Content DB                |
+| ---------------------------------------- | --------------------------------------- | --------------------------------------- | ------------------------- |
+| `652bf3e0-9a1e-47ca-b06f-cd8dc33907f7` | פרויקט כללי                   | חברת בנייה אביב ובניו | **MAIN** (fallback) |
+| `81b1cbac-8fcf-43c1-acdc-6b5c809de0e5` | סמל - החושלים 15 הרצליה | Kapaim                                  | **Kapaim**          |
 
 **המשמעות לצעד 8:** הגאנט `1776105870763_03.12.25.xml` שייך ל**"פרויקט כללי"** של חברת "אביב ובניו" — לא לפרויקט של Kapaim. העברת השורות ל-Content DB של Kapaim תשייך לוח זמנים של פרויקט אחד לפרויקט אחר.
 
@@ -2073,13 +2094,13 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 
 חמישה מקומות במסמך מניחים שבן אדם פועל, בלי להגדיר היכן:
 
-| סעיף | ההנחה | מה חסר |
-|---|---|---|
-| 6.3 | מיפוי עובר מ-`suggested` ל-`manually_confirmed` או `rejected` | תור אישור |
-| 8 | "ניתן לפתוח משימת Review למשתמש" בסתירה | תור Review |
-| 3.6 | אתחול היסטורי מסמן חריגות כ-`baselined` | מסך שמראה מה הושתק |
-| 6.6 | `holidays` ו-`holidays_through` מוזנים ידנית | מסך הזנה |
-| 7 | "אישור משתמש מעלה `confidence`" | מקום לאשר |
+| סעיף | ההנחה                                                                       | מה חסר                       |
+| -------- | -------------------------------------------------------------------------------- | --------------------------------- |
+| 6.3      | מיפוי עובר מ-`suggested` ל-`manually_confirmed` או `rejected` | תור אישור                 |
+| 8        | "ניתן לפתוח משימת Review למשתמש" בסתירה                | תור Review                     |
+| 3.6      | אתחול היסטורי מסמן חריגות כ-`baselined`                 | מסך שמראה מה הושתק |
+| 6.6      | `holidays` ו-`holidays_through` מוזנים ידנית                     | מסך הזנה                   |
+| 7        | "אישור משתמש מעלה`confidence`"                                   | מקום לאשר                 |
 
 בנוסף, **קריטריון קבלה 30** דורש שכל שינוי ידני יתועד עם `user_id` — אך אין מקום לבצע שינוי ידני.
 
@@ -2089,27 +2110,27 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 
 ### 15.2 שילוב בממשק הקיים
 
-| היבט | החלטה |
-|---|---|
-| ניתוב | טאב `#schedule` בתבנית הקיימת — [`app.js:375`](../public/app.js) |
-| טעינה | loader ייעודי בכניסה לטאב, כמו `#insights` ו-`#knowledge` |
-| קובץ | `src/react/SchedulePage.jsx`, בתבנית [`InsightsPage.jsx`](../src/react/InsightsPage.jsx) |
-| אימות | השער הקיים בלבד — סשן סופראדמין ([`server.js:160`](../src/server.js)). **אין שער חדש.** |
-| נתונים | **אך ורק דרך `/api/schedule/*`.** אין גישה ישירה ל-Supabase מהדפדפן. |
-| עיצוב | מערכת העיצוב הקיימת, RTL, עברית |
+| היבט     | החלטה                                                                                                                        |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| ניתוב   | טאב`#schedule` בתבנית הקיימת — [`app.js:375`](../public/app.js)                                                |
+| טעינה   | loader ייעודי בכניסה לטאב, כמו`#insights` ו-`#knowledge`                                                  |
+| קובץ     | `src/react/SchedulePage.jsx`, בתבנית [`InsightsPage.jsx`](../src/react/InsightsPage.jsx)                                 |
+| אימות   | השער הקיים בלבד — סשן סופראדמין ([`server.js:160`](../src/server.js)). **אין שער חדש.** |
+| נתונים | **אך ורק דרך `/api/schedule/*`.** אין גישה ישירה ל-Supabase מהדפדפן.                          |
+| עיצוב   | מערכת העיצוב הקיימת, RTL, עברית                                                                             |
 
 ### 15.3 מסלולי API נוספים
 
 מרחיבים את סעיף 4.4. נדרשים למסכי התורים.
 
-| Method | Route | תיאור |
-|---|---|---|
-| `GET` | `/api/schedule/mapping?status=suggested` | הצעות מיפוי הממתינות לאישור |
-| `POST` | `/api/schedule/mapping/{id}/confirm` | אישור — מעדכן ל-`manually_confirmed` |
-| `POST` | `/api/schedule/mapping/{id}/reject` | דחייה |
-| `GET` | `/api/schedule/conflicts` | סתירות פתוחות |
-| `POST` | `/api/schedule/conflicts/{id}/resolve` | הכרעה ידנית + נימוק |
-| `GET` | `/api/schedule/baselined` | חריגות שהושתקו באתחול ההיסטורי |
+| Method   | Route                                      | תיאור                                                |
+| -------- | ------------------------------------------ | --------------------------------------------------------- |
+| `GET`  | `/api/schedule/mapping?status=suggested` | הצעות מיפוי הממתינות לאישור       |
+| `POST` | `/api/schedule/mapping/{id}/confirm`     | אישור — מעדכן ל-`manually_confirmed`        |
+| `POST` | `/api/schedule/mapping/{id}/reject`      | דחייה                                                |
+| `GET`  | `/api/schedule/conflicts`                | סתירות פתוחות                                 |
+| `POST` | `/api/schedule/conflicts/{id}/resolve`   | הכרעה ידנית + נימוק                        |
+| `GET`  | `/api/schedule/baselined`                | חריגות שהושתקו באתחול ההיסטורי |
 
 כל פעולת כתיבה מתעדת `user_id` וזמן (קריטריון 30).
 
@@ -2174,12 +2195,12 @@ milestone_impact_days         = forecast_milestone_finish - contractual_mileston
 
 ### 15.6 מסכים לפי שלב ב-MVP
 
-| שלב | מסכים |
-|---|---|
-| 1 | חריגות + פעילות בודדת. **מסך החריגות הוא אמצעי האימות של השלב.** |
-| 2 | סקירה + `baselined`. בלי לראות מה הושתק, אתחול היסטורי הוא קופסה שחורה. |
-| 3 | הזנת לוח שנה בהגדרות |
-| 4 | תור מיפוי + תור סתירות |
+| שלב | מסכים                                                                                                            |
+| ------ | --------------------------------------------------------------------------------------------------------------------- |
+| 1      | חריגות + פעילות בודדת.**מסך החריגות הוא אמצעי האימות של השלב.**  |
+| 2      | סקירה +`baselined`. בלי לראות מה הושתק, אתחול היסטורי הוא קופסה שחורה. |
+| 3      | הזנת לוח שנה בהגדרות                                                                                 |
+| 4      | תור מיפוי + תור סתירות                                                                               |
 
 ### 15.7 קריטריוני קבלה לממשק
 

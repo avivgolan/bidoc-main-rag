@@ -1,6 +1,8 @@
 # מיפוי רכיבים לטבלאות Supabase
 
-עודכן: 2026-08-05
+עודכן: 2026-08-08
+
+> **CTO implementation lock — 2026-08-08:** The eight existing Schedule tables documented below are the canonical baseline and must be reused. Contracts work must not recreate, clone, rename, drop, or replace them, and must not execute DDL without separate approval. Re-audit the live schema and callers read-only immediately before implementation. See the [Contracts Agent and Schedule Intelligence implementation plan](<./Indicator + Contracts/BIDoc_Contracts_Agent_and_Schedule_Intelligence_Implementation_Plan.md>).
 
 ## פרויקטי Supabase והכינויים באפליקציה
 
@@ -43,13 +45,13 @@
 | Delay Claim Agent — evidence | טבלת האינדקס; `meetings_documents`; `meetings` | APP DATA / KAPAIM |
 | Delay Claim Agent — graph | `graph_nodes`; `graph_edges`; RPC `graph_search` | App / MAIN |
 | Schedule Agent — מקור העלאת לוח | `gantt_files_test`; `gantt_tasks_test` | App / MAIN |
-| Schedule Agent — טבלאות מנוע | `schedule_calendars`; `schedule_contract_milestones`; `schedule_contract_extensions`; `schedule_indicator_snapshots`; `schedule_alerts`; `schedule_contract_conditions` | APP DATA / KAPAIM |
+| Schedule Agent — טבלאות מנוע קיימות | `schedule_calendars`; `schedule_contract_milestones`; `schedule_contract_extensions`; `schedule_contract_conditions`; `schedule_indicator_snapshots`; `schedule_alerts`; `schedule_activity_map`; `schedule_observed_events` | APP DATA / KAPAIM |
 | Schedule Condition Resolver | `schedule_contract_milestones`; `schedule_contract_conditions`; `schedule_calendars` | APP DATA / KAPAIM |
 | Connection Diagnostics | טבלאות App / MAIN לצד טבלת האינדקס, ההתראות וה-RPCs של APP DATA | App / MAIN + APP DATA / KAPAIM |
 
 ## אימות חי של טבלאות Schedule ב-KAPAIM
 
-האימות בוצע מול PostgREST OpenAPI של הפרויקט `smxibuaowzuxkznuouwj` בתאריך 2026-08-05. כל הטבלאות הבאות חשופות ל-Data API:
+האימות המקורי בוצע מול PostgREST OpenAPI של הפרויקט `smxibuaowzuxkznuouwj` בתאריך 2026-08-05. אימות חוזר בוצע ב-2026-08-08 באמצעות בקשות `GET` ל-OpenAPI ובקשות `HEAD` עם `count=exact` בלבד. שני הפרויקטים החזירו HTTP 200, כל שמונת טבלאות ה-Schedule עדיין חשופות ל-Data API, והספירות לא השתנו. לא בוצעו DDL, RPC או כתיבת רשומות, ולא הודפסו credentials או ערכי רשומות.
 
 | טבלה | מספר רשומות | עמודות |
 |---|---:|---|
@@ -67,6 +69,8 @@
 RPC רלוונטי שנמצא: `match_gantt_tasks`. מנוע הלו״ז הנוכחי קורא ישירות מהטבלאות ואינו תלוי ב-RPC זה.
 
 > מסקנת האימות: הסכמה מלאה קיימת, אך `gantt_files` ו-`gantt_tasks` ריקות. לכן אין למנוע גרסת לוח או פעילויות לטעון. יש להעביר את הרשומות עצמן, לא רק את מבנה הטבלאות.
+
+> מגבלת האימות: OpenAPI מאמת עמודות, טיפוסים, ברירות מחדל, nullability וחשיפה ל-Data API, אך אינו מוכיח את כל ה-PK/UK/FK/check constraints, האינדקסים, הטריגרים, ה-RLS, המדיניות, ההרשאות או הבעלות החיות. חיבור קטלוג PostgreSQL לקריאה בלבד אינו מוגדר ב-checkout הזה. נדרש export מאושר של הקטלוג לפני Phase 2; זו אינה הרשאה להריץ DDL.
 
 בדיקת App / MAIN (`pmdnmzuqbcnzgkuhpfnx`) אימתה שהממשק כותב אל `gantt_files_test` (רשומה אחת) ואל `gantt_tasks_test` (382 רשומות). השמות `gantt_files` ו-`gantt_tasks` ללא `_test` אינם מופיעים בסכמת PostgREST של MAIN.
 

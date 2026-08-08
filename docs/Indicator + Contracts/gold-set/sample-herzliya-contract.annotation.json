@@ -1,0 +1,700 @@
+{
+  "schemaVersion": "contract-extraction.v1",
+  "extractionVersion": "human-gold.phase0.v1",
+  "mode": "dry_run",
+  "document": {
+    "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+    "filename": "הסכם קבלן-סמל אולם תצוגה הרצליה גרסה לחתימה 1.11.pdf",
+    "sha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+    "documentType": "signing_version",
+    "executionStatus": "unverified",
+    "authorityStatus": "needs_review",
+    "executionDate": null,
+    "visibleSignatureStatus": "blank",
+    "attachmentsStatus": "incomplete",
+    "sourceId": null,
+    "supersedesDocumentVersionId": null
+  },
+  "projectBinding": {
+    "projectId": null,
+    "selectedByUser": false,
+    "status": "needs_review",
+    "contractSiteRaw": "החושלים 5, הרצליה",
+    "contractSiteNormalized": "5 HaHoshlim Street, Herzliya",
+    "candidateProjectSite": "15 HaHoshlim Street, Herzliya",
+    "automaticBindingAllowed": false,
+    "mismatchReasons": [
+      "contract_site_differs_from_schedule_specification",
+      "no_explicit_user_project_selection"
+    ]
+  },
+  "candidates": [
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:6.1_appendix_b.2:role:contractual_completion",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "relative_condition",
+      "role": "contractual_completion",
+      "responsibleParty": "הקבלן",
+      "beneficiary": "סמל",
+      "action": "Complete and deliver the works",
+      "trigger": {
+        "kind": "commencement",
+        "description": "Reviewed contractual commencement event",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": {
+        "value": 100,
+        "unit": "working_day",
+        "direction": "after",
+        "calendarId": null,
+        "inclusivity": "unspecified",
+        "rollConvention": "unspecified"
+      },
+      "recurrence": null,
+      "projection": "project_schedule",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "candidate_for_schedule_contract_conditions",
+      "gates": [
+        "authority_unverified",
+        "project_binding_unreviewed",
+        "commencement_event_missing",
+        "working_calendar_missing",
+        "human_review_required"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 4,
+          "clause": "6.1",
+          "sourceText": "הקבלן מתחייב כי הוא יבצע את העבודות וישלימן במועד כקבוע בנספח ב'.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        },
+        {
+          "pdfPage": 14,
+          "clause": "Appendix B, item 2",
+          "sourceText": "העבודות יושלמו וימסרו לסמל בתוך 100 ימי עבודה ממועד תחילת העבודות.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {
+        "isProjectCompletion": true,
+        "literalDayLabel": "ימי עבודה"
+      }
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:6.7:role:daily_delay_charge_2000",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "consequence",
+      "role": "daily_delay_charge",
+      "responsibleParty": "הקבלן",
+      "beneficiary": "סמל",
+      "action": "Pay a daily charge for delayed completion",
+      "trigger": {
+        "kind": "event",
+        "description": "Each day after the contractual completion date",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": null,
+      "recurrence": null,
+      "projection": "project_schedule",
+      "computedDate": null,
+      "factStatus": "conflicting",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": "daily-delay-charge",
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "material_value_conflict",
+        "day_semantics_unresolved",
+        "human_review_required"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 5,
+          "clause": "6.7",
+          "sourceText": "ישלם הקבלן 2,000 שקלים חדשים בגין כל יום איחור ממועד השלמת העבודות.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {
+        "value": 2000,
+        "currency": "ILS",
+        "originalSourceLabel": "קנס",
+        "dayType": "unresolved"
+      }
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:appendix_b.3:role:daily_delay_charge_3250",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "consequence",
+      "role": "daily_delay_charge",
+      "responsibleParty": "הקבלן",
+      "beneficiary": "סמל",
+      "action": "Pay a daily charge for delayed completion",
+      "trigger": {
+        "kind": "event",
+        "description": "Each day after the contractual completion date",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": null,
+      "recurrence": null,
+      "projection": "project_schedule",
+      "computedDate": null,
+      "factStatus": "conflicting",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": "daily-delay-charge",
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "material_value_conflict",
+        "day_semantics_unresolved",
+        "human_review_required"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 14,
+          "clause": "Appendix B, item 3",
+          "sourceText": "הקנס בגין האיחור בהשלמת העבודות: 3,250 ש״ח ליום.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {
+        "value": 3250,
+        "currency": "ILS",
+        "originalSourceLabel": "קנס",
+        "dayType": "unresolved"
+      }
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:3.14:role:exceptional_event_notice",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "notice_rule",
+      "role": "exceptional_event_notice",
+      "responsibleParty": "הקבלן",
+      "beneficiary": "סמל",
+      "action": "Provide written notice of an exceptional event",
+      "trigger": {
+        "kind": "event",
+        "description": "Occurrence of an exceptional event",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": {
+        "value": 8,
+        "unit": "hour",
+        "direction": "after",
+        "calendarId": null,
+        "inclusivity": "unspecified",
+        "rollConvention": "none"
+      },
+      "recurrence": null,
+      "projection": "contract_compliance",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "subday_deadline_not_storable_as_date",
+        "compliance_engine_not_approved"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 2,
+          "clause": "3.14",
+          "sourceText": "מיד לאחר התרחשותם, ובכל מקרה לא יאוחר מ-8 שעות ממועד קרות אירוע כאמור.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:3.17:role:weekly_waste_removal",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "recurring_rule",
+      "role": "weekly_waste_removal",
+      "responsibleParty": "הקבלן",
+      "beneficiary": "סמל",
+      "action": "Remove accumulated waste and construction debris",
+      "trigger": {
+        "kind": "event",
+        "description": "Each project week during performance",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": null,
+      "recurrence": {
+        "frequency": "weekly",
+        "window": "at_least_once_per_week",
+        "occurrencePolicy": "each_occurrence"
+      },
+      "projection": "contract_compliance",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "recurring_occurrence_history_not_supported",
+        "compliance_engine_not_approved"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 3,
+          "clause": "3.17",
+          "sourceText": "יקפיד לסלק, מדי שבוע, לכל הפחות, את כל מצבורי האשפה ופסולת הבנין.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:7.7_7.8:role:monthly_payment_chain",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "recurring_rule",
+      "role": "monthly_payment_chain",
+      "responsibleParty": "סמל",
+      "beneficiary": "הקבלן",
+      "action": "Review monthly account and pay the approved amount",
+      "trigger": {
+        "kind": "month_end",
+        "description": "End of the month in which the approved interim account was submitted",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": {
+        "value": 25,
+        "unit": "calendar_day",
+        "direction": "after",
+        "calendarId": null,
+        "inclusivity": "unspecified",
+        "rollConvention": "next_working_day"
+      },
+      "recurrence": {
+        "frequency": "monthly",
+        "window": "submission_days_1_to_5_then_review_within_10_days",
+        "occurrencePolicy": "each_occurrence"
+      },
+      "projection": "contract_compliance",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "compound_rule_not_supported",
+        "approval_guard_not_supported",
+        "recurring_occurrence_history_not_supported"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 5,
+          "clause": "7.7",
+          "sourceText": "חשבונות קבלן יוגשו למפקח הפרויקט, חודש בחודשו, בין הימים 1-5 לכל חודש קלנדרי.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        },
+        {
+          "pdfPage": 5,
+          "clause": "7.8",
+          "sourceText": "ישולם לקבלן בתוך 25 ימים מתום החודש שבו הוגש חשבון הביניים.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {
+        "reviewOffsetDays": 10,
+        "paymentRequiresApproval": true
+      }
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:6.6:role:owner_requested_delay_relief",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "extension_rule",
+      "role": "owner_requested_delay_relief",
+      "responsibleParty": "סמל",
+      "beneficiary": "הקבלן",
+      "action": "Allow a corresponding postponement for a qualifying owner-requested delay",
+      "trigger": {
+        "kind": "event",
+        "description": "A documented schedule delay caused by Semel's request and not by contractor act or omission",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": null,
+      "recurrence": null,
+      "projection": "project_schedule",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "extension_event_missing",
+        "quantified_days_missing",
+        "entitlement_review_required"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 4,
+          "clause": "6.6",
+          "sourceText": "כל עיכוב בלוח הזמנים בהתאם לדרישת סמל שאינו נובע מפעולות ו/או מחדלי הקבלן יאפשר דחייה מקבילה של מועד סיום העבודות.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {
+        "isExtensionEvent": false
+      }
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:13.1:role:completion_inspection",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "relative_condition",
+      "role": "completion_inspection",
+      "responsibleParty": "מפקח הפרויקט",
+      "beneficiary": "הקבלן",
+      "action": "Complete the inspection of the works",
+      "trigger": {
+        "kind": "inspection_start",
+        "description": "The date on which the inspector starts the completion inspection",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": {
+        "value": 14,
+        "unit": "calendar_day",
+        "direction": "after",
+        "calendarId": null,
+        "inclusivity": "unspecified",
+        "rollConvention": "unspecified"
+      },
+      "recurrence": null,
+      "projection": "project_schedule",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "candidate_for_schedule_contract_conditions",
+      "gates": [
+        "inspection_start_event_missing",
+        "inspection_start_due_missing",
+        "human_review_required"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 8,
+          "clause": "13.1",
+          "sourceText": "המפקח יחל בבדיקת העבודות וישלים את הבדיקה תוך 14 ימים מיום שהחל בה.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:13.2:role:manager_set_corrections",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "missing_information",
+      "role": "manager_set_corrections",
+      "responsibleParty": "הקבלן",
+      "beneficiary": "סמל",
+      "action": "Complete correction work within a period later set by the inspector",
+      "trigger": {
+        "kind": "manager_decision",
+        "description": "Inspector provides the correction list and sets a completion period",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": {
+        "value": null,
+        "unit": "unknown",
+        "direction": "after",
+        "calendarId": null,
+        "inclusivity": "unspecified",
+        "rollConvention": "unspecified"
+      },
+      "recurrence": null,
+      "projection": "project_schedule",
+      "computedDate": null,
+      "factStatus": "missing",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "offset_missing",
+        "future_manager_decision_required"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 8,
+          "clause": "13.2",
+          "sourceText": "הקבלן מתחייב לבצע את עבודות ההשלמה תוך התקופה שתקבע לכך על ידי המפקח.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:14.1.1:role:performance_bond_delivery",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "relative_condition",
+      "role": "performance_bond_delivery",
+      "responsibleParty": "הקבלן",
+      "beneficiary": "סמל",
+      "action": "Deliver the performance bond",
+      "trigger": {
+        "kind": "signing",
+        "description": "Verified execution of the agreement",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": {
+        "value": 14,
+        "unit": "calendar_day",
+        "direction": "after",
+        "calendarId": null,
+        "inclusivity": "unspecified",
+        "rollConvention": "unspecified"
+      },
+      "recurrence": null,
+      "projection": "contract_compliance",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "candidate_for_schedule_contract_conditions",
+      "gates": [
+        "execution_date_unverified",
+        "compliance_engine_not_approved"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 8,
+          "clause": "14.1.1",
+          "sourceText": "הקבלן ימציא לסמל, לא יאוחר מ-14 יום ממועד חתימת הסכם זה, ערבות בנקאית אוטונומית בלתי מותנית.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {
+        "bondAmountIls": 325000
+      }
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:14.1.3:role:performance_bond_renewal",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "relative_condition",
+      "role": "performance_bond_renewal",
+      "responsibleParty": "הקבלן",
+      "beneficiary": "סמל",
+      "action": "Extend the performance bond before expiry",
+      "trigger": {
+        "kind": "event",
+        "description": "Current performance bond expiry date",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": {
+        "value": 45,
+        "unit": "calendar_day",
+        "direction": "before",
+        "calendarId": null,
+        "inclusivity": "unspecified",
+        "rollConvention": "unspecified"
+      },
+      "recurrence": null,
+      "projection": "contract_compliance",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "negative_offset_not_supported",
+        "bond_expiry_event_missing",
+        "compliance_engine_not_approved"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 8,
+          "clause": "14.1.3",
+          "sourceText": "לפחות 45 ימים טרם מועד פקיעתה, רשאית סמל לחלט את הערבות לאחר התראה מוקדמת.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {}
+    },
+    {
+      "candidateKey": "contract:0ff80eb28a15:clause:19.12:role:notice_service",
+      "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
+      "type": "notice_rule",
+      "role": "notice_service",
+      "responsibleParty": null,
+      "beneficiary": null,
+      "action": "Determine deemed receipt according to delivery channel",
+      "trigger": {
+        "kind": "channel_delivery",
+        "description": "Notice sent by registered mail, hand delivery, or email",
+        "eventDate": null
+      },
+      "fixedDate": null,
+      "offset": null,
+      "recurrence": null,
+      "projection": "contract_compliance",
+      "computedDate": null,
+      "factStatus": "explicit",
+      "reviewStatus": "needs_review",
+      "confidence": 1,
+      "conflictGroupId": null,
+      "operationalEligibility": "blocked",
+      "automaticPromotionAllowed": false,
+      "storageDisposition": "dry_run_only",
+      "gates": [
+        "branching_rule_not_supported",
+        "channel_specific_clock_not_supported",
+        "compliance_engine_not_approved"
+      ],
+      "sourceEvidence": [
+        {
+          "pdfPage": 11,
+          "clause": "19.12",
+          "sourceText": "הודעה בדואר רשום תיחשב כאילו הגיעה למענה תוך 5 ימים מעת שנמסרה למשלוח.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        },
+        {
+          "pdfPage": 12,
+          "clause": "19.12",
+          "sourceText": "אם נמסרה ביד - בעת מסירתה, ואם נשלחה בדוא״ל - בתוך יום עסקים או במועד קבלת מענה חוזר, לפי המוקדם.",
+          "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
+        }
+      ],
+      "metadata": {
+        "branches": [
+          "registered_mail",
+          "hand_delivery",
+          "email"
+        ]
+      }
+    }
+  ],
+  "conflicts": [
+    {
+      "conflictGroupId": "daily-delay-charge",
+      "type": "value_conflict",
+      "materiality": "high",
+      "status": "unresolved",
+      "candidateKeys": [
+        "contract:0ff80eb28a15:clause:6.7:role:daily_delay_charge_2000",
+        "contract:0ff80eb28a15:clause:appendix_b.3:role:daily_delay_charge_3250"
+      ],
+      "selectedCandidateKey": null,
+      "reviewDecision": null
+    }
+  ],
+  "missingInformation": [
+    {
+      "key": "contractual_commencement_date",
+      "field": "completion_rule.trigger.eventDate",
+      "description": "Appendix B contains a blank commencement-date field.",
+      "blocks": [
+        "computed_completion_date",
+        "schedule_contract_milestone_promotion"
+      ]
+    },
+    {
+      "key": "authoritative_working_calendar",
+      "field": "completion_rule.offset.calendarId",
+      "description": "The document does not define the authoritative working-day calendar.",
+      "blocks": [
+        "computed_completion_date"
+      ]
+    },
+    {
+      "key": "execution_authority",
+      "field": "document.executionStatus",
+      "description": "Visible signature fields are blank, so execution is not established by this artifact.",
+      "blocks": [
+        "operational_projection",
+        "signing_relative_rules"
+      ]
+    },
+    {
+      "key": "inspection_start_due",
+      "field": "completion_inspection.trigger",
+      "description": "Clause 13.1 defines when inspection must finish after it starts, but not when it must start after completion notice.",
+      "blocks": [
+        "inspection_start_deadline"
+      ]
+    },
+    {
+      "key": "manager_set_correction_period",
+      "field": "manager_set_corrections.offset.value",
+      "description": "Clause 13.2 leaves the correction period to a future inspector decision.",
+      "blocks": [
+        "correction_due_date"
+      ]
+    }
+  ],
+  "packetGaps": [
+    {
+      "reference": "Appendix A bill of quantities",
+      "status": "missing",
+      "impact": "The referenced scope and quantities cannot be reconciled against this PDF alone."
+    },
+    {
+      "reference": "Plans and specifications",
+      "status": "missing",
+      "impact": "Referenced technical documents are not present in the supplied packet."
+    },
+    {
+      "reference": "Appendix C",
+      "status": "missing",
+      "impact": "The agreement references an appendix that is not present in the supplied PDF."
+    }
+  ],
+  "warnings": [
+    "This is a human gold annotation for extraction evaluation, not legal advice.",
+    "Gold annotation approval does not equal operational contract approval.",
+    "No project binding, Schedule table write, date calculation, or conflict resolution is authorized."
+  ],
+  "summary": {
+    "candidateCount": 12,
+    "conflictCount": 1,
+    "missingInformationCount": 5,
+    "approvedScheduleProjectionCount": 0,
+    "computedCompletionDate": null,
+    "calendarStatus": "missing"
+  }
+}

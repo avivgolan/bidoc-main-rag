@@ -1,0 +1,149 @@
+{
+  "variantSetVersion": "contracts-gold-variants.phase0.v1",
+  "synthetic": true,
+  "purpose": "Phase 1 extraction evaluation only. These variants do not authorize operational Schedule writes.",
+  "variants": [
+    {
+      "id": "signed_fixed_completion",
+      "description": "An authoritative signed contract contains an explicit completion date.",
+      "inputFacts": {
+        "executionStatus": "executed",
+        "projectBindingStatus": "confirmed",
+        "clause": "The works shall be completed on 2027-03-31."
+      },
+      "expected": {
+        "candidateTypes": [
+          "fixed_milestone"
+        ],
+        "fixedDate": "2027-03-31",
+        "projection": "project_schedule",
+        "storageDisposition": "candidate_for_schedule_contract_milestones",
+        "automaticPromotionAllowed": false,
+        "computedDate": null,
+        "requiredGates": [
+          "human_review_required"
+        ]
+      }
+    },
+    {
+      "id": "relative_working_days_missing_calendar",
+      "description": "A relative completion obligation uses working days but supplies no authoritative calendar.",
+      "inputFacts": {
+        "executionStatus": "executed",
+        "projectBindingStatus": "confirmed",
+        "clause": "Complete within 45 working days after the notice to proceed."
+      },
+      "expected": {
+        "candidateTypes": [
+          "relative_condition"
+        ],
+        "offset": {
+          "value": 45,
+          "unit": "working_day",
+          "direction": "after"
+        },
+        "computedDate": null,
+        "storageDisposition": "candidate_for_schedule_contract_conditions",
+        "automaticPromotionAllowed": false,
+        "requiredGates": [
+          "working_calendar_missing",
+          "trigger_event_missing",
+          "human_review_required"
+        ]
+      }
+    },
+    {
+      "id": "approved_extension_event",
+      "description": "A dated, signed approval grants a quantified calendar-day extension to an existing milestone.",
+      "inputFacts": {
+        "executionStatus": "executed",
+        "projectBindingStatus": "confirmed",
+        "milestoneKey": "contract-completion",
+        "status": "approved",
+        "approvedDate": "2027-02-10",
+        "extensionDays": 21,
+        "unit": "calendar_day"
+      },
+      "expected": {
+        "candidateTypes": [
+          "extension_event"
+        ],
+        "storageDisposition": "candidate_for_schedule_contract_extensions",
+        "automaticPromotionAllowed": false,
+        "requiredGates": [
+          "human_review_required",
+          "existing_milestone_identity_required"
+        ],
+        "forbiddenInterpretations": [
+          "extension_rule_only",
+          "working_day_extension",
+          "unquantified_entitlement"
+        ]
+      }
+    },
+    {
+      "id": "unsigned_project_mismatch",
+      "description": "An unsigned draft names a site that differs from the user-selected project.",
+      "inputFacts": {
+        "executionStatus": "unsigned",
+        "projectBindingStatus": "needs_review",
+        "contractSite": "Project North",
+        "selectedProjectSite": "Project South"
+      },
+      "expected": {
+        "approvedScheduleProjectionCount": 0,
+        "automaticBindingAllowed": false,
+        "automaticPromotionAllowed": false,
+        "requiredGates": [
+          "authority_unverified",
+          "project_binding_mismatch"
+        ]
+      }
+    },
+    {
+      "id": "compound_monthly_payment_rule",
+      "description": "A monthly submission window is followed by review, approval, month-end, and holiday-roll steps.",
+      "inputFacts": {
+        "clause": "Submit on days 1-5; review within 10 days; pay 25 days after month-end if approved; roll holidays forward."
+      },
+      "expected": {
+        "candidateTypes": [
+          "recurring_rule"
+        ],
+        "projection": "contract_compliance",
+        "storageDisposition": "dry_run_only",
+        "computedDate": null,
+        "automaticPromotionAllowed": false,
+        "requiredGates": [
+          "compound_rule_not_supported",
+          "approval_guard_not_supported",
+          "recurring_occurrence_history_not_supported"
+        ]
+      }
+    },
+    {
+      "id": "negative_offset_bond_notice",
+      "description": "A bond must be renewed a specified number of days before its expiry.",
+      "inputFacts": {
+        "clause": "Renew the bond at least 30 days before expiry."
+      },
+      "expected": {
+        "candidateTypes": [
+          "relative_condition"
+        ],
+        "offset": {
+          "value": 30,
+          "unit": "calendar_day",
+          "direction": "before"
+        },
+        "storageDisposition": "dry_run_only",
+        "computedDate": null,
+        "automaticPromotionAllowed": false,
+        "requiredGates": [
+          "negative_offset_not_supported",
+          "trigger_event_missing"
+        ]
+      }
+    }
+  ]
+}

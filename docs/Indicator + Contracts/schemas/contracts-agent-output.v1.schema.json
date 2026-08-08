@@ -1,0 +1,751 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bidoc.ai/schemas/contracts-agent-output.v1.schema.json",
+  "title": "BIDoc Contracts Agent dry-run output",
+  "description": "Evidence-backed contract candidates. This schema never authorizes writes to Schedule Intelligence tables.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "extractionVersion",
+    "mode",
+    "document",
+    "projectBinding",
+    "candidates",
+    "conflicts",
+    "missingInformation",
+    "packetGaps",
+    "warnings",
+    "summary"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "contract-extraction.v1"
+    },
+    "extractionVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mode": {
+      "const": "dry_run"
+    },
+    "document": {
+      "$ref": "#/$defs/contractDocument"
+    },
+    "projectBinding": {
+      "$ref": "#/$defs/projectBinding"
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/temporalCandidate"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/conflictGroup"
+      }
+    },
+    "missingInformation": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/missingInformation"
+      }
+    },
+    "packetGaps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/packetGap"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "summary": {
+      "$ref": "#/$defs/summary"
+    }
+  },
+  "$defs": {
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nullableDate": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "contractDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentVersionId",
+        "filename",
+        "sha256",
+        "documentType",
+        "executionStatus",
+        "authorityStatus",
+        "executionDate",
+        "visibleSignatureStatus",
+        "attachmentsStatus",
+        "sourceId",
+        "supersedesDocumentVersionId"
+      ],
+      "properties": {
+        "documentVersionId": {
+          "type": "string",
+          "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        },
+        "documentType": {
+          "enum": [
+            "draft",
+            "signing_version",
+            "signed_contract",
+            "appendix",
+            "amendment",
+            "change_order",
+            "instruction",
+            "unknown"
+          ]
+        },
+        "executionStatus": {
+          "enum": [
+            "unverified",
+            "unsigned",
+            "partially_signed",
+            "executed",
+            "superseded",
+            "unknown"
+          ]
+        },
+        "authorityStatus": {
+          "enum": [
+            "needs_review",
+            "authoritative",
+            "non_authoritative",
+            "superseded",
+            "unknown"
+          ]
+        },
+        "executionDate": {
+          "$ref": "#/$defs/nullableDate"
+        },
+        "visibleSignatureStatus": {
+          "enum": [
+            "blank",
+            "partial",
+            "present",
+            "not_applicable",
+            "unknown"
+          ]
+        },
+        "attachmentsStatus": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "unknown"
+          ]
+        },
+        "sourceId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "supersedesDocumentVersionId": {
+          "$ref": "#/$defs/nullableString"
+        }
+      }
+    },
+    "projectBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projectId",
+        "selectedByUser",
+        "status",
+        "contractSiteRaw",
+        "contractSiteNormalized",
+        "candidateProjectSite",
+        "automaticBindingAllowed",
+        "mismatchReasons"
+      ],
+      "properties": {
+        "projectId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "selectedByUser": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "unbound",
+            "needs_review",
+            "confirmed",
+            "rejected"
+          ]
+        },
+        "contractSiteRaw": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "contractSiteNormalized": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "candidateProjectSite": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "automaticBindingAllowed": {
+          "const": false
+        },
+        "mismatchReasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "sourceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pdfPage",
+        "clause",
+        "sourceText",
+        "documentSha256"
+      ],
+      "properties": {
+        "pdfPage": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "clause": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceText": {
+          "type": "string",
+          "minLength": 1
+        },
+        "documentSha256": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        },
+        "boundingBox": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "x",
+            "y",
+            "width",
+            "height"
+          ],
+          "properties": {
+            "x": {
+              "type": "number",
+              "minimum": 0
+            },
+            "y": {
+              "type": "number",
+              "minimum": 0
+            },
+            "width": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        }
+      }
+    },
+    "trigger": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "description",
+        "eventDate"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "fixed_date",
+            "event",
+            "signing",
+            "commencement",
+            "inspection_start",
+            "month_end",
+            "channel_delivery",
+            "manager_decision",
+            "unknown"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eventDate": {
+          "$ref": "#/$defs/nullableDate"
+        }
+      }
+    },
+    "offset": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit",
+        "direction",
+        "calendarId",
+        "inclusivity",
+        "rollConvention"
+      ],
+      "properties": {
+        "value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "unit": {
+          "enum": [
+            "calendar_day",
+            "working_day",
+            "week",
+            "month",
+            "hour",
+            "unknown"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "after",
+            "before",
+            "unspecified"
+          ]
+        },
+        "calendarId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "inclusivity": {
+          "enum": [
+            "inclusive",
+            "exclusive",
+            "unspecified"
+          ]
+        },
+        "rollConvention": {
+          "enum": [
+            "none",
+            "next_working_day",
+            "previous_working_day",
+            "unspecified"
+          ]
+        }
+      }
+    },
+    "recurrence": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "frequency",
+        "window",
+        "occurrencePolicy"
+      ],
+      "properties": {
+        "frequency": {
+          "enum": [
+            "weekly",
+            "monthly",
+            "event_driven",
+            "ad_hoc",
+            "unknown"
+          ]
+        },
+        "window": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "occurrencePolicy": {
+          "enum": [
+            "each_occurrence",
+            "latest_only",
+            "not_defined"
+          ]
+        }
+      }
+    },
+    "temporalCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateKey",
+        "documentVersionId",
+        "type",
+        "role",
+        "responsibleParty",
+        "beneficiary",
+        "action",
+        "trigger",
+        "fixedDate",
+        "offset",
+        "recurrence",
+        "projection",
+        "computedDate",
+        "factStatus",
+        "reviewStatus",
+        "confidence",
+        "conflictGroupId",
+        "operationalEligibility",
+        "automaticPromotionAllowed",
+        "storageDisposition",
+        "gates",
+        "sourceEvidence",
+        "metadata"
+      ],
+      "properties": {
+        "candidateKey": {
+          "type": "string",
+          "pattern": "^contract:[A-Fa-f0-9]{12}:clause:[a-z0-9._-]+:role:[a-z0-9._-]+$"
+        },
+        "documentVersionId": {
+          "type": "string",
+          "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+        },
+        "type": {
+          "enum": [
+            "fixed_milestone",
+            "relative_condition",
+            "recurring_rule",
+            "extension_rule",
+            "extension_event",
+            "consequence",
+            "notice_rule",
+            "missing_information",
+            "conflict"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "responsibleParty": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "beneficiary": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trigger": {
+          "$ref": "#/$defs/trigger"
+        },
+        "fixedDate": {
+          "$ref": "#/$defs/nullableDate"
+        },
+        "offset": {
+          "$ref": "#/$defs/offset"
+        },
+        "recurrence": {
+          "$ref": "#/$defs/recurrence"
+        },
+        "projection": {
+          "enum": [
+            "project_schedule",
+            "contract_compliance",
+            "both",
+            "none"
+          ]
+        },
+        "computedDate": {
+          "$ref": "#/$defs/nullableDate"
+        },
+        "factStatus": {
+          "enum": [
+            "explicit",
+            "inferred",
+            "missing",
+            "conflicting"
+          ]
+        },
+        "reviewStatus": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "corrected",
+            "superseded",
+            "needs_review"
+          ]
+        },
+        "confidence": {
+          "$ref": "#/$defs/confidence"
+        },
+        "conflictGroupId": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "operationalEligibility": {
+          "enum": [
+            "blocked",
+            "review_ready",
+            "approved"
+          ]
+        },
+        "automaticPromotionAllowed": {
+          "const": false
+        },
+        "storageDisposition": {
+          "enum": [
+            "dry_run_only",
+            "candidate_for_schedule_contract_milestones",
+            "candidate_for_schedule_contract_conditions",
+            "candidate_for_schedule_contract_extensions",
+            "candidate_for_schedule_activity_map",
+            "candidate_for_schedule_observed_events"
+          ]
+        },
+        "gates": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "uniqueItems": true
+        },
+        "sourceEvidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/sourceEvidence"
+          }
+        },
+        "metadata": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "factStatus": {
+                "const": "conflicting"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "conflictGroupId": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "conflictGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conflictGroupId",
+        "type",
+        "materiality",
+        "status",
+        "candidateKeys",
+        "selectedCandidateKey",
+        "reviewDecision"
+      ],
+      "properties": {
+        "conflictGroupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "enum": [
+            "value_conflict",
+            "date_conflict",
+            "authority_conflict",
+            "project_binding_conflict",
+            "rule_conflict",
+            "other"
+          ]
+        },
+        "materiality": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "status": {
+          "enum": [
+            "unresolved",
+            "resolved",
+            "superseded"
+          ]
+        },
+        "candidateKeys": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "selectedCandidateKey": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "reviewDecision": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "missingInformation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "field",
+        "description",
+        "blocks"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "blocks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "packetGap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "status",
+        "impact"
+      ],
+      "properties": {
+        "reference": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "missing",
+            "partial",
+            "present",
+            "unknown"
+          ]
+        },
+        "impact": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidateCount",
+        "conflictCount",
+        "missingInformationCount",
+        "approvedScheduleProjectionCount",
+        "computedCompletionDate",
+        "calendarStatus"
+      ],
+      "properties": {
+        "candidateCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflictCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missingInformationCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "approvedScheduleProjectionCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "computedCompletionDate": {
+          "$ref": "#/$defs/nullableDate"
+        },
+        "calendarStatus": {
+          "enum": [
+            "available",
+            "missing",
+            "stale",
+            "needs_review",
+            "not_required"
+          ]
+        }
+      }
+    }
+  }
+}
