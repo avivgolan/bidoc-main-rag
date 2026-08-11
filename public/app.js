@@ -149,6 +149,7 @@ const diagnosticGroups = [
       ["subagent_safety_report", "Safety Subagent"],
       ["subagent_meeting_evidence", "Meeting Evidence Agent"],
       ["subagent_data_query", "Data Query Agent"],
+      ["subagent_contracts", "Contracts Agent"],
       ["subagent_indexing", "Indexing Agent"],
       ["subagent_schedule", "Schedule Agent"],
       ["subagent_schedule_conditions", "Schedule Condition Resolver"],
@@ -453,6 +454,7 @@ function startNewSession(options = {}) {
 const TAB_LOADERS = {
   settings:   () => state.settingsDirty ? Promise.resolve() : loadSettings(),
   schedule:   () => window.dispatchEvent(new Event("bidoc:schedule-activated")),
+  contracts:  () => window.dispatchEvent(new Event("bidoc:contracts-activated")),
   agents:     () => loadAgentsTabData(),
   subagents:  () => loadSubAgents(),
   insights:   () => { loadProjectInsightHistory(); loadHashtagChart(); renderProjectInsightsResults(); renderProjectInsightsStatus(); },

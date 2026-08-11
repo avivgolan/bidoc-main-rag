@@ -44,9 +44,11 @@ import { adjacentTimelineRange, buildTimelineEventsUrl, canCommitTimelineRequest
 import { buildTimelineSearchText, createTimelineSearchController, timelineEventMatchesQuery } from "../public/timelineSearch.js";
 import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigateByMonths, calWeekBoundary } from "../public/calendarHelpers.js";
 import { cleanChatUrl, renderChatMarkdown } from "../public/chatMarkdown.js";
+import { registerContractsAgentTests } from "./contracts-agent.tests.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
+registerContractsAgentTests(test);
 const testJwt = (claims) => [
   Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
   Buffer.from(JSON.stringify(claims)).toString("base64url"),
@@ -13708,6 +13710,7 @@ test("connection diagnostics list every operational internal subagent", () => {
   const expectedIds = [
     "alert", "meetings", "emails", "whatsapp_messages", "financial_transactions", "safety_report",
     "meeting_evidence", "data_query", "indexing", "schedule", "schedule_conditions",
+    "contracts",
     "project_insights", "graph_enrichment", "delay_claim"
   ];
   assert.match(appSource, /id:\s*"subagents"/);
@@ -13719,6 +13722,7 @@ test("internal subagent diagnostics are read-only readiness probes", () => {
   const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   const expectedIds = [
     "alert", "meeting_evidence", "data_query", "indexing", "schedule", "schedule_conditions",
+    "contracts",
     "project_insights", "graph_enrichment", "delay_claim"
   ];
   for (const id of expectedIds) assert.match(serverSource, new RegExp(`add\\("subagent_${id}"`));

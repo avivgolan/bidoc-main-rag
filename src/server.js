@@ -16,6 +16,9 @@ import { authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { runScheduleConditionResolver } from "./subagents/scheduleConditionResolver.js";
+import { CONTRACTS_AGENT_VERSION, CONTRACTS_EXTRACTION_BUDGET_MS, CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES, CONTRACTS_MAX_RESPONSE_BYTES, CONTRACTS_PDF_READER_VERSION } from "./contracts/constants.js";
+import { contractsErrorResponse } from "./contracts/errors.js";
+import { readJsonBounded } from "./contracts/request.js";
 import { listScheduleProjects, loadScheduleSource, scheduleSettings } from "./scheduleIngestion.js";
 import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
@@ -812,10 +815,137 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, result);
   }
 
+  // Contracts Agent Phase 1: authenticated, bounded, dry-run extraction only.
+  // This route intentionally has no project-data override, persistence option,
+  // Schedule service call, or database writer.
+  if (req.method === "POST" && url.pathname === "/api/contracts/extract") {
+    try {
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { runContractsExtractionRequest, safeContractTelemetry } = await import("./subagents/contracts.js");
+      const { sendContractsJson } = await import("./contracts/response.js");
+      const result = await runContractsExtractionRequest({
+        body,
+        config: config(),
+        emit: (payload) => {
+          const safe = safeContractTelemetry(payload.event, payload);
+          if (safe) console.info("[contracts]", JSON.stringify(safe));
+        }
+      });
+      return sendContractsJson(res, 200, result);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
   // ─── Schedule Intelligence Service (spec 4.4) ──────────────────────────────
   // Every route requires an explicit projectId — there is no default project
   // (acceptance criterion 24). DB routing comes from the schedule source
   // profile (scheduleSettings), never from this layer.
+
+  // Contracts Agent Phase 2: authenticated human review and separately gated
+  // atomic promotion. These routes never accept per-request database credentials
+  // and never run Schedule arithmetic; the existing Schedule Engine consumes the
+  // reviewed rows through its existing ingestion path.
+  if (req.method === "GET" && url.pathname === "/api/contracts/review/status") {
+    const { CONTRACTS_PHASE2_MIGRATION_VERSION, contractsPhase2ApplyApproved } = await import("./contracts/reviewWorkflow.js");
+    const applyApproved = contractsPhase2ApplyApproved();
+    return sendJson(res, 200, {
+      active: true,
+      mode: applyApproved ? "promotion_enabled" : "review_only",
+      migrationVersion: CONTRACTS_PHASE2_MIGRATION_VERSION,
+      applyApproved,
+      scheduleEngineMode: "reuse_existing_logic"
+    });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/review/plan") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { prepareContractReview } = await import("./contracts/reviewWorkflow.js");
+      const prepared = prepareContractReview({ body, reviewerId: reviewer.sub });
+      return sendJson(res, 200, prepared);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/review/save") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { contractsPhase2ApplyApproved, prepareContractReview } = await import("./contracts/reviewWorkflow.js");
+      if (!contractsPhase2ApplyApproved()) {
+        return sendJson(res, 503, {
+          error: "Contracts review persistence is disabled by the server-only Phase 2 activation gate.",
+          code: "contracts_review_persistence_not_enabled"
+        });
+      }
+      if (body.persistReview !== true) {
+        return sendJson(res, 409, { error: "An explicit review-only persistence confirmation is required.", code: "contracts_review_persistence_required" });
+      }
+      const prepared = prepareContractReview({ body, reviewerId: reviewer.sub });
+      const { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } = await import("./contracts/reviewMode.js");
+      if (contractReviewSubmissionMode(prepared.plan) !== CONTRACT_REVIEW_SUBMISSION_MODE.reviewOnly) {
+        return sendJson(res, 409, {
+          error: "This endpoint accepts only a complete rejection-only review and can never promote Schedule facts.",
+          code: "contracts_review_only_not_ready"
+        });
+      }
+      const { submitContractPromotion } = await import("./contracts/promotionWriter.js");
+      const result = await submitContractPromotion({
+        ...prepared,
+        config: config(),
+        commit: true,
+        migrationApplyApproved: true
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/review/commit") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { contractsPhase2ApplyApproved, prepareContractReview } = await import("./contracts/reviewWorkflow.js");
+      if (!contractsPhase2ApplyApproved()) {
+        return sendJson(res, 503, {
+          error: "Contracts fact promotion is disabled by the server-only Phase 2 activation gate.",
+          code: "contracts_promotion_apply_not_approved"
+        });
+      }
+      if (body.commit !== true) {
+        return sendJson(res, 409, { error: "An explicit commit confirmation is required.", code: "contracts_promotion_commit_required" });
+      }
+      const prepared = prepareContractReview({ body, reviewerId: reviewer.sub });
+      const { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } = await import("./contracts/reviewMode.js");
+      if (contractReviewSubmissionMode(prepared.plan) !== CONTRACT_REVIEW_SUBMISSION_MODE.promotion) {
+        return sendJson(res, 409, {
+          error: "No transaction-ready approved fact exists. Use the review-only save endpoint for a complete rejection review.",
+          code: "contracts_promotion_not_ready"
+        });
+      }
+      const { submitContractPromotion } = await import("./contracts/promotionWriter.js");
+      const result = await submitContractPromotion({
+        ...prepared,
+        config: config(),
+        commit: true,
+        migrationApplyApproved: true
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/indicator") {
     const projectId = url.searchParams.get("projectId") || "";
@@ -2374,6 +2504,21 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
       active: true,
       plannerEnabled: cfg.dataQuery?.plannerEnabled !== false,
       configuredTables: Array.isArray(cfg.dataQuery?.tables) ? cfg.dataQuery.tables.length : 0
+    };
+  });
+
+  add("subagent_contracts", "Contracts Agent", "subagents", async () => {
+    if (!cfg.openRouterApiKey) inactive("Contracts Agent is inactive: OpenRouter API Key is missing");
+    if (!cfg.models?.main) inactive("Contracts Agent is inactive: main model is missing");
+    return {
+      active: true,
+      mode: "dry_run",
+      agentVersion: CONTRACTS_AGENT_VERSION,
+      pdfReaderVersion: CONTRACTS_PDF_READER_VERSION,
+      maxJsonBytes: CONTRACTS_MAX_JSON_BYTES,
+      maxPdfBytes: CONTRACTS_MAX_PDF_BYTES,
+      maxResponseBytes: CONTRACTS_MAX_RESPONSE_BYTES,
+      extractionBudgetMs: CONTRACTS_EXTRACTION_BUDGET_MS
     };
   });
 

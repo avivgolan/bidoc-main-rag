@@ -37,7 +37,7 @@ The following decisions are already locked by the CTO's 2026-08-08 review:
 
 ### 2.1 Protected Schedule Engine
 
-The Contracts Agent is an additive producer. It must not change or duplicate the existing Schedule Engine.
+The Contracts Agent is an additive producer. It must not duplicate the existing Schedule Engine. Per the CTO clarification recorded on 2026-08-10, an approved later integration slice may modify or extend the existing Engine when genuinely required, but it must reuse the current logic and prove unchanged-input compatibility with focused regressions.
 
 Protected behavior includes:
 
@@ -476,7 +476,7 @@ Items 1-9 are not permission to change Schedule behavior during Phase 1. They ar
 
 | ID | Proposed/locked decision | Status after this phase | Next gate |
 |---|---|---|---|
-| D-00 | Existing Schedule behavior and protected modules are frozen | CTO locked; baseline captured | Re-run before and after every implementation slice |
+| D-00 | Existing Schedule behavior is the protected compatibility baseline; necessary integration extensions must reuse the existing modules and carry focused regression evidence | CTO clarified; baseline captured | Re-run before and after every implementation slice |
 | D-01 | Reuse all eight existing tables; zero DDL by default | CTO locked; OpenAPI audit complete; catalog detail pending | Backend/security catalog evidence before Phase 2 |
 | D-02 | Gantt parser ownership remains outside Contracts Phase 1 | Deferred, non-blocking | CTO/frontend/backend owner before Phase 5 |
 | D-03 | Hash/clause/role candidate identity and existing activity-map seam | Proposed | CTO/backend approval before Phase 1 |
@@ -525,4 +525,4 @@ Not performed:
 - Deployment or production change.
 - UI implementation or browser-facing feature change.
 
-The next step is the Phase 0 approval checkpoint. Phase 1 must not start until that checkpoint is approved.
+Historical transition note (updated 2026-08-10): the CTO-approved Phase 1 dry-run slice was subsequently authorized, implemented, and accepted. Phase 0 remains the design baseline, subject to the CTO's 2026-08-10 Engine-reuse clarification above; the passing live artifact and current status are recorded in [BIDoc Phase 1 Contracts Agent Dry Run](./BIDoc_Phase_1_Contracts_Agent_Dry_Run.md). Phase 2 has entered its separately approved read-only schema-reuse checkpoint; its operational persistence status and required decisions are recorded in [BIDoc Phase 2 Entry and Schema-Reuse Gate](./BIDoc_Phase_2_Entry_Schema_Reuse_and_Promotion_Gate.md).

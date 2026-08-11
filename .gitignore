@@ -13,6 +13,10 @@ bidoc-settings-max-quality.json
 # Node
 node_modules/
 
+# Supabase CLI local state
+supabase/.branches/
+supabase/.temp/
+
 # bedrock: noisy auto-generated content excluded from git
 # Curated knowledge (Memory/, History/, Evidence/imports/, Dashboards/) IS tracked.
 # Playwright artifacts (generated on test run — do not commit)

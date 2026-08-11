@@ -4,6 +4,7 @@ import { SettingsPage } from "./SettingsPage.jsx";
 import { WorkflowPage } from "./WorkflowPage.jsx";
 import { InsightsPage } from "./InsightsPage.jsx";
 import { SchedulePage } from "./SchedulePage.jsx";
+import { ContractsPage } from "./ContractsPage.jsx";
 
 const mountedRoots = new WeakMap();
 
@@ -21,6 +22,7 @@ const islands = {
   workflow: WorkflowPage,
   insights: InsightsPage,
   schedule: SchedulePage,
+  contracts: ContractsPage,
 };
 
 function mountIsland(element) {

@@ -12,6 +12,12 @@
     "data-query:provision": "node scripts/provision-data-query-service-account.mjs",
     "test": "node test/run-tests.js",
     "test:data-query": "node test/run-tests.js --filter \"^data query\"",
+    "test:contracts": "node test/run-tests.js --filter \"^contracts\"",
+    "test:contracts:ui": "node scripts/verify-contracts-review-ui.mjs",
+    "test:contracts:db": "node scripts/test-contracts-phase2-db.mjs",
+    "contracts:gold": "node scripts/evaluate-contracts-gold-set.mjs",
+    "contracts:representative": "node scripts/evaluate-contracts-representative-set.mjs",
+    "contracts:sample-live": "node scripts/evaluate-contracts-sample-live.mjs",
     "test:schedule": "node test/schedule-engine.test.js",
     "test:ui": "playwright test",
     "test:ui:headed": "playwright test --headed",
@@ -21,13 +27,17 @@
     "node": ">=20"
   },
   "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "graphology": "^0.26.0",
+    "pdfjs-dist": "4.10.38",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@vitejs/plugin-react": "^6.0.3",
+    "supabase": "2.113.0",
     "vite": "^8.1.0"
   }
 }

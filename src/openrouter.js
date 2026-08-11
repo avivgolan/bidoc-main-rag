@@ -19,7 +19,8 @@ export async function chatCompletion({
   presencePenalty = 0,
   seed = null,
   responseFormat = null,
-  telemetry = null
+  telemetry = null,
+  signal = null
 }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const startedAt = Date.now();
@@ -29,7 +30,20 @@ export async function chatCompletion({
   // and stream the completion body for minutes, so a fetch-only timeout never fires
   // and response.json() hangs unbounded.
   const controller = new AbortController();
-  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  let abortError = null;
+  const abortWith = (reason, fallbackMessage) => {
+    if (controller.signal.aborted) return;
+    abortError = reason instanceof Error ? reason : new Error(fallbackMessage);
+    controller.abort(abortError);
+  };
+  const externalSignal = signal && typeof signal.addEventListener === "function" ? signal : null;
+  const abortFromExternal = () => abortWith(externalSignal?.reason, "OpenRouter response was cancelled");
+  if (externalSignal?.aborted) abortFromExternal();
+  else externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
+  const abortTimer = setTimeout(
+    () => abortWith(null, `OpenRouter response timed out after ${timeoutMs}ms`),
+    timeoutMs
+  );
   try {
     response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -54,7 +68,7 @@ export async function chatCompletion({
     });
 
     data = await response.json().catch((error) => {
-      if (controller.signal.aborted) throw new Error(`OpenRouter response timed out after ${timeoutMs}ms`);
+      if (controller.signal.aborted && abortError) throw abortError;
       if (!response.ok) return {};
       throw error;
     });
@@ -77,18 +91,20 @@ export async function chatCompletion({
     }));
     return data.choices?.[0]?.message?.content || "";
   } catch (error) {
+    const reportedError = controller.signal.aborted && abortError ? abortError : error;
     recordTelemetry(telemetry, buildTelemetryEntry({
       kind: "chat",
       requestedModel: model,
       data,
       durationMs: Date.now() - startedAt,
       status: "error",
-      error: error.message,
+      error: reportedError.message,
       httpStatus: response?.status || null
     }));
-    throw error;
+    throw reportedError;
   } finally {
     clearTimeout(abortTimer);
+    externalSignal?.removeEventListener("abort", abortFromExternal);
   }
 }
 

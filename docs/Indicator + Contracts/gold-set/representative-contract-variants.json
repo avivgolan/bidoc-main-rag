@@ -1,7 +1,7 @@
 {
-  "variantSetVersion": "contracts-gold-variants.phase0.v1",
+  "variantSetVersion": "contracts-gold-variants.phase1.v2",
   "synthetic": true,
-  "purpose": "Phase 1 extraction evaluation only. These variants do not authorize operational Schedule writes.",
+  "purpose": "Legacy human-readable design matrix. Executable inputs and exact canonical digests are stored in representative-contract-cases.input.json and representative-contract-cases.expected.json. No operational Schedule writes are authorized.",
   "variants": [
     {
       "id": "signed_fixed_completion",

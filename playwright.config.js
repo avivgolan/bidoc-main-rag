@@ -40,6 +40,7 @@ export default defineConfig({
       SUPABASE_URL: "",
       SUPABASE_SERVICE_ROLE_KEY: "",
       OPENROUTER_API_KEY: "test-noop",
+      MAIN_AGENT_SESSION_SECRET: "playwright-test-session-secret",
     },
   },
 

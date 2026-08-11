@@ -1,0 +1,114 @@
+{
+  "caseSetVersion": "contracts-representative-inputs.phase1.v1",
+  "synthetic": true,
+  "purpose": "Executable deterministic Phase 1 compiler evaluation. No operational writes or production-generalization claim.",
+  "cases": [
+    {
+      "id": "signed_fixed_completion",
+      "identity": { "filename": "fixed-completion.pdf", "sourceId": null, "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "documentVersionId": "sha256:1111111111111111111111111111111111111111111111111111111111111111" },
+      "projectSelection": { "projectId": "project-alpha", "projectSite": "Project Alpha", "selectedByUser": true },
+      "segments": [{ "segmentId": "fixed", "pdfPage": 1, "clauseLabel": "2.1", "clauseKey": "2.1", "text": "The Contractor shall complete the works for the Owner on 2027-03-31." }],
+      "draft": {
+        "draftVersion": "contracts-model-draft.v1",
+        "documentObservations": { "documentType": "signed_contract", "executionDate": null, "attachmentsStatus": "complete", "contractSiteRaw": "Project Alpha" },
+        "candidates": [{
+          "type": "fixed_milestone", "roleCode": "fixed_completion", "responsibleParty": "Contractor", "beneficiary": "Owner",
+          "action": "Complete the works", "trigger": null, "fixedDate": "2027-03-31", "offset": null, "recurrence": null,
+          "projectionHint": "project_schedule", "factStatus": "explicit", "confidence": 0.98, "conflictHint": null,
+          "evidence": [{ "segmentId": "fixed", "exactQuote": "The Contractor shall complete the works for the Owner on 2027-03-31." }], "metadata": {}
+        }],
+        "missingObservations": [], "packetReferences": []
+      }
+    },
+    {
+      "id": "relative_working_days_missing_calendar",
+      "identity": { "filename": "relative-completion.pdf", "sourceId": null, "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "documentVersionId": "sha256:2222222222222222222222222222222222222222222222222222222222222222" },
+      "projectSelection": { "projectId": "project-alpha", "projectSite": "Project Alpha", "selectedByUser": true },
+      "segments": [{ "segmentId": "relative", "pdfPage": 1, "clauseLabel": "3.1", "clauseKey": "3.1", "text": "The Contractor shall complete the works for the Owner within 45 working days after the notice to proceed." }],
+      "draft": {
+        "draftVersion": "contracts-model-draft.v1",
+        "documentObservations": { "documentType": "signed_contract", "executionDate": null, "attachmentsStatus": "complete", "contractSiteRaw": "Project Alpha" },
+        "candidates": [{
+          "type": "relative_condition", "roleCode": "contractual_completion", "responsibleParty": "Contractor", "beneficiary": "Owner",
+          "action": "Complete the works", "trigger": { "kind": "event", "description": "Notice to proceed", "eventDate": null }, "fixedDate": null,
+          "offset": { "value": 45, "unit": "working_day", "direction": "after", "inclusivity": "unspecified", "rollConvention": "unspecified" },
+          "recurrence": null, "projectionHint": "project_schedule", "factStatus": "explicit", "confidence": 0.97, "conflictHint": null,
+          "evidence": [{ "segmentId": "relative", "exactQuote": "The Contractor shall complete the works for the Owner within 45 working days after the notice to proceed." }], "metadata": {}
+        }],
+        "missingObservations": [], "packetReferences": []
+      }
+    },
+    {
+      "id": "approved_extension_event",
+      "identity": { "filename": "approved-extension.pdf", "sourceId": null, "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "documentVersionId": "sha256:3333333333333333333333333333333333333333333333333333333333333333" },
+      "projectSelection": { "projectId": "project-alpha", "projectSite": "Project Alpha", "selectedByUser": true },
+      "segments": [{ "segmentId": "extension", "pdfPage": 1, "clauseLabel": "Approval 1", "clauseKey": "approval_1", "text": "On 10/02/2027 the Owner approved 21 calendar days for the Contractor's contract completion milestone." }],
+      "draft": {
+        "draftVersion": "contracts-model-draft.v1",
+        "documentObservations": { "documentType": "amendment", "executionDate": null, "attachmentsStatus": "complete", "contractSiteRaw": "Project Alpha" },
+        "candidates": [{
+          "type": "extension_event", "roleCode": "approved_extension", "responsibleParty": "Owner", "beneficiary": "Contractor",
+          "action": "Approve an extension", "trigger": null, "fixedDate": null, "offset": null, "recurrence": null,
+          "projectionHint": "project_schedule", "factStatus": "explicit", "confidence": 0.99, "conflictHint": null,
+          "evidence": [{ "segmentId": "extension", "exactQuote": "On 10/02/2027 the Owner approved 21 calendar days for the Contractor's contract completion milestone." }],
+          "metadata": { "extensionAmount": 21, "extensionUnit": "calendar_day", "approvalStatus": "approved", "approvedDate": "2027-02-10", "milestoneKey": "contract-completion" }
+        }],
+        "missingObservations": [], "packetReferences": []
+      }
+    },
+    {
+      "id": "unsigned_project_mismatch",
+      "identity": { "filename": "project-mismatch.pdf", "sourceId": null, "sha256": "4444444444444444444444444444444444444444444444444444444444444444", "documentVersionId": "sha256:4444444444444444444444444444444444444444444444444444444444444444" },
+      "projectSelection": { "projectId": "project-south", "projectSite": "Project South 15", "selectedByUser": true },
+      "segments": [{ "segmentId": "mismatch", "pdfPage": 1, "clauseLabel": "1.1", "clauseKey": "1.1", "text": "Draft for Project North 5: the Contractor shall complete the works for the Owner on 2027-04-30." }],
+      "draft": {
+        "draftVersion": "contracts-model-draft.v1",
+        "documentObservations": { "documentType": "draft", "executionDate": null, "attachmentsStatus": "unknown", "contractSiteRaw": "Project North 5" },
+        "candidates": [{
+          "type": "fixed_milestone", "roleCode": "fixed_completion", "responsibleParty": "Contractor", "beneficiary": "Owner",
+          "action": "Complete the works", "trigger": null, "fixedDate": "2027-04-30", "offset": null, "recurrence": null,
+          "projectionHint": "project_schedule", "factStatus": "explicit", "confidence": 0.9, "conflictHint": null,
+          "evidence": [{ "segmentId": "mismatch", "exactQuote": "Draft for Project North 5: the Contractor shall complete the works for the Owner on 2027-04-30." }], "metadata": {}
+        }],
+        "missingObservations": [], "packetReferences": []
+      }
+    },
+    {
+      "id": "compound_monthly_payment_rule",
+      "identity": { "filename": "monthly-payment.pdf", "sourceId": null, "sha256": "5555555555555555555555555555555555555555555555555555555555555555", "documentVersionId": "sha256:5555555555555555555555555555555555555555555555555555555555555555" },
+      "projectSelection": { "projectId": "project-alpha", "projectSite": "Project Alpha", "selectedByUser": true },
+      "segments": [{ "segmentId": "payment", "pdfPage": 1, "clauseLabel": "7.7", "clauseKey": "7.7", "text": "Monthly, the Contractor shall submit on days 1-5; the Owner shall review within 10 days and pay the Contractor 25 days after month-end if approved, rolling holidays forward." }],
+      "draft": {
+        "draftVersion": "contracts-model-draft.v1",
+        "documentObservations": { "documentType": "signed_contract", "executionDate": null, "attachmentsStatus": "complete", "contractSiteRaw": "Project Alpha" },
+        "candidates": [{
+          "type": "recurring_rule", "roleCode": "monthly_payment_chain", "responsibleParty": "Owner", "beneficiary": "Contractor",
+          "action": "Review and pay the monthly account", "trigger": null, "fixedDate": null, "offset": null,
+          "recurrence": { "frequency": "monthly", "window": "days 1-5", "occurrencePolicy": "each_occurrence" },
+          "projectionHint": "contract_compliance", "factStatus": "explicit", "confidence": 0.96, "conflictHint": null,
+          "evidence": [{ "segmentId": "payment", "exactQuote": "Monthly, the Contractor shall submit on days 1-5; the Owner shall review within 10 days and pay the Contractor 25 days after month-end if approved, rolling holidays forward." }],
+          "metadata": { "reviewOffsetDays": 10, "paymentRequiresApproval": true, "temporalSteps": [{ "kind": "submission_window", "value": "1-5" }, { "kind": "review", "value": "10 days" }, { "kind": "payment", "value": "25 days after month-end" }] }
+        }],
+        "missingObservations": [], "packetReferences": []
+      }
+    },
+    {
+      "id": "negative_offset_bond_notice",
+      "identity": { "filename": "bond-renewal.pdf", "sourceId": null, "sha256": "6666666666666666666666666666666666666666666666666666666666666666", "documentVersionId": "sha256:6666666666666666666666666666666666666666666666666666666666666666" },
+      "projectSelection": { "projectId": "project-alpha", "projectSite": "Project Alpha", "selectedByUser": true },
+      "segments": [{ "segmentId": "bond", "pdfPage": 1, "clauseLabel": "14.1", "clauseKey": "14.1", "text": "The Contractor shall renew the performance bond for the Owner at least 30 calendar days before expiry." }],
+      "draft": {
+        "draftVersion": "contracts-model-draft.v1",
+        "documentObservations": { "documentType": "signed_contract", "executionDate": null, "attachmentsStatus": "complete", "contractSiteRaw": "Project Alpha" },
+        "candidates": [{
+          "type": "relative_condition", "roleCode": "performance_bond_renewal", "responsibleParty": "Contractor", "beneficiary": "Owner",
+          "action": "Renew the performance bond", "trigger": { "kind": "event", "description": "Bond expiry", "eventDate": null }, "fixedDate": null,
+          "offset": { "value": 30, "unit": "calendar_day", "direction": "before", "inclusivity": "unspecified", "rollConvention": "unspecified" },
+          "recurrence": null, "projectionHint": "contract_compliance", "factStatus": "explicit", "confidence": 0.97, "conflictHint": null,
+          "evidence": [{ "segmentId": "bond", "exactQuote": "The Contractor shall renew the performance bond for the Owner at least 30 calendar days before expiry." }], "metadata": {}
+        }],
+        "missingObservations": [], "packetReferences": []
+      }
+    }
+  ]
+}

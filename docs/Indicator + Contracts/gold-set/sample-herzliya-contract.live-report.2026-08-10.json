@@ -1,0 +1,79 @@
+{
+  "evaluationVersion": "contracts-sample-live.phase1.v1",
+  "evaluatedAt": "2026-08-10T09:13:44.716Z",
+  "model": "google/gemini-2.5-pro",
+  "durationMs": 150228,
+  "documentSha256": "0ff80eb28a157e748c02676b3c3897ea1fbbb1ad429f12e8aece0ef062629dda",
+  "status": "not_accepted_post_run_deterministic_fixes_not_replayed",
+  "outputSummary": {
+    "candidateCount": 12,
+    "conflictCount": 1,
+    "missingInformationCount": 10,
+    "packetGapCount": 2,
+    "approvedScheduleProjectionCount": 0,
+    "computedCompletionDate": null
+  },
+  "fallbackSummary": {
+    "initialChunkCount": 7,
+    "fallbackChunkNumber": 5,
+    "fallbackSegmentCount": 3,
+    "reasonCode": "contracts_model_draft_invalid",
+    "fallbackCallsCompleted": 3
+  },
+  "report": {
+    "passed": false,
+    "hardGates": {
+      "expectedSchemaValid": true,
+      "actualSchemaValid": true,
+      "actualDomainValid": true,
+      "materialFactsExact": true,
+      "evidenceCoverageComplete": true,
+      "evidencePageAndClauseExact": true,
+      "conflictsExact": true,
+      "projectBindingExact": true,
+      "candidateSemanticsExact": false,
+      "candidateGatesExact": false,
+      "missingInformationExact": false,
+      "packetGapsExact": false,
+      "storageDispositionExact": true,
+      "dryRunOnly": true,
+      "noFalseOperationalEligibility": true
+    },
+    "thresholds": {
+      "candidateTypeMicroF1": true,
+      "projectionMacroF1": true,
+      "criticalRoleRecall": true,
+      "falseOperationalEligibility": true
+    },
+    "metrics": {
+      "candidateTypeMicroPrecision": 1,
+      "candidateTypeMicroRecall": 1,
+      "candidateTypeMicroF1": 1,
+      "projectionMacroF1": 1,
+      "criticalRoleRecall": 1,
+      "materialFactPrecision": 1,
+      "materialFactRecall": 1,
+      "evidenceCoverage": 1,
+      "evidenceLocationAccuracy": 1,
+      "falseOperationalEligibility": 0
+    }
+  },
+  "postRunDeterministicRemediation": {
+    "liveProviderRerunPerformed": false,
+    "changes": [
+      "Generic reciprocal notice-party labels are normalized to null.",
+      "Redundant notice temporalSteps cannot create a compound-rule gate.",
+      "Phase 1 missing-information rows are compiler-owned and out-of-scope model rows are removed.",
+      "Packet gaps are derived from source references and present appendix identities with canonical impacts."
+    ],
+    "localVerification": {
+      "contractsTestsPassed": 32,
+      "representativeCasesPassed": 6
+    }
+  },
+  "privacy": {
+    "rawContractTextIncluded": false,
+    "rawProviderResponseIncluded": false,
+    "credentialsIncluded": false
+  }
+}
