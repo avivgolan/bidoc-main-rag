@@ -1,3 +1,5 @@
+pmn
+
 # BIDoc Contracts Agent - Phase 3F Manual Activity-Mapping Review Checkpoint
 
 - Date: 2026-08-12
@@ -79,19 +81,19 @@ The Supabase CLI `migration new` command was attempted first. On this Windows/On
 
 ## 5. Verification
 
-| Command | Exact result |
-|---|---|
-| `npm.cmd run test:contracts` | 79 tests passed, including Hebrew terminology, alternate-model timeout retry, validated-chunk resume, model-change invalidation, and six focused Phase 3F service/route/security tests |
-| `npm.cmd run test:schedule` | 47 tests passed |
-| `npm.cmd run test:contracts:phase3-db` | Isolated full Phase 3 database suite passed with 10 mapping rows, 6 immutable review events, and 8 confirmed winners |
-| `npm.cmd run test:contracts:phase3-db:rollback` | Non-destructive rollback passed; 10 mapping rows and 6 review events preserved |
-| `npm.cmd run test:contracts:ui` | Existing Phase 2 UI regression passed: 3 scenarios, 0 promotion calls |
-| In-app browser acceptance | At 1634px: 12 cards render as 4/4/4 with 0 clipped cards/headings, 0 overlaps, 0 raw controlled English values, and 0px horizontal overflow; at 390px: 12 single-column cards with the same zero-defect metrics |
-| `npm.cmd run test:contracts:phase3f:ui` | Desktop and 390px mobile passed; exact evidence/history, disabled gate, confirmation, correction, Hebrew controlled terminology, and no browser-owned identity/credentials |
-| `npm.cmd run react:build` | Passed; 19 modules, 467.21 kB, 113.87 kB gzip |
-| `node --check src/contracts/activityMappingReview.js` | Passed |
-| `node --check src/server.js` | Passed |
-| `git diff --check` | Passed |
+| Command                                                 | Exact result                                                                                                                                                                                                    |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm.cmd run test:contracts`                          | 79 tests passed, including Hebrew terminology, alternate-model timeout retry, validated-chunk resume, model-change invalidation, and six focused Phase 3F service/route/security tests                          |
+| `npm.cmd run test:schedule`                           | 47 tests passed                                                                                                                                                                                                 |
+| `npm.cmd run test:contracts:phase3-db`                | Isolated full Phase 3 database suite passed with 10 mapping rows, 6 immutable review events, and 8 confirmed winners                                                                                            |
+| `npm.cmd run test:contracts:phase3-db:rollback`       | Non-destructive rollback passed; 10 mapping rows and 6 review events preserved                                                                                                                                  |
+| `npm.cmd run test:contracts:ui`                       | Existing Phase 2 UI regression passed: 3 scenarios, 0 promotion calls                                                                                                                                           |
+| In-app browser acceptance                               | At 1634px: 12 cards render as 4/4/4 with 0 clipped cards/headings, 0 overlaps, 0 raw controlled English values, and 0px horizontal overflow; at 390px: 12 single-column cards with the same zero-defect metrics |
+| `npm.cmd run test:contracts:phase3f:ui`               | Desktop and 390px mobile passed; exact evidence/history, disabled gate, confirmation, correction, Hebrew controlled terminology, and no browser-owned identity/credentials                                      |
+| `npm.cmd run react:build`                             | Passed; 19 modules, 467.21 kB, 113.87 kB gzip                                                                                                                                                                   |
+| `node --check src/contracts/activityMappingReview.js` | Passed                                                                                                                                                                                                          |
+| `node --check src/server.js`                          | Passed                                                                                                                                                                                                          |
+| `git diff --check`                                    | Passed                                                                                                                                                                                                          |
 
 The automated Phase 3F browser fixture uses isolated synthetic data. Its two activity alternatives and review events are not production claims and are never sent to KAPAIM.
 
