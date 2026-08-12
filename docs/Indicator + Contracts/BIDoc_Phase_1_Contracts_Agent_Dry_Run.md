@@ -91,7 +91,8 @@ The route is after the existing authorization wall. It contains no Supabase, Sch
 - Evidence must reproduce the complete supplied parser segment. The compiler re-resolves it against the claimed page/clause.
 - Up to three model chunks run concurrently. The first failure stops queued calls and aborts in-flight OpenRouter requests.
 - A global deadline watchdog actively aborts in-flight and queued model work at the 270-second total budget; the budget is not only checked between calls.
-- One bounded retry is allowed only for transient transport, HTTP 408/429, or HTTP 5xx failures.
+- One bounded retry is allowed only for transient transport, HTTP 408/429, or HTTP 5xx failures. When a distinct configured lite model exists, that retry uses it instead of repeating the failing provider model.
+- Schema-validated completed chunks are retained in a bounded 30-minute in-process resume cache. A repeated request for the same prompt/model configuration reuses only those validated drafts; raw, invalid, failed, or partial model output is never cached, and model/prompt changes invalidate reuse.
 - One repair call is allowed only for JSON/schema structure. Provider failure or truncation is not repaired into a result.
 - Operator-configured main-model token and timeout limits are upper bounds; Contracts does not silently raise them.
 - Dates, numbers, amounts, units, and notice branches are checked against evidence. A number must be locally paired with its unit/currency.
@@ -131,6 +132,11 @@ Passed on 2026-08-10:
 - Protected Schedule files - no diff and Phase 0 hashes preserved.
 - Manual Contracts diagnostics - passed by the user: `active: true`, `mode: dry_run`, `contracts-agent.phase1.v1`, `pdfjs-dist/4.10.38`, and the configured byte/time limits including the 270,000 ms budget.
 - Manual Schedule UI regression - passed from the user-provided screenshot: the three-axis view rendered the existing real schedule with 285 of 328 activities, milestone/delay summaries, and timeline data; no Contracts candidate appeared in Schedule.
+
+Reliability addendum verified on 2026-08-12 after two repeated final-chunk provider timeouts:
+
+- `npm.cmd run test:contracts` - 79/79 passed, including alternate-model retry, typed provider-timeout handling, validated-chunk resume, and model-change invalidation.
+- Hebrew UI error handling distinguishes provider timeout from a generic failure and states that no partial result was saved.
 
 The full repository suite still fails on two pre-existing Timeline mobile source assertions for absent `wireTimelineGraphTouch` and `wireTimelineDetailSwipe`. Contracts/OpenRouter tests pass before those failures. No Timeline implementation was changed.
 

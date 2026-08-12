@@ -17,6 +17,9 @@ const MAX_MODEL_CHUNK_CHARACTERS = 10_000;
 const MAX_MODEL_CHUNK_PAGES = 5;
 const MAX_PARALLEL_MODEL_CHUNKS = 3;
 const REPAIR_MODEL_TIMEOUT_MS = 60_000;
+const CONTRACTS_MODEL_CHUNK_RESUME_TTL_MS = 30 * 60_000;
+const CONTRACTS_MODEL_CHUNK_RESUME_MAX_ENTRIES = 96;
+const contractsModelChunkResumeCache = new Map();
 const PHASE1_APPROVED_ROLE_CODES = new Set([
   "contractual_completion",
   "fixed_completion",
@@ -128,7 +131,16 @@ export async function runContractsExtractionRequest({
   signal = null
 } = {}) {
   const request = parseContractExtractionRequest(body);
-  return runContractsDryRun({ ...request, config, readPdf, chatComplete, emit, deadlineAt, signal });
+  return runContractsDryRun({
+    ...request,
+    config,
+    readPdf,
+    chatComplete,
+    emit,
+    deadlineAt,
+    signal,
+    chunkResumeCache: contractsModelChunkResumeCache
+  });
 }
 
 export async function runContractsDryRun({
@@ -141,7 +153,8 @@ export async function runContractsDryRun({
   chatComplete = chatCompletion,
   emit = null,
   deadlineAt = null,
-  signal = null
+  signal = null,
+  chunkResumeCache = null
 } = {}) {
   if (!config?.openRouterApiKey) {
     throw new ContractsAgentError(
@@ -192,7 +205,8 @@ export async function runContractsDryRun({
     chatComplete,
     emit,
     deadlineAt: extractionDeadline,
-    signal
+    signal,
+    chunkResumeCache
   });
   const output = compileContractDraft({
     draft,
@@ -220,10 +234,13 @@ export async function extractContractsModelDraft({
   chatComplete = chatCompletion,
   emit = null,
   deadlineAt = null,
-  signal = null
+  signal = null,
+  chunkResumeCache = null
 } = {}) {
   const selectedSegments = selectContractExtractionSegments(segments);
   const model = config.models?.main || "openai/gpt-4o";
+  const configuredRetryModel = String(config.models?.lite || "").trim();
+  const retryModel = configuredRetryModel && configuredRetryModel !== model ? configuredRetryModel : model;
   const mainSettings = config.ai?.main || {};
   const extractionDeadline = deadlineAt !== null && deadlineAt !== undefined && Number.isFinite(Number(deadlineAt))
     ? Number(deadlineAt)
@@ -269,9 +286,10 @@ export async function extractContractsModelDraft({
           );
         }
         try {
+          const attemptModel = attempt === 1 ? retryModel : model;
           const raw = await chatComplete({
             apiKey: config.openRouterApiKey,
-            model,
+            model: attemptModel,
             temperature: 0,
             maxTokens: primaryModelMaxTokens,
             timeoutMs: Math.max(1, Math.min(preferredTimeoutMs, remainingMs)),
@@ -298,6 +316,14 @@ export async function extractContractsModelDraft({
               { cause: error, issueCodes: ["provider.time_budget_exceeded"] }
             );
           }
+          if (isContractsProviderTimeout(error)) {
+            throw new ContractsAgentError(
+              "contracts_model_provider_timeout",
+              "The configured Contracts models did not complete the extraction call before the provider timeout.",
+              504,
+              { cause: error, issueCodes: ["provider.response_timeout"] }
+            );
+          }
           throw new ContractsAgentError(
             "contracts_model_provider_failed",
             "The configured Contracts model did not complete the extraction call.",
@@ -322,6 +348,31 @@ export async function extractContractsModelDraft({
       chunkNumber,
       chunkCount: chunks.length
     });
+    const chunkResumeKey = contractsModelChunkResumeKey({
+      messages,
+      model,
+      retryModel,
+      maxTokens: primaryModelMaxTokens
+    });
+    const resumed = readValidatedContractsChunk(chunkResumeCache, chunkResumeKey);
+    if (resumed) {
+      safeEmit(emit, "contract_chunk_resumed", {
+        chunkNumber,
+        chunkCount: chunks.length,
+        candidateCount: resumed.draft.candidates.length,
+        missingInformationCount: resumed.draft.missingObservations.length,
+        packetReferenceCount: resumed.draft.packetReferences.length,
+        cacheAgeMs: resumed.cacheAgeMs
+      });
+      safeEmit(emit, "contract_chunk_validated", {
+        chunkNumber,
+        chunkCount: chunks.length,
+        candidateCount: resumed.draft.candidates.length,
+        missingInformationCount: resumed.draft.missingObservations.length,
+        packetReferenceCount: resumed.draft.packetReferences.length
+      });
+      return resumed.draft;
+    }
     let raw = await call(messages, `contracts_extract_${chunkNumber}`);
     ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, raw);
     let draft;
@@ -389,6 +440,7 @@ export async function extractContractsModelDraft({
       missingInformationCount: draft.missingObservations.length,
       packetReferenceCount: draft.packetReferences.length
     });
+    writeValidatedContractsChunk(chunkResumeCache, chunkResumeKey, draft);
     return draft;
   }, { signal, deadlineAt: extractionDeadline });
   return mergeContractsModelDrafts(drafts, selectedSegments);
@@ -696,6 +748,54 @@ function isRetryableContractsProviderError(error) {
   return /(?:unexpected end of json|fetch failed|socket|connection reset|temporarily unavailable|response timed out after \d+ms)/iu.test(String(error?.message || ""));
 }
 
+function isContractsProviderTimeout(error) {
+  const code = String(error?.code || error?.cause?.code || "").toUpperCase();
+  if (code === "ETIMEDOUT") return true;
+  return /(?:timed out|timeout)/iu.test(String(error?.message || ""));
+}
+
+function contractsModelChunkResumeKey({ messages, model, retryModel, maxTokens }) {
+  return crypto.createHash("sha256").update(JSON.stringify({
+    version: CONTRACTS_AGENT_VERSION,
+    model,
+    retryModel,
+    maxTokens,
+    messages
+  })).digest("hex");
+}
+
+function readValidatedContractsChunk(cache, key, now = Date.now()) {
+  if (!cache || typeof cache.get !== "function") return null;
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (!Number.isFinite(entry.savedAt) || now - entry.savedAt > CONTRACTS_MODEL_CHUNK_RESUME_TTL_MS) {
+    cache.delete?.(key);
+    return null;
+  }
+  cache.delete?.(key);
+  cache.set?.(key, entry);
+  return {
+    draft: structuredClone(entry.draft),
+    cacheAgeMs: Math.max(0, now - entry.savedAt)
+  };
+}
+
+function writeValidatedContractsChunk(cache, key, draft, now = Date.now()) {
+  if (!cache || typeof cache.set !== "function") return;
+  for (const [existingKey, entry] of cache) {
+    if (!Number.isFinite(entry?.savedAt) || now - entry.savedAt > CONTRACTS_MODEL_CHUNK_RESUME_TTL_MS) {
+      cache.delete?.(existingKey);
+    }
+  }
+  cache.delete?.(key);
+  while (Number(cache.size || 0) >= CONTRACTS_MODEL_CHUNK_RESUME_MAX_ENTRIES) {
+    const oldestKey = cache.keys?.().next?.().value;
+    if (oldestKey === undefined) break;
+    cache.delete?.(oldestKey);
+  }
+  cache.set(key, { savedAt: now, draft: structuredClone(draft) });
+}
+
 function parseAndValidateDraft(raw, sourceSegments = []) {
   if (String(raw || "").length > MAX_MODEL_RESPONSE_CHARACTERS) {
     throw new ContractsAgentError(
@@ -854,6 +954,7 @@ export function safeContractTelemetry(event, details = {}) {
     contract_pdf_read: ["documentSha256", "pageCount", "segmentCount", "unreadablePageCount", "readerVersion", "segmenterVersion"],
     contract_chunk_extracted: ["chunkNumber", "chunkCount", "segmentCount", "characterCount"],
     contract_chunk_fallback: ["chunkNumber", "chunkCount", "segmentCount", "reasonCode"],
+    contract_chunk_resumed: ["chunkNumber", "chunkCount", "candidateCount", "missingInformationCount", "packetReferenceCount", "cacheAgeMs"],
     contract_chunk_validated: ["chunkNumber", "chunkCount", "candidateCount", "missingInformationCount", "packetReferenceCount"],
     contract_model_call: ["status", "chunkNumber", "callId", "requestedModel", "actualModel", "durationMs", "promptTokens", "completionTokens", "totalTokens", "cost", "finishReason", "nativeFinishReason", "errorCode"],
     contract_dry_run_completed: ["documentSha256", "compilerVersion", "candidateCount", "conflictCount", "missingInformationCount", "packetGapCount"]

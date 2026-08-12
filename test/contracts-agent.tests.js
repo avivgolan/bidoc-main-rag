@@ -1,6 +1,38 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { Readable } from "node:stream";
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+import {
+  ACTIVITY_MAPPING_BLOCKER,
+  ACTIVITY_MAPPING_METHOD,
+  ACTIVITY_MAPPING_STATUS,
+  CONTRACTS_ACTIVITY_MAPPING_VERSION,
+  buildContractActivityMappingCandidates,
+  mappingAutomaticAlertEligible,
+  reconcileConfirmedActivityAliases
+} from "../src/contracts/activityMapping.js";
+import {
+  CONTRACTS_ACTIVITY_MAPPING_API_VERSION,
+  CONTRACTS_ACTIVITY_MAPPING_CONTEXT_RPC,
+  assertNoClientDatabaseOverrides,
+  buildContractActivityMappingCandidatesFromSources,
+  loadContractActivityMappingState,
+  parseActivityMappingCandidateRequest,
+  parseActivityMappingListRequest
+} from "../src/contracts/activityMappingService.js";
+import {
+  CONTRACTS_ACTIVITY_MAPPING_HISTORY_RPC,
+  CONTRACTS_ACTIVITY_MAPPING_HISTORY_VERSION,
+  CONTRACTS_ACTIVITY_MAPPING_REVIEW_API_VERSION,
+  CONTRACTS_ACTIVITY_MAPPING_REVIEW_RPC,
+  contractsActivityMappingReviewApproved,
+  listActivityMappingReviewHistory,
+  parseActivityMappingHistoryRequest,
+  parseActivityMappingReviewRequest,
+  prepareActivityMappingReviewSubmission,
+  submitActivityMappingReview
+} from "../src/contracts/activityMappingReview.js";
 import { compileContractDraft, findGroundedQuote } from "../src/contracts/compiler.js";
 import { ContractsAgentError } from "../src/contracts/errors.js";
 import { evaluateContractExtraction } from "../src/contracts/goldEvaluator.js";
@@ -18,6 +50,32 @@ import { contractsPhase2ApplyApproved, prepareContractReview } from "../src/cont
 import { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } from "../src/contracts/reviewMode.js";
 import { sendContractsJson, serializeContractsResponse } from "../src/contracts/response.js";
 import { contractExtractionSchemaErrors } from "../src/contracts/schema.js";
+import {
+  CONTRACTS_REVIEW_DRAFT_VERSION,
+  CONTRACTS_WORKSPACE_MIGRATION_VERSION,
+  CONTRACTS_WORKSPACE_VERSION,
+  assertPrivateStorageBucket,
+  contractPdfSha256,
+  contractsExtractionFingerprint,
+  findSavedContractWorkspace,
+  loadContractsWorkspaceStatus,
+  normalizeWorkspaceDraft,
+  parseWorkspaceExtractionRequest,
+  persistExtractedContractWorkspace,
+  projectSavedContractExtractionResponse,
+  saveContractWorkspaceDraft
+} from "../src/contracts/workspacePersistence.js";
+import {
+  contractActionLabel,
+  contractGateLabel,
+  contractRoleLabel,
+  contractsUiError,
+  mappingBlockerLabel,
+  mappingEvidenceKindLabel,
+  promotionBlockerLabel,
+  reviewPlanStatusLabel,
+  storageDispositionLabel
+} from "../src/react/contractsHebrew.js";
 import { segmentContractPages } from "../src/contracts/segmenter.js";
 import { chatCompletion } from "../src/openrouter.js";
 import {
@@ -34,8 +92,1383 @@ import {
 } from "../src/subagents/contracts.js";
 
 const FIXTURE_SHA = "a".repeat(64);
+const MAPPING_SOURCE_PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+const MAPPING_SCHEDULE_PROJECT_ID = "22222222-2222-4222-8222-222222222222";
+const MAPPING_PROJECT_LINK_ID = "33333333-3333-4333-8333-333333333333";
+const MAPPING_FILE_V1 = "1776105870763_03.12.25.xml";
+const MAPPING_FILE_V2 = "1781010000000_01.08.26.xml";
+const MAPPING_CANONICAL_KEY = "schedule-activity:66666666-6666-4666-8666-666666666666";
+const MAPPING_REVIEWER_ID = "44444444-4444-4444-8444-444444444444";
+const MAPPING_REVIEW_REQUEST_ID = "55555555-5555-4555-8555-555555555555";
+const MAPPING_REVIEW_EVENT_ID = "77777777-7777-4777-8777-777777777777";
+
+const activityMappingSchema = JSON.parse(fs.readFileSync(
+  new URL(
+    "../docs/Indicator%20+%20Contracts/schemas/contracts-activity-mapping.phase3.v1.schema.json",
+    import.meta.url
+  ),
+  "utf8"
+));
+const activityMappingAjv = new Ajv2020({ strict: true, allErrors: true });
+addFormats(activityMappingAjv);
+const validateActivityMappingOutput = activityMappingAjv.compile(activityMappingSchema);
+
+function mappingProjectContext(mappingStatus = "active") {
+  return {
+    sourceSystem: "main",
+    sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+    scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+    projectMappingId: MAPPING_PROJECT_LINK_ID,
+    mappingStatus
+  };
+}
+
+function mappingScheduleVersion(fileId, overrides = {}) {
+  return {
+    fileId,
+    relevancyDate: fileId === MAPPING_FILE_V1 ? "2026-07-01" : "2026-08-01",
+    versionConflict: false,
+    ...overrides
+  };
+}
+
+function mappingTask(fileId, taskUid, name, overrides = {}) {
+  return {
+    activityKey: `gantt:${fileId}:${taskUid}`,
+    taskUid,
+    name,
+    outlineLevel: 3,
+    isSummary: false,
+    isMilestone: false,
+    plannedStart: "2026-08-10",
+    plannedFinish: "2026-08-14",
+    sourceVersionId: fileId,
+    ...overrides
+  };
+}
+
+function mappingObligation(overrides = {}) {
+  return {
+    documentVersionId: `sha256:${FIXTURE_SHA}`,
+    candidateKey: "candidate:contract-completion",
+    milestoneKey: null,
+    label: "Complete structural framing",
+    mappingRequirement: "required",
+    conditionStatus: "not_applicable",
+    triggerEvidenceReviewed: true,
+    preferMilestone: false,
+    preferredTaskUid: null,
+    preferredActivityKey: null,
+    preferredOutlineLevel: 3,
+    activityTerms: ["structural", "framing"],
+    sourceEvidence: [{
+      evidenceId: "evidence:clause-7.2",
+      sourceText: "The contractor shall complete the structural framing.",
+      pdfPage: 12,
+      clause: "7.2"
+    }],
+    ...overrides
+  };
+}
+
+function confirmedActivityMapping(fileId = MAPPING_FILE_V1, overrides = {}) {
+  return {
+    canonicalKey: MAPPING_CANONICAL_KEY,
+    alias: `gantt:${fileId}:17`,
+    aliasSource: "gantt_activity_key",
+    status: ACTIVITY_MAPPING_STATUS.MANUALLY_CONFIRMED,
+    confidence: 0.98,
+    matchMethod: ACTIVITY_MAPPING_METHOD.MANUAL_REVIEW,
+    ...overrides
+  };
+}
+
+function assertActivityMappingSchemaValid(output) {
+  assert.equal(
+    validateActivityMappingOutput(output),
+    true,
+    JSON.stringify(validateActivityMappingOutput.errors, null, 2)
+  );
+}
+
+function activityMappingTestConfig() {
+  return {
+    contentSource: {
+      supabaseUrl: "https://app-data.example.test",
+      supabaseServiceRoleKey: "service-role-test-key"
+    }
+  };
+}
+
+function activityMappingSourceFetch(requests, { reviewResult = null, historyResult = null } = {}) {
+  return async (url, options) => {
+    requests.push({ url, options });
+    let value;
+    if (url.includes(`/rpc/${CONTRACTS_ACTIVITY_MAPPING_CONTEXT_RPC}`)) {
+      value = mappingProjectContext();
+    } else if (url.includes(`/rpc/${CONTRACTS_ACTIVITY_MAPPING_REVIEW_RPC}`)) {
+      const submission = JSON.parse(options.body).p_submission;
+      value = reviewResult || {
+        status: "recorded",
+        eventKey: submission.eventKey,
+        action: submission.decision.action,
+        mappingRowsChanged: 2
+      };
+    } else if (url.includes(`/rpc/${CONTRACTS_ACTIVITY_MAPPING_HISTORY_RPC}`)) {
+      value = historyResult || {
+        historyVersion: CONTRACTS_ACTIVITY_MAPPING_HISTORY_VERSION,
+        projectContext: mappingProjectContext(),
+        total: 0,
+        returned: 0,
+        events: []
+      };
+    } else {
+      value = [];
+    }
+    return { ok: true, status: 200, text: async () => JSON.stringify(value) };
+  };
+}
+
+function mappingScheduleSource(tasks = [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")]) {
+  return {
+    tasks,
+    scheduleMeta: {
+      sourceVersionId: MAPPING_FILE_V2,
+      relevancyDate: "2026-08-01",
+      versionConflict: false
+    }
+  };
+}
+
+function mappingReviewRequest(overrides = {}) {
+  return {
+    sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+    obligation: mappingObligation({ preferredTaskUid: 17 }),
+    action: "confirm",
+    selectedActivityKey: `gantt:${MAPPING_FILE_V2}:17`,
+    reason: "Confirmed against the exact contract evidence and current schedule activity.",
+    reviewRequestId: MAPPING_REVIEW_REQUEST_ID,
+    conflictResolved: false,
+    ...overrides
+  };
+}
 
 export function registerContractsAgentTests(test) {
+  test("contracts reviewer presents controlled decisions, statuses, and blockers in Hebrew", () => {
+    assert.equal(contractRoleLabel("contractual_completion"), "השלמת ומסירת העבודות");
+    assert.equal(contractActionLabel({ role: "performance_bond_renewal" }), "הארך את ערבות הביצוע לפני פקיעתה");
+    assert.equal(contractGateLabel("working_calendar_missing"), "חסר לוח ימי עבודה מאושר");
+    assert.equal(mappingBlockerLabel("ambiguous_candidates"), "נמצאו כמה חלופות בעלות התאמה זהה");
+    assert.equal(mappingEvidenceKindLabel("normalized_name_exact"), "התאמה מלאה בשם הפעילות");
+    assert.equal(promotionBlockerLabel("review_gate_unresolved:authority_unverified"), "חסם סקירה טרם נפתר: סמכות המסמך טרם אומתה");
+    assert.equal(reviewPlanStatusLabel("transaction_ready"), "מוכן לטרנזקציה");
+    assert.equal(storageDispositionLabel("candidate_for_schedule_contract_milestones"), "מועמד לאבן דרך חוזית");
+    assert.equal(
+      contractsUiError({ code: "contracts_activity_mapping_review_selection_stale" }),
+      "הפעילות שנבחרה כבר אינה מופיעה בחלופות העדכניות. יש לרענן ולבחור מחדש."
+    );
+    assert.equal(
+      contractsUiError({ code: "contracts_model_provider_timeout" }),
+      "ספק הבינה המלאכותית לא השלים את החילוץ בזמן. לא נשמרה תוצאה חלקית; בניסיון הבא המערכת תשתמש מחדש רק בחלקים שכבר אומתו."
+    );
+    assert.equal(contractActionLabel({ role: "unknown_role", action: "Unsafe raw English" }), "בדוק את העובדה החוזית מול הראיה המקורית");
+    assert.equal(contractGateLabel("unknown_gate"), "נדרש בירור נוסף לפני קידום");
+  });
+
+  test("contracts Phase 3F.1 parses an explicit saved-workspace extraction without widening Phase 1", () => {
+    const parsed = parseWorkspaceExtractionRequest({
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      extractionRequest: {
+        filename: "contract.pdf",
+        mediaType: "application/pdf",
+        pdfBase64: Buffer.from("%PDF-1.4\n", "utf8").toString("base64"),
+        mode: "dry_run",
+        projectSelection: {
+          projectId: MAPPING_SOURCE_PROJECT_ID,
+          projectSite: "אתר בדיקה",
+          selectedByUser: true
+        }
+      }
+    });
+
+    assert.equal(parsed.scheduleProjectId, MAPPING_SCHEDULE_PROJECT_ID);
+    assert.equal(parsed.parsedExtraction.projectSelection.projectId, MAPPING_SOURCE_PROJECT_ID);
+    assert.equal(parsed.parsedExtraction.pdfBytes.subarray(0, 5).toString("ascii"), "%PDF-");
+    assert.throws(
+      () => parseWorkspaceExtractionRequest({
+        scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+        database: { supabaseUrl: "https://attacker.example" },
+        extractionRequest: {}
+      }),
+      (error) => error instanceof ContractsAgentError && error.code === "contracts_workspace_request_field_unsupported"
+    );
+  });
+
+  test("contracts Phase 3F.1 extraction reuse fingerprint is stable and model-sensitive", () => {
+    const baseConfig = { models: { main: "google/gemini-2.5-pro", lite: "google/gemini-2.5-flash" } };
+    const first = contractsExtractionFingerprint(baseConfig);
+    assert.match(first, /^[0-9a-f]{64}$/u);
+    assert.equal(first, contractsExtractionFingerprint(structuredClone(baseConfig)));
+    assert.notEqual(first, contractsExtractionFingerprint({ models: { ...baseConfig.models, lite: "openai/gpt-4.1-mini" } }));
+  });
+
+  test("contracts Phase 3F.1 status requires the exact migration and a private Storage bucket", async () => {
+    const requests = [];
+    const fetchImpl = async (url, options) => {
+      requests.push({ url, options });
+      const value = url.includes("/rest/v1/rpc/")
+        ? {
+            workspaceVersion: CONTRACTS_WORKSPACE_VERSION,
+            draftVersion: CONTRACTS_REVIEW_DRAFT_VERSION,
+            migrationVersion: CONTRACTS_WORKSPACE_MIGRATION_VERSION
+          }
+        : {
+            name: "contracts-private",
+            public: false,
+            allowed_mime_types: ["application/pdf"],
+            file_size_limit: 3_000_000
+          };
+      return { ok: true, status: 200, text: async () => JSON.stringify(value) };
+    };
+    const status = await loadContractsWorkspaceStatus({
+      config: activityMappingTestConfig(),
+      env: {
+        CONTRACTS_PHASE3F1_WORKSPACE_PERSISTENCE_APPROVED: "TRUE",
+        CONTRACTS_STORAGE_BUCKET: "contracts-private"
+      },
+      fetchImpl
+    });
+    assert.equal(status.ready, true);
+    assert.equal(status.storageBucket, "contracts-private");
+    assert.equal(requests.length, 2);
+    assert.match(requests[0].url, /\/rest\/v1\/rpc\/bidoc_contracts_workspace_status_v1$/u);
+    assert.match(requests[1].url, /\/storage\/v1\/bucket\/contracts-private$/u);
+    assert.equal(requests[0].options.headers.apikey, "service-role-test-key");
+  });
+
+  test("contracts Phase 3F.1 rejects a public PDF bucket", async () => {
+    await assert.rejects(
+      () => assertPrivateStorageBucket({
+        config: activityMappingTestConfig(),
+        bucket: "contracts-private",
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ name: "contracts-private", public: true })
+        })
+      }),
+      (error) => error instanceof ContractsAgentError && error.code === "contracts_workspace_storage_bucket_not_private"
+    );
+  });
+
+  test("contracts Phase 3F.1 rejects missing or looser bucket safety metadata", async () => {
+    for (const bucket of [
+      { name: "contracts-private", public: false, file_size_limit: 3_000_000 },
+      { name: "contracts-private", public: false, allowed_mime_types: ["application/pdf"], file_size_limit: null },
+      { name: "contracts-private", public: false, allowed_mime_types: ["application/pdf", "text/plain"], file_size_limit: 3_000_000 },
+      { name: "contracts-private", public: false, allowed_mime_types: ["application/pdf"], file_size_limit: 3_000_001 }
+    ]) {
+      await assert.rejects(
+        () => assertPrivateStorageBucket({
+          config: activityMappingTestConfig(),
+          bucket: "contracts-private",
+          fetchImpl: async () => ({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify(bucket)
+          })
+        }),
+        (error) => error instanceof ContractsAgentError && error.code === "contracts_workspace_storage_bucket_unsafe"
+      );
+    }
+  });
+
+  test("contracts Phase 3F.1 reload validates the canonical stored extraction", async () => {
+    const extraction = representativeOutput("signed_fixed_completion");
+    extraction.projectBinding.projectId = MAPPING_SOURCE_PROJECT_ID;
+    const response = {
+      workspaceId: "88888888-8888-4888-8888-888888888888",
+      workspaceVersion: CONTRACTS_WORKSPACE_VERSION,
+      documentVersionId: extraction.document.documentVersionId,
+      filename: extraction.document.filename,
+      projectSite: extraction.projectBinding.projectSite,
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      candidateCount: extraction.candidates.length,
+      createdAt: "2026-08-12T12:00:00.000Z",
+      lastOpenedAt: "2026-08-12T12:00:00.000Z",
+      extraction,
+      draft: null
+    };
+    const requests = [];
+    const workspace = await findSavedContractWorkspace({
+      config: activityMappingTestConfig(),
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      documentSha256: extraction.document.sha256,
+      reviewerId: MAPPING_REVIEWER_ID,
+      fetchImpl: async (url, options) => {
+        requests.push({ url, options });
+        return { ok: true, status: 200, text: async () => JSON.stringify(response) };
+      }
+    });
+    assert.equal(workspace.documentVersionId, extraction.document.documentVersionId);
+    assert.equal(workspace.extraction.summary.candidateCount, extraction.summary.candidateCount);
+    assert.equal(requests.length, 1);
+    const payload = JSON.parse(requests[0].options.body);
+    assert.equal(payload.p_source_project_id, MAPPING_SOURCE_PROJECT_ID);
+    assert.equal(payload.p_schedule_project_id, MAPPING_SCHEDULE_PROJECT_ID);
+    assert.equal(payload.p_reviewer_id, MAPPING_REVIEWER_ID);
+    assert.match(payload.p_extraction_fingerprint, /^[0-9a-f]{64}$/u);
+  });
+
+  test("contracts Phase 3F.1 refuses reuse from a different Schedule project", async () => {
+    const extraction = representativeOutput("signed_fixed_completion");
+    extraction.projectBinding.projectId = MAPPING_SOURCE_PROJECT_ID;
+    await assert.rejects(
+      () => findSavedContractWorkspace({
+        config: activityMappingTestConfig(),
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+        documentSha256: extraction.document.sha256,
+        reviewerId: MAPPING_REVIEWER_ID,
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            workspaceId: "88888888-8888-4888-8888-888888888888",
+            workspaceVersion: CONTRACTS_WORKSPACE_VERSION,
+            documentVersionId: extraction.document.documentVersionId,
+            filename: extraction.document.filename,
+            sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+            scheduleProjectId: "99999999-9999-4999-8999-999999999999",
+            candidateCount: extraction.candidates.length,
+            extraction,
+            draft: null
+          })
+        })
+      }),
+      (error) => error instanceof ContractsAgentError && error.code === "contracts_workspace_response_invalid"
+    );
+  });
+
+  test("contracts Phase 3F.1 verifies an existing content-addressed PDF before accepting Storage duplicate", async () => {
+    const pdfBytes = Buffer.from("%PDF-1.4\nBiDoc saved contract fixture\n%%EOF", "utf8");
+    const documentSha256 = contractPdfSha256(pdfBytes);
+    const extraction = representativeOutput("signed_fixed_completion");
+    extraction.projectBinding.projectId = MAPPING_SOURCE_PROJECT_ID;
+    extraction.document.sha256 = documentSha256;
+    extraction.document.documentVersionId = `sha256:${documentSha256}`;
+    extraction.document.filename = "saved-fixture.pdf";
+    const parsedExtraction = {
+      pdfBytes,
+      filename: "saved-fixture.pdf",
+      mediaType: "application/pdf",
+      projectSelection: {
+        projectId: MAPPING_SOURCE_PROJECT_ID,
+        projectSite: "Project Alpha",
+        selectedByUser: true
+      }
+    };
+    const requests = [];
+    const responseEnvelope = {
+      workspaceId: "88888888-8888-4888-8888-888888888888",
+      workspaceVersion: CONTRACTS_WORKSPACE_VERSION,
+      documentVersionId: extraction.document.documentVersionId,
+      filename: extraction.document.filename,
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      candidateCount: extraction.candidates.length,
+      extraction,
+      inserted: true,
+      reused: false
+    };
+    const fetchImpl = async (url, options) => {
+      requests.push({ url, options });
+      if (url.endsWith("/storage/v1/bucket/contracts-private")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            name: "contracts-private",
+            public: false,
+            allowed_mime_types: ["application/pdf"],
+            file_size_limit: 3_000_000
+          })
+        };
+      }
+      if (url.includes("/storage/v1/object/authenticated/")) {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-type": "application/pdf", "content-length": String(pdfBytes.length) }),
+          arrayBuffer: async () => pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength)
+        };
+      }
+      if (url.includes("/storage/v1/object/")) {
+        return { ok: false, status: 409, text: async () => JSON.stringify({ code: "Duplicate", message: "Asset already exists" }) };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify(responseEnvelope) };
+    };
+    const workspace = await persistExtractedContractWorkspace({
+      config: activityMappingTestConfig(),
+      parsedExtraction,
+      extraction,
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      reviewerId: MAPPING_REVIEWER_ID,
+      env: { CONTRACTS_STORAGE_BUCKET: "contracts-private" },
+      fetchImpl
+    });
+    assert.equal(workspace.inserted, true);
+    assert.equal(requests.filter(({ url }) => url.includes("/object/authenticated/")).length, 1);
+    const upsert = requests.find(({ url }) => url.includes("/rpc/bidoc_contracts_upsert_workspace_v1"));
+    const payload = JSON.parse(upsert.options.body).p_payload;
+    assert.equal(payload.storageObjectKey, `${MAPPING_SOURCE_PROJECT_ID}/${documentSha256}.pdf`);
+    assert.equal(payload.scheduleProjectId, MAPPING_SCHEDULE_PROJECT_ID);
+  });
+
+  test("contracts Phase 3F.1 rejects a Storage duplicate whose bytes do not match the PDF hash", async () => {
+    const pdfBytes = Buffer.from("%PDF-1.4\nExpected bytes\n%%EOF", "utf8");
+    const existingBytes = Buffer.from("%PDF-1.4\nDifferent bytes\n%%EOF", "utf8");
+    const documentSha256 = contractPdfSha256(pdfBytes);
+    const extraction = representativeOutput("signed_fixed_completion");
+    extraction.projectBinding.projectId = MAPPING_SOURCE_PROJECT_ID;
+    extraction.document.sha256 = documentSha256;
+    extraction.document.documentVersionId = `sha256:${documentSha256}`;
+    const parsedExtraction = {
+      pdfBytes,
+      filename: extraction.document.filename,
+      mediaType: "application/pdf",
+      projectSelection: { projectId: MAPPING_SOURCE_PROJECT_ID, projectSite: "Project Alpha", selectedByUser: true }
+    };
+    await assert.rejects(
+      () => persistExtractedContractWorkspace({
+        config: activityMappingTestConfig(),
+        parsedExtraction,
+        extraction,
+        scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+        reviewerId: MAPPING_REVIEWER_ID,
+        env: { CONTRACTS_STORAGE_BUCKET: "contracts-private" },
+        fetchImpl: async (url) => {
+          if (url.endsWith("/storage/v1/bucket/contracts-private")) {
+            return {
+              ok: true,
+              status: 200,
+              text: async () => JSON.stringify({
+                name: "contracts-private",
+                public: false,
+                allowed_mime_types: ["application/pdf"],
+                file_size_limit: 3_000_000
+              })
+            };
+          }
+          if (url.includes("/object/authenticated/")) {
+            return {
+              ok: true,
+              status: 200,
+              headers: new Headers({ "content-type": "application/pdf" }),
+              arrayBuffer: async () => existingBytes.buffer.slice(existingBytes.byteOffset, existingBytes.byteOffset + existingBytes.byteLength)
+            };
+          }
+          return { ok: false, status: 409, text: async () => JSON.stringify({ code: "Duplicate" }) };
+        }
+      }),
+      (error) => error instanceof ContractsAgentError && error.code === "contracts_workspace_storage_object_mismatch" && error.status === 409
+    );
+  });
+
+  test("contracts Phase 3F.1 post-model UPSERT race returns the canonical winner without claiming model avoidance", async () => {
+    const pdfBytes = Buffer.from("%PDF-1.4\nConcurrent extraction fixture\n%%EOF", "utf8");
+    const documentSha256 = contractPdfSha256(pdfBytes);
+    const freshExtraction = representativeOutput("signed_fixed_completion");
+    freshExtraction.projectBinding.projectId = MAPPING_SOURCE_PROJECT_ID;
+    freshExtraction.document.sha256 = documentSha256;
+    freshExtraction.document.documentVersionId = `sha256:${documentSha256}`;
+    freshExtraction.document.filename = "fresh-loser.pdf";
+    const canonicalExtraction = structuredClone(freshExtraction);
+    canonicalExtraction.document.filename = "canonical-winner.pdf";
+    const baseEnvelope = {
+      workspaceId: "88888888-8888-4888-8888-888888888888",
+      workspaceVersion: CONTRACTS_WORKSPACE_VERSION,
+      documentVersionId: canonicalExtraction.document.documentVersionId,
+      filename: canonicalExtraction.document.filename,
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      candidateCount: canonicalExtraction.candidates.length,
+      extraction: canonicalExtraction
+    };
+    const requests = [];
+    const fetchImpl = async (url, options) => {
+      requests.push({ url, options });
+      if (url.endsWith("/storage/v1/bucket/contracts-private")) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            name: "contracts-private",
+            public: false,
+            allowed_mime_types: ["application/pdf"],
+            file_size_limit: 3_000_000
+          })
+        };
+      }
+      if (url.includes("/storage/v1/object/")) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ Key: "saved.pdf" }) };
+      }
+      if (url.includes("/rpc/bidoc_contracts_upsert_workspace_v1")) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ ...baseEnvelope, inserted: false, reused: true }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          ...baseEnvelope,
+          draft: { draftVersion: CONTRACTS_REVIEW_DRAFT_VERSION, revision: 3 }
+        })
+      };
+    };
+    const workspace = await persistExtractedContractWorkspace({
+      config: activityMappingTestConfig(),
+      parsedExtraction: {
+        pdfBytes,
+        filename: freshExtraction.document.filename,
+        mediaType: "application/pdf",
+        projectSelection: { projectId: MAPPING_SOURCE_PROJECT_ID, projectSite: "Project Alpha", selectedByUser: true }
+      },
+      extraction: freshExtraction,
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      reviewerId: MAPPING_REVIEWER_ID,
+      env: { CONTRACTS_STORAGE_BUCKET: "contracts-private" },
+      fetchImpl
+    });
+    const response = projectSavedContractExtractionResponse(workspace, { modelAvoided: false });
+    assert.equal(response.reused, false);
+    assert.equal(response.workspaceReused, true);
+    assert.equal(response.concurrentReuse, true);
+    assert.equal(response.extraction.document.filename, "canonical-winner.pdf");
+    assert.equal(response.draft.revision, 3);
+    assert.equal(requests.filter(({ url }) => url.includes("/rpc/bidoc_contracts_get_workspace_v1")).length, 1);
+  });
+
+  test("contracts Phase 3F.1 draft save sends expected revision and maps stale writes to HTTP 409", async () => {
+    const extraction = representativeOutput("signed_fixed_completion");
+    const decisions = Object.fromEntries(extraction.candidates.map((candidate) => [candidate.candidateKey, {
+      action: "reject",
+      reason: "",
+      gatesReviewed: false,
+      milestoneKey: "",
+      approvedBy: "",
+      calendarSemantics: "",
+      conflictReason: ""
+    }]));
+    const draft = {
+      decisions,
+      reviewReason: "",
+      batchId: "contracts-review-test",
+      reviewedAt: "2026-08-12T12:00:00.000Z",
+      mappingDraft: null,
+      expectedRevision: 2
+    };
+    let requestPayload = null;
+    await assert.rejects(
+      () => saveContractWorkspaceDraft({
+        config: activityMappingTestConfig(),
+        workspaceId: "88888888-8888-4888-8888-888888888888",
+        reviewerId: MAPPING_REVIEWER_ID,
+        draft,
+        extraction,
+        fetchImpl: async (_url, options) => {
+          requestPayload = JSON.parse(options.body);
+          return {
+            ok: false,
+            status: 400,
+            text: async () => JSON.stringify({ code: "40001", message: "Saved contract review draft revision is stale" })
+          };
+        }
+      }),
+      (error) => error instanceof ContractsAgentError && error.code === "contracts_workspace_draft_stale" && error.status === 409
+    );
+    assert.equal(requestPayload.p_expected_revision, 2);
+    assert.equal(Object.prototype.hasOwnProperty.call(requestPayload.p_draft, "expectedRevision"), false);
+  });
+
+  test("contracts Phase 3F.1 draft progress counts only decisions with reviewer reasoning", () => {
+    const extraction = representativeOutput("signed_fixed_completion");
+    const decisions = Object.fromEntries(extraction.candidates.map((candidate, index) => [candidate.candidateKey, {
+      action: index === 0 ? "approve" : "reject",
+      reason: index === 0 ? "נבדק מול הציטוט והחסמים" : "",
+      gatesReviewed: index === 0,
+      milestoneKey: "",
+      approvedBy: "",
+      calendarSemantics: "",
+      conflictReason: ""
+    }]));
+    const draft = normalizeWorkspaceDraft({
+      decisions,
+      reviewReason: "טיוטת סקירה",
+      batchId: "contracts-review-test",
+      reviewedAt: "2026-08-12T12:00:00.000Z",
+      mappingDraft: null
+    }, extraction);
+    assert.equal(draft.candidateCount, extraction.candidates.length);
+    assert.equal(draft.reviewedCount, 1);
+    assert.equal(draft.approvedCount, 1);
+    assert.equal(draft.rejectedCount, 0);
+  });
+
+  test("contracts Phase 3E loads its exact mapping context, MAIN activities, and KAPAIM state read-only", async () => {
+    const requests = [];
+    const fetchImpl = async (url, options) => {
+      requests.push({ url, options });
+      const value = url.includes(`/rpc/${CONTRACTS_ACTIVITY_MAPPING_CONTEXT_RPC}`)
+        ? mappingProjectContext()
+        : [{
+            id: "77777777-7777-4777-8777-777777777777",
+            canonical_key: MAPPING_CANONICAL_KEY,
+            alias: `gantt:${MAPPING_FILE_V2}:17`,
+            alias_source: "gantt_activity_key",
+            match_method: "manual_review",
+            confidence: "0.98",
+            status: "manually_confirmed",
+            confirmed_by: "11111111-1111-4111-8111-111111111111",
+            confirmed_at: "2026-08-11T12:00:00.000Z",
+            created_at: "2026-08-11T12:00:00.000Z",
+            updated_at: "2026-08-11T12:00:00.000Z"
+          }];
+      return { ok: true, status: 200, text: async () => JSON.stringify(value) };
+    };
+    const scheduleCalls = [];
+    const loadScheduleSourceImpl = async (input) => {
+      scheduleCalls.push(input);
+      return {
+        tasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+        scheduleMeta: {
+          sourceVersionId: MAPPING_FILE_V2,
+          relevancyDate: "2026-08-01",
+          versionConflict: false
+        }
+      };
+    };
+    const state = await loadContractActivityMappingState({
+      config: { contentSource: { supabaseUrl: "https://kapaim.example", supabaseServiceRoleKey: "sb_secret_server" } },
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      fetchImpl,
+      loadScheduleSourceImpl
+    });
+
+    assert.equal(state.apiVersion, CONTRACTS_ACTIVITY_MAPPING_API_VERSION);
+    assert.equal(state.mode, "read_only");
+    assert.deepEqual(state.projectContext, mappingProjectContext());
+    assert.deepEqual(state.counts, { activities: 1, existingMappings: 1 });
+    assert.equal(state.activities[0].taskUid, 17);
+    assert.equal(state.existingMappings[0].canonicalKey, MAPPING_CANONICAL_KEY);
+    assert.equal(state.operationalWritesPerformed, false);
+    assert.equal(scheduleCalls.length, 1);
+    assert.equal(scheduleCalls[0].projectId, MAPPING_SOURCE_PROJECT_ID);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].url, `https://kapaim.example/rest/v1/rpc/${CONTRACTS_ACTIVITY_MAPPING_CONTEXT_RPC}`);
+    assert.equal(requests[0].options.method, "POST");
+    assert.deepEqual(JSON.parse(requests[0].options.body), { p_source_project_id: MAPPING_SOURCE_PROJECT_ID });
+    assert.match(requests[1].url, /\/rest\/v1\/schedule_activity_map\?select=/u);
+    assert.match(requests[1].url, new RegExp(`project_id=eq\\.${MAPPING_SCHEDULE_PROJECT_ID}`, "u"));
+    assert.equal(requests[1].options.method, "GET");
+    assert.equal(requests[0].options.headers.apikey, "sb_secret_server");
+    assert.equal(requests[1].options.headers.apikey, "sb_secret_server");
+  });
+
+  test("contracts Phase 3E builds candidates only from server-loaded state", async () => {
+    const fetchImpl = async (url) => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(
+        url.includes(`/rpc/${CONTRACTS_ACTIVITY_MAPPING_CONTEXT_RPC}`) ? mappingProjectContext() : []
+      )
+    });
+    const result = await buildContractActivityMappingCandidatesFromSources({
+      config: { contentSource: { supabaseUrl: "https://kapaim.example", supabaseServiceRoleKey: "sb_secret_server" } },
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      obligation: mappingObligation(),
+      fetchImpl,
+      loadScheduleSourceImpl: async ({ projectId }) => {
+        assert.equal(projectId, MAPPING_SOURCE_PROJECT_ID);
+        return {
+          tasks: [
+            mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+            mappingTask(MAPPING_FILE_V2, 24, "Structural steel framing")
+          ],
+          scheduleMeta: {
+            sourceVersionId: MAPPING_FILE_V2,
+            relevancyDate: "2026-08-01",
+            versionConflict: false
+          }
+        };
+      }
+    });
+
+    assert.equal(result.apiVersion, CONTRACTS_ACTIVITY_MAPPING_API_VERSION);
+    assert.equal(result.mode, "read_only");
+    assert.deepEqual(result.sourceCounts, { activities: 2, existingMappings: 0 });
+    assert.equal(result.candidateBundle.candidates[0].taskUid, 17);
+    assert.equal(result.candidateBundle.decisionState, "suggested");
+    assert.equal(result.candidateBundle.automaticAlertEligible, false);
+    assert.equal(result.operationalWritesPerformed, false);
+    assertActivityMappingSchemaValid(result.candidateBundle);
+  });
+
+  test("contracts Phase 3E rejects every browser database-credential override before I/O", () => {
+    const fixtures = [
+      { headers: { "x-content-supabase-url": "https://attacker.example" } },
+      { headers: { "x-content-supabase-key": "attacker-key" } },
+      { query: new URLSearchParams({ contentSupabaseUrl: "https://attacker.example" }) },
+      { body: { contentSupabaseKey: "attacker-key" } },
+      { body: { obligation: { contentSource: { supabaseServiceRoleKey: "attacker-key" } } } },
+      { body: { obligation: { databaseCredentials: { url: "https://attacker.example", key: "attacker-key" } } } }
+    ];
+    for (const fixture of fixtures) {
+      assert.throws(
+        () => assertNoClientDatabaseOverrides(fixture),
+        (error) => error.code === "contracts_activity_mapping_database_override_rejected" && error.status === 400
+      );
+    }
+    assert.doesNotThrow(() => assertNoClientDatabaseOverrides({
+      query: new URLSearchParams({ sourceProjectId: MAPPING_SOURCE_PROJECT_ID }),
+      body: { sourceProjectId: MAPPING_SOURCE_PROJECT_ID, obligation: mappingObligation() }
+    }));
+    assert.deepEqual(
+      parseActivityMappingListRequest({ query: new URLSearchParams({ sourceProjectId: MAPPING_SOURCE_PROJECT_ID }) }),
+      { sourceProjectId: MAPPING_SOURCE_PROJECT_ID }
+    );
+    assert.equal(
+      parseActivityMappingCandidateRequest({ body: { sourceProjectId: MAPPING_SOURCE_PROJECT_ID, obligation: mappingObligation() } }).obligation.candidateKey,
+      "candidate:contract-completion"
+    );
+    assert.throws(
+      () => parseActivityMappingCandidateRequest({
+        body: {
+          sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+          obligation: mappingObligation(),
+          tasks: [mappingTask(MAPPING_FILE_V2, 17, "Browser-selected activity")]
+        }
+      }),
+      (error) => error.code === "contracts_activity_mapping_request_field_unsupported"
+    );
+  });
+
+  test("contracts Phase 3E fails closed for missing approved project context or MAIN Gantt", async () => {
+    const config = { contentSource: { supabaseUrl: "https://kapaim.example", supabaseServiceRoleKey: "sb_secret_server" } };
+    await assert.rejects(
+      () => loadContractActivityMappingState({
+        config,
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        fetchImpl: async () => ({
+          ok: false,
+          status: 400,
+          text: async () => JSON.stringify({ code: "23503", message: "No active approved MAIN-to-KAPAIM project mapping exists" })
+        }),
+        loadScheduleSourceImpl: async () => assert.fail("MAIN must not be read without an approved context")
+      }),
+      (error) => error.code === "contracts_activity_mapping_context_not_found" && error.status === 404
+    );
+    await assert.rejects(
+      () => loadContractActivityMappingState({
+        config,
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        fetchImpl: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(mappingProjectContext()) }),
+        loadScheduleSourceImpl: async () => ({
+          tasks: [],
+          scheduleMeta: { sourceVersionId: null, relevancyDate: null, versionConflict: false }
+        })
+      }),
+      (error) => error.code === "contracts_activity_mapping_schedule_not_found" && error.status === 404
+    );
+  });
+
+  test("contracts Phase 3F accepts only bounded manual review and history contracts", () => {
+    assert.equal(contractsActivityMappingReviewApproved({ CONTRACTS_PHASE3_MAPPING_REVIEW_APPROVED: "TRUE" }), true);
+    assert.equal(contractsActivityMappingReviewApproved({ CONTRACTS_PHASE3_MAPPING_REVIEW_APPROVED: "true " }), true);
+    assert.equal(contractsActivityMappingReviewApproved({ CONTRACTS_PHASE3_MAPPING_REVIEW_APPROVED: "1" }), false);
+    assert.equal(parseActivityMappingReviewRequest({ body: mappingReviewRequest() }).action, "confirm");
+    assert.deepEqual(
+      parseActivityMappingHistoryRequest({
+        query: new URLSearchParams({
+          sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+          documentVersionId: `sha256:${FIXTURE_SHA}`,
+          candidateKey: "candidate:contract-completion",
+          limit: "25"
+        })
+      }),
+      {
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        documentVersionId: `sha256:${FIXTURE_SHA}`,
+        candidateKey: "candidate:contract-completion",
+        limit: 25
+      }
+    );
+    for (const body of [
+      { ...mappingReviewRequest(), action: "auto_continue" },
+      { ...mappingReviewRequest(), reviewerId: MAPPING_REVIEWER_ID },
+      { ...mappingReviewRequest(), reviewedAt: "2026-08-11T12:00:00.000Z" },
+      { ...mappingReviewRequest(), selectedActivityKey: null },
+      { ...mappingReviewRequest(), contentSupabaseKey: "browser-secret" }
+    ]) {
+      assert.throws(() => parseActivityMappingReviewRequest({ body }), ContractsAgentError);
+    }
+    assert.throws(
+      () => parseActivityMappingHistoryRequest({
+        query: new URLSearchParams({ sourceProjectId: MAPPING_SOURCE_PROJECT_ID, limit: "101" })
+      }),
+      (error) => error.code === "contracts_activity_mapping_history_filter_invalid"
+    );
+  });
+
+  test("contracts Phase 3F rebuilds alternatives and owns reviewer, time, and evidence", async () => {
+    const requests = [];
+    const prepared = await prepareActivityMappingReviewSubmission({
+      config: activityMappingTestConfig(),
+      request: mappingReviewRequest(),
+      reviewerId: MAPPING_REVIEWER_ID,
+      fetchImpl: activityMappingSourceFetch(requests),
+      loadScheduleSourceImpl: async ({ projectId }) => {
+        assert.equal(projectId, MAPPING_SOURCE_PROJECT_ID);
+        return mappingScheduleSource();
+      },
+      nowImpl: () => new Date("2026-08-11T19:45:00.000Z")
+    });
+
+    assert.equal(prepared.apiVersion, CONTRACTS_ACTIVITY_MAPPING_REVIEW_API_VERSION);
+    assert.equal(prepared.operationalWritesPerformed, false);
+    assert.equal(prepared.submission.decision.reviewerId, MAPPING_REVIEWER_ID);
+    assert.equal(prepared.submission.decision.reviewedAt, "2026-08-11T19:45:00.000Z");
+    assert.equal(prepared.submission.decision.activityKey, `gantt:${MAPPING_FILE_V2}:17`);
+    assert.equal(prepared.submission.decision.alternatives.length, 1);
+    assert.equal(prepared.submission.decision.evidence[0].kind, "contract_source");
+    assert.equal(prepared.submission.decision.evidence[0].sourceText, mappingObligation().sourceEvidence[0].sourceText);
+    assert.equal(prepared.submission.eventKey, `activity-mapping-review:${MAPPING_REVIEW_REQUEST_ID}`);
+    assert.equal(requests.length, 2);
+
+    await assert.rejects(
+      () => prepareActivityMappingReviewSubmission({
+        config: activityMappingTestConfig(),
+        request: mappingReviewRequest({ selectedActivityKey: `gantt:${MAPPING_FILE_V2}:999` }),
+        reviewerId: MAPPING_REVIEWER_ID,
+        fetchImpl: activityMappingSourceFetch([]),
+        loadScheduleSourceImpl: async () => mappingScheduleSource()
+      }),
+      (error) => error.code === "contracts_activity_mapping_review_selection_stale" && error.status === 409
+    );
+  });
+
+  test("contracts Phase 3F requires explicit conflict resolution and preserves correction history", async () => {
+    const tiedTasks = [
+      mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+      mappingTask(MAPPING_FILE_V2, 18, "Complete structural framing")
+    ];
+    await assert.rejects(
+      () => prepareActivityMappingReviewSubmission({
+        config: activityMappingTestConfig(),
+        request: mappingReviewRequest({ obligation: mappingObligation({ preferredTaskUid: null }) }),
+        reviewerId: MAPPING_REVIEWER_ID,
+        fetchImpl: activityMappingSourceFetch([]),
+        loadScheduleSourceImpl: async () => mappingScheduleSource(tiedTasks)
+      }),
+      (error) => error.code === "contracts_activity_mapping_review_conflict_unresolved"
+    );
+
+    const correction = await prepareActivityMappingReviewSubmission({
+      config: activityMappingTestConfig(),
+      request: mappingReviewRequest({
+        obligation: mappingObligation({ preferredTaskUid: null }),
+        action: "correct",
+        conflictResolved: true,
+        supersedesEventId: MAPPING_REVIEW_EVENT_ID
+      }),
+      reviewerId: MAPPING_REVIEWER_ID,
+      fetchImpl: activityMappingSourceFetch([]),
+      loadScheduleSourceImpl: async () => mappingScheduleSource(tiedTasks),
+      historyLoader: async (filters) => {
+        assert.equal(filters.candidateKey, "candidate:contract-completion");
+        return {
+          historyVersion: CONTRACTS_ACTIVITY_MAPPING_HISTORY_VERSION,
+          events: [{ eventId: MAPPING_REVIEW_EVENT_ID, selectedCanonicalKey: MAPPING_CANONICAL_KEY }]
+        };
+      }
+    });
+    assert.equal(correction.submission.decision.canonicalKey, MAPPING_CANONICAL_KEY);
+    assert.equal(correction.submission.decision.supersedesEventId, MAPPING_REVIEW_EVENT_ID);
+    assert.equal(correction.submission.decision.conflictResolved, true);
+  });
+
+  test("contracts Phase 3F gates writes and calls only the atomic service-role review RPC", async () => {
+    await assert.rejects(
+      () => submitActivityMappingReview({
+        config: activityMappingTestConfig(),
+        request: mappingReviewRequest(),
+        reviewerId: MAPPING_REVIEWER_ID,
+        reviewApplyApproved: false
+      }),
+      (error) => error.code === "contracts_activity_mapping_review_apply_not_approved" && error.status === 503
+    );
+
+    const requests = [];
+    const result = await submitActivityMappingReview({
+      config: activityMappingTestConfig(),
+      request: mappingReviewRequest(),
+      reviewerId: MAPPING_REVIEWER_ID,
+      reviewApplyApproved: true,
+      fetchImpl: activityMappingSourceFetch(requests),
+      loadScheduleSourceImpl: async () => mappingScheduleSource(),
+      nowImpl: () => new Date("2026-08-11T20:00:00.000Z")
+    });
+    assert.equal(result.status, "recorded");
+    assert.equal(result.auditWritePerformed, true);
+    assert.equal(result.operationalWritesPerformed, true);
+    const reviewCall = requests.find((request) => request.url.includes(`/rpc/${CONTRACTS_ACTIVITY_MAPPING_REVIEW_RPC}`));
+    assert.ok(reviewCall);
+    assert.equal(reviewCall.options.headers.apikey, "service-role-test-key");
+    assert.equal(JSON.parse(reviewCall.options.body).p_submission.decision.reviewerId, MAPPING_REVIEWER_ID);
+    assert.equal(requests.filter((request) => request.options.method !== "GET").length, 2);
+  });
+
+  test("contracts Phase 3F history is server-only, filtered, immutable, and read-only", async () => {
+    const requests = [];
+    const history = await listActivityMappingReviewHistory({
+      config: activityMappingTestConfig(),
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      candidateKey: "candidate:contract-completion",
+      limit: 25,
+      fetchImpl: activityMappingSourceFetch(requests, {
+        historyResult: {
+          historyVersion: CONTRACTS_ACTIVITY_MAPPING_HISTORY_VERSION,
+          projectContext: mappingProjectContext(),
+          total: 1,
+          returned: 1,
+          events: [{
+            eventId: MAPPING_REVIEW_EVENT_ID,
+            action: "confirm",
+            reason: "Reviewed against exact evidence.",
+            evidence: [{ kind: "contract_source" }]
+          }]
+        }
+      })
+    });
+    assert.equal(history.apiVersion, CONTRACTS_ACTIVITY_MAPPING_REVIEW_API_VERSION);
+    assert.equal(history.operationalWritesPerformed, false);
+    assert.equal(history.events[0].eventId, MAPPING_REVIEW_EVENT_ID);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, `https://app-data.example.test/rest/v1/rpc/${CONTRACTS_ACTIVITY_MAPPING_HISTORY_RPC}`);
+    assert.equal(requests[0].options.headers.apikey, "service-role-test-key");
+    assert.deepEqual(JSON.parse(requests[0].options.body), {
+      p_source_project_id: MAPPING_SOURCE_PROJECT_ID,
+      p_document_version_id: `sha256:${FIXTURE_SHA}`,
+      p_candidate_key: "candidate:contract-completion",
+      p_limit: 25
+    });
+  });
+
+  test("contracts Phase 3 mapping ranks review alternatives without selecting an initial winner", () => {
+    const output = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext(),
+      obligation: mappingObligation(),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      tasks: [
+        mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+        mappingTask(MAPPING_FILE_V2, 24, "Structural steel framing")
+      ],
+      existingMappings: []
+    });
+
+    assert.equal(output.mappingContractVersion, CONTRACTS_ACTIVITY_MAPPING_VERSION);
+    assert.equal(output.decisionState, ACTIVITY_MAPPING_STATUS.SUGGESTED);
+    assert.equal(output.candidates.length, 2);
+    assert.equal(output.candidates[0].taskUid, 17);
+    assert.equal(output.candidates[0].canonicalKey, null);
+    assert.ok(output.candidates[0].confidence > output.candidates[1].confidence);
+    assert.equal(output.automaticAlertEligible, false);
+    assert.equal(output.conflict, null);
+    assertActivityMappingSchemaValid(output);
+  });
+
+  test("contracts Phase 3 mapping leaves global milestones explicitly unlinked", () => {
+    const output = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext(),
+      obligation: mappingObligation({
+        candidateKey: "candidate:global-completion-date",
+        milestoneKey: "milestone:global-completion-date",
+        label: "Contract-wide completion date",
+        mappingRequirement: "not_required",
+        sourceEvidence: []
+      }),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      tasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: []
+    });
+
+    assert.equal(output.decisionState, "not_required");
+    assert.deepEqual(output.candidates, []);
+    assert.deepEqual(output.blockers, []);
+    assert.equal(output.automaticAlertEligible, false);
+    assertActivityMappingSchemaValid(output);
+  });
+
+  test("contracts Phase 3 mapping keeps unreviewed trigger conditions pending without a date or link", () => {
+    const output = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext(),
+      obligation: mappingObligation({
+        candidateKey: "candidate:notice-trigger",
+        label: "Complete within 30 days after written notice",
+        conditionStatus: "pending",
+        triggerEvidenceReviewed: false
+      }),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      tasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: []
+    });
+
+    assert.equal(output.decisionState, "pending_trigger");
+    assert.deepEqual(output.candidates, []);
+    assert.deepEqual(output.blockers, [ACTIVITY_MAPPING_BLOCKER.TRIGGER_EVIDENCE_UNREVIEWED]);
+    assert.equal(output.automaticAlertEligible, false);
+    assertActivityMappingSchemaValid(output);
+  });
+
+  test("contracts Phase 3 mapping fails closed for inactive project routing and version conflicts", () => {
+    const inactive = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext("inactive"),
+      obligation: mappingObligation(),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      tasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: []
+    });
+    assert.equal(inactive.decisionState, "blocked");
+    assert.deepEqual(inactive.blockers, [ACTIVITY_MAPPING_BLOCKER.PROJECT_MAPPING_INACTIVE]);
+    assertActivityMappingSchemaValid(inactive);
+
+    const versionConflict = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext(),
+      obligation: mappingObligation(),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2, { versionConflict: true }),
+      tasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: []
+    });
+    assert.equal(versionConflict.decisionState, "blocked");
+    assert.deepEqual(versionConflict.blockers, [ACTIVITY_MAPPING_BLOCKER.SCHEDULE_VERSION_CONFLICT]);
+    assertActivityMappingSchemaValid(versionConflict);
+  });
+
+  test("contracts Phase 3 mapping preserves tied alternatives and conflicting canonical owners", () => {
+    const tied = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext(),
+      obligation: mappingObligation(),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      tasks: [
+        mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+        mappingTask(MAPPING_FILE_V2, 18, "Complete structural framing")
+      ],
+      existingMappings: []
+    });
+    assert.equal(tied.decisionState, "blocked");
+    assert.equal(tied.conflict.type, ACTIVITY_MAPPING_BLOCKER.AMBIGUOUS_CANDIDATES);
+    assert.equal(tied.conflict.candidateActivityKeys.length, 2);
+    assertActivityMappingSchemaValid(tied);
+
+    const conflict = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext(),
+      obligation: mappingObligation(),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      tasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: [
+        confirmedActivityMapping(MAPPING_FILE_V2),
+        confirmedActivityMapping(MAPPING_FILE_V2, {
+          canonicalKey: "schedule-activity:77777777-7777-4777-8777-777777777777"
+        })
+      ]
+    });
+    assert.equal(conflict.decisionState, "blocked");
+    assert.equal(conflict.conflict.type, ACTIVITY_MAPPING_BLOCKER.CANONICAL_ALIAS_CONFLICT);
+    assert.equal(conflict.candidates[0].confidence, 0.79);
+    assertActivityMappingSchemaValid(conflict);
+
+    const duplicateUid = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext(),
+      obligation: mappingObligation(),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      tasks: [
+        mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+        mappingTask(MAPPING_FILE_V2, 17, "Duplicate structural framing")
+      ],
+      existingMappings: []
+    });
+    assert.equal(duplicateUid.decisionState, "blocked");
+    assert.deepEqual(duplicateUid.blockers, [ACTIVITY_MAPPING_BLOCKER.DUPLICATE_CURRENT_TASK_UID]);
+    assertActivityMappingSchemaValid(duplicateUid);
+
+    const invalidCanonical = buildContractActivityMappingCandidates({
+      projectContext: mappingProjectContext(),
+      obligation: mappingObligation(),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      tasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: [confirmedActivityMapping(MAPPING_FILE_V2, { canonicalKey: "legacy-key" })]
+    });
+    assert.equal(invalidCanonical.decisionState, "blocked");
+    assert.deepEqual(invalidCanonical.blockers, [ACTIVITY_MAPPING_BLOCKER.INVALID_CANONICAL_KEY]);
+    assert.equal(invalidCanonical.candidates[0].canonicalKey, null);
+    assertActivityMappingSchemaValid(invalidCanonical);
+  });
+
+  test("contracts Phase 3 reconciliation carries forward an exact two-upload alias conservatively", () => {
+    const output = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing")],
+      currentTasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: [confirmedActivityMapping()]
+    });
+
+    assert.deepEqual(output.summary, {
+      evaluated: 1,
+      autoConfirmed: 1,
+      suggested: 0,
+      unmapped: 0,
+      conflicts: 0
+    });
+    assert.equal(output.reconciliations[0].canonicalKey, MAPPING_CANONICAL_KEY);
+    assert.equal(output.reconciliations[0].currentActivityKey, `gantt:${MAPPING_FILE_V2}:17`);
+    assert.equal(output.reconciliations[0].status, ACTIVITY_MAPPING_STATUS.AUTO_CONFIRMED);
+    assert.equal(output.reconciliations[0].confidence, 0.97);
+    assert.equal(output.reconciliations[0].matchMethod, ACTIVITY_MAPPING_METHOD.EXACT_UID_CONTINUITY);
+    assert.equal(output.reconciliations[0].automaticAlertEligible, true);
+    assertActivityMappingSchemaValid(output);
+  });
+
+  test("contracts Phase 3 reconciliation blocks a different UID with the same normalized current identity", () => {
+    const output = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing")],
+      currentTasks: [
+        mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+        mappingTask(MAPPING_FILE_V2, 18, "  COMPLETE\u2014STRUCTURAL   FRAMING  ")
+      ],
+      existingMappings: [confirmedActivityMapping()]
+    });
+
+    assert.deepEqual(output.summary, {
+      evaluated: 1,
+      autoConfirmed: 0,
+      suggested: 0,
+      unmapped: 0,
+      conflicts: 1
+    });
+    assert.equal(output.conflictCount, 1);
+    assert.equal(output.reconciliations[0].currentActivityKey, `gantt:${MAPPING_FILE_V2}:17`);
+    assert.equal(output.reconciliations[0].status, "conflict");
+    assert.equal(output.reconciliations[0].confidence, 0);
+    assert.equal(output.reconciliations[0].matchMethod, null);
+    assert.deepEqual(output.reconciliations[0].blockers, [
+      ACTIVITY_MAPPING_BLOCKER.AMBIGUOUS_CANDIDATES
+    ]);
+    assert.deepEqual(output.reconciliations[0].evidence, [
+      { kind: "task_uid_exact", detail: "17", scoreDelta: 0.5 },
+      {
+        kind: "identity_mismatch",
+        detail: `normalized name and outline level also match gantt:${MAPPING_FILE_V2}:18`,
+        scoreDelta: 0
+      }
+    ]);
+    assert.equal(output.reconciliations[0].automaticAlertEligible, false);
+    assertActivityMappingSchemaValid(output);
+  });
+
+  test("contracts Phase 3 reconciliation allows distinct current identities to preserve exact continuity", () => {
+    const output = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing")],
+      currentTasks: [
+        mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+        mappingTask(MAPPING_FILE_V2, 18, "  COMPLETE\u2014STRUCTURAL   FRAMING  ", { outlineLevel: 4 }),
+        mappingTask(MAPPING_FILE_V2, 19, "Complete exterior framing")
+      ],
+      existingMappings: [confirmedActivityMapping()]
+    });
+
+    assert.equal(output.reconciliations[0].status, ACTIVITY_MAPPING_STATUS.AUTO_CONFIRMED);
+    assert.equal(output.reconciliations[0].confidence, 0.97);
+    assert.equal(output.reconciliations[0].matchMethod, ACTIVITY_MAPPING_METHOD.EXACT_UID_CONTINUITY);
+    assert.deepEqual(output.reconciliations[0].blockers, []);
+    assert.equal(output.reconciliations[0].automaticAlertEligible, true);
+    assertActivityMappingSchemaValid(output);
+  });
+
+  test("contracts Phase 3 reconciliation blocks automatic continuity when identity evidence changes", () => {
+    const output = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing")],
+      currentTasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete revised framing", { outlineLevel: 4 })],
+      existingMappings: [confirmedActivityMapping()]
+    });
+
+    assert.equal(output.reconciliations[0].status, ACTIVITY_MAPPING_STATUS.SUGGESTED);
+    assert.equal(output.reconciliations[0].confidence, 0.79);
+    assert.equal(output.reconciliations[0].matchMethod, null);
+    assert.deepEqual(output.reconciliations[0].blockers, [
+      ACTIVITY_MAPPING_BLOCKER.IDENTITY_CONTINUITY_REQUIRES_REVIEW
+    ]);
+    assert.equal(output.reconciliations[0].automaticAlertEligible, false);
+    assertActivityMappingSchemaValid(output);
+  });
+
+  test("contracts Phase 3 reconciliation preserves prior uncertainty below the continuity gate", () => {
+    const output = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing")],
+      currentTasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: [confirmedActivityMapping(MAPPING_FILE_V1, { confidence: 0.94 })]
+    });
+
+    assert.equal(output.reconciliations[0].status, ACTIVITY_MAPPING_STATUS.SUGGESTED);
+    assert.equal(output.reconciliations[0].confidence, 0.94);
+    assert.deepEqual(output.reconciliations[0].blockers, [
+      ACTIVITY_MAPPING_BLOCKER.PRIOR_MAPPING_CONFIDENCE_BELOW_CONTINUITY_GATE
+    ]);
+    assert.equal(output.reconciliations[0].automaticAlertEligible, false);
+    assertActivityMappingSchemaValid(output);
+  });
+
+  test("contracts Phase 3 reconciliation leaves changed and duplicate UIDs fail closed", () => {
+    const changedUid = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing")],
+      currentTasks: [mappingTask(MAPPING_FILE_V2, 18, "Complete structural framing")],
+      existingMappings: [confirmedActivityMapping()]
+    });
+    assert.equal(changedUid.reconciliations[0].status, ACTIVITY_MAPPING_STATUS.UNMAPPED);
+    assert.deepEqual(changedUid.reconciliations[0].blockers, [
+      ACTIVITY_MAPPING_BLOCKER.CURRENT_ACTIVITY_NOT_FOUND
+    ]);
+    assert.equal(changedUid.reconciliations[0].automaticAlertEligible, false);
+    assertActivityMappingSchemaValid(changedUid);
+
+    const duplicateUid = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing")],
+      currentTasks: [
+        mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+        mappingTask(MAPPING_FILE_V2, 17, "Duplicate structural framing")
+      ],
+      existingMappings: [confirmedActivityMapping()]
+    });
+    assert.equal(duplicateUid.reconciliations[0].status, "conflict");
+    assert.deepEqual(duplicateUid.reconciliations[0].blockers, [
+      ACTIVITY_MAPPING_BLOCKER.DUPLICATE_CURRENT_TASK_UID
+    ]);
+    assert.equal(duplicateUid.conflictCount, 1);
+    assertActivityMappingSchemaValid(duplicateUid);
+
+    const duplicateCanonical = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [
+        mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing"),
+        mappingTask(MAPPING_FILE_V1, 18, "Complete exterior framing")
+      ],
+      currentTasks: [
+        mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing"),
+        mappingTask(MAPPING_FILE_V2, 18, "Complete exterior framing")
+      ],
+      existingMappings: [
+        confirmedActivityMapping(),
+        confirmedActivityMapping(MAPPING_FILE_V1, { alias: `gantt:${MAPPING_FILE_V1}:18` })
+      ]
+    });
+    assert.equal(duplicateCanonical.conflictCount, 2);
+    assert.ok(duplicateCanonical.reconciliations.every((entry) => (
+      entry.blockers.includes(ACTIVITY_MAPPING_BLOCKER.CANONICAL_ALIAS_CONFLICT)
+      && entry.automaticAlertEligible === false
+    )));
+    assertActivityMappingSchemaValid(duplicateCanonical);
+
+    const occupiedCurrentAlias = reconcileConfirmedActivityAliases({
+      projectContext: mappingProjectContext(),
+      previousScheduleVersion: mappingScheduleVersion(MAPPING_FILE_V1),
+      scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+      previousTasks: [mappingTask(MAPPING_FILE_V1, 17, "Complete structural framing")],
+      currentTasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing")],
+      existingMappings: [
+        confirmedActivityMapping(),
+        confirmedActivityMapping(MAPPING_FILE_V2, {
+          canonicalKey: "schedule-activity:77777777-7777-4777-8777-777777777777"
+        })
+      ]
+    });
+    assert.equal(occupiedCurrentAlias.conflictCount, 1);
+    assert.equal(occupiedCurrentAlias.reconciliations[0].status, "conflict");
+    assert.equal(occupiedCurrentAlias.reconciliations[0].currentActivityKey, `gantt:${MAPPING_FILE_V2}:17`);
+    assert.deepEqual(occupiedCurrentAlias.reconciliations[0].blockers, [
+      ACTIVITY_MAPPING_BLOCKER.CANONICAL_ALIAS_CONFLICT
+    ]);
+    assertActivityMappingSchemaValid(occupiedCurrentAlias);
+  });
+
+  test("contracts Phase 3 automatic alert eligibility enforces every mapping gate", () => {
+    const eligible = {
+      status: ACTIVITY_MAPPING_STATUS.MANUALLY_CONFIRMED,
+      confidence: 0.8,
+      currentVersionAliasResolvedExactlyOnce: true,
+      noOpenMappingConflict: true,
+      projectMappingActive: true
+    };
+    assert.equal(mappingAutomaticAlertEligible(eligible), true);
+    assert.equal(mappingAutomaticAlertEligible({ ...eligible, confidence: 0.79 }), false);
+    assert.equal(mappingAutomaticAlertEligible({ ...eligible, status: ACTIVITY_MAPPING_STATUS.SUGGESTED }), false);
+    assert.equal(mappingAutomaticAlertEligible({ ...eligible, currentVersionAliasResolvedExactlyOnce: false }), false);
+    assert.equal(mappingAutomaticAlertEligible({ ...eligible, noOpenMappingConflict: false }), false);
+    assert.equal(mappingAutomaticAlertEligible({ ...eligible, projectMappingActive: false }), false);
+  });
+
+  test("contracts Phase 3 mapping validates inputs and remains a pure no-I/O, no-arithmetic module", () => {
+    assert.throws(
+      () => buildContractActivityMappingCandidates({
+        projectContext: mappingProjectContext(),
+        obligation: mappingObligation({ sourceEvidence: [] }),
+        scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+        tasks: [],
+        existingMappings: []
+      }),
+      (error) => error.code === "contracts_activity_mapping_input_invalid" && error.status === 400
+    );
+    assert.throws(
+      () => buildContractActivityMappingCandidates({
+        projectContext: mappingProjectContext(),
+        obligation: mappingObligation(),
+        scheduleVersion: mappingScheduleVersion(MAPPING_FILE_V2),
+        tasks: [mappingTask(MAPPING_FILE_V2, 17, "Complete structural framing", {
+          plannedStart: "2026-02-30"
+        })],
+        existingMappings: []
+      }),
+      (error) => error.code === "contracts_activity_mapping_input_invalid"
+    );
+
+    const source = fs.readFileSync(new URL("../src/contracts/activityMapping.js", import.meta.url), "utf8");
+    assert.doesNotMatch(source, /from\s+["']node:/);
+    assert.doesNotMatch(source, /\b(?:fetch|readFile|writeFile|process\.env|setTimeout)\b/);
+    assert.doesNotMatch(source, /(?:scheduleEngine|scheduleCalendar|diffCalendarDays|addCalendarDays|workingDays)/);
+  });
+
   test("contracts request intake is bounded, strict, and dry-run only", async () => {
     const pdfBytes = Buffer.from("%PDF-1.4\nfixture", "utf8");
     const parsed = parseContractExtractionRequest({
@@ -515,19 +1948,21 @@ export function registerContractsAgentTests(test) {
     assert.deepEqual(draft.candidates, []);
   });
 
-  test("contracts model extraction retries one provider response timeout", async () => {
+  test("contracts model extraction retries one provider response timeout with the configured alternate model", async () => {
     let calls = 0;
+    const models = [];
     const draft = await extractContractsModelDraft({
       segments: [segment("timeout", 1, "1", "1", "Complete the work within 30 days after commencement.")],
       pageCount: 1,
       unreadablePages: [],
       config: {
         openRouterApiKey: "configured",
-        models: { main: "test/model" },
+        models: { main: "test/model", lite: "test/fallback-model" },
         ai: { main: { maxTokens: 8000, timeoutMs: 60_000 } }
       },
       chatComplete: async (options) => {
         calls += 1;
+        models.push(options.model);
         if (calls === 1) throw new Error("OpenRouter response timed out after 60000ms");
         options.telemetry?.record?.({ status: "done", finish_reason: "stop", native_finish_reason: "stop" });
         return JSON.stringify({
@@ -540,7 +1975,119 @@ export function registerContractsAgentTests(test) {
       }
     });
     assert.equal(calls, 2);
+    assert.deepEqual(models, ["test/model", "test/fallback-model"]);
     assert.deepEqual(draft.candidates, []);
+  });
+
+  test("contracts model extraction reports a typed provider timeout after both bounded attempts fail", async () => {
+    const models = [];
+    await assert.rejects(
+      () => extractContractsModelDraft({
+        segments: [segment("timeout-twice", 1, "1", "1", "Complete the work within 30 days after commencement.")],
+        pageCount: 1,
+        unreadablePages: [],
+        config: {
+          openRouterApiKey: "configured",
+          models: { main: "test/model", lite: "test/fallback-model" },
+          ai: { main: { maxTokens: 8000, timeoutMs: 60_000 } }
+        },
+        chatComplete: async (options) => {
+          models.push(options.model);
+          throw new Error("OpenRouter response timed out after 60000ms");
+        }
+      }),
+      (error) => error?.code === "contracts_model_provider_timeout" && error.issueCodes.includes("provider.response_timeout")
+    );
+    assert.deepEqual(models, ["test/model", "test/fallback-model"]);
+  });
+
+  test("contracts model extraction resumes only schema-validated chunks after a later chunk fails", async () => {
+    const segments = Array.from({ length: 12 }, (_, index) => segment(
+      `resume-${index + 1}`,
+      index + 1,
+      String(index + 1),
+      String(index + 1),
+      `Clause ${index + 1}: complete the work within 30 days after commencement.`
+    ));
+    const chunkResumeCache = new Map();
+    const config = {
+      openRouterApiKey: "configured",
+      models: { main: "test/model", lite: "test/fallback-model" },
+      ai: { main: { maxTokens: 8000, timeoutMs: 60_000 } }
+    };
+    const firstCalls = [];
+    await assert.rejects(
+      () => extractContractsModelDraft({
+        segments,
+        pageCount: segments.length,
+        unreadablePages: [],
+        config,
+        chunkResumeCache,
+        chatComplete: async (options) => {
+          firstCalls.push(options.telemetry.callId);
+          if (options.telemetry.callId.startsWith("contracts_extract_4")) {
+            throw new Error("OpenRouter response timed out after 60000ms");
+          }
+          options.telemetry.record({ status: "done", finish_reason: "stop", native_finish_reason: "stop" });
+          return emptyContractsModelDraft();
+        }
+      }),
+      (error) => error?.code === "contracts_model_provider_timeout"
+    );
+    assert.deepEqual(firstCalls.sort(), [
+      "contracts_extract_1",
+      "contracts_extract_2",
+      "contracts_extract_3",
+      "contracts_extract_4",
+      "contracts_extract_4_retry"
+    ]);
+
+    const secondCalls = [];
+    const events = [];
+    const draft = await extractContractsModelDraft({
+      segments,
+      pageCount: segments.length,
+      unreadablePages: [],
+      config,
+      chunkResumeCache,
+      emit: (event) => events.push(event),
+      chatComplete: async (options) => {
+        secondCalls.push(options.telemetry.callId);
+        options.telemetry.record({ status: "done", finish_reason: "stop", native_finish_reason: "stop" });
+        return emptyContractsModelDraft();
+      }
+    });
+    assert.deepEqual(secondCalls, ["contracts_extract_4"]);
+    assert.deepEqual(
+      events.filter((event) => event.event === "contract_chunk_resumed").map((event) => event.chunkNumber).sort(),
+      [1, 2, 3]
+    );
+    assert.deepEqual(draft.candidates, []);
+  });
+
+  test("contracts model chunk resume invalidates when the configured model changes", async () => {
+    const source = [segment("resume-model", 1, "1", "1", "Complete the work within 30 days after commencement.")];
+    const chunkResumeCache = new Map();
+    const calls = [];
+    const run = (model) => extractContractsModelDraft({
+      segments: source,
+      pageCount: 1,
+      unreadablePages: [],
+      config: {
+        openRouterApiKey: "configured",
+        models: { main: model, lite: "test/fallback-model" },
+        ai: { main: { maxTokens: 8000, timeoutMs: 60_000 } }
+      },
+      chunkResumeCache,
+      chatComplete: async (options) => {
+        calls.push(options.model);
+        options.telemetry.record({ status: "done", finish_reason: "stop", native_finish_reason: "stop" });
+        return emptyContractsModelDraft();
+      }
+    });
+    await run("test/model-a");
+    await run("test/model-b");
+    assert.deepEqual(calls, ["test/model-a", "test/model-b"]);
   });
 
   test("contracts cancellation reaches the in-flight OpenRouter request", async () => {
@@ -1786,6 +3333,103 @@ export function registerContractsAgentTests(test) {
     assert.doesNotMatch(route, /buildRequestConfig/);
     assert.doesNotMatch(route, /x-content-supabase-key|contentSupabaseKey/);
   });
+
+  test("contracts Phase 3E routes are same-origin, bounded, server-owned, and read-only", () => {
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("Contracts Agent Phase 3E"),
+      server.indexOf("Contracts Agent Phase 3F")
+    );
+    assert.match(route, /\/api\/contracts\/activity-mapping\/status/u);
+    assert.match(route, /\/api\/contracts\/activity-mapping\/activities/u);
+    assert.match(route, /\/api\/contracts\/activity-mapping\/candidates/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /readJsonBounded\(req, CONTRACTS_MAX_JSON_BYTES\)/u);
+    assert.match(route, /parseActivityMappingListRequest/u);
+    assert.match(route, /parseActivityMappingCandidateRequest/u);
+    assert.match(route, /loadContractActivityMappingState/u);
+    assert.match(route, /buildContractActivityMappingCandidatesFromSources/u);
+    assert.match(route, /config:\s*config\(\)/u);
+    assert.doesNotMatch(route, /buildRequestConfig|submitContractPromotion|bidoc_contracts_review_activity_mapping_v1|commit|persist|runSchedule/u);
+
+    const loginWall = server.slice(
+      server.indexOf("if (!url.pathname.startsWith"),
+      server.indexOf('url.pathname === "/api/chat"')
+    );
+    assert.match(loginWall, /contracts_activity_mapping_database_override_rejected/u);
+    assert.match(loginWall, /x-content-supabase-url/u);
+    assert.match(loginWall, /x-content-supabase-key/u);
+  });
+
+  test("contracts Phase 3F routes are same-origin, bounded, server-owned, and explicitly gated", () => {
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("Contracts Agent Phase 3F"),
+      server.indexOf('url.pathname === "/api/schedule/indicator"')
+    );
+    assert.match(route, /\/api\/contracts\/activity-mapping\/history/u);
+    assert.match(route, /\/api\/contracts\/activity-mapping\/review/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /readJsonBounded\(req, CONTRACTS_MAX_JSON_BYTES\)/u);
+    assert.match(route, /parseActivityMappingHistoryRequest/u);
+    assert.match(route, /parseActivityMappingReviewRequest/u);
+    assert.match(route, /contractsActivityMappingReviewApproved\(\)/u);
+    assert.match(route, /reviewerId:\s*reviewer\.sub/u);
+    assert.match(route, /config:\s*config\(\)/u);
+    assert.doesNotMatch(route, /buildRequestConfig|x-content-supabase-key|contentSupabaseKey|auto_continue/u);
+  });
+
+  test("contracts Phase 3F.1 routes are same-origin, bounded, server-owned, and do not write Schedule state", () => {
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("Contracts saved-workspace Phase 3F.1"),
+      server.indexOf("Contracts Agent Phase 2")
+    );
+    assert.match(route, /\/api\/contracts\/workspaces\/status/u);
+    assert.match(route, /\/api\/contracts\/workspaces\/extract/u);
+    assert.match(route, /contractWorkspaceDraftMatch/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /readJsonBounded\(req, CONTRACTS_MAX_JSON_BYTES\)/u);
+    assert.match(route, /contractsWorkspacePersistenceApproved\(\)/u);
+    assert.match(route, /findSavedContractWorkspace/u);
+    assert.match(route, /persistExtractedContractWorkspace/u);
+    assert.match(route, /saveContractWorkspaceDraft/u);
+    assert.doesNotMatch(route, /runSchedule|scheduleEngine|submitContractPromotion|submitActivityMappingReview/u);
+
+    const loginWall = server.slice(
+      server.indexOf("if (!url.pathname.startsWith"),
+      server.indexOf('url.pathname === "/api/chat"')
+    );
+    assert.match(loginWall, /isContractsWorkspaceRoute/u);
+    assert.match(loginWall, /contracts_workspace_database_override_rejected/u);
+  });
+
+  test("contracts Phase 3F.1 migration keeps workspace data private and extraction immutable", () => {
+    const sql = fs.readFileSync(
+      new URL("../supabase/migrations/20260812135210_contracts_phase3f1_saved_workspaces.sql", import.meta.url),
+      "utf8"
+    );
+    assert.match(sql, /create table if not exists private\.contract_workspaces/u);
+    assert.match(sql, /create table if not exists private\.contract_review_drafts/u);
+    assert.match(sql, /alter table private\.contract_workspaces enable row level security/u);
+    assert.match(sql, /alter table private\.contract_review_drafts enable row level security/u);
+    assert.match(sql, /bidoc_contract_workspace_extraction_is_immutable/u);
+    assert.match(sql, /security invoker/iu);
+    assert.match(sql, /revoke execute[\s\S]*from public, anon, authenticated, service_role/iu);
+    assert.match(sql, /grant execute[\s\S]*to service_role/iu);
+    assert.doesNotMatch(sql, /insert\s+into\s+storage\.|update\s+storage\.|delete\s+from\s+storage\./iu);
+  });
+
+  test("contracts Phase 3F.1 UI explains blocked zero alternatives and saved-contract reuse in Hebrew", () => {
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+    assert.match(page, /החיפוש טרם בוצע/u);
+    assert.match(page, /טרם בוצע חיפוש/u);
+    assert.match(page, /ראיות האירוע המפעיל נבדקו/u);
+    assert.match(page, /החוזה כבר היה שמור/u);
+    assert.match(page, /ללא קריאת מודל וללא עלות טוקנים נוספת/u);
+    assert.match(page, /פתח והמשך/u);
+    assert.match(page, /שומר טיוטה/u);
+  });
 }
 
 function representativeOutput(id) {
@@ -1936,6 +3580,21 @@ function draftCandidate(overrides) {
 
 function segment(segmentId, pdfPage, clauseLabel, clauseKey, text) {
   return { segmentId, pdfPage, clauseLabel, clauseKey, text };
+}
+
+function emptyContractsModelDraft() {
+  return JSON.stringify({
+    draftVersion: "contracts-model-draft.v1",
+    documentObservations: {
+      documentType: "unknown",
+      executionDate: null,
+      attachmentsStatus: "unknown",
+      contractSiteRaw: null
+    },
+    candidates: [],
+    missingObservations: [],
+    packetReferences: []
+  });
 }
 
 function positionedGlyphs(words) {

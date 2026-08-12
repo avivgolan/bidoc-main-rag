@@ -55,6 +55,24 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === "/api/contracts/review/status") {
     return sendJson(response, 200, { active: true, mode: applyApproved ? "promotion_enabled" : "review_only", migrationVersion: "20260810175150", applyApproved });
   }
+  if (url.pathname === "/api/contracts/activity-mapping/status") {
+    return sendJson(response, 200, {
+      active: true,
+      mode: "manual_review",
+      reviewApplyApproved: false,
+      historyMigrationVersion: "20260811214619",
+      automaticReviewActionsEnabled: false
+    });
+  }
+  if (url.pathname === "/api/contracts/workspaces/status") {
+    return sendJson(response, 200, {
+      active: false,
+      ready: false,
+      mode: "saved_workspaces",
+      migrationVersion: "20260812135210",
+      storageBucket: "contracts-private"
+    });
+  }
   if (url.pathname === "/api/contracts/extract") return sendJson(response, 200, extraction);
   if (url.pathname === "/api/contracts/review/plan") return sendJson(response, 200, { extraction, plan: rejectionPlan });
   if (url.pathname === "/api/contracts/review/save") {
@@ -130,7 +148,7 @@ try {
   applyApproved = false;
   const disabledPage = await browser.newPage();
   await prepareReview(disabledPage, baseUrl);
-  await disabledPage.getByText("שמירת ביקורות מושבתת בצד השרת. ה־migration אינו נבדק או מופעל מכפתור זה.").waitFor();
+  await disabledPage.getByText("שמירת ביקורות מושבתת בצד השרת. שינוי תשתית הנתונים אינו נבדק או מופעל מכפתור זה.").waitFor();
   assert.equal(await disabledPage.getByRole("button", { name: "שמור סקירה ללא קידום" }).isEnabled(), false);
   assert.equal(requests.save.length, 1);
   assert.equal(requests.commit.length, 0);
@@ -141,7 +159,7 @@ try {
   const missingMigrationPage = await browser.newPage();
   await prepareReview(missingMigrationPage, baseUrl);
   await missingMigrationPage.getByRole("button", { name: "שמור סקירה ללא קידום" }).click();
-  await missingMigrationPage.getByText("The expected Contracts Phase 2 RPC is unavailable in APP DATA. Verify that the approved migration is applied and exposed before retrying.").waitFor();
+  await missingMigrationPage.getByText("תשתית שמירת הסקירה אינה זמינה כעת בצד השרת.").waitFor();
   assert.equal(requests.save.length, 2);
   assert.equal(requests.commit.length, 0);
   await missingMigrationPage.close();

@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bidoc.ai/schemas/contracts-activity-mapping.phase3.v1.schema.json",
+  "title": "BiDoc Contracts Activity Mapping Phase 3",
+  "oneOf": [
+    { "$ref": "#/$defs/candidateBundle" },
+    { "$ref": "#/$defs/reconciliationBundle" }
+  ],
+  "$defs": {
+    "canonicalKey": {
+      "type": "string",
+      "pattern": "^schedule-activity:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "nullableCanonicalKey": {
+      "oneOf": [
+        { "$ref": "#/$defs/canonicalKey" },
+        { "type": "null" }
+      ]
+    },
+    "nullableDate": {
+      "oneOf": [
+        { "type": "string", "format": "date" },
+        { "type": "null" }
+      ]
+    },
+    "projectContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceSystem",
+        "sourceProjectId",
+        "scheduleProjectId",
+        "projectMappingId",
+        "mappingStatus"
+      ],
+      "properties": {
+        "sourceSystem": { "const": "main" },
+        "sourceProjectId": { "type": "string", "format": "uuid" },
+        "scheduleProjectId": { "type": "string", "format": "uuid" },
+        "projectMappingId": { "type": "string", "format": "uuid" },
+        "mappingStatus": { "enum": ["active", "inactive"] }
+      }
+    },
+    "scheduleVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fileId", "relevancyDate", "versionConflict"],
+      "properties": {
+        "fileId": { "type": "string", "minLength": 1 },
+        "relevancyDate": { "$ref": "#/$defs/nullableDate" },
+        "versionConflict": { "type": "boolean" }
+      }
+    },
+    "sourceEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidenceId", "sourceText", "pdfPage", "clause"],
+      "properties": {
+        "evidenceId": { "type": "string", "minLength": 1 },
+        "sourceText": { "type": "string", "minLength": 1 },
+        "pdfPage": {
+          "oneOf": [
+            { "type": "integer", "minimum": 1 },
+            { "type": "null" }
+          ]
+        },
+        "clause": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "mappingEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "detail", "scoreDelta"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "preferred_activity_key_exact",
+            "preferred_task_uid_exact",
+            "normalized_name_exact",
+            "token_overlap",
+            "milestone_shape_match",
+            "outline_level_match",
+            "summary_activity_penalty",
+            "confirmed_alias_owner",
+            "conflicting_alias_owners",
+            "invalid_canonical_owner",
+            "task_uid_exact",
+            "outline_level_exact",
+            "previous_activity_key",
+            "identity_mismatch"
+          ]
+        },
+        "detail": { "type": "string" },
+        "scoreDelta": { "type": "number", "minimum": -1, "maximum": 1 }
+      }
+    },
+    "blocker": {
+      "enum": [
+        "human_review_required",
+        "project_mapping_inactive",
+        "schedule_version_conflict",
+        "trigger_evidence_unreviewed",
+        "no_mapping_candidate",
+        "ambiguous_candidates",
+        "canonical_alias_conflict",
+        "invalid_canonical_key",
+        "previous_activity_not_found",
+        "current_activity_not_found",
+        "duplicate_previous_task_uid",
+        "duplicate_current_task_uid",
+        "identity_continuity_requires_review",
+        "summary_activity_requires_review",
+        "prior_mapping_confidence_below_continuity_gate"
+      ]
+    },
+    "obligation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "documentVersionId",
+        "candidateKey",
+        "milestoneKey",
+        "label",
+        "mappingRequirement",
+        "conditionStatus",
+        "triggerEvidenceReviewed",
+        "sourceEvidence"
+      ],
+      "properties": {
+        "documentVersionId": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "candidateKey": { "type": "string", "minLength": 1 },
+        "milestoneKey": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "label": { "type": "string", "minLength": 1 },
+        "mappingRequirement": { "enum": ["required", "not_required"] },
+        "conditionStatus": { "enum": ["not_applicable", "pending", "resolved"] },
+        "triggerEvidenceReviewed": { "type": "boolean" },
+        "sourceEvidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceEvidence" }
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rank",
+        "canonicalKey",
+        "taskUid",
+        "activityKey",
+        "taskName",
+        "outlineLevel",
+        "isSummary",
+        "isMilestone",
+        "plannedStart",
+        "plannedFinish",
+        "confidence",
+        "evidence",
+        "blockers"
+      ],
+      "properties": {
+        "rank": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "canonicalKey": { "$ref": "#/$defs/nullableCanonicalKey" },
+        "taskUid": { "type": "integer", "minimum": 0 },
+        "activityKey": { "type": "string", "minLength": 1 },
+        "taskName": { "type": "string", "minLength": 1 },
+        "outlineLevel": { "type": "integer", "minimum": 0 },
+        "isSummary": { "type": "boolean" },
+        "isMilestone": { "type": "boolean" },
+        "plannedStart": { "$ref": "#/$defs/nullableDate" },
+        "plannedFinish": { "$ref": "#/$defs/nullableDate" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/mappingEvidence" }
+        },
+        "blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/blocker" }
+        }
+      }
+    },
+    "conflict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "candidateActivityKeys"],
+      "properties": {
+        "type": { "enum": ["ambiguous_candidates", "canonical_alias_conflict"] },
+        "candidateActivityKeys": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "candidateBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mappingContractVersion",
+        "outputKind",
+        "projectContext",
+        "obligation",
+        "scheduleVersion",
+        "candidates",
+        "blockers",
+        "conflict",
+        "decisionState",
+        "automaticAlertEligible"
+      ],
+      "properties": {
+        "mappingContractVersion": { "const": "contracts-activity-mapping.phase3.v1" },
+        "outputKind": { "const": "candidate_bundle" },
+        "projectContext": { "$ref": "#/$defs/projectContext" },
+        "obligation": { "$ref": "#/$defs/obligation" },
+        "scheduleVersion": { "$ref": "#/$defs/scheduleVersion" },
+        "candidates": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/candidate" }
+        },
+        "blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/blocker" }
+        },
+        "conflict": {
+          "oneOf": [
+            { "$ref": "#/$defs/conflict" },
+            { "type": "null" }
+          ]
+        },
+        "decisionState": {
+          "enum": ["suggested", "not_required", "pending_trigger", "blocked", "unmapped"]
+        },
+        "automaticAlertEligible": { "const": false }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonicalKey",
+        "previousActivityKey",
+        "currentActivityKey",
+        "taskUid",
+        "status",
+        "confidence",
+        "aliasSource",
+        "matchMethod",
+        "evidence",
+        "blockers",
+        "automaticAlertEligible"
+      ],
+      "properties": {
+        "canonicalKey": { "$ref": "#/$defs/nullableCanonicalKey" },
+        "previousActivityKey": { "type": "string", "minLength": 1 },
+        "currentActivityKey": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "taskUid": { "type": "integer", "minimum": 0 },
+        "status": { "enum": ["suggested", "auto_confirmed", "unmapped", "conflict"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "aliasSource": { "const": "gantt_activity_key" },
+        "matchMethod": {
+          "oneOf": [
+            { "const": "exact_uid_continuity" },
+            { "type": "null" }
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/mappingEvidence" }
+        },
+        "blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/blocker" }
+        },
+        "automaticAlertEligible": { "type": "boolean" }
+      }
+    },
+    "reconciliationSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evaluated", "autoConfirmed", "suggested", "unmapped", "conflicts"],
+      "properties": {
+        "evaluated": { "type": "integer", "minimum": 0 },
+        "autoConfirmed": { "type": "integer", "minimum": 0 },
+        "suggested": { "type": "integer", "minimum": 0 },
+        "unmapped": { "type": "integer", "minimum": 0 },
+        "conflicts": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "reconciliationBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mappingContractVersion",
+        "outputKind",
+        "projectContext",
+        "previousScheduleVersion",
+        "scheduleVersion",
+        "reconciliations",
+        "blockers",
+        "conflictCount",
+        "summary"
+      ],
+      "properties": {
+        "mappingContractVersion": { "const": "contracts-activity-mapping.phase3.v1" },
+        "outputKind": { "const": "reconciliation_bundle" },
+        "projectContext": { "$ref": "#/$defs/projectContext" },
+        "previousScheduleVersion": { "$ref": "#/$defs/scheduleVersion" },
+        "scheduleVersion": { "$ref": "#/$defs/scheduleVersion" },
+        "reconciliations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/reconciliation" }
+        },
+        "blockers": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/blocker" }
+        },
+        "conflictCount": { "type": "integer", "minimum": 0 },
+        "summary": { "$ref": "#/$defs/reconciliationSummary" }
+      }
+    }
+  }
+}

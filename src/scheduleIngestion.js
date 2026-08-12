@@ -134,12 +134,19 @@ function isMissingTableError(status, message) {
   return status === 404 || /could not find the table|does not exist|schema cache/i.test(String(message || ""));
 }
 
-async function scheduleFetch({ config, settings, path, options = {}, database = "app_data" }) {
+async function scheduleFetch({
+  config,
+  settings,
+  path,
+  options = {},
+  database = "app_data",
+  fetchImpl = fetch
+}) {
   const target = scheduleSupabaseConfig(config, database);
   if (!target.supabaseUrl || !target.supabaseServiceRoleKey) {
     throw new Error(`${target.label} is not configured for the schedule source profile "${settings.sourceProfile}"`);
   }
-  const response = await fetch(`${trimSlash(target.supabaseUrl)}${path}`, {
+  const response = await fetchImpl(`${trimSlash(target.supabaseUrl)}${path}`, {
     method: options.method || "GET",
     headers: supabaseHeaders(target.supabaseServiceRoleKey, options.headers || {}),
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined
@@ -158,7 +165,13 @@ async function scheduleFetch({ config, settings, path, options = {}, database = 
     error.missingTable = isMissingTableError(response.status, message);
     throw error;
   }
-  return Array.isArray(data) ? data : [];
+  const rows = Array.isArray(data) ? data : [];
+  if (options.includeExactCount === true) {
+    const contentRange = String(response.headers?.get?.("content-range") || "");
+    const match = contentRange.match(/\/(\d+)$/u);
+    return { rows, exactCount: match ? Number(match[1]) : null };
+  }
+  return rows;
 }
 
 // Public data-access door for the orchestration layer (subagents/schedule.js).
@@ -178,37 +191,68 @@ const FILE_COLUMNS = "file_id,project_id,display_name,task_count,start_date,end_
 // Loads the contractor schedule: current version's tasks, previous version's
 // tasks (slippage), and scheduleMeta for the engine. Every query is scoped by
 // project_id — there is no default project (criterion 24).
-export async function loadScheduleSource({ config = null, projectId, settings: settingsInput = null }) {
+export async function loadScheduleSource({
+  config = null,
+  projectId,
+  settings: settingsInput = null,
+  includeExactCounts = false,
+  fetchImpl = fetch
+}) {
   if (!projectId) throw new Error("loadScheduleSource: projectId is required");
   const cfg = config || getConfig();
   const settings = settingsInput || scheduleSettings();
   const sourceSettings = { ...settings, ...MAIN_GANTT_SOURCE, sourceProfile: "main_upload" };
 
-  const files = await scheduleFetch({
+  const fileResponse = await scheduleFetch({
     config: cfg, settings: sourceSettings, database: "main",
-    path: `/rest/v1/${sourceSettings.filesTable}?select=${FILE_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&order=relevancy_date.desc,uploaded_at.desc`
+    path: `/rest/v1/${sourceSettings.filesTable}?select=${FILE_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&order=relevancy_date.desc,uploaded_at.desc`,
+    options: includeExactCounts
+      ? { headers: { Prefer: "count=exact" }, includeExactCount: true }
+      : {},
+    fetchImpl
   });
+  const files = includeExactCounts ? fileResponse.rows : fileResponse;
   const { current, previous, versionConflict } = pickCurrentVersion(files);
   if (!current) {
     return {
       tasks: [], previousTasks: [], files: [],
       scheduleMeta: { relevancyDate: null, versionCount: 0, displayName: null, sourceVersionId: null, versionConflict: false },
+      ...(includeExactCounts
+        ? { exactCounts: { files: fileResponse.exactCount, currentTasks: 0, previousTasks: 0 } }
+        : {}),
       settings: sourceSettings
     };
   }
 
   const loadTasks = (fileId) => scheduleFetch({
     config: cfg, settings: sourceSettings, database: "main",
-    path: `/rest/v1/${sourceSettings.tasksTable}?select=${TASK_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&file_id=eq.${encodeURIComponent(fileId)}&order=task_uid.asc`
+    path: `/rest/v1/${sourceSettings.tasksTable}?select=${TASK_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&file_id=eq.${encodeURIComponent(fileId)}&order=task_uid.asc`,
+    options: includeExactCounts
+      ? { headers: { Prefer: "count=exact" }, includeExactCount: true }
+      : {},
+    fetchImpl
   });
 
-  const currentRows = await loadTasks(current.file_id);
-  const previousRows = previous ? await loadTasks(previous.file_id) : [];
+  const currentResponse = await loadTasks(current.file_id);
+  const previousResponse = previous ? await loadTasks(previous.file_id) : null;
+  const currentRows = includeExactCounts ? currentResponse.rows : currentResponse;
+  const previousRows = previous
+    ? (includeExactCounts ? previousResponse.rows : previousResponse)
+    : [];
 
   return {
     tasks: currentRows.map((row) => normalizeGanttTask(row, { fileId: current.file_id })).filter(Boolean),
     previousTasks: previousRows.map((row) => normalizeGanttTask(row, { fileId: previous?.file_id })).filter(Boolean),
     files,
+    ...(includeExactCounts
+      ? {
+          exactCounts: {
+            files: fileResponse.exactCount,
+            currentTasks: currentResponse.exactCount,
+            previousTasks: previous ? previousResponse.exactCount : 0
+          }
+        }
+      : {}),
     scheduleMeta: {
       relevancyDate: current.relevancy_date ?? null,
       versionCount: files.length,
