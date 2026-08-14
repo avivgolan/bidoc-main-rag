@@ -8,6 +8,7 @@ const SECTIONS = [
   { id: "retrieval",   label: "שליפה ו-RAG" },
   { id: "content",     label: "APP DATA" },
   { id: "tools",       label: "כלים n8n" },
+  { id: "memory",      label: "זיכרון" },
   { id: "performance", label: "ביצועים ו-Cache" },
   { id: "presets",     label: "פריסטים" },
   { id: "general",     label: "כללי" },
@@ -123,6 +124,7 @@ function settingsToForm(s) {
     rag:           { ...s.rag },
     graph:         { ...s.graph },
     cache:         { ...s.cache, redisUrl: "" },
+    memory:        s.memory ? JSON.parse(JSON.stringify(s.memory)) : {},
     knowledge:     { ...s.knowledge, triggerKeywords: (s.knowledge?.triggerKeywords || []).join("\n") },
     toolsRuntime:  { ...s.toolsRuntime },
     secrets:       { openRouterApiKey: "", supabaseUrl: s.secrets?.supabaseUrl || "", supabaseServiceRoleKey: "" },
@@ -147,6 +149,7 @@ function formToPayload(form) {
     rag:       form.rag,
     graph:     form.graph,
     cache:     form.cache,
+    memory:    form.memory,
     knowledge: { ...form.knowledge, triggerKeywords: (form.knowledge?.triggerKeywords || "").split("\n").map(s => s.trim()).filter(Boolean) },
     toolsRuntime: form.toolsRuntime,
     secrets:   form.secrets,
@@ -175,6 +178,7 @@ const icons = {
   tools:       "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3-3a1 1 0 0 0 0-1.4L19 3.3a1 1 0 0 0-1.4 0zM5 17l-1 4 4-1L20 8l-3-3zM16 5l3 3",
   presets:     "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8",
   performance: "M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm1.5-1.5L18 8M5 19a9 9 0 1 1 14 0",
+  memory:      "M9 3a3 3 0 0 0-3 3v1a3 3 0 0 0-2 5.2A3 3 0 0 0 6 17v1a3 3 0 0 0 5 2.2V3H9zm6 0a3 3 0 0 1 3 3v1a3 3 0 0 1 2 5.2A3 3 0 0 1 18 17v1a3 3 0 0 1-5 2.2V3h2z",
   general:     "M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-4.5 10-10 10zm0-14v4l3 3",
   save:        "M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8",
   reload:      "M23 4v6h-6M1 20v-6h6M3.5 9a9 9 0 0 1 14.8-3.5L23 10M1 14l4.7 4.5A9 9 0 0 0 20.5 15",
@@ -783,6 +787,172 @@ function ToolsSection({ form, update }) {
   );
 }
 
+// ─── Section: Conversational Memory ──────────────────────────────────────────
+
+function MemorySection({ form, update }) {
+  const memory = form.memory || {};
+  const [stats, setStats] = useState({ memoryItems: 0, sessions: 0, lastUpdatedAt: null, mode: "session_only" });
+  const [actionStatus, setActionStatus] = useState("");
+
+  const loadStats = useCallback(() => {
+    apiFetch("/api/memory/stats")
+      .then(setStats)
+      .catch(() => setStats(prev => ({ ...prev, degraded: true })));
+  }, []);
+
+  useEffect(() => { loadStats(); }, [loadStats]);
+
+  const deleteCurrentSession = async () => {
+    const sessionId = localStorage.getItem("sessionId");
+    if (!sessionId) return setActionStatus("לא נמצאה שיחה נוכחית בדפדפן.");
+    if (!window.confirm("למחוק את סיכום הזיכרון של השיחה הנוכחית? היסטוריית ההודעות עצמה לא תימחק.")) return;
+    try {
+      await apiFetch(`/api/memory/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+      setActionStatus("זיכרון השיחה הנוכחית נמחק.");
+      loadStats();
+    } catch {
+      setActionStatus("לא נמצא זיכרון שיחה למחיקה או שהמחיקה נכשלה.");
+    }
+  };
+
+  const deleteAllMemory = async () => {
+    if (!window.confirm("פעולה זו תמחק את כל הזיכרונות האישיים ואת כל סיכומי השיחות שלך. לא ניתן לבטל אותה. להמשיך?")) return;
+    const typed = window.prompt("לאישור סופי, הקלד DELETE_ALL_MEMORY");
+    if (typed !== "DELETE_ALL_MEMORY") return setActionStatus("המחיקה בוטלה — טקסט האישור לא תאם.");
+    try {
+      await apiFetch("/api/memory/me", { method: "DELETE", body: { confirm: "DELETE_ALL_MEMORY" } });
+      setActionStatus("כל הזיכרון האישי נמחק.");
+      loadStats();
+    } catch {
+      setActionStatus("מחיקת הזיכרון האישי נכשלה.");
+    }
+  };
+
+  return (
+    <div style={s.section}>
+      <div style={{ ...s.card, borderInlineStart: "4px solid var(--brand-500)" }}>
+        <p style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>זיכרון שיחה אינו Cache</p>
+        <p style={{ ...s.hint, marginTop: 7 }}>
+          הזיכרון שומר הקשר, סיכומי שיחה והעדפות משתמש ב־Supabase. ה־Cache רק מאיץ פעולות חוזרות, מותר למחיקה בכל רגע ואינו מקור להקשר שיחה.
+        </p>
+      </div>
+
+      <div>
+        <p style={s.sectionTitle}>מצב וסטטיסטיקה</p>
+        <div style={{ ...s.grid3 }}>
+          <StatCard label="זיכרונות אישיים" value={stats.memoryItems ?? 0} />
+          <StatCard label="שיחות עם סיכום" value={stats.sessions ?? 0} />
+          <StatCard label="עדכון אחרון" value={stats.lastUpdatedAt ? new Date(stats.lastUpdatedAt).toLocaleString("he-IL") : "—"} />
+        </div>
+        <p style={{ ...s.hint, marginTop: 8 }}>
+          מצב נוכחי: {stats.mode === "user_and_session" ? "זיכרון משתמש + שיחה" : "זיכרון שיחה בלבד"}{stats.degraded ? " · שירות הזיכרון לא זמין כרגע" : ""}
+        </p>
+      </div>
+
+      <div>
+        <p style={s.sectionTitle}>הגדרות כלליות</p>
+        <div style={{ ...s.card, display: "flex", flexDirection: "column", gap: 14 }}>
+          <Toggle label="להפעיל זיכרון" checked={memory.enabled !== false} onChange={v => update("memory.enabled", v)} />
+          <Toggle label="זיכרון בין שיחות" checked={memory.crossSessionEnabled !== false} onChange={v => update("memory.crossSessionEnabled", v)} />
+          <div style={s.grid3}>
+            <Field label="מדיניות כתיבה">
+              <Select value={memory.writePolicy || "hybrid"} onChange={v => update("memory.writePolicy", v)}>
+                <option value="explicit">רק בקשת ״זכור״</option>
+                <option value="automatic">אוטומטית בלבד</option>
+                <option value="hybrid">היברידית — מומלץ</option>
+              </Select>
+            </Field>
+            <Field label="סף למידה אוטומטית">
+              <Input type="number" value={memory.autoLearnMinConfidence ?? .85} min={0} max={1} step={.01} onChange={v => update("memory.autoLearnMinConfidence", v)} />
+            </Field>
+            <Field label="רענון סיכום בכל N תורות">
+              <Input type="number" value={memory.summaryRefreshEveryTurns ?? 4} min={1} max={50} onChange={v => update("memory.summaryRefreshEveryTurns", v)} />
+            </Field>
+            <Field label="שמירה (ימים)">
+              <Input type="number" value={memory.retentionDays ?? 365} min={1} max={3650} onChange={v => update("memory.retentionDays", v)} />
+            </Field>
+            <Field label="מקסימום פריטים למשתמש">
+              <Input type="number" value={memory.maxItemsPerUser ?? 1000} min={1} max={10000} onChange={v => update("memory.maxItemsPerUser", v)} />
+            </Field>
+            <Field label="תורות ל־Classifier">
+              <Input type="number" value={memory.routingRecentTurns ?? 4} min={0} max={20} onChange={v => update("memory.routingRecentTurns", v)} />
+            </Field>
+            <Field label="תקציב טוקנים לניתוב">
+              <Input type="number" value={memory.routingTokenBudget ?? 1200} min={100} max={8000} step={100} onChange={v => update("memory.routingTokenBudget", v)} />
+            </Field>
+            <Field label="מודל Embedding">
+              <Input value="openai/text-embedding-3-large" onChange={() => {}} disabled />
+            </Field>
+            <Field label="ממדי Embedding">
+              <Input value="3072" onChange={() => {}} disabled />
+            </Field>
+          </div>
+        </div>
+      </div>
+
+      <div style={s.grid2}>
+        <MemoryAgentCard agent="main" title="Main Agent" memory={memory} update={update} />
+        <MemoryAgentCard agent="lite" title="Lite Agent" memory={memory} update={update} />
+      </div>
+
+      <div>
+        <p style={s.sectionTitle}>מחיקת נתונים</p>
+        <div style={{ ...s.card, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <p style={{ margin: 0, fontWeight: 700, fontSize: 13 }}>שליטה בזיכרון האישי</p>
+            <p style={{ ...s.hint, marginTop: 5 }}>מחיקת session אינה מוחקת הודעות. מחיקה מלאה מסירה זיכרונות אישיים וסיכומי שיחות.</p>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn onClick={deleteCurrentSession}>מחק זיכרון שיחה נוכחית</Btn>
+            <Btn variant="danger" onClick={deleteAllMemory}>מחק את כל הזיכרון שלי</Btn>
+          </div>
+          {actionStatus && <p role="status" style={{ ...s.hint, width: "100%" }}>{actionStatus}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div style={{ ...s.card, padding: "14px 16px" }}>
+      <p style={{ ...s.hint, marginBottom: 5 }}>{label}</p>
+      <strong style={{ fontSize: 18, fontWeight: 750 }}>{value}</strong>
+    </div>
+  );
+}
+
+function MemoryAgentCard({ agent, title, memory, update }) {
+  const item = memory.agents?.[agent] || {};
+  const base = `memory.agents.${agent}`;
+  const weightSum = Number(item.semanticWeight || 0) + Number(item.recencyWeight || 0) + Number(item.importanceWeight || 0);
+  return (
+    <div style={{ ...s.card, display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+        <div>
+          <p style={{ margin: 0, fontSize: 15, fontWeight: 750 }}>{title}</p>
+          <p style={{ ...s.hint, marginTop: 3 }}>תקציב ושליפה עצמאיים</p>
+        </div>
+        <Toggle label="פעיל" checked={item.enabled !== false} onChange={v => update(`${base}.enabled`, v)} />
+      </div>
+      <div style={s.grid2}>
+        <Field label="Recent Turns"><Input type="number" value={item.recentTurns ?? (agent === "main" ? 6 : 8)} min={0} max={30} onChange={v => update(`${base}.recentTurns`, v)} /></Field>
+        <Field label="Context Token Budget"><Input type="number" value={item.contextTokenBudget ?? (agent === "main" ? 3000 : 4000)} min={200} max={16000} step={100} onChange={v => update(`${base}.contextTokenBudget`, v)} /></Field>
+        <Field label="Semantic Top K"><Input type="number" value={item.semanticTopK ?? (agent === "main" ? 6 : 4)} min={0} max={30} onChange={v => update(`${base}.semanticTopK`, v)} /></Field>
+        <Field label="Similarity Threshold"><Input type="number" value={item.similarityThreshold ?? (agent === "main" ? .72 : .70)} min={0} max={1} step={.01} onChange={v => update(`${base}.similarityThreshold`, v)} /></Field>
+        <Field label="Semantic Weight"><Input type="number" value={item.semanticWeight ?? (agent === "main" ? .70 : .65)} min={0} max={1} step={.05} onChange={v => update(`${base}.semanticWeight`, v)} /></Field>
+        <Field label="Recency Weight"><Input type="number" value={item.recencyWeight ?? (agent === "main" ? .15 : .20)} min={0} max={1} step={.05} onChange={v => update(`${base}.recencyWeight`, v)} /></Field>
+        <Field label="Importance Weight"><Input type="number" value={item.importanceWeight ?? .15} min={0} max={1} step={.05} onChange={v => update(`${base}.importanceWeight`, v)} /></Field>
+      </div>
+      <Toggle label="להשתמש בסיכום שיחה" checked={item.useSessionSummary !== false} onChange={v => update(`${base}.useSessionSummary`, v)} />
+      <Toggle label="להשתמש בזיכרון ארוך טווח" checked={item.useLongTermMemory !== false} onChange={v => update(`${base}.useLongTermMemory`, v)} />
+      <p style={{ ...s.hint, color: Math.abs(weightSum - 1) < .001 ? "var(--text-muted)" : "var(--danger)" }}>
+        סכום משקלים: {weightSum.toFixed(2)}{Math.abs(weightSum - 1) < .001 ? "" : " — מומלץ שסכום המשקלים יהיה 1.00"}
+      </p>
+    </div>
+  );
+}
+
 // ─── Section: Performance & Cache ─────────────────────────────────────────────
 
 function PerformanceSection({ form, update }) {
@@ -1312,6 +1482,7 @@ export function SettingsPage() {
           {activeSection === "retrieval"   && <RetrievalSection {...sectionProps} />}
           {activeSection === "content"     && <ContentDbSection {...sectionProps} />}
           {activeSection === "tools"       && <ToolsSection {...sectionProps} />}
+          {activeSection === "memory"      && <MemorySection {...sectionProps} />}
           {activeSection === "performance" && <PerformanceSection {...sectionProps} />}
           {activeSection === "presets"     && (
             <PresetsSection {...sectionProps}

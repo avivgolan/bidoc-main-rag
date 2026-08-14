@@ -46,6 +46,43 @@ const DEFAULT_CACHE_SETTINGS = {
   memoryMaxEntries: 10_000,
   timeoutMs: 5_000
 };
+export const DEFAULT_MEMORY_SETTINGS = {
+  enabled: true,
+  crossSessionEnabled: true,
+  writePolicy: "hybrid",
+  autoLearnMinConfidence: 0.85,
+  summaryRefreshEveryTurns: 4,
+  retentionDays: 365,
+  maxItemsPerUser: 1000,
+  routingRecentTurns: 4,
+  routingTokenBudget: 1200,
+  agents: {
+    main: {
+      enabled: true,
+      recentTurns: 6,
+      contextTokenBudget: 3000,
+      useSessionSummary: true,
+      useLongTermMemory: true,
+      semanticTopK: 6,
+      similarityThreshold: 0.72,
+      semanticWeight: 0.70,
+      recencyWeight: 0.15,
+      importanceWeight: 0.15
+    },
+    lite: {
+      enabled: true,
+      recentTurns: 8,
+      contextTokenBudget: 4000,
+      useSessionSummary: true,
+      useLongTermMemory: true,
+      semanticTopK: 4,
+      similarityThreshold: 0.70,
+      semanticWeight: 0.65,
+      recencyWeight: 0.20,
+      importanceWeight: 0.15
+    }
+  }
+};
 const BUILT_IN_SETTINGS_PRESETS = [
   {
     id: "profile-a-conservative",
@@ -593,6 +630,7 @@ export function getConfig(settingsOverride = null) {
     cache: normalizeCacheSettings(settings.cache, {
       redisUrl: resolveSecret(settings.cache?.redisUrl, process.env.REDIS_URL || process.env.UPSTASH_REDIS_URL)
     }),
+    memory: normalizeMemorySettings(settings.memory),
     knowledge: {
       triggerKeywords: normalizeStringList(settings.knowledge?.triggerKeywords, DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS),
       agentLimit: clampNumber(settings.knowledge?.agentLimit, 1, 5, 2),
@@ -638,6 +676,7 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
       supabaseServiceRoleKey: maskSecret(config.contentSource.supabaseServiceRoleKey),
       keyRole: supabaseKeyRole(config.contentSource.supabaseServiceRoleKey)
     },
+    memory: config.memory,
     timezone: config.timezone,
     supabaseConfigured: Boolean(config.supabaseUrl && config.supabaseServiceRoleKey),
     contentSupabaseConfigured: Boolean(config.contentSource.supabaseUrl && config.contentSource.supabaseServiceRoleKey),
@@ -839,6 +878,7 @@ export function exportFullSettings(config = getConfig()) {
       rag: config.rag,
       graph: config.graph,
       cache: config.cache,
+      memory: config.memory,
       knowledge: config.knowledge,
       timelineLinks: config.timelineLinks,
       contentSource: {
@@ -877,6 +917,7 @@ export function normalizeImportedSettingsFile(value = {}) {
   if (Object.prototype.hasOwnProperty.call(raw, "rag")) normalized.rag = raw.rag || {};
   if (Object.prototype.hasOwnProperty.call(raw, "graph")) normalized.graph = raw.graph || {};
   if (Object.prototype.hasOwnProperty.call(raw, "cache")) normalized.cache = raw.cache || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "memory")) normalized.memory = raw.memory || {};
   if (Object.prototype.hasOwnProperty.call(raw, "knowledge")) normalized.knowledge = raw.knowledge || {};
   if (Object.prototype.hasOwnProperty.call(raw, "timelineLinks")) normalized.timelineLinks = raw.timelineLinks || {};
   if (Object.prototype.hasOwnProperty.call(raw, "contentSource")) normalized.contentSource = raw.contentSource || {};
@@ -926,6 +967,41 @@ export function normalizeContentSourceSettings(value = {}, fallback = {}) {
     alertsRpcName: String(raw.alertsRpcName || process.env.CONTENT_ALERTS_RPC_NAME || `match_${alertsTable}`).trim(),
     useAppSupabase,
     usesAppSupabase: useAppSupabase || (!configuredUrl && !configuredKey)
+  };
+}
+
+export function normalizeMemorySettings(value = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const normalizeAgent = (agent, defaults) => {
+    const item = agent && typeof agent === "object" ? agent : {};
+    return {
+      enabled: item.enabled !== false,
+      recentTurns: clampNumber(item.recentTurns, 0, 30, defaults.recentTurns),
+      contextTokenBudget: clampNumber(item.contextTokenBudget, 200, 16_000, defaults.contextTokenBudget),
+      useSessionSummary: item.useSessionSummary !== false,
+      useLongTermMemory: item.useLongTermMemory !== false,
+      semanticTopK: clampNumber(item.semanticTopK, 0, 30, defaults.semanticTopK),
+      similarityThreshold: clampNumber(item.similarityThreshold, 0, 1, defaults.similarityThreshold),
+      semanticWeight: clampNumber(item.semanticWeight, 0, 1, defaults.semanticWeight),
+      recencyWeight: clampNumber(item.recencyWeight, 0, 1, defaults.recencyWeight),
+      importanceWeight: clampNumber(item.importanceWeight, 0, 1, defaults.importanceWeight)
+    };
+  };
+  const writePolicy = String(raw.writePolicy || DEFAULT_MEMORY_SETTINGS.writePolicy).toLowerCase();
+  return {
+    enabled: raw.enabled !== false,
+    crossSessionEnabled: raw.crossSessionEnabled !== false,
+    writePolicy: ["explicit", "automatic", "hybrid"].includes(writePolicy) ? writePolicy : DEFAULT_MEMORY_SETTINGS.writePolicy,
+    autoLearnMinConfidence: clampNumber(raw.autoLearnMinConfidence, 0, 1, DEFAULT_MEMORY_SETTINGS.autoLearnMinConfidence),
+    summaryRefreshEveryTurns: clampNumber(raw.summaryRefreshEveryTurns, 1, 50, DEFAULT_MEMORY_SETTINGS.summaryRefreshEveryTurns),
+    retentionDays: clampNumber(raw.retentionDays, 1, 3650, DEFAULT_MEMORY_SETTINGS.retentionDays),
+    maxItemsPerUser: clampNumber(raw.maxItemsPerUser, 1, 10_000, DEFAULT_MEMORY_SETTINGS.maxItemsPerUser),
+    routingRecentTurns: clampNumber(raw.routingRecentTurns, 0, 20, DEFAULT_MEMORY_SETTINGS.routingRecentTurns),
+    routingTokenBudget: clampNumber(raw.routingTokenBudget, 100, 8000, DEFAULT_MEMORY_SETTINGS.routingTokenBudget),
+    agents: {
+      main: normalizeAgent(raw.agents?.main, DEFAULT_MEMORY_SETTINGS.agents.main),
+      lite: normalizeAgent(raw.agents?.lite, DEFAULT_MEMORY_SETTINGS.agents.lite)
+    }
   };
 }
 
@@ -1040,6 +1116,7 @@ export async function writeLocalSettings(settings, options = {}) {
   const mergedGraph = mergeSection("graph", settings.graph || {}, existing.graph || {});
   const mergedInsights = mergeSection("insights", settings.insights || {}, existing.insights || {});
   const mergedCache = mergeSection("cache", settings.cache || {}, existing.cache || {});
+  const mergedMemory = mergeSection("memory", settings.memory || {}, existing.memory || {});
   const mergedKnowledge = mergeSection("knowledge", settings.knowledge || {}, existing.knowledge || {});
   const mergedTimelineLinks = mergeSection("timelineLinks", settings.timelineLinks || {}, existing.timelineLinks || {});
   const mergedContentSource = mergeSection("contentSource", incomingContentSource, existingContentSource);
@@ -1089,6 +1166,7 @@ export async function writeLocalSettings(settings, options = {}) {
     cache: normalizeCacheSettings(mergedCache, {
       redisUrl: mergeSecret(existing.cache?.redisUrl, has("cache") ? settings.cache?.redisUrl : undefined)
     }),
+    memory: normalizeMemorySettings(mergedMemory),
     contentSource: {
       useAppSupabase: mergedContentSource.useAppSupabase === true,
       supabaseUrl: mergedContentSource.supabaseUrl || mergedContentSource.url || "",
@@ -1268,6 +1346,7 @@ function normalizePresetSettingsPatch(value = {}) {
     rag: raw.rag && typeof raw.rag === "object" ? cloneJson(raw.rag) : {},
     graph: raw.graph && typeof raw.graph === "object" ? cloneJson(raw.graph) : {},
     cache: raw.cache && typeof raw.cache === "object" ? cloneJson(raw.cache) : {},
+    memory: raw.memory && typeof raw.memory === "object" ? cloneJson(raw.memory) : {},
     knowledge: raw.knowledge && typeof raw.knowledge === "object" ? cloneJson(raw.knowledge) : {},
     timelineLinks: raw.timelineLinks && typeof raw.timelineLinks === "object" ? cloneJson(raw.timelineLinks) : {},
     timezone: typeof raw.timezone === "string" ? raw.timezone : "",

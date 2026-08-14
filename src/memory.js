@@ -18,9 +18,9 @@ export function getMemorySummary(sessionId) {
   return summaryStore.get(sessionId) || emptySummary();
 }
 
-export function updateMemorySummary(sessionId, userMessage, assistantMessage = "") {
+export function updateMemorySummary(sessionId, userMessage, assistantMessage = "", baseSummary = null) {
   if (!sessionId) return emptySummary();
-  const current = getMemorySummary(sessionId);
+  const current = baseSummary && typeof baseSummary === "object" ? normalizeMemorySummary(baseSummary) : getMemorySummary(sessionId);
   const topics = unique([...current.active_topics, ...extractTopics(userMessage), ...extractTopics(assistantMessage)]).slice(-10);
   const dates = unique([...current.date_context, ...extractDates(userMessage), ...extractDates(assistantMessage)]).slice(-8);
   const openQuestions = unique([
@@ -39,6 +39,22 @@ export function updateMemorySummary(sessionId, userMessage, assistantMessage = "
   return summary;
 }
 
+export function setMemorySummary(sessionId, summary) {
+  const normalized = normalizeMemorySummary(summary);
+  if (sessionId) summaryStore.set(sessionId, normalized);
+  return normalized;
+}
+
+export function normalizeMemorySummary(value = {}) {
+  return {
+    active_topics: unique(Array.isArray(value.active_topics) ? value.active_topics : []).slice(-10),
+    date_context: unique(Array.isArray(value.date_context) ? value.date_context : []).slice(-8),
+    open_questions: unique(Array.isArray(value.open_questions) ? value.open_questions : []).slice(-6),
+    last_intent: String(value.last_intent || "").slice(0, 220),
+    last_updated: value.last_updated || null
+  };
+}
+
 export function memorySummaryMessages(summary) {
   if (!summary || !hasSummary(summary)) return [];
   return [{
@@ -53,7 +69,7 @@ Use this summary only as conversational context. Do not treat it as project evid
   }];
 }
 
-function emptySummary() {
+export function emptyMemorySummary() {
   return {
     active_topics: [],
     date_context: [],
@@ -62,6 +78,8 @@ function emptySummary() {
     last_updated: null
   };
 }
+
+const emptySummary = emptyMemorySummary;
 
 function hasSummary(summary) {
   return Boolean(summary.active_topics?.length || summary.date_context?.length || summary.open_questions?.length || summary.last_intent);

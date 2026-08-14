@@ -27,6 +27,7 @@ import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalR
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession } from "./auth.js";
+import { deleteAllChatMemoryForUser, deleteChatSessionMemory, getChatMemoryStats } from "./chatMemory.js";
 
 loadEnv();
 
@@ -53,9 +54,21 @@ function checkBidocSecret(req) {
  * so the app's own interface can still load history/hashtags.
  */
 function checkBidocSecretForRead(req) {
-  const isCrossTenant = Boolean(req.headers["x-content-supabase-url"]);
+  const isCrossTenant = isCrossTenantRequest(req);
   if (!isCrossTenant) return true;
   return checkBidocSecret(req);
+}
+
+function isCrossTenantRequest(req) {
+  return Boolean(req.headers["x-content-supabase-url"] || req.headers["x-user-id"]);
+}
+
+function resolveRequestUserId(req, body = {}) {
+  if (isCrossTenantRequest(req)) {
+    if (!checkBidocSecret(req)) return null;
+    return String(req.headers["x-user-id"] || body.userId || "").trim() || null;
+  }
+  return String(getSuperadminSession(req)?.sub || "").trim() || null;
 }
 
 /**
@@ -161,7 +174,7 @@ async function handleApi(req, res, url) {
   // secret — merely sending the content-supabase-url header is not enough to
   // bypass the login wall. Same-origin calls (the standalone UI) need a session.
   if (!url.pathname.startsWith("/api/auth/")) {
-    const isCrossTenantApiRequest = Boolean(req.headers["x-content-supabase-url"]);
+    const isCrossTenantApiRequest = isCrossTenantRequest(req);
     if (isCrossTenantApiRequest) {
       if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
     } else if (!getSuperadminSession(req)) {
@@ -176,6 +189,7 @@ async function handleApi(req, res, url) {
     const sessionId = body.sessionId || `session_${Date.now()}`;
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const cfg = buildRequestConfig(req, body);
+    const userId = resolveRequestUserId(req, body);
     createRun(runId);
 
     // Opt-in inline-stream mode (body.stream === true, used by the standalone
@@ -203,6 +217,7 @@ async function handleApi(req, res, url) {
         const output = await runChatPipeline({
           message: body.message,
           sessionId,
+          userId,
           config: cfg,
           runId,
           sourcesEnabled: body.sourcesEnabled !== false,
@@ -227,6 +242,7 @@ async function handleApi(req, res, url) {
       const output = await runChatPipeline({
         message: body.message,
         sessionId,
+        userId,
         config: cfg,
         runId,
         sourcesEnabled: body.sourcesEnabled !== false,
@@ -674,6 +690,39 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && messagesMatch) {
     const messages = await listMessages({ config: config(), sessionId: decodeURIComponent(messagesMatch[1]) }).catch(() => []);
     return sendJson(res, 200, { messages });
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/memory/stats") {
+    const userId = resolveRequestUserId(req);
+    const stats = await getChatMemoryStats({ config: config(), userId }).catch((error) => ({
+      memoryItems: 0,
+      sessions: 0,
+      lastUpdatedAt: null,
+      degraded: true,
+      error: error.message
+    }));
+    return sendJson(res, 200, { ...stats, mode: userId ? "user_and_session" : "session_only" });
+  }
+
+  const memorySessionMatch = url.pathname.match(/^\/api\/memory\/session\/([^/]+)$/);
+  if (req.method === "DELETE" && memorySessionMatch) {
+    const sessionId = decodeURIComponent(memorySessionMatch[1]);
+    const userId = resolveRequestUserId(req);
+    const deleted = await deleteChatSessionMemory({ config: config(), sessionId, userId });
+    return sendJson(res, deleted ? 200 : 404, deleted
+      ? { ok: true, sessionId }
+      : { ok: false, error: "Session memory was not found for this owner" });
+  }
+
+  if (req.method === "DELETE" && url.pathname === "/api/memory/me") {
+    const body = await readJson(req);
+    if (body.confirm !== "DELETE_ALL_MEMORY") {
+      return sendJson(res, 400, { error: "confirm must equal DELETE_ALL_MEMORY" });
+    }
+    const userId = resolveRequestUserId(req, body);
+    if (!userId) return sendJson(res, 400, { error: "Authenticated userId is required" });
+    const deleted = await deleteAllChatMemoryForUser({ config: config(), userId });
+    return sendJson(res, 200, { ok: true, deleted });
   }
 
   if (req.method === "GET" && url.pathname === "/api/settings") {

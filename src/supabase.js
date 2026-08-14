@@ -4,6 +4,8 @@ import { addDurationToLink, TIMELINE_RELATION_TYPES } from "./timelineLinks.js";
 import { CACHE_TTL, cachedOperation } from "./cache.js";
 
 const MESSAGES_TABLE = "chat_messages_gf";
+const SESSION_MEMORY_TABLE = "chat_session_memory";
+const MEMORY_ITEMS_TABLE = "chat_memory_items";
 const TIMELINE_LINKS_TABLE = "timeline_event_links";
 const TIMELINE_ENTITIES_TABLE = "timeline_entities";
 const TIMELINE_EVENT_ENTITIES_TABLE = "timeline_event_entities";
@@ -635,7 +637,10 @@ export async function listMessages({ config, sessionId }) {
 
 export async function recentMemory({ config, sessionId, limit = 8 }) {
   if (!isConfigured(config) || !sessionId) return [];
-  const query = `/rest/v1/${MESSAGES_TABLE}?select=user_message,ai_response,created_at&session_id=eq.${encodeURIComponent(sessionId)}&order=created_at.desc&limit=${limit}`;
+  // Only completed turns are conversational history. The current request is
+  // inserted as `processing`, so excluding it prevents the latest user message
+  // from appearing twice in the model prompt.
+  const query = `/rest/v1/${MESSAGES_TABLE}?select=user_message,ai_response,created_at&session_id=eq.${encodeURIComponent(sessionId)}&status=eq.done&order=created_at.desc&limit=${limit}`;
   const rows = await supabaseFetch(config, query);
   return (rows || []).reverse().flatMap((row) => {
     const messages = [];
@@ -643,6 +648,186 @@ export async function recentMemory({ config, sessionId, limit = 8 }) {
     if (row.ai_response) messages.push({ role: "assistant", content: row.ai_response });
     return messages;
   });
+}
+
+export async function getChatSessionMemory({ config, sessionId, userId = null }) {
+  if (!isConfigured(config) || !sessionId) return null;
+  const rows = await supabaseFetch(config,
+    `/rest/v1/${SESSION_MEMORY_TABLE}?session_id=eq.${encodeURIComponent(sessionId)}&select=*&limit=1`
+  );
+  const row = rows?.[0] || null;
+  if (row && String(row.user_id || "") !== String(userId || "")) {
+    throw new Error("Session memory belongs to a different user");
+  }
+  return row;
+}
+
+export async function upsertChatSessionMemory({ config, sessionId, userId = null, summary = {}, turnCount = 0, summaryVersion = 1 }) {
+  if (!isConfigured(config) || !sessionId) return null;
+  const existing = await supabaseFetch(config,
+    `/rest/v1/${SESSION_MEMORY_TABLE}?session_id=eq.${encodeURIComponent(sessionId)}&select=user_id&limit=1`
+  );
+  if (existing?.length && String(existing[0].user_id || "") !== String(userId || "")) {
+    throw new Error("Session memory belongs to a different user");
+  }
+  const rows = await supabaseFetch(config, `/rest/v1/${SESSION_MEMORY_TABLE}?on_conflict=session_id`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      user_id: userId || null,
+      summary: plainObject(summary),
+      turn_count: Math.max(0, Number(turnCount) || 0),
+      summary_version: Math.max(1, Number(summaryVersion) || 1)
+    })
+  });
+  return rows?.[0] || null;
+}
+
+export async function matchChatMemory({ config, userId, embedding, settings }) {
+  if (!isConfigured(config) || !userId || !Array.isArray(embedding) || !embedding.length) return [];
+  return supabaseFetch(config, "/rest/v1/rpc/match_chat_memory", {
+    method: "POST",
+    body: JSON.stringify({
+      p_user_id: userId,
+      p_query_embedding: embedding,
+      p_match_count: settings.semanticTopK,
+      p_similarity_threshold: settings.similarityThreshold,
+      p_semantic_weight: settings.semanticWeight,
+      p_recency_weight: settings.recencyWeight,
+      p_importance_weight: settings.importanceWeight
+    })
+  });
+}
+
+export async function replaceChatMemoryItem({ config, item }) {
+  if (!isConfigured(config) || !item?.userId || !item?.canonicalKey) return null;
+  const userFilter = encodeURIComponent(item.userId);
+  const keyFilter = encodeURIComponent(item.canonicalKey);
+  const active = await supabaseFetch(config,
+    `/rest/v1/${MEMORY_ITEMS_TABLE}?user_id=eq.${userFilter}&canonical_key=eq.${keyFilter}&valid_to=is.null&select=id&limit=1`
+  );
+  const previousId = active?.[0]?.id || null;
+  if (previousId) {
+    await supabaseFetch(config, `/rest/v1/${MEMORY_ITEMS_TABLE}?id=eq.${encodeURIComponent(previousId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ valid_to: new Date().toISOString() })
+    });
+  }
+  const rows = await supabaseFetch(config, `/rest/v1/${MEMORY_ITEMS_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({
+      user_id: item.userId,
+      memory_type: item.memoryType || "fact",
+      canonical_key: item.canonicalKey,
+      content: item.content,
+      source: item.source || "automatic",
+      source_session_id: item.sessionId || null,
+      source_message_id: Number.isFinite(Number(item.messageId)) ? Number(item.messageId) : null,
+      confidence: item.confidence ?? 1,
+      importance: item.importance ?? 0.5,
+      embedding: item.embedding || null,
+      embedding_model: item.embeddingModel || "openai/text-embedding-3-large",
+      expires_at: item.expiresAt || null,
+      metadata: plainObject(item.metadata)
+    })
+  });
+  const created = rows?.[0] || null;
+  if (previousId && created?.id) {
+    await supabaseFetch(config, `/rest/v1/${MEMORY_ITEMS_TABLE}?id=eq.${encodeURIComponent(previousId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ superseded_by: created.id })
+    });
+  }
+  return created;
+}
+
+export async function forgetChatMemory({ config, userId, canonicalKey }) {
+  if (!isConfigured(config) || !userId || !canonicalKey) return 0;
+  const rows = await supabaseFetch(config,
+    `/rest/v1/${MEMORY_ITEMS_TABLE}?user_id=eq.${encodeURIComponent(userId)}&canonical_key=eq.${encodeURIComponent(canonicalKey)}&valid_to=is.null&select=id`
+  );
+  if (!rows?.length) return 0;
+  await supabaseFetch(config,
+    `/rest/v1/${MEMORY_ITEMS_TABLE}?user_id=eq.${encodeURIComponent(userId)}&canonical_key=eq.${encodeURIComponent(canonicalKey)}&valid_to=is.null`,
+    { method: "PATCH", body: JSON.stringify({ valid_to: new Date().toISOString() }) }
+  );
+  return rows.length;
+}
+
+export async function invalidateChatMemoryItems({ config, userId, ids = [] }) {
+  const clean = [...new Set(ids.map(String).filter(Boolean))].slice(0, 30);
+  if (!isConfigured(config) || !userId || !clean.length) return 0;
+  const timestamp = new Date().toISOString();
+  let count = 0;
+  for (const id of clean) {
+    const rows = await supabaseFetch(config,
+      `/rest/v1/${MEMORY_ITEMS_TABLE}?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&valid_to=is.null&select=id`
+    );
+    if (!rows?.length) continue;
+    await supabaseFetch(config,
+      `/rest/v1/${MEMORY_ITEMS_TABLE}?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(userId)}&valid_to=is.null`,
+      { method: "PATCH", body: JSON.stringify({ valid_to: timestamp }) }
+    );
+    count += 1;
+  }
+  return count;
+}
+
+export async function touchChatMemoryItems({ config, ids = [] }) {
+  const clean = [...new Set(ids.map(String).filter(Boolean))].slice(0, 30);
+  if (!isConfigured(config) || !clean.length) return;
+  for (const id of clean) {
+    const rows = await supabaseFetch(config,
+      `/rest/v1/${MEMORY_ITEMS_TABLE}?id=eq.${encodeURIComponent(id)}&select=access_count&limit=1`
+    );
+    await supabaseFetch(config, `/rest/v1/${MEMORY_ITEMS_TABLE}?id=eq.${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        access_count: Math.max(0, Number(rows?.[0]?.access_count) || 0) + 1,
+        last_accessed_at: new Date().toISOString()
+      })
+    });
+  }
+}
+
+export async function getChatMemoryStats({ config, userId = null }) {
+  if (!isConfigured(config)) return { memoryItems: 0, sessions: 0, lastUpdatedAt: null };
+  const userQuery = userId ? `user_id=eq.${encodeURIComponent(userId)}` : "user_id=is.null";
+  const [items, sessions] = await Promise.all([
+    userId
+      ? supabaseFetch(config, `/rest/v1/${MEMORY_ITEMS_TABLE}?${userQuery}&valid_to=is.null&select=id,updated_at&order=updated_at.desc`)
+      : Promise.resolve([]),
+    supabaseFetch(config, `/rest/v1/${SESSION_MEMORY_TABLE}?${userQuery}&select=session_id,updated_at&order=updated_at.desc`)
+  ]);
+  const dates = [...(items || []), ...(sessions || [])].map((row) => row.updated_at).filter(Boolean).sort().reverse();
+  return { memoryItems: items?.length || 0, sessions: sessions?.length || 0, lastUpdatedAt: dates[0] || null };
+}
+
+export async function deleteChatSessionMemory({ config, sessionId, userId = null }) {
+  if (!isConfigured(config) || !sessionId) return false;
+  const ownerFilter = userId ? `&user_id=eq.${encodeURIComponent(userId)}` : "&user_id=is.null";
+  const rows = await supabaseFetch(config,
+    `/rest/v1/${SESSION_MEMORY_TABLE}?session_id=eq.${encodeURIComponent(sessionId)}${ownerFilter}&select=session_id`
+  );
+  if (!rows?.length) return false;
+  await supabaseFetch(config,
+    `/rest/v1/${SESSION_MEMORY_TABLE}?session_id=eq.${encodeURIComponent(sessionId)}${ownerFilter}`,
+    { method: "DELETE" }
+  );
+  return true;
+}
+
+export async function deleteAllChatMemoryForUser({ config, userId }) {
+  if (!isConfigured(config) || !userId) return { memories: 0, sessions: 0 };
+  const stats = await getChatMemoryStats({ config, userId });
+  const filter = encodeURIComponent(userId);
+  await Promise.all([
+    supabaseFetch(config, `/rest/v1/${MEMORY_ITEMS_TABLE}?user_id=eq.${filter}`, { method: "DELETE" }),
+    supabaseFetch(config, `/rest/v1/${SESSION_MEMORY_TABLE}?user_id=eq.${filter}`, { method: "DELETE" })
+  ]);
+  return { memories: stats.memoryItems, sessions: stats.sessions };
 }
 
 export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags = [], topK = config.retrieval.candidates, cacheContext = null, telemetry = null }) {

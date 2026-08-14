@@ -28,7 +28,9 @@ import { buildIndexRow, computeIndexDates, EMBEDDING_BACKFILL_TABLES, INDEX_DATE
 import { compactJsonList, CONTENT_TOOL_SPECS, contentToolRowDate, contentToolSettings, DEFAULT_TOOL_PROMPTS, fetchEmailAttachmentByReference, fetchFinancialTransactionById, fetchFinancialTransactionsByIds, fetchSafetyAttachmentByReference, fetchSafetyReportsByIds, filterContentRowsByDate, isInternalContentTool } from "../src/subagents/contentTools.js";
 import { detectColumnRoles, extractSearchTerms, mergeRetrievalRows, parseOpenApiTableColumns } from "../src/subagents/contentRetrieval.js";
 import { analyzeFinancial, analyzeGeneric, analyzeMeetings, analyzeSafety, analyzeWhatsapp } from "../src/subagents/contentAnalysis.js";
-import { DEFAULT_CONTENT_TOOL_SETTINGS, INTERNAL_CONTENT_TOOL_NAMES, normalizeContentToolsSettings, normalizeIndexingSettings } from "../src/config.js";
+import { DEFAULT_CONTENT_TOOL_SETTINGS, DEFAULT_MEMORY_SETTINGS, INTERNAL_CONTENT_TOOL_NAMES, normalizeContentToolsSettings, normalizeIndexingSettings, normalizeMemorySettings } from "../src/config.js";
+import { buildClassifierContext, canonicalMemoryKey, containsSensitiveSecret, detectMemoryCommand, estimateTokens, loadAgentMemory, memoryMessagesForAgent, trimMessagesToBudget } from "../src/chatMemory.js";
+import { hashLogIdentifier, redactLogText, sanitizeMemoryLogEntry } from "../src/memoryLogger.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, normalizeToolUrlValue, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, resolveToolUrl, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
 import { contentSupabaseConfig, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, hybridSearch, listTimelineEventLinks, parseTimelineEventsQuery, projectGraphResponse, sanitizeDelayChangeLogPayload, sanitizeDelayClaimCasePayload, sanitizeDelayClaimExportPayload, sanitizeDelayCostItemPayload, sanitizeDelayEventPayload, sanitizeDelayEventUpdatePayload, sanitizeDelayEvidencePayload, sanitizeDelayFindingPayload, sanitizeDelayScheduleActivityPayload, sanitizeDelayScheduleLinkPayload, sanitizeDelayScheduleVersionPayload, saveMessage, TimelineRequestError } from "../src/supabase.js";
@@ -3133,6 +3135,116 @@ test("data query reads require a dedicated database-role access token", () => {
   assert.equal("dataQueryReadAccessToken" in exposed, false);
   assert.equal("dataQueryServiceEmail" in exposed, false);
   assert.equal("dataQueryServicePassword" in exposed, false);
+});
+
+test("memory settings preserve independent Main and Lite budgets", () => {
+  const normalized = normalizeMemorySettings({
+    agents: {
+      main: { recentTurns: 3, contextTokenBudget: 2100 },
+      lite: { recentTurns: 11, contextTokenBudget: 5100 }
+    }
+  });
+  assert.equal(normalized.agents.main.recentTurns, 3);
+  assert.equal(normalized.agents.main.contextTokenBudget, 2100);
+  assert.equal(normalized.agents.lite.recentTurns, 11);
+  assert.equal(normalized.agents.lite.contextTokenBudget, 5100);
+  assert.equal(DEFAULT_MEMORY_SETTINGS.agents.main.semanticTopK, 6);
+  assert.equal(DEFAULT_MEMORY_SETTINGS.agents.lite.semanticTopK, 4);
+});
+
+test("memory commands support Hebrew remember and forget requests", () => {
+  assert.deepEqual(detectMemoryCommand("זכור שהספק המועדף עליי הוא אלפא"), {
+    kind: "remember",
+    content: "הספק המועדף עליי הוא אלפא"
+  });
+  assert.deepEqual(detectMemoryCommand("שכח שהספק המועדף עליי הוא אלפא"), {
+    kind: "forget",
+    content: "הספק המועדף עליי הוא אלפא"
+  });
+  assert.equal(detectMemoryCommand("מה קרה בחודש הקודם?"), null);
+});
+
+test("memory refuses secrets and produces stable canonical keys", () => {
+  assert.equal(containsSensitiveSecret("api_key=sk-or-supersecretvalue123"), true);
+  assert.equal(containsSensitiveSecret("הספק שלי הוא אלפא"), false);
+  assert.equal(canonicalMemoryKey("זכור שהספק שלי הוא אלפא"), canonicalMemoryKey("הספק שלי הוא אלפא"));
+});
+
+test("memory context obeys the conservative token budget", () => {
+  const messages = Array.from({ length: 15 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: `הודעה ${index} ${"א".repeat(120)}` }));
+  const trimmed = trimMessagesToBudget(messages, 180);
+  assert.ok(trimmed.length > 0 && trimmed.length < messages.length);
+  assert.ok(trimmed.reduce((sum, item) => sum + estimateTokens(item.content), 0) <= 180);
+});
+
+test("routing memory keeps Hebrew follow-up references across a 15-message sequence", () => {
+  const recent = [
+    "בדוק את ספק אלפא", "מצאתי את ספק אלפא",
+    "מי אחראי עליו?", "דנה אחראית על התיאום",
+    "מה היה איתו בחודש הקודם?", "נרשמו שתי פניות",
+    "בדוק גם את הצעת המחיר", "ההצעה עדיין פתוחה",
+    "מי אישר אותה?", "טרם נמצא אישור",
+    "תשווה אותו לספק בטא", "בטא הגיש הצעה נמוכה יותר",
+    "ומה לגביו?", "נדרש מקור נוסף",
+    "האם זה אותו ספק?"
+  ].map((content, index) => ({ role: index % 2 ? "assistant" : "user", content }));
+  const context = buildClassifierContext({
+    recent: recent.slice(-8),
+    summary: { active_topics: ["ספק אלפא"], date_context: ["בחודש הקודם"], open_questions: [], last_intent: "השוואת ספקים" }
+  }, 1200);
+  assert.match(context, /בחודש הקודם/);
+  assert.match(context, /אותו ספק/);
+  assert.match(context, /ומה לגביו/);
+});
+
+test("agent memory labels personal recall as non-evidence", () => {
+  const messages = memoryMessagesForAgent({
+    summary: null,
+    recent: [],
+    memories: [{ content: "המשתמש מעדיף תשובות קצרות" }]
+  }, 500);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].content, /never project evidence/i);
+  assert.match(messages[0].content, /Re-retrieve a project source/i);
+});
+
+test("memory loading fails open when Supabase and OpenRouter are unavailable", async () => {
+  const context = await loadAgentMemory({
+    config: {
+      memory: normalizeMemorySettings({}),
+      supabaseUrl: "",
+      supabaseServiceRoleKey: "",
+      openRouterApiKey: "",
+      models: { embedding: "openai/text-embedding-3-large" }
+    },
+    sessionId: "memory_fail_open_test",
+    userId: "user_a",
+    query: "ומה לגביו?",
+    agent: "main"
+  });
+  assert.equal(context.mode, "user_and_session");
+  assert.deepEqual(context.memories, []);
+  assert.deepEqual(context.errors, []);
+});
+
+test("memory diagnostic log redacts secrets and never includes recalled content", () => {
+  const entry = sanitizeMemoryLogEntry({
+    runId: "run_1",
+    sessionId: "session_1",
+    userId: "user@example.com",
+    mode: "user_and_session",
+    selectedAgent: "main",
+    routeType: "RAG",
+    originalMessage: "password=topsecret123 email user@example.com",
+    standaloneQuery: "Bearer abcdefghijklmnop",
+    recalledScores: [{ content: "private personal memory", similarity: 0.81234, score: 0.7 }]
+  });
+  const serialized = JSON.stringify(entry);
+  assert.doesNotMatch(serialized, /topsecret123|user@example\.com|abcdefghijklmnop|private personal memory/);
+  assert.match(serialized, /REDACTED/);
+  assert.equal(entry.recalledScores[0].similarity, 0.8123);
+  assert.equal(entry.userHash, hashLogIdentifier("user@example.com"));
+  assert.equal(redactLogText("api_key=sk-or-secretvalue12345").includes("secretvalue"), false);
 });
 
 test("data query uses the explicit MAIN mapping only through the fixed read-only transport", () => {

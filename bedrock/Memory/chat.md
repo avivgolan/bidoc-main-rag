@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: chat
-last_updated: 2026-06-26
+last_updated: 2026-08-14
 tags:
   - chat
   - rag
@@ -13,8 +13,16 @@ tags:
 
 ## Current State
 
-- `src/agent.js` owns the main chat pipeline: sanitize, save message, classify, load memory, route to Lite Agent or Main RAG Agent, then update the saved message.
-- `src/classifier.js` normalizes model output into `type`, `complexity`, `tool_hint`, `urgency`, `date_from`, `date_to`, hashtags, professional mode, and investigation mode.
+- `src/agent.js` owns the main chat pipeline: sanitize, load bounded routing memory, save the current message, classify/rewrite it, load agent-specific memory, route to Lite or Main, maintain persistent memory, then update the saved message.
+- `src/classifier.js` normalizes model output into routing fields plus `standalone_query`, which resolves follow-up references from bounded conversational context without changing the stored/displayed user message.
+- `src/chatMemory.js` coordinates session summaries, recent turns, user-owned semantic recall, token budgets, explicit remember/forget commands, guarded automatic learning, and fail-open behavior.
+- Main and Lite share the same session state but have independent recent-turn, token-budget, semantic top-K, threshold, and score-weight settings under `agent_settings.data.memory.agents`.
+- `chat_session_memory` persists structured summaries and turn counts across restarts; `chat_memory_items` stores atomic user-owned long-term memories with 3072-dimensional `openai/text-embedding-3-large` vectors.
+- The memory tables have RLS enabled with no client policies or anon/authenticated grants. `match_chat_memory` is SECURITY INVOKER and executable only by service role.
+- Same-origin memory ownership comes from the signed superadmin session. Cross-tenant callers may supply `x-user-id` only through the shared-secret-gated path; missing identity degrades to session-only memory.
+- Conversational memory is never project evidence: Main receives it only for personalization/reference resolution and must retrieve project sources again for factual claims.
+- Settings expose a dedicated `זיכרון` section with advanced Main/Lite controls, safe stats, session deletion, and confirmed full personal-memory deletion. Cache remains a separate disposable acceleration layer.
+- `src/memoryLogger.js` writes one redacted JSONL record per completed chat run to `logs/chat-memory.jsonl`; logs include routing, rewrite, counts, score-only recall diagnostics, memory actions, latency, and errors. User IDs are hashed, recalled memory content is excluded, and files rotate at 10 MB with five backups by default.
 - Main RAG uses `hybridSearch` with `classification.date_from` and `classification.date_to`.
 - Tool ordering comes from `buildToolOrder` in `src/tools.js`; high urgency forces `safety_report` then `alert`.
 - Main RAG calls project tools through `callProjectTool` in `src/agent.js`.
@@ -49,6 +57,9 @@ tags:
 
 ## Recent Changes
 
+- 2026-08-14 -- Added persistent session and cross-session agent memory with user isolation, semantic recall, standalone-query rewriting, explicit remember/forget, guarded automatic learning, separate Main/Lite budgets, safe debug metrics, memory APIs, and an advanced settings UI.
+- 2026-08-14 -- Applied the `chat_agent_memory` Supabase migration and verified RLS, service-role-only RPC execution, restart restoration, owner isolation, and Remember → Recall → Forget through the live smoke test.
+- 2026-08-14 -- Added persistent, rotated, privacy-redacted local JSONL diagnostics for conversational memory plus `npm run logs:memory -- <count>` for reading recent entries.
 - 2026-08-05 -- Fixed the Local Knowledge Base connection check on read-only/serverless runtimes by removing directory creation from document listing and anchoring paths to the module-derived project root. Live diagnostics now report 3 agents and 3 built-in documents.
 - 2026-05-09 -- Main chat now builds a structured alert-agent request with `dateFilter`, `dateFrom`, and `dateTo`.
 - 2026-05-10 -- Workflow logs now show Alert as its own `Alert Agent` node instead of hiding it inside safety/tool steps.

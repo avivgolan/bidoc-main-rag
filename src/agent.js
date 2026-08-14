@@ -2,7 +2,7 @@ import { sanitizeMessage } from "./sanitize.js";
 import { classifyMessage, hintedTools } from "./classifier.js";
 import { heuristicClassification, isHebrew } from "./heuristics.js";
 import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.js";
-import { graphSearch, hybridSearch, recentMemory, saveMessage, updateMessage } from "./supabase.js";
+import { graphSearch, hybridSearch, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks, buildInternalSourceUrl, isInternalProjectTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import {
@@ -29,7 +29,15 @@ import { DATA_QUERY_EXCEPTION_CURRENCY, DATA_QUERY_EXCEPTION_VAT_RATE } from "./
 import { formatMeetingCitation, runMeetingEvidenceAgent } from "./subagents/meeting.js";
 import { runExceptionEvidenceAgent } from "./subagents/exceptionEvidence.js";
 import { runConsultantReportEvidenceAgent } from "./subagents/consultantReportEvidence.js";
-import { appendLocalMemory, getLocalMemory, getMemorySummary, memorySummaryMessages } from "./memory.js";
+import {
+  applyExplicitMemoryCommand,
+  buildClassifierContext,
+  estimateTokens,
+  finalizeChatMemory,
+  loadAgentMemory,
+  loadRoutingMemory,
+  memoryMessagesForAgent
+} from "./chatMemory.js";
 import { completeRun, emitRunEvent, getRunEvents } from "./runLog.js";
 import { renderPrompt, defaultPrompts } from "./prompts.js";
 import { getProjectDateTime } from "./clock.js";
@@ -38,10 +46,11 @@ import { getConfig, TOOL_NAMES } from "./config.js";
 import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./sourceQuality.js";
 import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, hashValue } from "./cache.js";
+import { appendMemoryLog } from "./memoryLogger.js";
 
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
 
-export async function runChatPipeline({ message, sessionId, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [], ephemeral = false, forceRag = false }) {
+export async function runChatPipeline({ message, sessionId, userId = null, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [], ephemeral = false, forceRag = false }) {
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
   const openRouterCalls = [];
   let openRouterCallSequence = 0;
@@ -63,7 +72,16 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     attachments: attachments.map((item) => item.name)
   });
   const sanitized = sanitizeMessage(effectiveMessage);
+  const memoryLoadStartedAt = Date.now();
   emitRunEvent(runId, "sanitize", "Message sanitized", { changed: sanitized !== message, length: sanitized.length });
+  const routingMemory = ephemeral
+    ? { mode: "disabled", recent: [], summary: null, sessionRow: null, memories: [], errors: [] }
+    : await loadRoutingMemory({ config, sessionId, userId }).catch((error) => ({
+      mode: "session_only", recent: [], summary: null, sessionRow: null, memories: [], errors: [error.message]
+    }));
+  if (routingMemory.errors.length) {
+    emitRunEvent(runId, "memory", "Routing memory degraded; chat continues", { errors: routingMemory.errors });
+  }
   const saved = ephemeral
     ? { id: null, status: "ephemeral" }
     : await saveMessage({ config, userMessage: message, sanitizedMessage: sanitized, sessionId });
@@ -73,17 +91,23 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
 
   try {
     emitRunEvent(runId, "classifier", "Classifying message", {});
-    classification = await classifyMessage({ message: sanitized, config, telemetry: telemetryFor("classifier") });
+    classification = await classifyMessage({
+      message: sanitized,
+      context: buildClassifierContext(routingMemory, config.memory?.routingTokenBudget),
+      config,
+      telemetry: telemetryFor("classifier")
+    });
     emitRunEvent(runId, "classifier", "Classification completed", classification);
     console.log(`[classifier] type=${classification.type} tool="${classification.tool_hint}" msg="${sanitized.slice(0, 70)}"`);
   } catch (error) {
-    classification = heuristicClassification(sanitized);
+    classification = { ...heuristicClassification(sanitized), standalone_query: sanitized };
     trace.push({ step: "classifier", ok: false, fallback: true, error: error.message });
     emitRunEvent(runId, "classifier", "Classifier failed, using local fallback", { error: error.message, classification });
     console.log(`[classifier] FALLBACK (${error.message}) type=${classification.type} msg="${sanitized.slice(0, 70)}"`);
   }
+  const resolvedMessage = classification.standalone_query || sanitized;
   const beforeProfessional = Boolean(classification?.professional);
-  classification = enforceProfessionalKnowledgeMode(classification, sanitized, config);
+  classification = enforceProfessionalKnowledgeMode(classification, resolvedMessage, config);
   emitRunEvent(runId, "knowledge_vocabulary", classification?.knowledge_vocabulary_match
     ? "Knowledge vocabulary matched"
     : "Knowledge vocabulary checked", {
@@ -99,7 +123,7 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
       matched: classification.knowledge_vocabulary_match || null
     });
   }
-  classification = enforceInvestigationMode(classification, sanitized);
+  classification = enforceInvestigationMode(classification, resolvedMessage);
   if (!sourcesEnabled && !deepResearch) {
     classification = { ...classification, type: "CHAT", professional: false, investigation: false };
     emitRunEvent(runId, "switch", "Project sources disabled by user", {});
@@ -119,41 +143,83 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     emitRunEvent(runId, "switch", "RAG route required by internal caller", {});
   }
 
-  let memory = ephemeral ? [] : await recentMemory({ config, sessionId }).catch((error) => {
-    trace.push({ step: "memory", ok: false, error: error.message });
-    emitRunEvent(runId, "memory", "Memory load failed", { error: error.message });
-    return [];
+  let memoryCommand = null;
+  if (!ephemeral) {
+    try {
+      memoryCommand = await applyExplicitMemoryCommand({ config, userId, sessionId, messageId: saved.id, message: sanitized });
+      if (memoryCommand) classification = { ...classification, type: "CHAT" };
+    } catch (error) {
+      memoryCommand = { kind: "unknown", ok: false, reason: "write_failed" };
+      trace.push({ step: "memory_write", ok: false, error: error.message });
+      emitRunEvent(runId, "memory_write", "Explicit memory action failed; chat continues", { error: error.message });
+    }
+  }
+  const agentName = classification.type === "CHAT" ? "lite" : "main";
+  const memoryContext = ephemeral
+    ? { mode: "disabled", recent: [], summary: null, sessionRow: null, memories: [], errors: [] }
+    : await loadAgentMemory({ config, sessionId, userId, query: resolvedMessage, agent: agentName }).catch((error) => ({
+      mode: userId ? "user_and_session" : "session_only",
+      recent: routingMemory.recent,
+      summary: routingMemory.summary,
+      sessionRow: routingMemory.sessionRow,
+      memories: [],
+      errors: [error.message]
+    }));
+  const agentMemorySettings = config.memory?.agents?.[agentName] || {};
+  const memory = memoryMessagesForAgent(memoryContext, agentMemorySettings.contextTokenBudget);
+  const memorySummary = memoryContext.summary;
+  if (memoryContext.errors.length) trace.push({ step: "memory", ok: false, fallback: true, errors: memoryContext.errors });
+  emitRunEvent(runId, "memory", "Memory loaded", {
+    mode: memoryContext.mode,
+    recent_messages: memoryContext.recent.length,
+    recalled_items: memoryContext.memories.length,
+    errors: memoryContext.errors
   });
-  if (!ephemeral && !memory.length) memory = getLocalMemory(sessionId);
-  const memorySummary = ephemeral ? null : getMemorySummary(sessionId);
-  emitRunEvent(runId, "memory", "Memory loaded", { messages: memory.length, summary: memorySummary });
+  const memoryLoadLatencyMs = Date.now() - memoryLoadStartedAt;
 
   let result;
-  if (classification.type === "CHAT") {
+  if (memoryCommand) {
+    emitRunEvent(runId, "memory_write", "Explicit memory action verified", { kind: memoryCommand.kind, ok: memoryCommand.ok });
+    result = { answer: explicitMemoryResponse(memoryCommand, sanitized), sources: [], toolCalls: [], memoryAction: true };
+  } else if (classification.type === "CHAT") {
     emitRunEvent(runId, "switch", "Routing to Lite Agent", { type: classification.type });
-    result = await runLiteAgent({ message: sanitized, memory, memorySummary, config, trace, runId, telemetryFor });
+    result = await runLiteAgent({ message: resolvedMessage, memory, memorySummary, config, trace, runId, telemetryFor });
   } else {
     emitRunEvent(runId, "switch", "Routing to Main RAG Agent", { type: classification.type });
-    result = await runRagAgent({ message: sanitized, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext, telemetryFor });
+    result = await runRagAgent({ message: resolvedMessage, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext, telemetryFor });
   }
 
   result.answer = sanitizeCustomerFacingAnswer(result.answer, { hebrew: isHebrew(sanitized) });
 
-  if (!ephemeral) {
-    appendLocalMemory(sessionId, message, result.answer);
-    emitRunEvent(runId, "local_memory", "Local memory updated", {});
+  const memoryWrite = ephemeral ? null : await finalizeChatMemory({
+    config,
+    sessionId,
+    userId,
+    userMessage: message,
+    assistantMessage: result.answer,
+    messageId: saved.id,
+    previousSession: memoryContext.sessionRow || routingMemory.sessionRow,
+    telemetry: telemetryFor("memory_maintenance"),
+    allowAutoLearn: !memoryCommand
+  }).catch((error) => ({ mode: memoryContext.mode, learned: 0, errors: [error.message] }));
+  if (memoryWrite?.errors?.length) {
+    trace.push({ step: "memory_write", ok: false, fallback: true, errors: memoryWrite.errors });
+    emitRunEvent(runId, "memory_write", "Memory maintenance degraded; answer preserved", { errors: memoryWrite.errors });
+  } else if (!ephemeral) {
+    emitRunEvent(runId, "memory_write", "Persistent memory updated", { learned: memoryWrite?.learned || 0, turns: memoryWrite?.turnCount || 0 });
   }
   const workflowLog = buildWorkflowLog({
     message,
     sanitized,
     saved,
     memory,
-    memorySummary: getMemorySummary(sessionId),
+    memorySummary: memoryWrite?.summary || memorySummary,
     classification,
     result,
     trace,
     config,
-    openRouterCalls
+    openRouterCalls,
+    memoryWrite
   });
   workflowLog.cacheMetrics = finalizeCacheMetrics(cacheContext);
 
@@ -174,6 +240,47 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     });
   }
 
+  const memoryDebug = {
+    mode: memoryContext.mode,
+    recentTurns: Math.floor(memoryContext.recent.length / 2),
+    recalledItems: memoryContext.memories.length,
+    turnCount: memoryWrite?.turnCount || memoryContext.sessionRow?.turn_count || 0,
+    degraded: Boolean(memoryContext.errors.length || memoryWrite?.errors?.length),
+    queryRewritten: resolvedMessage !== sanitized,
+    contextEstimatedTokens: memory.reduce((sum, item) => sum + estimateTokens(item.content), 0),
+    loadLatencyMs: memoryLoadLatencyMs,
+    maintenanceLatencyMs: memoryWrite?.latencyMs || 0,
+    rejectedItems: memoryWrite?.rejected || 0,
+    localLogWritten: false
+  };
+  if (!ephemeral) {
+    const logStatus = await appendMemoryLog({
+      runId,
+      sessionId,
+      userId,
+      mode: memoryContext.mode,
+      selectedAgent: memoryCommand ? "memory_action" : agentName,
+      routeType: classification.type,
+      originalMessage: message,
+      standaloneQuery: resolvedMessage,
+      queryRewritten: memoryDebug.queryRewritten,
+      recentTurns: memoryDebug.recentTurns,
+      recalledItems: memoryDebug.recalledItems,
+      recalledScores: memoryContext.memories,
+      contextEstimatedTokens: memoryDebug.contextEstimatedTokens,
+      turnCount: memoryDebug.turnCount,
+      memoryAction: memoryCommand,
+      learnedItems: memoryWrite?.learned || 0,
+      rejectedItems: memoryDebug.rejectedItems,
+      degraded: memoryDebug.degraded,
+      loadLatencyMs: memoryDebug.loadLatencyMs,
+      maintenanceLatencyMs: memoryDebug.maintenanceLatencyMs,
+      errors: [...routingMemory.errors, ...memoryContext.errors, ...(memoryWrite?.errors || [])]
+    });
+    memoryDebug.localLogWritten = logStatus.ok;
+    if (!logStatus.ok) console.warn("[memory_log] write failed:", logStatus.error);
+  }
+
   const output = {
     messageId: saved.id,
     status: "complete",
@@ -191,7 +298,8 @@ export async function runChatPipeline({ message, sessionId, config, runId, sourc
     toolCalls: projectChatToolCallsForClient(result.toolCalls, { question: sanitized }),
     knowledgePlan: result.knowledgePlan || null,
     investigationPlan: result.investigationPlan || null,
-    memorySummary: ephemeral ? null : getMemorySummary(sessionId),
+    memorySummary: ephemeral ? null : (memoryWrite?.summary || memorySummary),
+    memoryDebug,
     sourceQuality: result.sourceQuality || null,
     conflicts: result.conflicts || [],
     openRouterUsage: workflowLog.openRouterUsage,
@@ -231,6 +339,25 @@ function buildChatFollowUps({ classification, result }) {
   return followUps;
 }
 
+function explicitMemoryResponse(command, originalMessage) {
+  const hebrew = isHebrew(originalMessage);
+  if (command.kind === "remember" && command.ok) {
+    return hebrew ? "זכרתי. המידע נשמר בזיכרון האישי שלך לשיחות הבאות." : "Remembered. I saved this to your personal memory for future conversations.";
+  }
+  if (command.kind === "forget" && command.ok) {
+    if (command.count > 0) return hebrew ? "שכחתי את המידע שביקשת." : "I forgot the information you requested.";
+    return hebrew ? "לא מצאתי זיכרון אישי תואם למחיקה." : "I could not find a matching personal memory to remove.";
+  }
+  const reasons = {
+    session_only: hebrew ? "אין משתמש מזוהה, ולכן השיחה פועלת כרגע בזיכרון session בלבד." : "No authenticated user was found, so this conversation is using session-only memory.",
+    sensitive: hebrew ? "לא שמרתי את המידע כי הוא נראה כמו סוד, מפתח או סיסמה." : "I did not save that because it appears to contain a secret, key, or password.",
+    limit: hebrew ? "לא שמרתי את המידע כי מכסת הזיכרון האישי מלאה." : "I did not save that because the personal memory limit is full.",
+    disabled: hebrew ? "הזיכרון כבוי בהגדרות." : "Memory is disabled in settings.",
+    embedding_unavailable: hebrew ? "לא ניתן היה לאמת ולשמור את הזיכרון כרגע." : "The memory could not be verified and saved right now."
+  };
+  return reasons[command.reason] || (hebrew ? "לא הצלחתי לבצע את פעולת הזיכרון; השיחה עצמה ממשיכה כרגיל." : "I could not complete the memory action; the chat itself is still available.");
+}
+
 async function runLiteAgent({ message, memory, memorySummary, config, trace, runId, telemetryFor }) {
   const fallback = liteFallback(message);
   if (!config.openRouterApiKey) {
@@ -254,7 +381,6 @@ async function runLiteAgent({ message, memory, memorySummary, config, trace, run
           role: "system",
           content: `SYSTEM TIME: ${getProjectDateTime(config.timezone)} — when the user asks about the time or date, answer using this exact value. Do not say you lack real-time access.\n\n${renderPrompt(config.prompts?.lite, { currentDate: getProjectDateTime(config.timezone) })}`
         },
-        ...memorySummaryMessages(memorySummary),
         ...memory,
         { role: "user", content: message }
       ]
@@ -2216,7 +2342,8 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
           retrievalResults,
           graphContext,
           toolResults: mainPayload.tool_results,
-          memorySummary
+          memorySummary,
+          memory
         }),
         model: config.models.main,
         prompt_hash: hashValue(systemPrompt)
@@ -2235,7 +2362,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
           telemetry: telemetryFor("main_agent"),
           messages: [
             { role: "system", content: systemPrompt },
-            ...memorySummaryMessages(memorySummary),
+            ...memory,
             {
               role: "user",
               content: safeJsonStringify(mainPayload)
@@ -2284,7 +2411,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
           telemetry: telemetryFor("main_agent_compact_retry"),
           messages: [
             { role: "system", content: mainSystemPrompt(classification, config) },
-            ...memorySummaryMessages(memorySummary),
+            ...memory,
             {
               role: "user",
               content: safeJsonStringify({
@@ -5694,7 +5821,7 @@ function uniqueByUrl(sources) {
   });
 }
 
-function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, classification, result, trace, config, openRouterCalls = [] }) {
+function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, classification, result, trace, config, openRouterCalls = [], memoryWrite = null }) {
   const toolCalls = result.toolCalls || [];
   const hybridCall = toolCalls.find((call) => call.toolName === "hybrid_search");
   const graphCall = toolCalls.find((call) => call.toolName === "graph_search");
@@ -5736,15 +5863,23 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
       session_id: saved.session_id
     }, {
       messages_loaded: memory.length,
-      summary: memorySummary,
-      preview: memory.slice(-4)
+      has_summary: Boolean(memorySummary?.last_intent || memorySummary?.active_topics?.length)
+    }),
+    workflowNode("memory_write", "Memory Maintenance", "memory", memoryWrite?.errors?.length ? "error" : "done", {
+      session_id: saved.session_id
+    }, {
+      mode: memoryWrite?.mode || "disabled",
+      learned_items: memoryWrite?.learned || 0,
+      rejected_items: memoryWrite?.rejected || 0,
+      turn_count: memoryWrite?.turnCount || 0,
+      degraded: Boolean(memoryWrite?.errors?.length)
     }),
     workflowNode("switch", "Traffic Switch", "router", "done", classification, {
-      route: isChat ? "Lite Agent" : "Main RAG Agent"
+      route: result.memoryAction ? "Memory Action" : isChat ? "Lite Agent" : "Main RAG Agent"
     })
   ];
 
-  if (isChat) {
+  if (isChat && !result.memoryAction) {
     nodes.push(
       workflowNode("lite_agent", "Lite Agent", "ai", "done", {
         message: sanitized,

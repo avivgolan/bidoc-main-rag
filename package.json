@@ -13,6 +13,8 @@
     "test": "node test/run-tests.js",
     "test:data-query": "node test/run-tests.js --filter \"^data query\"",
     "test:schedule": "node test/schedule-engine.test.js",
+    "test:memory:smoke": "node scripts/smoke-chat-memory.mjs",
+    "logs:memory": "node scripts/read-memory-log.mjs",
     "test:ui": "playwright test",
     "test:ui:headed": "playwright test --headed",
     "test:ui:debug": "playwright test --debug"
