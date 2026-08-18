@@ -103,7 +103,7 @@ async function readJsonResponse(response, code) {
   }
 }
 
-async function workspaceRequest({
+export async function workspaceRequest({
   config,
   path,
   method = "POST",
@@ -138,7 +138,7 @@ async function workspaceRequest({
   return { response, data: await readJsonResponse(response, responseCode) };
 }
 
-async function workspaceRpc({ config, rpc, payload = {}, fetchImpl = fetch, timeoutMs }) {
+export async function workspaceRpc({ config, rpc, payload = {}, fetchImpl = fetch, timeoutMs }) {
   const { response, data: raw } = await workspaceRequest({
     config,
     path: `/rest/v1/rpc/${encodeURIComponent(rpc)}`,
@@ -289,7 +289,7 @@ async function readStorageObjectBounded(response, maxBytes = CONTRACTS_MAX_PDF_B
   throw workspaceError("contracts_workspace_storage_object_mismatch", "The existing Contracts Storage object could not be verified.", 409);
 }
 
-async function verifyExistingStorageObject({
+export async function verifyExistingStorageObject({
   config,
   storageBucket,
   storageObjectKey,

@@ -7138,6 +7138,48 @@ test("chatCompletion exposes provider capacity metadata without leaking it into 
   }
 });
 
+test("chatCompletion unwraps bounded provider metadata for actionable diagnostics", async () => {
+  const previousFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: false,
+    status: 400,
+    json: async () => ({
+      error: {
+        message: "Provider returned error",
+        code: 400,
+        metadata: {
+          provider_name: "Google AI Studio",
+          raw: JSON.stringify({
+            error: {
+              code: 400,
+              message: "The specified schema produces too many states for serving.",
+              status: "INVALID_ARGUMENT"
+            }
+          })
+        }
+      }
+    })
+  });
+  try {
+    await assert.rejects(
+      () => chatCompletion({
+        apiKey: "sk-test",
+        model: "openai/gpt-4o",
+        messages: [{ role: "user", content: "hello" }]
+      }),
+      (error) => {
+        assert.equal(error.message, "The specified schema produces too many states for serving.");
+        assert.equal(error.httpStatus, 400);
+        assert.equal(error.providerName, "Google AI Studio");
+        assert.equal(error.providerCode, "INVALID_ARGUMENT");
+        return true;
+      }
+    );
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("main synthesis credit failures use one compact lower-cost retry policy", () => {
   const policy = mainSynthesisRetryPolicy(Object.assign(
     new Error("This request requires more credits, but can only afford 1,581 tokens"),

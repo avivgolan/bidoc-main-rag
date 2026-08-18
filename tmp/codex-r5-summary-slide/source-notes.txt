@@ -1,0 +1,7 @@
+Communication job: By the end, the BIDoc project team should understand that the two contract agents now deliver a persisted, reviewable pipeline and a controlled handoff, while operational scheduling remains owned by the future Indicator agent.
+
+Narrative: completed capability -> two agents -> verified handoff boundary.
+
+Visual route: Codex Grid slide 09, preserving its title, intro, and three-callout hierarchy.
+
+Claims are based only on the retained workspace, local verification, and the R5 checkpoint. No deployment or production-readiness claim is made.

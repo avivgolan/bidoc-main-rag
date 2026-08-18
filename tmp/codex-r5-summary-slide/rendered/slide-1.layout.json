@@ -1,0 +1,1776 @@
+{
+  "schema": "openai.presentation.layout/v4",
+  "unit": "px",
+  "slide": {
+    "aid": "sl/2l0kg3",
+    "id": "2l0kg3",
+    "slide": 1,
+    "layoutId": "dfd1a4a8-d42d-4f43-9239-b0c9af5a528a",
+    "layoutName": "Title Slide",
+    "layoutType": "title",
+    "masterLayoutId": "cd338d20-7b31-4368-8875-95b2238010ba",
+    "masterLayoutName": "Master",
+    "frame": {
+      "left": 0,
+      "top": 0,
+      "width": 1280,
+      "height": 720
+    }
+  },
+  "theme": {
+    "colorSchemeName": "ChatGPT",
+    "colors": {
+      "accent1": "#156082",
+      "accent2": "#E97132",
+      "accent3": "#196B24",
+      "accent4": "#0F9ED5",
+      "accent5": "#A02B93",
+      "accent6": "#4EA72E",
+      "bg1": "#FFFFFF",
+      "bg2": "#000000",
+      "tx1": "#1F1F1F",
+      "tx2": "#FFFFFF",
+      "dk1": "#000000",
+      "lt1": "#FFFFFF",
+      "dk2": "#0E2841",
+      "lt2": "#E8E8E8",
+      "hlink": "#467886",
+      "folHlink": "#96607D"
+    },
+    "typefaces": [
+      "Arial"
+    ]
+  },
+  "inheritedLayers": [
+    {
+      "scope": "layout",
+      "id": "dfd1a4a8-d42d-4f43-9239-b0c9af5a528a",
+      "name": "Title Slide",
+      "type": "title",
+      "parentLayoutId": "cd338d20-7b31-4368-8875-95b2238010ba",
+      "elements": []
+    },
+    {
+      "scope": "master",
+      "id": "cd338d20-7b31-4368-8875-95b2238010ba",
+      "name": "Master",
+      "type": "master",
+      "elements": []
+    }
+  ],
+  "elements": [
+    {
+      "order": 1,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/18bmhwry",
+      "id": "1",
+      "name": "footer",
+      "bbox": [
+        1110,
+        659,
+        129,
+        25
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.0"
+      },
+      "geometry": "rect",
+      "text": "BIDOC • 2026",
+      "textPreview": "BIDOC • 2026",
+      "resolvedFontSize": 13,
+      "resolvedTextStyle": {
+        "anchor": 3,
+        "fontSize": 13,
+        "typeface": "Arial",
+        "color": "#000000",
+        "alignment": "right",
+        "verticalAlignment": "bottom",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "BIDOC • 2026"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "BIDOC • 2026",
+          "resolvedTextStyle": {
+            "anchor": 3,
+            "fontSize": 13,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "right",
+            "verticalAlignment": "bottom",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "BIDOC • 2026",
+              "anchor": 3,
+              "fontSize": 13,
+              "typeface": "Arial",
+              "color": "#000000",
+              "alignment": "right",
+              "verticalAlignment": "bottom",
+              "autoFit": "none",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 2,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/e5k36hs7",
+      "id": "2",
+      "name": "slide-title",
+      "bbox": [
+        41,
+        36,
+        1198,
+        94
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.1"
+      },
+      "geometry": "rect",
+      "text": "Completed: Contract Intelligence from PDF to Indicator Handoff",
+      "textPreview": "Completed: Contract Intelligence from PDF to Indicator Handoff",
+      "resolvedFontSize": 39,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 39,
+        "typeface": "Arial",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "Completed: Contract Intelligence from PDF to Indicator Handoff"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "Completed: Contract Intelligence from PDF to Indicator Handoff",
+          "lineSpacingPercent": 93000,
+          "spaceAfter": 0,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 39,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Completed: Contract Intelligence from PDF to Indicator Handoff",
+              "fontSize": 39,
+              "typeface": "Arial",
+              "color": "#000000",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 3,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/f6t4fm9s",
+      "id": "3",
+      "name": "summary-intro",
+      "bbox": [
+        41,
+        143,
+        1198,
+        180
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.2"
+      },
+      "geometry": "rect",
+      "text": "BIDOC | CONTRACTS PIPELINE COMPLETE\nThe Contracts Agent and Contract Relationships Agent now convert a contract into traceable clauses, reviewed relationships, normalized decisions and a safe, zero-write handoff.\nEvidence is persisted in KAPAIM and reloads without reprocessing.",
+      "textPreview": "BIDOC | CONTRACTS PIPELINE COMPLETE | The Contracts Agent and Contract Relationships Agent now convert a contract into traceable clauses,...",
+      "resolvedFontSize": 20,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 20,
+        "typeface": "Arial",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 4,
+        "lines": [
+          {
+            "index": 1,
+            "text": "BIDOC | CONTRACTS PIPELINE COMPLETE"
+          },
+          {
+            "index": 2,
+            "text": "The Contracts Agent and Contract Relationships Agent now convert a contract into traceable clauses, reviewed relationships,"
+          },
+          {
+            "index": 3,
+            "text": "normalized decisions and a safe, zero-write handoff."
+          },
+          {
+            "index": 4,
+            "text": "Evidence is persisted in KAPAIM and reloads without reprocessing."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "BIDOC | CONTRACTS PIPELINE COMPLETE",
+          "lineSpacingPercent": 108000,
+          "spaceAfter": 650,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 20,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "BIDOC | CONTRACTS PIPELINE COMPLETE",
+              "fontSize": 18,
+              "typeface": "Arial",
+              "color": "#3D8DFF",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "The Contracts Agent and Contract Relationships Agent now convert a contract into traceable clauses, reviewed relationships, normalized decisions and a safe, zero-write handoff.",
+          "lineSpacingPercent": 112000,
+          "spaceAfter": 450,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 20,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "The Contracts Agent and Contract Relationships Agent now convert a contract into traceable clauses, reviewed relationships, normalized decisions and a safe, zero-write handoff.",
+              "fontSize": 20,
+              "typeface": "Arial",
+              "color": "#000000"
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 3,
+          "text": "Evidence is persisted in KAPAIM and reloads without reprocessing.",
+          "lineSpacingPercent": 112000,
+          "spaceAfter": 0,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 20,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Evidence is persisted in KAPAIM and reloads without reprocessing.",
+              "fontSize": 20,
+              "typeface": "Arial",
+              "color": "#000000",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 4,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/obmlcrqp",
+      "id": "4",
+      "name": "callout-card-1",
+      "bbox": [
+        41,
+        353,
+        375,
+        276
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.3"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#F2F2F2"
+    },
+    {
+      "order": 5,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/pcvmlwru",
+      "id": "5",
+      "name": "check-1",
+      "bbox": [
+        73,
+        381,
+        30,
+        34
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.4"
+      },
+      "geometry": "rect",
+      "text": "✓",
+      "textPreview": "✓",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "anchor": 2,
+        "fontSize": 25,
+        "typeface": "Arial",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "middle",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "✓"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "✓",
+          "resolvedTextStyle": {
+            "anchor": 2,
+            "fontSize": 25,
+            "typeface": "Arial",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "verticalAlignment": "middle",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "✓",
+              "anchor": 2,
+              "fontSize": 25,
+              "typeface": "Arial",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "verticalAlignment": "middle",
+              "autoFit": "none",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 6,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/2943a18j",
+      "id": "6",
+      "name": "callout-copy-1",
+      "bbox": [
+        74,
+        433,
+        310,
+        166
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.5"
+      },
+      "geometry": "rect",
+      "text": "1. Contracts Agent\nParsed 743 source lines into 189 grounded records, with Hebrew summaries, controlled tags, exact evidence and durable reuse.",
+      "textPreview": "1. Contracts Agent | Parsed 743 source lines into 189 grounded records, with Hebrew summaries, controlled tags, exact evidence and durabl...",
+      "resolvedFontSize": 17,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17,
+        "typeface": "Arial",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 5,
+        "lines": [
+          {
+            "index": 1,
+            "text": "1. Contracts Agent"
+          },
+          {
+            "index": 2,
+            "text": "Parsed 743 source lines into 189"
+          },
+          {
+            "index": 3,
+            "text": "grounded records, with Hebrew"
+          },
+          {
+            "index": 4,
+            "text": "summaries, controlled tags, exact"
+          },
+          {
+            "index": 5,
+            "text": "evidence and durable reuse."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "1. Contracts Agent",
+          "lineSpacingPercent": 108000,
+          "spaceAfter": 700,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 17,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "1. Contracts Agent",
+              "fontSize": 24,
+              "typeface": "Arial",
+              "color": "#000000",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "Parsed 743 source lines into 189 grounded records, with Hebrew summaries, controlled tags, exact evidence and durable reuse.",
+          "lineSpacingPercent": 112000,
+          "spaceAfter": 0,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 17,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Parsed 743 source lines into 189 grounded records, with Hebrew summaries, controlled tags, exact evidence and durable reuse.",
+              "fontSize": 17,
+              "typeface": "Arial",
+              "color": "#000000"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 7,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/nad4j694",
+      "id": "7",
+      "name": "callout-card-2",
+      "bbox": [
+        453,
+        353,
+        375,
+        276
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.6"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#F2F2F2"
+    },
+    {
+      "order": 8,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/4fil07a5",
+      "id": "8",
+      "name": "check-2",
+      "bbox": [
+        485,
+        381,
+        30,
+        34
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.7"
+      },
+      "geometry": "rect",
+      "text": "✓",
+      "textPreview": "✓",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "anchor": 2,
+        "fontSize": 25,
+        "typeface": "Arial",
+        "color": "#000000",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "middle",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "✓"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "✓",
+          "resolvedTextStyle": {
+            "anchor": 2,
+            "fontSize": 25,
+            "typeface": "Arial",
+            "color": "#000000",
+            "bold": true,
+            "alignment": "left",
+            "verticalAlignment": "middle",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "✓",
+              "anchor": 2,
+              "fontSize": 25,
+              "typeface": "Arial",
+              "color": "#000000",
+              "bold": true,
+              "alignment": "left",
+              "verticalAlignment": "middle",
+              "autoFit": "none",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 9,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/5gr29crq",
+      "id": "9",
+      "name": "callout-copy-2",
+      "bbox": [
+        486,
+        433,
+        310,
+        166
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.8"
+      },
+      "geometry": "rect",
+      "text": "2. Relationships & Decisions\nConnected clauses, surfaced conflicts and references, and produced 137 current decisions with human review and split/merge lineage.",
+      "textPreview": "2. Relationships & Decisions | Connected clauses, surfaced conflicts and references, and produced 137 current decisions with human review...",
+      "resolvedFontSize": 17,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17,
+        "typeface": "Arial",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 6,
+        "lines": [
+          {
+            "index": 1,
+            "text": "2. Relationships &"
+          },
+          {
+            "index": 2,
+            "text": "Decisions"
+          },
+          {
+            "index": 3,
+            "text": "Connected clauses, surfaced conflicts"
+          },
+          {
+            "index": 4,
+            "text": "and references, and produced 137"
+          },
+          {
+            "index": 5,
+            "text": "current decisions with human review and"
+          },
+          {
+            "index": 6,
+            "text": "split/merge lineage."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "2. Relationships & Decisions",
+          "lineSpacingPercent": 108000,
+          "spaceAfter": 700,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 17,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "2. Relationships & Decisions",
+              "fontSize": 24,
+              "typeface": "Arial",
+              "color": "#000000",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "Connected clauses, surfaced conflicts and references, and produced 137 current decisions with human review and split/merge lineage.",
+          "lineSpacingPercent": 112000,
+          "spaceAfter": 0,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 17,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Connected clauses, surfaced conflicts and references, and produced 137 current decisions with human review and split/merge lineage.",
+              "fontSize": 17,
+              "typeface": "Arial",
+              "color": "#000000"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 10,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/dc7a1obi",
+      "id": "10",
+      "name": "callout-card-3",
+      "bbox": [
+        864,
+        353,
+        375,
+        276
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.9"
+      },
+      "geometry": "roundRect",
+      "fillColor": "#EAF5FC"
+    },
+    {
+      "order": 11,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/cbyt8jax",
+      "id": "11",
+      "name": "check-3",
+      "bbox": [
+        896,
+        381,
+        30,
+        34
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.10"
+      },
+      "geometry": "rect",
+      "text": "✓",
+      "textPreview": "✓",
+      "resolvedFontSize": 25,
+      "resolvedTextStyle": {
+        "anchor": 2,
+        "fontSize": 25,
+        "typeface": "Arial",
+        "color": "#3D8DFF",
+        "bold": true,
+        "alignment": "left",
+        "verticalAlignment": "middle",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 1,
+        "lines": [
+          {
+            "index": 1,
+            "text": "✓"
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "✓",
+          "resolvedTextStyle": {
+            "anchor": 2,
+            "fontSize": 25,
+            "typeface": "Arial",
+            "color": "#3D8DFF",
+            "bold": true,
+            "alignment": "left",
+            "verticalAlignment": "middle",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "✓",
+              "anchor": 2,
+              "fontSize": 25,
+              "typeface": "Arial",
+              "color": "#3D8DFF",
+              "bold": true,
+              "alignment": "left",
+              "verticalAlignment": "middle",
+              "autoFit": "none",
+              "insets": {
+                "top": 0,
+                "right": 0,
+                "bottom": 0,
+                "left": 0
+              }
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    },
+    {
+      "order": 12,
+      "kind": "shape",
+      "scope": "slide",
+      "aid": "sh/bapszetc",
+      "id": "12",
+      "name": "callout-copy-3",
+      "bbox": [
+        897,
+        433,
+        310,
+        166
+      ],
+      "composeSource": {
+        "run": 1,
+        "path": "0.11"
+      },
+      "geometry": "rect",
+      "text": "3. Indicator Handoff\nClassified 40 suitable, 24 unsuitable and 73 for review. The future Indicator agent owns placement, dates and Schedule writes.",
+      "textPreview": "3. Indicator Handoff | Classified 40 suitable, 24 unsuitable and 73 for review. The future Indicator agent owns placement, dates and Sche...",
+      "resolvedFontSize": 17,
+      "resolvedTextStyle": {
+        "anchor": 1,
+        "fontSize": 17,
+        "typeface": "Arial",
+        "color": "#000000",
+        "alignment": "left",
+        "verticalAlignment": "top",
+        "autoFit": "none",
+        "insets": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        }
+      },
+      "textLayout": {
+        "lineCount": 5,
+        "lines": [
+          {
+            "index": 1,
+            "text": "3. Indicator Handoff"
+          },
+          {
+            "index": 2,
+            "text": "Classified 40 suitable, 24 unsuitable and"
+          },
+          {
+            "index": 3,
+            "text": "73 for review. The future Indicator agent"
+          },
+          {
+            "index": 4,
+            "text": "owns placement, dates and Schedule"
+          },
+          {
+            "index": 5,
+            "text": "writes."
+          }
+        ]
+      },
+      "paragraphs": [
+        {
+          "index": 1,
+          "text": "3. Indicator Handoff",
+          "lineSpacingPercent": 108000,
+          "spaceAfter": 700,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 17,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "3. Indicator Handoff",
+              "fontSize": 24,
+              "typeface": "Arial",
+              "color": "#000000",
+              "bold": true
+            }
+          ],
+          "marginLeft": 0
+        },
+        {
+          "index": 2,
+          "text": "Classified 40 suitable, 24 unsuitable and 73 for review. The future Indicator agent owns placement, dates and Schedule writes.",
+          "lineSpacingPercent": 112000,
+          "spaceAfter": 0,
+          "resolvedTextStyle": {
+            "anchor": 1,
+            "fontSize": 17,
+            "typeface": "Arial",
+            "color": "#000000",
+            "alignment": "left",
+            "verticalAlignment": "top",
+            "autoFit": "none",
+            "insets": {
+              "top": 0,
+              "right": 0,
+              "bottom": 0,
+              "left": 0
+            }
+          },
+          "runs": [
+            {
+              "index": 1,
+              "text": "Classified 40 suitable, 24 unsuitable and 73 for review. The future Indicator agent owns placement, dates and Schedule writes.",
+              "fontSize": 17,
+              "typeface": "Arial",
+              "color": "#000000"
+            }
+          ],
+          "marginLeft": 0
+        }
+      ]
+    }
+  ],
+  "composeRuns": [
+    {
+      "index": 1,
+      "frame": {
+        "left": 0,
+        "top": 0,
+        "width": 1280,
+        "height": 720
+      },
+      "baseUnit": 1,
+      "root": {
+        "path": "0",
+        "kind": "layers",
+        "name": "codex-grid-summary",
+        "requestedSize": {
+          "width": {
+            "mode": "fill",
+            "value": 1
+          },
+          "height": {
+            "mode": "fill",
+            "value": 1
+          }
+        },
+        "intrinsicSize": {
+          "width": 1239,
+          "height": 684
+        },
+        "frame": {
+          "left": 0,
+          "top": 0,
+          "width": 1280,
+          "height": 720
+        },
+        "children": [
+          {
+            "path": "0.0",
+            "kind": "text",
+            "name": "footer",
+            "position": {
+              "left": 1110,
+              "top": 659
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 129
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 25
+              }
+            },
+            "intrinsicSize": {
+              "width": 129,
+              "height": 25
+            },
+            "frame": {
+              "left": 1110,
+              "top": 659,
+              "width": 129,
+              "height": 25
+            },
+            "snappedFrame": {
+              "left": 1110,
+              "top": 659,
+              "width": 129,
+              "height": 25
+            },
+            "children": [],
+            "text": "BIDOC • 2026",
+            "transform": "none",
+            "element": {
+              "aid": "sh/18bmhwry",
+              "id": "1",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.1",
+            "kind": "text",
+            "name": "slide-title",
+            "position": {
+              "left": 41,
+              "top": 36
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 1198
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 94
+              }
+            },
+            "intrinsicSize": {
+              "width": 1198,
+              "height": 94
+            },
+            "frame": {
+              "left": 41,
+              "top": 36,
+              "width": 1198,
+              "height": 94
+            },
+            "snappedFrame": {
+              "left": 41,
+              "top": 36,
+              "width": 1198,
+              "height": 94
+            },
+            "children": [],
+            "text": "Completed: Contract Intelligence from PDF to Indicator Handoff",
+            "transform": "none",
+            "element": {
+              "aid": "sh/e5k36hs7",
+              "id": "2",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.2",
+            "kind": "text",
+            "name": "summary-intro",
+            "position": {
+              "left": 41,
+              "top": 143
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 1198
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 180
+              }
+            },
+            "intrinsicSize": {
+              "width": 1198,
+              "height": 180
+            },
+            "frame": {
+              "left": 41,
+              "top": 143,
+              "width": 1198,
+              "height": 180
+            },
+            "snappedFrame": {
+              "left": 41,
+              "top": 143,
+              "width": 1198,
+              "height": 180
+            },
+            "children": [],
+            "text": "BIDOC | CONTRACTS PIPELINE COMPLETE\nThe Contracts Agent and Contract Relationships Agent now convert a contract into traceable clauses, reviewed relationships, normalized decisions and a safe, zero-write handoff.\nEvidence is persisted in KAPAIM and reloads without reprocessing.",
+            "transform": "none",
+            "element": {
+              "aid": "sh/f6t4fm9s",
+              "id": "3",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.3",
+            "kind": "shape",
+            "name": "callout-card-1",
+            "position": {
+              "left": 41,
+              "top": 353
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 375
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 276
+              }
+            },
+            "intrinsicSize": {
+              "width": 375,
+              "height": 276
+            },
+            "frame": {
+              "left": 41,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            },
+            "snappedFrame": {
+              "left": 41,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            },
+            "children": [],
+            "geometry": "roundRect",
+            "element": {
+              "aid": "sh/obmlcrqp",
+              "id": "4",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.4",
+            "kind": "text",
+            "name": "check-1",
+            "position": {
+              "left": 73,
+              "top": 381
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 30
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 34
+              }
+            },
+            "intrinsicSize": {
+              "width": 30,
+              "height": 34
+            },
+            "frame": {
+              "left": 73,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            },
+            "snappedFrame": {
+              "left": 73,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            },
+            "children": [],
+            "text": "✓",
+            "transform": "none",
+            "element": {
+              "aid": "sh/pcvmlwru",
+              "id": "5",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.5",
+            "kind": "text",
+            "name": "callout-copy-1",
+            "position": {
+              "left": 74,
+              "top": 433
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 310
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 166
+              }
+            },
+            "intrinsicSize": {
+              "width": 310,
+              "height": 166
+            },
+            "frame": {
+              "left": 74,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            },
+            "snappedFrame": {
+              "left": 74,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            },
+            "children": [],
+            "text": "1. Contracts Agent\nParsed 743 source lines into 189 grounded records, with Hebrew summaries, controlled tags, exact evidence and durable reuse.",
+            "transform": "none",
+            "element": {
+              "aid": "sh/2943a18j",
+              "id": "6",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.6",
+            "kind": "shape",
+            "name": "callout-card-2",
+            "position": {
+              "left": 453,
+              "top": 353
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 375
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 276
+              }
+            },
+            "intrinsicSize": {
+              "width": 375,
+              "height": 276
+            },
+            "frame": {
+              "left": 453,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            },
+            "snappedFrame": {
+              "left": 453,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            },
+            "children": [],
+            "geometry": "roundRect",
+            "element": {
+              "aid": "sh/nad4j694",
+              "id": "7",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.7",
+            "kind": "text",
+            "name": "check-2",
+            "position": {
+              "left": 485,
+              "top": 381
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 30
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 34
+              }
+            },
+            "intrinsicSize": {
+              "width": 30,
+              "height": 34
+            },
+            "frame": {
+              "left": 485,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            },
+            "snappedFrame": {
+              "left": 485,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            },
+            "children": [],
+            "text": "✓",
+            "transform": "none",
+            "element": {
+              "aid": "sh/4fil07a5",
+              "id": "8",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.8",
+            "kind": "text",
+            "name": "callout-copy-2",
+            "position": {
+              "left": 486,
+              "top": 433
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 310
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 166
+              }
+            },
+            "intrinsicSize": {
+              "width": 310,
+              "height": 166
+            },
+            "frame": {
+              "left": 486,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            },
+            "snappedFrame": {
+              "left": 486,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            },
+            "children": [],
+            "text": "2. Relationships & Decisions\nConnected clauses, surfaced conflicts and references, and produced 137 current decisions with human review and split/merge lineage.",
+            "transform": "none",
+            "element": {
+              "aid": "sh/5gr29crq",
+              "id": "9",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.9",
+            "kind": "shape",
+            "name": "callout-card-3",
+            "position": {
+              "left": 864,
+              "top": 353
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 375
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 276
+              }
+            },
+            "intrinsicSize": {
+              "width": 375,
+              "height": 276
+            },
+            "frame": {
+              "left": 864,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            },
+            "snappedFrame": {
+              "left": 864,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            },
+            "children": [],
+            "geometry": "roundRect",
+            "element": {
+              "aid": "sh/dc7a1obi",
+              "id": "10",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.10",
+            "kind": "text",
+            "name": "check-3",
+            "position": {
+              "left": 896,
+              "top": 381
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 30
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 34
+              }
+            },
+            "intrinsicSize": {
+              "width": 30,
+              "height": 34
+            },
+            "frame": {
+              "left": 896,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            },
+            "snappedFrame": {
+              "left": 896,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            },
+            "children": [],
+            "text": "✓",
+            "transform": "none",
+            "element": {
+              "aid": "sh/cbyt8jax",
+              "id": "11",
+              "kind": "shape"
+            }
+          },
+          {
+            "path": "0.11",
+            "kind": "text",
+            "name": "callout-copy-3",
+            "position": {
+              "left": 897,
+              "top": 433
+            },
+            "requestedSize": {
+              "width": {
+                "mode": "fixed",
+                "value": 310
+              },
+              "height": {
+                "mode": "fixed",
+                "value": 166
+              }
+            },
+            "intrinsicSize": {
+              "width": 310,
+              "height": 166
+            },
+            "frame": {
+              "left": 897,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            },
+            "snappedFrame": {
+              "left": 897,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            },
+            "children": [],
+            "text": "3. Indicator Handoff\nClassified 40 suitable, 24 unsuitable and 73 for review. The future Indicator agent owns placement, dates and Schedule writes.",
+            "transform": "none",
+            "element": {
+              "aid": "sh/bapszetc",
+              "id": "12",
+              "kind": "shape"
+            }
+          }
+        ],
+        "padding": {
+          "top": 0,
+          "right": 0,
+          "bottom": 0,
+          "left": 0
+        },
+        "alignItems": "stretch",
+        "justifyItems": "stretch",
+        "contentFrame": {
+          "left": 0,
+          "top": 0,
+          "width": 1280,
+          "height": 720
+        },
+        "items": [
+          {
+            "path": "0.0",
+            "frame": {
+              "left": 1110,
+              "top": 659,
+              "width": 129,
+              "height": 25
+            }
+          },
+          {
+            "path": "0.1",
+            "frame": {
+              "left": 41,
+              "top": 36,
+              "width": 1198,
+              "height": 94
+            }
+          },
+          {
+            "path": "0.2",
+            "frame": {
+              "left": 41,
+              "top": 143,
+              "width": 1198,
+              "height": 180
+            }
+          },
+          {
+            "path": "0.3",
+            "frame": {
+              "left": 41,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            }
+          },
+          {
+            "path": "0.4",
+            "frame": {
+              "left": 73,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            }
+          },
+          {
+            "path": "0.5",
+            "frame": {
+              "left": 74,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            }
+          },
+          {
+            "path": "0.6",
+            "frame": {
+              "left": 453,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            }
+          },
+          {
+            "path": "0.7",
+            "frame": {
+              "left": 485,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            }
+          },
+          {
+            "path": "0.8",
+            "frame": {
+              "left": 486,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            }
+          },
+          {
+            "path": "0.9",
+            "frame": {
+              "left": 864,
+              "top": 353,
+              "width": 375,
+              "height": 276
+            }
+          },
+          {
+            "path": "0.10",
+            "frame": {
+              "left": 896,
+              "top": 381,
+              "width": 30,
+              "height": 34
+            }
+          },
+          {
+            "path": "0.11",
+            "frame": {
+              "left": 897,
+              "top": 433,
+              "width": 310,
+              "height": 166
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

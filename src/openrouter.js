@@ -18,6 +18,7 @@ export async function chatCompletion({
   frequencyPenalty = 0,
   presencePenalty = 0,
   seed = null,
+  reasoning = null,
   responseFormat = null,
   telemetry = null,
   signal = null
@@ -63,6 +64,7 @@ export async function chatCompletion({
         frequency_penalty: frequencyPenalty,
         presence_penalty: presencePenalty,
         seed,
+        reasoning,
         response_format: responseFormat
       }))
     });
@@ -73,10 +75,12 @@ export async function chatCompletion({
       throw error;
     });
     if (!response.ok) {
-      const providerMessage = data?.error?.message || `OpenRouter request failed: ${response.status}`;
-      const providerError = new Error(providerMessage);
+      const providerDetails = extractProviderErrorDetails(data, response.status);
+      const providerError = new Error(providerDetails.message);
       providerError.httpStatus = response.status;
-      const affordableMatch = String(providerMessage).match(/can\s+only\s+afford\s+([\d,]+)(?:\s+tokens?)?/i);
+      providerError.providerName = providerDetails.providerName;
+      providerError.providerCode = providerDetails.providerCode;
+      const affordableMatch = String(providerDetails.message).match(/can\s+only\s+afford\s+([\d,]+)(?:\s+tokens?)?/i);
       if (affordableMatch) {
         providerError.affordableMaxTokens = Number(affordableMatch[1].replaceAll(",", ""));
       }
@@ -245,6 +249,30 @@ export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, 
 
 function omitNullish(value = {}) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== ""));
+}
+
+function extractProviderErrorDetails(data, status) {
+  const outer = data?.error && typeof data.error === "object" ? data.error : {};
+  const metadata = outer?.metadata && typeof outer.metadata === "object" ? outer.metadata : {};
+  let nested = {};
+  if (typeof metadata.raw === "string" && metadata.raw.length <= 20_000) {
+    try {
+      const parsed = JSON.parse(metadata.raw);
+      nested = parsed?.error && typeof parsed.error === "object" ? parsed.error : {};
+    } catch {
+      nested = {};
+    }
+  }
+  const outerMessage = String(outer.message || "").trim();
+  const nestedMessage = String(nested.message || "").trim();
+  const message = nestedMessage
+    || outerMessage
+    || `OpenRouter request failed: ${status}`;
+  return {
+    message: message.slice(0, 2_000),
+    providerName: String(metadata.provider_name || "").trim().slice(0, 200) || null,
+    providerCode: String(nested.status || nested.code || outer.code || "").trim().slice(0, 200) || null
+  };
 }
 
 function extractResultText(row) {

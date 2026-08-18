@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { Readable } from "node:stream";
 import Ajv2020 from "ajv/dist/2020.js";
@@ -77,6 +78,118 @@ import {
   storageDispositionLabel
 } from "../src/react/contractsHebrew.js";
 import { segmentContractPages } from "../src/contracts/segmenter.js";
+import {
+  CONTRACTS_CLAUSE_PARSER_POLICY_VERSION,
+  buildContractsClauseGeneration,
+  buildContractsClausePayloads,
+  buildContractsClauseWorkspacePayload,
+  createContractsClauseParserGeneration,
+  runContractsClauseParser
+} from "../src/contracts/clauseParser.js";
+import {
+  CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+  CONTRACTS_CLAUSE_ENRICHMENT_POLICY_VERSION,
+  buildContractsClauseEnrichmentRpcPayload,
+  buildContractsClauseIndexRecord,
+  buildContractsClauseIndexRef,
+  extractExplicitCrossReferences,
+  runContractsClauseEnrichment
+} from "../src/contracts/clauseEnrichment.js";
+import { projectContractsClausePreview } from "../src/contracts/clausePreview.js";
+import {
+  CONTRACTS_CLAUSE_PRESENTATION_VERSION,
+  CONTRACTS_RELATIONSHIPS_INPUT_BOUNDARY_VERSION,
+  contractsReferenceTargetLabelHe,
+  contractsTagLabelHe,
+  decorateContractsClauseRecords,
+  selectContractsRelationshipEligibleClauses
+} from "../src/contracts/clausePresentation.js";
+import {
+  CONTRACTS_CLAUSE_PERSISTENCE_MIGRATION_VERSION,
+  CONTRACTS_CLAUSE_PERSISTENCE_VERSION,
+  contractsClausePersistenceApproved,
+  contractsClausePersistenceIdentity,
+  parseContractsClauseWorkspaceListRequest,
+  runContractsClausePersistence
+} from "../src/contracts/clausePersistence.js";
+import {
+  CONTRACTS_RELATIONSHIPS_AGENT_VERSION,
+  CONTRACTS_RELATIONSHIP_POLICY_VERSION,
+  buildContractsExplicitReferencePreview,
+  contractsRelationshipOriginLabelHe,
+  contractsRelationshipReviewLabelHe,
+  contractsRelationshipTypeLabelHe
+} from "../src/contracts/relationshipProposals.js";
+import {
+  CONTRACTS_RELATIONSHIPS_MIGRATION_VERSION,
+  contractsRelationshipsApproved,
+  persistContractsExplicitRelationships
+} from "../src/contracts/relationshipPersistence.js";
+import {
+  CONTRACTS_RELATIONSHIPS_R4_1_AGENT_VERSION,
+  CONTRACTS_RELATIONSHIPS_R4_1_MODEL_SCHEMA_VERSION,
+  CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION,
+  buildContractsSemanticRelationshipCandidates,
+  runContractsSemanticRelationshipPreview
+} from "../src/contracts/semanticRelationships.js";
+import {
+  contractsSemanticRelationshipsApproved,
+  loadContractsSemanticRelationshipsStatus,
+  parseContractsSemanticRelationshipRequest,
+  previewContractsSemanticRelationships
+} from "../src/contracts/semanticRelationshipService.js";
+import {
+  CONTRACTS_RELATIONSHIP_REVIEW_AGENT_VERSION,
+  CONTRACTS_RELATIONSHIP_REVIEW_MIGRATION_VERSION,
+  contractsRelationshipReviewApproved,
+  loadContractsRelationshipReview,
+  parseContractsRelationshipReviewRequest,
+  persistContractsSemanticRelationshipProposals,
+  reviewContractsSemanticRelationship
+} from "../src/contracts/semanticRelationshipReview.js";
+import {
+  CONTRACTS_DECISIONS_R4_2B_AGENT_VERSION,
+  CONTRACTS_DECISIONS_R4_2B_MODEL_SCHEMA_VERSION,
+  CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
+  CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
+  buildContractsDecisionCandidates,
+  runContractsDecisionNormalization
+} from "../src/contracts/decisionNormalization.js";
+import {
+  CONTRACTS_DECISION_REVIEW_MIGRATION_VERSION,
+  contractsDecisionReviewApproved,
+  parseContractsDecisionProposalRequest,
+  parseContractsDecisionReviewRequest,
+  persistContractsDecisionProposals,
+  reviewContractsDecision
+} from "../src/contracts/decisionReview.js";
+import {
+  CONTRACTS_DECISION_LINEAGE_AGENT_VERSION,
+  CONTRACTS_DECISION_LINEAGE_MIGRATION_VERSION,
+  CONTRACTS_DECISION_LINEAGE_POLICY_VERSION,
+  contractsDecisionLineageApproved,
+  parseContractsDecisionMergeRequest,
+  parseContractsDecisionSplitRequest,
+  splitContractsDecision
+} from "../src/contracts/decisionLineage.js";
+import {
+  CONTRACTS_INDICATOR_HANDOFF_AGENT_VERSION,
+  CONTRACTS_INDICATOR_HANDOFF_MIGRATION_VERSION,
+  CONTRACTS_INDICATOR_HANDOFF_POLICY_VERSION,
+  buildContractsIndicatorHandoff,
+  contractsIndicatorHandoffApproved,
+  loadContractsIndicatorHandoff
+} from "../src/contracts/indicatorHandoff.js";
+import {
+  CONTRACTS_SCHEDULE_PROJECTION_AGENT_VERSION,
+  CONTRACTS_SCHEDULE_PROJECTION_MIGRATION_VERSION,
+  CONTRACTS_SCHEDULE_PROJECTION_POLICY_VERSION,
+  CONTRACTS_SCHEDULE_PROJECTION_SOURCE_RPC,
+  contractsScheduleProjectionApproved,
+  loadContractsScheduleProjectionPreview,
+  loadContractsScheduleProjectionSourceMappings,
+  planReviewedScheduleProjection
+} from "../src/contracts/scheduleProjection.js";
 import { chatCompletion } from "../src/openrouter.js";
 import {
   CONTRACTS_EXTRACTION_BUDGET_MS,
@@ -270,6 +383,14 @@ export function registerContractsAgentTests(test) {
     assert.equal(
       contractsUiError({ code: "contracts_model_provider_timeout" }),
       "ספק הבינה המלאכותית לא השלים את החילוץ בזמן. לא נשמרה תוצאה חלקית; בניסיון הבא המערכת תשתמש מחדש רק בחלקים שכבר אומתו."
+    );
+    assert.equal(
+      contractsUiError({ code: "contracts_clause_enrichment_token_budget_exceeded" }),
+      "החוזה חרג מתקציב הפלט המוגדר להעשרת הסעיפים. לא נשמרה תוצאה חלקית."
+    );
+    assert.equal(
+      contractsUiError({ code: "contracts_semantic_relationships_provider_failed" }),
+      "ספק הבינה המלאכותית לא השלים את סיווג זוגות הסעיפים. לא נשמרה תוצאה חלקית; אפשר לנסות שוב."
     );
     assert.equal(contractActionLabel({ role: "unknown_role", action: "Unsafe raw English" }), "בדוק את העובדה החוזית מול הראיה המקורית");
     assert.equal(contractGateLabel("unknown_gate"), "נדרש בירור נוסף לפני קידום");
@@ -1979,6 +2100,666 @@ export function registerContractsAgentTests(test) {
     assert.deepEqual(draft.candidates, []);
   });
 
+  test("contracts R2 clause parser assembles complete logical clauses across pages", () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [
+        {
+          pdfPage: 1,
+          text: [
+            "סמל הקבלן",
+            "Contract preamble",
+            "1. General",
+            "1.1. First clause begins"
+          ].join("\n")
+        },
+        {
+          pdfPage: 2,
+          text: [
+            "סמל הקבלן",
+            "and continues on the next page.",
+            "1.2. Second clause"
+          ].join("\n")
+        },
+        {
+          pdfPage: 3,
+          text: [
+            "סמל הקבלן",
+            "נספח ב' - לוח זמנים",
+            "1. Appendix item"
+          ].join("\n")
+        }
+      ],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+
+    assert.equal(generation.coverageLedger.accepted, true);
+    assert.equal(generation.coverageLedger.pageCount, 3);
+    assert.equal(generation.coverageLedger.sourceLineCount, 10);
+    assert.equal(generation.coverageLedger.accountedSourceLineCount, 10);
+    assert.equal(generation.coverageLedger.numberedSourceCount, 4);
+    assert.equal(generation.coverageLedger.appendixItemCount, 1);
+    assert.deepEqual(generation.coverageLedger.duplicateKeys, []);
+    assert.deepEqual(generation.coverageLedger.unparsedNumberedLines, []);
+    assert.deepEqual(generation.coverageLedger.errors, []);
+    assert.deepEqual(generation.semanticDecisions, []);
+
+    const crossPage = generation.clauses.find((clause) => clause.clauseKey === "1.1");
+    assert.equal(crossPage.pageStart, 1);
+    assert.equal(crossPage.pageEnd, 2);
+    assert.equal(crossPage.rawData.segments.length, 2);
+    assert.equal(crossPage.rawData.segments[1].continuation, true);
+    assert.match(crossPage.rawText, /continues on the next page/u);
+    assert.equal(crossPage.parentClauseKey, "1");
+
+    const appendix = generation.clauses.find((clause) => clause.clauseKey === "appendix_b.1");
+    assert.equal(appendix.clauseType, "appendix_item");
+    assert.equal(appendix.parentClauseKey, "appendix_b.heading");
+  });
+
+  test("contracts R2 parser policy changes create immutable generation identity", () => {
+    const input = {
+      pages: [{ pdfPage: 1, text: "1. General\n1.1. Exact source text" }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    };
+    const first = buildContractsClauseGeneration(input);
+    const rerun = buildContractsClauseGeneration(input);
+    const changed = buildContractsClauseGeneration({
+      ...input,
+      parserPolicyVersion: `${CONTRACTS_CLAUSE_PARSER_POLICY_VERSION}.changed`
+    });
+
+    assert.equal(first.parserGenerationId, rerun.parserGenerationId);
+    assert.deepEqual(
+      first.clauses.map((clause) => [clause.clauseKey, clause.rawTextSha256]),
+      rerun.clauses.map((clause) => [clause.clauseKey, clause.rawTextSha256])
+    );
+    assert.notEqual(first.parserGenerationId, changed.parserGenerationId);
+    assert.deepEqual(
+      first.clauses.map((clause) => [clause.clauseKey, clause.rawTextSha256]),
+      changed.clauses.map((clause) => [clause.clauseKey, clause.rawTextSha256])
+    );
+    assert.match(createContractsClauseParserGeneration().parserGenerationId, /^parser-generation:sha256:[0-9a-f]{64}$/u);
+  });
+
+  test("contracts R2 clause parser binds parsing identity to immutable PDF bytes", async () => {
+    const pdfBytes = Buffer.from("%PDF-r2-fixture", "utf8");
+    const parsed = await runContractsClauseParser({
+      pdfBytes,
+      readPdf: async () => ({
+        readerVersion: "fixture-reader.r2",
+        pageCount: 1,
+        unreadablePages: [],
+        pages: [{ pdfPage: 1, text: "1. General\n1.1. Exact source" }]
+      })
+    });
+    assert.equal(parsed.documentVersionId, `sha256:${parsed.documentSha256}`);
+    assert.equal(parsed.pdfReaderVersion, "fixture-reader.r2");
+    assert.equal(parsed.pageCount, 1);
+    assert.deepEqual(parsed.unreadablePages, []);
+    await assert.rejects(
+      runContractsClauseParser({
+        pdfBytes,
+        expectedDocumentVersionId: `sha256:${"b".repeat(64)}`,
+        readPdf: async () => { throw new Error("must not read after identity mismatch"); }
+      }),
+      (error) => error.code === "contracts_clause_parser_document_version_mismatch"
+    );
+  });
+
+  test("contracts R2 persistence payloads contain only clause source truth", () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. General\n1.1. Exact source text" }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const workspace = buildContractsClauseWorkspacePayload({
+      generation,
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      filename: "fixture.pdf",
+      byteCount: 100,
+      storageBucket: "contracts-private",
+      storageObjectKey: `sha256/${FIXTURE_SHA}.pdf`,
+      createdBy: MAPPING_REVIEWER_ID,
+      extractorVersion: "fixture-reader.r2"
+    });
+    const clauses = buildContractsClausePayloads({
+      generation,
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      extractorVersion: "fixture-reader.r2"
+    });
+
+    assert.equal(workspace.scheduleProjectId, null);
+    assert.equal(workspace.promptVersion, "not_applicable");
+    assert.equal(workspace.extraction.coverageLedger.accepted, true);
+    assert.equal(clauses.length, generation.clauses.length);
+    assert.equal(clauses[0].parserGenerationId, generation.parserGenerationId);
+    assert.equal(clauses[0].rawTextSha256, generation.clauses[0].rawTextSha256);
+    assert.equal("decisionKey" in clauses[0], false);
+    assert.equal("scheduleProjectId" in clauses[0], false);
+  });
+
+  test("contracts R2 hard gates reject duplicate keys, missing parents, page gaps, and malformed numbering", () => {
+    const identity = {
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    };
+    assert.throws(
+      () => buildContractsClauseGeneration({
+        ...identity,
+        pages: [{ pdfPage: 1, text: "1. General\n1.1. First\n1.1. Duplicate" }]
+      }),
+      (error) => error.code === "contracts_clause_parser_coverage_failed"
+        && error.issueCodes.includes("coverage.duplicate_clause_key")
+    );
+    assert.throws(
+      () => buildContractsClauseGeneration({
+        ...identity,
+        pages: [{ pdfPage: 1, text: "1.1. Missing parent" }]
+      }),
+      (error) => error.code === "contracts_clause_parser_coverage_failed"
+        && error.issueCodes.includes("coverage.parent_clause_missing")
+    );
+    assert.throws(
+      () => buildContractsClauseGeneration({
+        ...identity,
+        pages: [{ pdfPage: 2, text: "1. Wrong first page" }]
+      }),
+      (error) => error.code === "contracts_clause_parser_page_gap"
+        && error.issueCodes.includes("clause_parser.page_gap")
+    );
+    assert.throws(
+      () => buildContractsClauseGeneration({
+        ...identity,
+        pages: [{ pdfPage: 1, text: "1.General without a boundary" }]
+      }),
+      (error) => error.code === "contracts_clause_parser_coverage_failed"
+        && error.issueCodes.includes("coverage.unparsed_numbered_line")
+    );
+    assert.throws(
+      () => buildContractsClauseGeneration({
+        ...identity,
+        pages: [{ pdfPage: 1, text: "1. General" }],
+        expectedParserGenerationId: `parser-generation:sha256:${"b".repeat(64)}`
+      }),
+      (error) => error.code === "contracts_clause_parser_generation_mismatch"
+    );
+  });
+
+  test("contracts R3 enriches every clause without changing immutable source truth", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [
+        { pdfPage: 1, text: "1. הוראות כלליות\n1.1. יש לפעול לפי סעיף 2.1 ולפי נספח ב סעיף 1." },
+        { pdfPage: 2, text: "2. ביצוע\n2.1. הקבלן יבצע את העבודה בהתאם להסכם.\nנספח ב - לוח\n1. פריט נספח" }
+      ],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const sourceHashes = generation.clauses.map((clause) => clause.rawTextSha256);
+    let calls = 0;
+    const enriched = await runContractsClauseEnrichment({
+      generation,
+      config: {
+        openRouterApiKey: "configured",
+        models: { main: "fixture/hebrew-enrichment" },
+        ai: { main: { maxTokens: 1600, timeoutMs: 30_000 } }
+      },
+      chatComplete: async ({ messages, reasoning, responseFormat }) => {
+        calls += 1;
+        assert.deepEqual(reasoning, { max_tokens: 128, exclude: true });
+        assert.equal(responseFormat.type, "json_schema");
+        assert.equal(responseFormat.json_schema.strict, true);
+        const providerSchema = responseFormat.json_schema.schema;
+        assert.equal(providerSchema.additionalProperties, false);
+        assert.equal(Object.hasOwn(providerSchema.properties.schemaVersion, "enum"), false);
+        assert.equal(Object.hasOwn(providerSchema.properties.items, "minItems"), false);
+        assert.equal(Object.hasOwn(providerSchema.properties.items, "maxItems"), false);
+        assert.equal(Object.hasOwn(providerSchema.properties.items.items.properties.clauseKey, "enum"), false);
+        assert.equal(Object.hasOwn(providerSchema.properties.items.items.properties.tags.items, "enum"), false);
+        const input = JSON.parse(messages[1].content);
+        assert.deepEqual(input.controlledTags, [...new Set(input.controlledTags)]);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף מתאר הוראות חוזיות המבוססות על הטקסט המקורי.",
+            tags: [clause.clauseType === "appendix_item" ? "appendix" : "scope"]
+          }))
+        });
+      }
+    });
+
+    assert.ok(calls >= 1);
+    assert.equal(enriched.qualityLedger.accepted, true);
+    assert.equal(enriched.qualityLedger.clauseCount, generation.clauses.length);
+    assert.equal(enriched.qualityLedger.summarizedClauseCount, generation.clauses.length);
+    assert.equal(enriched.qualityLedger.taggedClauseCount, generation.clauses.length);
+    assert.deepEqual(enriched.clauses.map((clause) => clause.rawTextSha256), sourceHashes);
+    assert.deepEqual(enriched.semanticDecisions, []);
+    assert.deepEqual(enriched.canonicalRelationships, []);
+
+    const referencingClause = enriched.clauses.find((clause) => clause.clauseKey === "1.1");
+    assert.deepEqual(
+      referencingClause.crossReferences.map((reference) => [reference.targetClauseKey, reference.resolution]),
+      [["2.1", "resolved"], ["appendix_b.1", "resolved"]]
+    );
+    assert.match(referencingClause.content, /טקסט מקורי:/u);
+    assert.match(referencingClause.contentSha256, /^[0-9a-f]{64}$/u);
+
+    const reused = await runContractsClauseEnrichment({
+      generation,
+      existingEnrichments: enriched.clauses,
+      config: { models: { main: "fixture/hebrew-enrichment" } },
+      chatComplete: async () => { throw new Error("same-generation rerun must not call the model"); }
+    });
+    assert.equal(reused.qualityLedger.modelBatchCount, 0);
+    assert.equal(reused.qualityLedger.modelEnrichedClauseCount, 0);
+    assert.equal(reused.qualityLedger.reusedClauseCount, generation.clauses.length);
+    assert.deepEqual(
+      reused.clauses.map((clause) => [clause.clauseKey, clause.contentSha256]),
+      enriched.clauses.map((clause) => [clause.clauseKey, clause.contentSha256])
+    );
+  });
+
+  test("contracts R3 keeps a 189-clause contract inside its dedicated output-token budget", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{
+        pdfPage: 1,
+        text: [
+          "1. הוראות חוזיות",
+          ...Array.from({ length: 98 }, (_, index) => `1.${index + 1}. הוראה חוזית כללית`),
+          "2. הוראות חוזיות נוספות",
+          ...Array.from({ length: 89 }, (_, index) => `2.${index + 1}. הוראה חוזית כללית`)
+        ].join("\n")
+      }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const providerLimits = [];
+    const enriched = await runContractsClauseEnrichment({
+      generation,
+      config: {
+        openRouterApiKey: "configured",
+        models: { main: "fixture/model" },
+        ai: { main: { maxTokens: 4096, timeoutMs: 60_000 } }
+      },
+      chatComplete: async ({ maxTokens, messages }) => {
+        providerLimits.push(maxTokens);
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף מתאר הוראה חוזית כללית.",
+            tags: ["scope"]
+          }))
+        });
+      }
+    });
+
+    assert.equal(generation.clauses.length, 189);
+    assert.equal(providerLimits.length, 24);
+    assert.ok(providerLimits.every((maxTokens) => maxTokens === 1600));
+    assert.equal(enriched.qualityLedger.accepted, true);
+    assert.equal(enriched.qualityLedger.clauseCount, 189);
+  });
+
+  test("contracts R3 retries one transient provider failure without widening its total budget", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. הוראות חוזיות כלליות" }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const warnings = [];
+    let calls = 0;
+    const enriched = await runContractsClauseEnrichment({
+      generation,
+      config: { openRouterApiKey: "configured", models: { main: "fixture/model" } },
+      logger: { warn: (...items) => warnings.push(items) },
+      chatComplete: async ({ messages, telemetry }) => {
+        calls += 1;
+        if (calls === 1) throw new TypeError("fetch failed");
+        assert.equal(telemetry.attempt, 2);
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף מתאר הוראות חוזיות כלליות.",
+            tags: ["scope"]
+          }))
+        });
+      }
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0][1].retrying, true);
+    assert.equal(warnings[0][1].batch, 1);
+    assert.equal(enriched.qualityLedger.accepted, true);
+  });
+
+  test("contracts R3 enrichment rejects unknown tags and removes ungrounded numeric facts", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. הוראות כלליות" }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const config = { openRouterApiKey: "configured", models: { main: "fixture/model" } };
+    await assert.rejects(
+      runContractsClauseEnrichment({
+        generation,
+        config,
+        chatComplete: async ({ messages }) => {
+          const input = JSON.parse(messages[1].content);
+          return JSON.stringify({
+            schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+            items: input.clauses.map((clause) => ({ clauseKey: clause.clauseKey, summaryHe: "תקציר חוזי תקין.", tags: ["invented_tag"] }))
+          });
+        }
+      }),
+      (error) => error.code === "contracts_clause_enrichment_tags_invalid"
+    );
+    const sanitized = await runContractsClauseEnrichment({
+      generation,
+      config,
+      chatComplete: async ({ messages }) => {
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({ clauseKey: clause.clauseKey, summaryHe: "הסעיף מחייב השלמה בתוך 99 ימים.", tags: ["completion"] }))
+        });
+      }
+    });
+    assert.equal(sanitized.qualityLedger.groundingSanitizationCount, 1);
+    assert.doesNotMatch(sanitized.clauses[0].summaryHe, /99/u);
+  });
+
+  test("contracts R3 repairs one bounded unknown tag without weakening the controlled vocabulary", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. הוראות כלליות לביצוע העבודה." }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    let calls = 0;
+    const enriched = await runContractsClauseEnrichment({
+      generation,
+      config: { openRouterApiKey: "configured", models: { main: "fixture/model" } },
+      chatComplete: async ({ messages }) => {
+        calls += 1;
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף קובע הוראות כלליות לביצוע העבודה.",
+            tags: calls === 1 ? ["invented_tag"] : ["scope", "scope"]
+          }))
+        });
+      }
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(enriched.qualityLedger.modelBatchCount, 1);
+    assert.equal(enriched.qualityLedger.modelRepairCount, 1);
+    assert.equal(enriched.qualityLedger.modelCallCount, 2);
+    assert.deepEqual(enriched.clauses[0].hashtags, ["scope"]);
+  });
+
+  test("contracts R3 deterministically sanitizes an ungrounded numeric summary without accepting the invented fact", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. הוראה כללית לביצוע העבודה." }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    let calls = 0;
+    const enriched = await runContractsClauseEnrichment({
+      generation,
+      config: { openRouterApiKey: "configured", models: { main: "fixture/model" } },
+      chatComplete: async ({ messages }) => {
+        calls += 1;
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף מחייב השלמה בתוך 99 ימים.",
+            tags: ["execution"]
+          }))
+        });
+      }
+    });
+
+    assert.equal(calls, 1);
+    assert.equal(enriched.qualityLedger.modelRepairCount, 0);
+    assert.equal(enriched.qualityLedger.groundingSanitizationCount, 1);
+    assert.doesNotMatch(enriched.clauses[0].summaryHe, /99/u);
+  });
+
+  test("contracts R3 builds shared-index and server-owned persistence payloads", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. הודעות\n1.1. ההודעה תימסר בכתב." }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const enriched = await runContractsClauseEnrichment({
+      generation,
+      config: { openRouterApiKey: "configured", models: { main: "fixture/model" } },
+      chatComplete: async ({ messages }) => {
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({ clauseKey: clause.clauseKey, summaryHe: "הסעיף מסדיר מסירת הודעה בכתב.", tags: ["notice"] }))
+        });
+      }
+    });
+    const clause = enriched.clauses.find((item) => item.clauseKey === "1.1");
+    const clauseId = "55555555-5555-4555-8555-555555555555";
+    const indexRecord = buildContractsClauseIndexRecord({
+      clause,
+      clauseId,
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID
+    });
+    const indexRef = buildContractsClauseIndexRef({
+      provider: "shared_data_index",
+      recordId: clauseId,
+      content: indexRecord.index_text,
+      metadata: { sourceTable: indexRecord.source_table }
+    });
+    const payload = buildContractsClauseEnrichmentRpcPayload({
+      clause,
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      indexRef
+    });
+
+    assert.equal(indexRecord.source_table, "contracts_documents");
+    assert.equal(indexRecord.source_id, clauseId);
+    assert.equal(indexRecord.metadata.enrichmentPolicyVersion, CONTRACTS_CLAUSE_ENRICHMENT_POLICY_VERSION);
+    assert.equal(indexRef.contentSha256, clause.contentSha256);
+    assert.equal(payload.rawTextSha256, clause.rawTextSha256);
+    assert.equal(payload.contentSha256, clause.contentSha256);
+    assert.equal(payload.indexRef.recordId, clauseId);
+    assert.equal("decisionKey" in payload, false);
+    assert.equal("scheduleProjectId" in payload, false);
+  });
+
+  test("contracts R3 explicit references remain observations rather than canonical relationships", () => {
+    const clause = {
+      clauseKey: "3.1",
+      clauseType: "subclause",
+      clauseOrder: 1,
+      pageStart: 4,
+      pageEnd: 4,
+      rawText: "הוראות סעיף 8.2 ונספח ג יחולו.",
+      rawTextSha256: "",
+      documentSha256: FIXTURE_SHA,
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      parserGenerationId: `parser-generation:sha256:${FIXTURE_SHA}`
+    };
+    clause.rawTextSha256 = crypto.createHash("sha256").update(clause.rawText).digest("hex");
+    const references = extractExplicitCrossReferences({ clause, knownClauseKeys: new Set(["8.2"]) });
+    assert.deepEqual(references.map((reference) => [reference.targetClauseKey, reference.resolution]), [
+      ["8.2", "resolved"],
+      ["appendix_c", "unresolved"]
+    ]);
+    assert.ok(references.every((reference) => !("confidence" in reference) && !("relationshipType" in reference)));
+  });
+
+  test("contracts R3 migration exposes only a short service-role enrichment RPC", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260815153955_contracts_pipeline_r3_clause_enrichment.sql", import.meta.url),
+      "utf8"
+    );
+    assert.match(migration, /create or replace function public\.bidoc_contracts_apply_clause_enrichment_r3\(p_payload jsonb\)/iu);
+    assert.match(migration, /security invoker/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.match(migration, /if current_user <> 'service_role'/iu);
+    assert.match(migration, /for update/iu);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.match(migration, /same-policy R3 rerun produced different enrichment/iu);
+    assert.match(migration, /set summary_he = v_summary_he,[\s\S]*processing_status = 'processed'/iu);
+    assert.doesNotMatch(migration, /set[\s\S]{0,120}(?:raw_text|raw_data|document_sha256|parser_generation_id)\s*=/iu);
+  });
+
+  test("contracts R3.1 preview projects complete clause evidence without decisions or persistence", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. מבוא\n1.1. הקבלן יבצע את העבודה בהתאם להסכם." }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const enrichment = await runContractsClauseEnrichment({
+      generation,
+      config: { openRouterApiKey: "configured", models: { main: "fixture/model" } },
+      chatComplete: async ({ messages }) => {
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף מתאר את חובת ביצוע העבודה בהתאם להסכם.",
+            tags: ["scope", "responsibility"]
+          }))
+        });
+      }
+    });
+    const preview = projectContractsClausePreview({
+      request: { filename: "contract.pdf", mediaType: "application/pdf" },
+      generation,
+      enrichment
+    });
+
+    assert.equal(preview.mode, "dry_run");
+    assert.equal(preview.persisted, false);
+    assert.equal(preview.coverage.sourceLineCount, preview.coverage.accountedSourceLineCount);
+    assert.equal(preview.quality.clauseCount, generation.clauses.length);
+    assert.equal(preview.clauses.length, generation.clauses.length);
+    assert.ok(preview.clauses.every((clause) => clause.rawText && clause.summaryHe && clause.hashtags.length));
+    assert.ok(preview.clauses.every((clause) => !Object.hasOwn(clause, "rawData")));
+    assert.equal(preview.presentationVersion, CONTRACTS_CLAUSE_PRESENTATION_VERSION);
+    assert.equal(preview.relationshipsInputBoundary.version, CONTRACTS_RELATIONSHIPS_INPUT_BOUNDARY_VERSION);
+    const heading = preview.clauses.find((clause) => clause.clauseKey === "1");
+    const operative = preview.clauses.find((clause) => clause.clauseKey === "1.1");
+    assert.equal(heading.structuralRole, "heading");
+    assert.equal(heading.relationshipEligible, false);
+    assert.equal(operative.structuralRole, "operative");
+    assert.equal(operative.relationshipEligible, true);
+    assert.deepEqual(operative.tagLabelsHe, ["תחולת העבודה", "אחריות"]);
+    assert.deepEqual(preview.relationshipsInputBoundary.eligibleClauseKeys, ["1.1"]);
+    assert.deepEqual(preview.semanticDecisions, []);
+    assert.deepEqual(preview.canonicalRelationships, []);
+  });
+
+  test("contracts R3.3 keeps stable machine tags while exposing locked Hebrew labels and a fail-closed relationship boundary", () => {
+    const records = decorateContractsClauseRecords([
+      {
+        clauseKey: "document.context.1",
+        parentClauseKey: null,
+        clauseType: "document_context",
+        clauseTitle: null,
+        rawText: "הסכם בין הצדדים.",
+        summaryHe: "הקשר כללי למסמך.",
+        hashtags: ["document_context", "parties"],
+        crossReferences: [],
+        pageStart: 1,
+        pageEnd: 1
+      },
+      {
+        clauseKey: "1",
+        parentClauseKey: null,
+        clauseType: "clause",
+        clauseTitle: "מבוא, נספחים וכותרות",
+        rawText: "1. מבוא, נספחים וכותרות",
+        summaryHe: "כותרת סעיף: מבוא, נספחים וכותרות.",
+        hashtags: ["other"],
+        crossReferences: [],
+        pageStart: 1,
+        pageEnd: 1
+      },
+      {
+        clauseKey: "1.1",
+        parentClauseKey: "1",
+        clauseType: "subclause",
+        clauseTitle: null,
+        rawText: "1.1. הקבלן יבצע את העבודה בהתאם להסכם.",
+        summaryHe: "הקבלן מחויב לבצע את העבודה בהתאם להסכם.",
+        hashtags: ["scope", "responsibility"],
+        crossReferences: [{ referenceText: "נספח א׳", targetClauseKey: "appendix_a.heading", resolution: "resolved" }],
+        pageStart: 1,
+        pageEnd: 1
+      },
+      {
+        clauseKey: "2.1",
+        parentClauseKey: "2",
+        clauseType: "subclause",
+        clauseTitle: null,
+        rawText: "2.1. בהסכם זה המונח קבלן משמעו המבצע.",
+        summaryHe: "הסעיף מגדיר את המונח קבלן.",
+        hashtags: ["definitions"],
+        crossReferences: [],
+        pageStart: 1,
+        pageEnd: 1
+      },
+      {
+        clauseKey: "3",
+        parentClauseKey: null,
+        clauseType: "clause",
+        clauseTitle: "הצהרות והתחייבויות הקבלן",
+        rawText: "3. הצהרות והתחייבויות הקבלן\nהקבלן מצהיר, מאשר ומתחייב בזה כדלקמן:",
+        summaryHe: "כותרת הסעיף: הצהרות והתחייבויות הקבלן.",
+        hashtags: ["document_context"],
+        crossReferences: [],
+        pageStart: 2,
+        pageEnd: 2
+      },
+      {
+        clauseKey: "3.1",
+        parentClauseKey: "3",
+        clauseType: "subclause",
+        clauseTitle: null,
+        rawText: "3.1. הקבלן מתחייב לבצע את השירותים במיומנות.",
+        summaryHe: "הקבלן מתחייב לבצע את השירותים במיומנות.",
+        hashtags: ["responsibility"],
+        crossReferences: [],
+        pageStart: 2,
+        pageEnd: 2
+      }
+    ]);
+
+    assert.deepEqual(records.map((record) => record.structuralRole), ["context", "heading", "operative", "definition", "heading", "operative"]);
+    assert.deepEqual(records[2].hashtags, ["scope", "responsibility"]);
+    assert.deepEqual(records[2].tagLabelsHe, ["תחולת העבודה", "אחריות"]);
+    assert.equal(records[2].crossReferences[0].targetLabelHe, "כותרת נספח א׳");
+    assert.equal(records[4].structuralLeadHe, "הקבלן מצהיר, מאשר ומתחייב בזה כדלקמן:");
+    assert.match(records[2].displayContentHe, /תגיות: תחולת העבודה · אחריות/u);
+    assert.doesNotMatch(records[2].displayContentHe, /scope|responsibility/u);
+    assert.deepEqual(selectContractsRelationshipEligibleClauses(records).map((record) => record.clauseKey), ["1.1", "3.1"]);
+    assert.equal(contractsTagLabelHe("other"), "אחר");
+    assert.equal(contractsReferenceTargetLabelHe("appendix_a.2"), "נספח א׳, סעיף 2");
+  });
+
   test("contracts model extraction reports a typed provider timeout after both bounded attempts fail", async () => {
     const models = [];
     await assert.rejects(
@@ -3314,6 +4095,2077 @@ export function registerContractsAgentTests(test) {
     assert.doesNotMatch(constants, /^import\s/m);
   });
 
+  test("contracts R3.1 preview route is authenticated, bounded, lazy, and no-write", () => {
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("Contracts Agent R3.1 acceptance preview"),
+      server.indexOf("Schedule Intelligence Service")
+    );
+    assert.match(route, /url\.pathname === ["']\/api\/contracts\/clauses\/preview["']/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /readJsonBounded\(req, CONTRACTS_MAX_JSON_BYTES\)/u);
+    assert.match(route, /await import\(["']\.\/contracts\/clausePreview\.js["']\)/u);
+    assert.match(route, /sendContractsJson\(res, 200, result\)/u);
+    assert.doesNotMatch(route, /supabaseHeaders|persistExtracted|submitContractPromotion|scheduleEngine|bidoc_contracts_/i);
+
+    const staticImports = server.split(/\r?\n/u).filter((line) => line.startsWith("import ")).join("\n");
+    assert.doesNotMatch(staticImports, /clausePreview|clauseParser|clauseEnrichment/u);
+    const loginWall = server.slice(
+      server.indexOf("if (!url.pathname.startsWith"),
+      server.indexOf('url.pathname === "/api/chat"')
+    );
+    assert.match(loginWall, /isContractsClausePreviewRoute/u);
+    assert.match(loginWall, /contracts_clause_preview_database_override_rejected/u);
+  });
+
+  test("contracts R3.2 persistence reuses a complete saved generation before parser or model work", async () => {
+    const identity = contractsClausePersistenceIdentity({ models: { main: "fixture/model" } });
+    const documentSha256 = crypto.createHash("sha256").update(Buffer.from("%PDF-fixture")).digest("hex");
+    const canonical = {
+      persistenceVersion: CONTRACTS_CLAUSE_PERSISTENCE_VERSION,
+      workspace: {
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        documentVersionId: `sha256:${documentSha256}`,
+        filename: "fixture.pdf",
+        clauseCount: 1
+      },
+      preview: {
+        previewVersion: "contracts-clause-preview.r3.1.v1",
+        mode: "persisted",
+        persisted: true,
+        document: { filename: "fixture.pdf", documentVersionId: `sha256:${documentSha256}` },
+        generations: {
+          parserGenerationId: identity.parser.parserGenerationId,
+          enrichmentGenerationId: identity.enrichment.enrichmentGenerationId
+        },
+        coverage: { accepted: true },
+        quality: { accepted: true },
+        clauses: [{ clauseKey: "1", rawText: "source", summaryHe: "תקציר תקין" }],
+        semanticDecisions: [],
+        canonicalRelationships: []
+      }
+    };
+    let parserCalls = 0;
+    let enrichmentCalls = 0;
+    let fetchCalls = 0;
+    const result = await runContractsClausePersistence({
+      body: {
+        filename: "fixture.pdf",
+        mediaType: "application/pdf",
+        pdfBase64: Buffer.from("%PDF-fixture").toString("base64"),
+        mode: "persist",
+        projectSelection: {
+          projectId: MAPPING_SOURCE_PROJECT_ID,
+          projectSite: "fixture",
+          selectedByUser: true
+        }
+      },
+      config: {
+        models: { main: "fixture/model" },
+        contentSource: { supabaseUrl: "https://fixture.supabase.co", supabaseServiceRoleKey: "service-role" }
+      },
+      reviewerId: MAPPING_REVIEWER_ID,
+      env: { CONTRACTS_CLAUSE_PERSISTENCE_APPROVED: "TRUE" },
+      fetchImpl: async (url) => {
+        fetchCalls += 1;
+        assert.match(String(url), /bidoc_contracts_find_clause_workspace_r3_2/u);
+        return new Response(JSON.stringify(canonical), { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+      parseClauses: async () => { parserCalls += 1; throw new Error("must not parse"); },
+      enrichClauses: async () => { enrichmentCalls += 1; throw new Error("must not enrich"); }
+    });
+    assert.equal(fetchCalls, 1);
+    assert.equal(parserCalls, 0);
+    assert.equal(enrichmentCalls, 0);
+    assert.equal(result.persisted, true);
+    assert.equal(result.reused, true);
+    assert.equal(result.modelAvoided, true);
+  });
+
+  test("contracts R3.2 activation, identity, and list bounds are fail closed", () => {
+    assert.equal(contractsClausePersistenceApproved({ CONTRACTS_CLAUSE_PERSISTENCE_APPROVED: "TRUE" }), true);
+    assert.equal(contractsClausePersistenceApproved({ CONTRACTS_CLAUSE_PERSISTENCE_APPROVED: "false" }), false);
+    assert.equal(CONTRACTS_CLAUSE_PERSISTENCE_MIGRATION_VERSION, "20260815180207");
+    assert.deepEqual(
+      contractsClausePersistenceIdentity({ models: { main: "fixture/model" } }),
+      contractsClausePersistenceIdentity({ models: { main: "fixture/model" } })
+    );
+    assert.equal(parseContractsClauseWorkspaceListRequest({ sourceProjectId: MAPPING_SOURCE_PROJECT_ID, limit: "100" }).limit, 100);
+    assert.throws(
+      () => parseContractsClauseWorkspaceListRequest({ sourceProjectId: MAPPING_SOURCE_PROJECT_ID, limit: "101" }),
+      (error) => error.code === "contracts_clause_persistence_request_invalid"
+    );
+  });
+
+  test("contracts R3.2 migration is atomic, private, bounded, and Schedule-independent", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260815180207_contracts_pipeline_r3_2_clause_persistence.sql", import.meta.url),
+      "utf8"
+    );
+    assert.match(migration, /bidoc_contracts_persist_clause_generation_r3_2\(/u);
+    assert.match(migration, /jsonb_array_length\(p_clauses\) not between 1 and 500/u);
+    assert.match(migration, /bidoc_contracts_upsert_workspace_r1/u);
+    assert.match(migration, /bidoc_contracts_insert_clause_r1/u);
+    assert.match(migration, /bidoc_contracts_apply_clause_enrichment_r3/u);
+    assert.match(migration, /security invoker/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated, service_role/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.match(migration, /workspace_version = 'contracts-workspace\.phase3f1\.v1'/u);
+    assert.doesNotMatch(migration, /schedule_contract_(?:milestones|conditions|extensions)|private\.contracts\s|private\.contract_relationships/iu);
+    const rollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_pipeline_r3_2_clause_persistence.rollback.sql", import.meta.url),
+      "utf8"
+    );
+    assert.match(rollback, /rollback refused while saved clause workspaces exist/iu);
+    assert.match(rollback, /drop function if exists public\.bidoc_contracts_persist_clause_generation_r3_2/iu);
+  });
+
+  test("contracts R3.2 routes are authenticated, bounded, server-owned, and lazy", () => {
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("Contracts Agent R3.2 persistence"),
+      server.indexOf("Contracts Relationships Agent R4.0 foundation")
+    );
+    assert.match(route, /\/api\/contracts\/clauses\/status/u);
+    assert.match(route, /\/api\/contracts\/clauses\/workspaces/u);
+    assert.match(route, /\/api\/contracts\/clauses\/workspaces\/extract/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /readJsonBounded\(req, CONTRACTS_MAX_JSON_BYTES\)/u);
+    assert.match(route, /contractsClausePersistenceApproved\(\)/u);
+    assert.match(route, /runContractsClausePersistence/u);
+    assert.doesNotMatch(route, /buildRequestConfig|runSchedule|submitContractPromotion|relationships/u);
+    const staticImports = server.split(/\r?\n/u).filter((line) => line.startsWith("import ")).join("\n");
+    assert.doesNotMatch(staticImports, /clausePersistence/u);
+  });
+
+  test("contracts R4.0 builds only deterministic explicit-reference proposals and preserves unresolved evidence", () => {
+    const preview = buildContractsExplicitReferencePreview({
+      clauses: [
+        {
+          clauseKey: "1",
+          parentClauseKey: null,
+          clauseType: "clause",
+          clauseTitle: "הוראות כלליות",
+          rawText: "1. הוראות כלליות",
+          rawTextSha256: "1".repeat(64),
+          summaryHe: "כותרת הוראות כלליות.",
+          hashtags: ["document_context"],
+          crossReferences: [],
+          pageStart: 1,
+          pageEnd: 1
+        },
+        {
+          clauseKey: "2.1",
+          parentClauseKey: "2",
+          clauseType: "subclause",
+          clauseTitle: null,
+          rawText: "2.1. הודעה תימסר לפי סעיף 1.",
+          rawTextSha256: "2".repeat(64),
+          summaryHe: "הודעה תימסר לפי סעיף 1.",
+          hashtags: ["notice"],
+          crossReferences: [
+            { referenceText: "סעיף 1", referenceKind: "clause", targetClauseKey: "1", resolution: "resolved" },
+            { referenceText: "בסעיף 1", referenceKind: "clause", targetClauseKey: "1", resolution: "resolved" },
+            { referenceText: "נספח ג׳", referenceKind: "appendix", targetClauseKey: "appendix_c.heading", resolution: "unresolved" }
+          ],
+          pageStart: 2,
+          pageEnd: 2
+        }
+      ]
+    });
+
+    assert.equal(preview.agentVersion, CONTRACTS_RELATIONSHIPS_AGENT_VERSION);
+    assert.equal(preview.relationshipPolicyVersion, CONTRACTS_RELATIONSHIP_POLICY_VERSION);
+    assert.equal(preview.metrics.explicitReferenceCount, 3);
+    assert.equal(preview.metrics.explicitRelationshipCount, 1);
+    assert.equal(preview.metrics.unresolvedReferenceCount, 1);
+    assert.equal(preview.metrics.modelRelationshipCount, 0);
+    assert.equal(preview.metrics.decisionCount, 0);
+    assert.equal(preview.metrics.scheduleWriteCount, 0);
+    assert.equal(preview.proposals[0].relationshipType, "cross_reference");
+    assert.equal(preview.proposals[0].origin, "explicit_reference");
+    assert.equal(preview.proposals[0].confidence, null);
+    assert.deepEqual(preview.proposals[0].referenceTexts, ["בסעיף 1", "סעיף 1"]);
+    assert.match(preview.proposals[0].rationaleHe, /אינו מוכיח/u);
+    assert.equal(preview.unresolvedReferences[0].targetClauseKey, "appendix_c.heading");
+    assert.equal(preview.gates.modelGroupingEnabled, false);
+    assert.equal(preview.gates.decisionCreationEnabled, false);
+    assert.equal(preview.gates.scheduleWritesEnabled, false);
+    assert.equal(contractsRelationshipTypeLabelHe("cross_reference"), "הפניה מפורשת");
+    assert.equal(contractsRelationshipOriginLabelHe("explicit_reference"), "הפניה שכתובה בחוזה");
+    assert.equal(contractsRelationshipReviewLabelHe("proposed"), "מוצע לסקירה");
+  });
+
+  test("contracts R4.0 persistence is explicitly gated before any database request", async () => {
+    assert.equal(contractsRelationshipsApproved({ CONTRACTS_RELATIONSHIPS_R4_APPROVED: "TRUE" }), true);
+    assert.equal(contractsRelationshipsApproved({ CONTRACTS_RELATIONSHIPS_R4_APPROVED: "false" }), false);
+    assert.equal(CONTRACTS_RELATIONSHIPS_MIGRATION_VERSION, "20260815182148");
+    let fetchCalls = 0;
+    await assert.rejects(
+      () => persistContractsExplicitRelationships({
+        config: {},
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        env: {},
+        fetchImpl: async () => { fetchCalls += 1; }
+      }),
+      (error) => error.code === "contracts_relationships_not_enabled" && error.status === 503
+    );
+    assert.equal(fetchCalls, 0);
+  });
+
+  test("contracts R4.0 migration and routes are private, idempotent, and Schedule-independent", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260815182148_contracts_relationships_explicit_reference_r4_0.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_relationships_explicit_reference_r4_0.rollback.sql", import.meta.url),
+      "utf8"
+    );
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("Contracts Relationships Agent R4.0 foundation"),
+      server.indexOf("Every route requires an explicit projectId")
+    );
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+
+    assert.match(migration, /bidoc_contracts_append_relationship_r1\(\s*0/iu);
+    assert.match(migration, /relationshipType', 'cross_reference'/u);
+    assert.match(migration, /origin', 'explicit_reference'/u);
+    assert.match(migration, /'confidence', null/u);
+    assert.match(migration, /pg_advisory_xact_lock/iu);
+    assert.match(migration, /security invoker/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated, service_role/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+public\.schedule_/iu);
+    assert.doesNotMatch(migration, /insert\s+into\s+private\.contracts\s*\(/iu);
+    assert.match(rollback, /rollback refused while explicit-reference relationship proposals exist/iu);
+    assert.match(route, /\/api\/contracts\/relationships\/status/u);
+    assert.match(route, /contractsRelationshipsWorkspaceMatch/u);
+    assert.match(route, /contractsRelationshipsPersistMatch/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /contractsRelationshipsApproved\(\)/u);
+    assert.doesNotMatch(route, /runSchedule|chatCompletion|createEmbedding|submitContractPromotion/u);
+    assert.match(page, /סוכן הקשרים בחוזים · R4\.0 \+ R4\.1/u);
+    assert.match(page, /ללא החלטות חוזיות · ללא כתיבה ללוח הזמנים/u);
+    assert.match(page, /שמור את הצעות הקשר המפורשות/u);
+  });
+
+  test("contracts R4.1 retrieves bounded operative pairs without treating headings as relationships", () => {
+    const preview = semanticRelationshipsFixture();
+    const first = buildContractsSemanticRelationshipCandidates({ preview, maxCandidates: 10, perClauseCandidates: 2 });
+    const second = buildContractsSemanticRelationshipCandidates({ preview, maxCandidates: 10, perClauseCandidates: 2 });
+    assert.deepEqual(second, first);
+    assert.ok(first.length >= 1 && first.length <= 10);
+    assert.ok(first.every((candidate) => candidate.leftClause.clauseKey !== "1" && candidate.rightClause.clauseKey !== "1"));
+    assert.ok(first.some((candidate) => new Set([
+      candidate.leftClause.clauseKey,
+      candidate.rightClause.clauseKey
+    ]).has("6.7") && new Set([
+      candidate.leftClause.clauseKey,
+      candidate.rightClause.clauseKey
+    ]).has("appendix_b.3")));
+    assert.ok(first.some((candidate) => new Set([
+      candidate.leftClause.clauseKey,
+      candidate.rightClause.clauseKey
+    ]).has("19.6") && new Set([
+      candidate.leftClause.clauseKey,
+      candidate.rightClause.clauseKey
+    ]).has("19.7")));
+    const asymmetric = first.find((candidate) => new Set([
+      candidate.leftClause.clauseKey,
+      candidate.rightClause.clauseKey
+    ]).has("19.6") && new Set([
+      candidate.leftClause.clauseKey,
+      candidate.rightClause.clauseKey
+    ]).has("19.7"));
+    assert.deepEqual(asymmetric.leftClause.dominantActors, ["owner"]);
+    assert.deepEqual(asymmetric.rightClause.dominantActors, ["contractor"]);
+  });
+
+  test("contracts R4.1 produces review-only Hebrew proposals and filters low-confidence classifications", async () => {
+    const preview = semanticRelationshipsFixture();
+    const config = {
+      openRouterApiKey: "server-owned-test-key",
+      models: { main: "test/contracts-r4.1" },
+      ai: { main: { timeoutMs: 5_000 } },
+      contracts: { r4_1: { maxCandidates: 10, concurrency: 1 } }
+    };
+    const model = (confidence) => async ({ messages, responseFormat }) => {
+      const input = JSON.parse(messages.find((message) => message.role === "user" && message.content.startsWith("{")).content);
+      if (responseFormat.json_schema.name === "contracts_semantic_relationships_verification_batch") {
+        const verifierProperties = responseFormat.json_schema.schema.properties.items.items.properties;
+        assert.equal(verifierProperties.rationaleHe.maxLength, 240);
+        assert.equal(verifierProperties.rationaleHe.minLength, 0);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION,
+          items: input.proposals.map((proposal) => ({
+            pairId: proposal.pairId,
+            verdict: "accept",
+            confidence,
+            reasonCode: "accepted",
+            rationaleHe: "שני הסעיפים קובעים סכומים שונים לאותו פיצוי יומי ולכן אינם יכולים לחול יחד."
+          }))
+        });
+      }
+      const classifierProperties = responseFormat.json_schema.schema.properties.items.items.properties;
+      assert.equal(Object.hasOwn(classifierProperties, "rationaleHe"), false);
+      return JSON.stringify({
+        schemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_MODEL_SCHEMA_VERSION,
+        items: input.pairs.map((pair) => {
+          const endpoints = new Set([pair.leftClause.clauseKey, pair.rightClause.clauseKey]);
+          const conflict = endpoints.has("6.7") && endpoints.has("appendix_b.3");
+          const asymmetricConflict = endpoints.has("19.6") && endpoints.has("19.7");
+          return {
+            pairId: pair.pairId,
+            relationshipType: conflict || asymmetricConflict ? "conflicts_with" : "none",
+            sourceClauseKey: pair.leftClause.clauseKey,
+            targetClauseKey: pair.rightClause.clauseKey,
+            confidence: conflict || asymmetricConflict ? confidence : 0.12
+          };
+        })
+      });
+    };
+
+    const accepted = await runContractsSemanticRelationshipPreview({
+      preview,
+      config,
+      chatComplete: model(0.95),
+      logger: null
+    });
+    assert.equal(accepted.agentVersion, CONTRACTS_RELATIONSHIPS_R4_1_AGENT_VERSION);
+    assert.equal(accepted.proposals.length, 1);
+    assert.equal(accepted.proposals[0].relationshipType, "conflicts_with");
+    assert.equal(accepted.proposals[0].origin, "model");
+    assert.equal(accepted.proposals[0].reviewStatus, "proposed");
+    assert.match(accepted.proposals[0].rationaleHe, /שני הסעיפים/u);
+    assert.match(accepted.proposals[0].sourceExcerpt, /2,000/u);
+    assert.match(accepted.proposals[0].targetExcerpt, /3,250/u);
+    assert.equal(accepted.metrics.asymmetricConflictRejectedCount, 1);
+    assert.equal(accepted.metrics.relationshipVerificationAssessedCount, 1);
+    assert.equal(accepted.metrics.relationshipVerificationAcceptedCount, 1);
+    assert.equal(accepted.metrics.relationshipVerificationRejectedCount, 0);
+    assert.equal(accepted.metrics.decisionCount, 0);
+    assert.equal(accepted.metrics.persistenceWriteCount, 0);
+    assert.equal(accepted.metrics.scheduleWriteCount, 0);
+    assert.deepEqual(accepted.gates, {
+      relationshipPersistenceEnabled: false,
+      decisionCreationEnabled: false,
+      conflictResolutionEnabled: false,
+      scheduleWritesEnabled: false
+    });
+
+    const filtered = await runContractsSemanticRelationshipPreview({
+      preview,
+      config,
+      chatComplete: model(0.89),
+      logger: null
+    });
+    assert.equal(filtered.proposals.length, 0);
+    assert.equal(filtered.metrics.belowThresholdCount, 1);
+  });
+
+  test("contracts R4.1 rejects amendment claims without explicit source amendment language before verification", async () => {
+    const preview = semanticPairPreview([
+      {
+        clauseKey: "11.8",
+        rawText: "11.8 הקבלן אחראי לכל פגם או נזק בעבודות במשך תקופת האחריות.",
+        summaryHe: "אחריות כללית של הקבלן לפגמים ונזקים.",
+        hashtags: ["liability", "warranty"]
+      },
+      {
+        clauseKey: "12.3",
+        rawText: "12.3 בתקופת הבדק הקבלן יתקן ליקויים שהתגלו בעבודות.",
+        summaryHe: "תיקון ליקויים שהתגלו בתקופת הבדק.",
+        hashtags: ["liability", "warranty"]
+      }
+    ]);
+    let calls = 0;
+    const result = await runContractsSemanticRelationshipPreview({
+      preview,
+      config: semanticTestConfig(),
+      logger: null,
+      chatComplete: async ({ messages, responseFormat }) => {
+        calls += 1;
+        assert.equal(responseFormat.json_schema.name, "contracts_semantic_relationships_batch");
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_MODEL_SCHEMA_VERSION,
+          items: input.pairs.map((pair) => ({
+            pairId: pair.pairId,
+            relationshipType: "amends",
+            sourceClauseKey: "12.3",
+            targetClauseKey: "11.8",
+            confidence: 0.99
+          }))
+        });
+      }
+    });
+    assert.equal(calls, 1);
+    assert.equal(result.proposals.length, 0);
+    assert.equal(result.metrics.deterministicTypeGateRejectedCount, 1);
+    assert.equal(result.metrics.deterministicRejectionReasonCounts.amendment_not_explicit, 1);
+    assert.equal(result.metrics.relationshipVerificationAssessedCount, 0);
+  });
+
+  test("contracts R4.1 skeptical verifier rejects separate termination grounds as one decision", async () => {
+    const preview = semanticPairPreview([
+      {
+        clauseKey: "15.1.5",
+        rawText: "15.1.5 סמל רשאית לבטל את ההסכם אם הקבלן התרשל בביצוע העבודות.",
+        summaryHe: "רשלנות הקבלן היא עילה לביטול ההסכם.",
+        hashtags: ["termination", "responsibility"]
+      },
+      {
+        clauseKey: "15.1.7",
+        rawText: "15.1.7 סמל רשאית לבטל את ההסכם אם הקבלן הסתלק מביצוע העבודות.",
+        summaryHe: "הסתלקות הקבלן היא עילה לביטול ההסכם.",
+        hashtags: ["termination", "responsibility"]
+      }
+    ]);
+    const result = await runContractsSemanticRelationshipPreview({
+      preview,
+      config: semanticTestConfig(),
+      logger: null,
+      chatComplete: async ({ messages, responseFormat }) => {
+        const input = JSON.parse(messages.find((message) => message.role === "user" && message.content.startsWith("{")).content);
+        if (responseFormat.json_schema.name === "contracts_semantic_relationships_verification_batch") {
+          return JSON.stringify({
+            schemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION,
+            items: input.proposals.map((proposal) => ({
+              pairId: proposal.pairId,
+              verdict: "reject",
+              confidence: 0.99,
+              reasonCode: "separate_decisions",
+              rationaleHe: ""
+            }))
+          });
+        }
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_MODEL_SCHEMA_VERSION,
+          items: input.pairs.map((pair) => ({
+            pairId: pair.pairId,
+            relationshipType: "supports_same_decision",
+            sourceClauseKey: pair.leftClause.clauseKey,
+            targetClauseKey: pair.rightClause.clauseKey,
+            confidence: 0.99
+          }))
+        });
+      }
+    });
+    assert.equal(result.proposals.length, 0);
+    assert.equal(result.metrics.relationshipVerificationAssessedCount, 1);
+    assert.equal(result.metrics.relationshipVerificationRejectedCount, 1);
+    assert.equal(result.metrics.verificationReasonCounts.separate_decisions, 1);
+  });
+
+  test("contracts R4.1 fails closed per verifier batch instead of losing the whole preview", async () => {
+    const preview = semanticPairPreview([
+      {
+        clauseKey: "6.7",
+        rawText: "6.7 הקבלן ישלם קנס בסך 2,000 שקלים לכל יום איחור.",
+        summaryHe: "קנס של 2,000 שקלים ליום איחור.",
+        hashtags: ["penalty", "delay", "responsibility"]
+      },
+      {
+        clauseKey: "appendix_b.3",
+        rawText: "3. הקבלן ישלם קנס בסך 3,250 שקלים לכל יום איחור.",
+        summaryHe: "קנס של 3,250 שקלים ליום איחור.",
+        hashtags: ["penalty", "delay", "responsibility"]
+      }
+    ]);
+    const warnings = [];
+    const result = await runContractsSemanticRelationshipPreview({
+      preview,
+      config: {
+        ...semanticTestConfig(),
+        contracts: {
+          r4_1: {
+            maxCandidates: 10,
+            concurrency: 1,
+            maxProviderRetries: 0,
+            maxVerificationRepairBatches: 0
+          }
+        }
+      },
+      logger: { warn: (...args) => warnings.push(args) },
+      chatComplete: async ({ messages, responseFormat }) => {
+        const input = JSON.parse(messages.find((message) => message.role === "user" && message.content.startsWith("{")).content);
+        if (responseFormat.json_schema.name === "contracts_semantic_relationships_verification_batch") {
+          throw Object.assign(new Error("intermittent verifier provider failure"), { status: 400 });
+        }
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_MODEL_SCHEMA_VERSION,
+          items: input.pairs.map((pair) => ({
+            pairId: pair.pairId,
+            relationshipType: "conflicts_with",
+            sourceClauseKey: pair.leftClause.clauseKey,
+            targetClauseKey: pair.rightClause.clauseKey,
+            confidence: 0.99
+          }))
+        });
+      }
+    });
+
+    assert.equal(result.proposals.length, 0);
+    assert.equal(result.metrics.verificationComplete, false);
+    assert.equal(result.metrics.verificationFailedBatchCount, 1);
+    assert.equal(result.metrics.verificationFailedPairCount, 1);
+    assert.equal(result.metrics.relationshipVerificationAssessedCount, 0);
+    assert.equal(result.metrics.relationshipVerificationRejectedCount, 1);
+    assert.equal(result.metrics.verificationReasonCounts.verification_unavailable, 1);
+    assert.equal(result.metrics.decisionCount, 0);
+    assert.equal(result.metrics.persistenceWriteCount, 0);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+    assert.equal(warnings.some(([message]) => message === "[contracts-r4.1] verifier batch rejected fail-closed"), true);
+  });
+
+  test("contracts R4.1 fails closed per malformed classifier batch after bounded repair", async () => {
+    const preview = semanticPairPreview([
+      {
+        clauseKey: "6.7",
+        rawText: "6.7 הקבלן ישלם קנס בסך 2,000 שקלים לכל יום איחור.",
+        summaryHe: "קנס של 2,000 שקלים ליום איחור.",
+        hashtags: ["penalty", "delay"]
+      },
+      {
+        clauseKey: "appendix_b.3",
+        rawText: "3. הקבלן ישלם קנס בסך 3,250 שקלים לכל יום איחור.",
+        summaryHe: "קנס של 3,250 שקלים ליום איחור.",
+        hashtags: ["penalty", "delay"]
+      }
+    ]);
+    const warnings = [];
+    let calls = 0;
+    const result = await runContractsSemanticRelationshipPreview({
+      preview,
+      config: {
+        ...semanticTestConfig(),
+        contracts: {
+          r4_1: {
+            maxCandidates: 10,
+            concurrency: 1,
+            maxProviderRetries: 0,
+            maxRepairBatches: 1
+          }
+        }
+      },
+      logger: { warn: (...args) => warnings.push(args) },
+      chatComplete: async ({ messages, responseFormat }) => {
+        calls += 1;
+        assert.equal(responseFormat.json_schema.name, "contracts_semantic_relationships_batch");
+        const input = JSON.parse(messages.find((message) => message.role === "user" && message.content.startsWith("{")).content);
+        assert.ok(input.pairs.length <= 4);
+        return '{"schemaVersion":"contracts-relationships-semantic-model.r4.1.v3","items":[';
+      }
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(result.proposals.length, 0);
+    assert.equal(result.metrics.classificationComplete, false);
+    assert.equal(result.metrics.classificationFailedBatchCount, 1);
+    assert.equal(result.metrics.classificationFailedPairCount, 1);
+    assert.equal(result.metrics.modelAssessedPairCount, 0);
+    assert.equal(result.metrics.noRelationshipCount, 0);
+    assert.equal(result.metrics.verificationComplete, true);
+    assert.equal(result.metrics.decisionCount, 0);
+    assert.equal(result.metrics.persistenceWriteCount, 0);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+    assert.equal(warnings.some(([message]) => message === "[contracts-r4.1] classifier batch rejected fail-closed"), true);
+  });
+
+  test("contracts R4.1 service is explicitly gated and accepts no browser-owned analysis inputs", async () => {
+    assert.equal(contractsSemanticRelationshipsApproved({ CONTRACTS_RELATIONSHIPS_R4_1_APPROVED: "TRUE" }), true);
+    assert.equal(contractsSemanticRelationshipsApproved({ CONTRACTS_RELATIONSHIPS_R4_1_APPROVED: "false" }), false);
+    assert.deepEqual(parseContractsSemanticRelationshipRequest({}), {});
+    assert.throws(
+      () => parseContractsSemanticRelationshipRequest({ clauses: [], model: "browser/model" }),
+      (error) => error.code === "contracts_semantic_relationships_request_invalid"
+    );
+    assert.deepEqual(loadContractsSemanticRelationshipsStatus({
+      config: { openRouterApiKey: "configured", models: { main: "server/model" } },
+      env: { CONTRACTS_RELATIONSHIPS_R4_1_APPROVED: "TRUE" }
+    }), {
+      active: true,
+      ready: true,
+      applyApproved: true,
+      modelConfigured: true,
+      agentVersion: CONTRACTS_RELATIONSHIPS_R4_1_AGENT_VERSION,
+      relationshipPolicyVersion: "contracts-relationships-semantic.r4.1.v2",
+      promptVersion: "contracts-relationships-semantic-prompt.r4.1.v3",
+      modelVersion: "server/model",
+      scope: "same_generation_semantic_clause_pairs",
+      persistenceEnabled: false,
+      decisionCreationEnabled: false,
+      conflictResolutionEnabled: false,
+      scheduleWritesEnabled: false,
+      reason: null
+    });
+    let fetchCalls = 0;
+    let modelCalls = 0;
+    await assert.rejects(
+      () => previewContractsSemanticRelationships({
+        config: { openRouterApiKey: "configured" },
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        env: {},
+        fetchImpl: async () => { fetchCalls += 1; },
+        chatComplete: async () => { modelCalls += 1; }
+      }),
+      (error) => error.code === "contracts_semantic_relationships_not_enabled" && error.status === 503
+    );
+    assert.equal(fetchCalls, 0);
+    assert.equal(modelCalls, 0);
+  });
+
+  test("contracts R4.1 routes and Hebrew UI remain preview-only and Schedule-independent", () => {
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("R4.1 is a read/model-only semantic preview"),
+      server.indexOf("Every route requires an explicit projectId")
+    );
+    const previewRoute = server.slice(
+      server.indexOf("const contractsSemanticRelationshipsPreviewMatch"),
+      server.indexOf("Every route requires an explicit projectId")
+    );
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+    const service = fs.readFileSync(new URL("../src/contracts/semanticRelationshipService.js", import.meta.url), "utf8");
+    assert.match(route, /\/api\/contracts\/relationships\/semantic\/status/u);
+    assert.match(route, /\/semantic-preview/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /readJsonBounded\(req, CONTRACTS_MAX_JSON_BYTES\)/u);
+    assert.match(route, /config:\s*config\(\)/u);
+    assert.doesNotMatch(previewRoute, /runSchedule|submitContractPromotion|persistContractsExplicitRelationships/u);
+    assert.doesNotMatch(service, /buildRequestConfig|runSchedule|submitContractPromotion/u);
+    assert.match(page, /\/api\/contracts\/relationships\/semantic\/status/u);
+    assert.match(page, /\/semantic-preview/u);
+    assert.match(page, /גילוי קשרים סמנטיים/u);
+    assert.match(page, /תצוגת איכות זמנית · אינה נשמרת/u);
+    assert.match(page, /ללא יצירת החלטות · ללא הכרעה בסתירות/u);
+    assert.match(page, /בדיקה ספקנית נפרדת/u);
+    assert.match(page, /ביטחון הסיווג אינו ודאות משפטית/u);
+    assert.match(page, /ביטחון סיווג:/u);
+    assert.doesNotMatch(page, /<i>ביטחון \{Math\.round/u);
+  });
+
+  test("contracts R4.2A accepts only bounded Hebrew review decisions and complete R4.1 results", async () => {
+    assert.equal(contractsRelationshipReviewApproved({ CONTRACTS_RELATIONSHIPS_R4_2A_APPROVED: "TRUE" }), true);
+    assert.equal(contractsRelationshipReviewApproved({ CONTRACTS_RELATIONSHIPS_R4_2A_APPROVED: "false" }), false);
+    assert.deepEqual(parseContractsRelationshipReviewRequest({
+      expectedRevision: 1,
+      action: "approve",
+      reasonHe: "שתי הראיות תומכות בקשר המוצע."
+    }), {
+      expectedRevision: 1,
+      action: "approve",
+      reasonHe: "שתי הראיות תומכות בקשר המוצע.",
+      correction: null
+    });
+    assert.deepEqual(parseContractsRelationshipReviewRequest({
+      expectedRevision: 1,
+      action: "correct",
+      reasonHe: "זהו חריג מפורש ולא תנאי מוקדם.",
+      correction: {
+        relationshipType: "exception_to",
+        sourceClauseKey: "10.3.2",
+        targetClauseKey: "10.3.1"
+      }
+    }).correction, {
+      relationshipType: "exception_to",
+      sourceClauseKey: "10.3.2",
+      targetClauseKey: "10.3.1"
+    });
+    assert.throws(
+      () => parseContractsRelationshipReviewRequest({
+        expectedRevision: 1,
+        action: "approve",
+        reasonHe: "too short",
+        reviewerId: MAPPING_REVIEWER_ID
+      }),
+      (error) => error.code === "contracts_relationship_review_request_invalid"
+    );
+
+    let fetchCalls = 0;
+    await assert.rejects(
+      () => persistContractsSemanticRelationshipProposals({
+        config: {},
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        semanticResult: {},
+        env: {},
+        fetchImpl: async () => { fetchCalls += 1; }
+      }),
+      (error) => error.code === "contracts_relationship_review_not_enabled" && error.status === 503
+    );
+    await assert.rejects(
+      () => persistContractsSemanticRelationshipProposals({
+        config: {},
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        semanticResult: {
+          agentVersion: CONTRACTS_RELATIONSHIPS_R4_1_AGENT_VERSION,
+          relationshipPolicyVersion: "contracts-relationships-semantic.r4.1.v2",
+          scope: "same_generation_semantic_clause_pairs",
+          proposals: [],
+          metrics: {
+            classificationComplete: false,
+            verificationComplete: true,
+            modelRelationshipCount: 0,
+            decisionCount: 0,
+            persistenceWriteCount: 0,
+            scheduleWriteCount: 0
+          },
+          gates: {
+            relationshipPersistenceEnabled: false,
+            decisionCreationEnabled: false,
+            conflictResolutionEnabled: false,
+            scheduleWritesEnabled: false
+          }
+        },
+        env: { CONTRACTS_RELATIONSHIPS_R4_2A_APPROVED: "TRUE" },
+        fetchImpl: async () => { fetchCalls += 1; }
+      }),
+      (error) => error.code === "contracts_relationship_review_analysis_incomplete" && error.status === 422
+    );
+    assert.equal(fetchCalls, 0);
+  });
+
+  test("contracts R4.2A persistence and review send only server-owned bounded RPC payloads", async () => {
+    const relationshipId = "88888888-8888-4888-8888-888888888888";
+    const projection = ({ persistence = null, review = null } = {}) => ({
+      agentVersion: CONTRACTS_RELATIONSHIP_REVIEW_AGENT_VERSION,
+      relationshipPolicyVersion: "contracts-relationships-semantic.r4.1.v2",
+      migrationVersion: CONTRACTS_RELATIONSHIP_REVIEW_MIGRATION_VERSION,
+      scope: "verified_semantic_proposals_and_human_review",
+      workspace: { workspaceId: MAPPING_PROJECT_LINK_ID },
+      metrics: { currentRelationshipCount: 1, proposedCount: 1, decisionCount: 0, scheduleWriteCount: 0 },
+      items: [{
+        relationshipId,
+        relationshipType: "conflicts_with",
+        origin: "model",
+        reviewStatus: "proposed",
+        revision: 1,
+        evidence: { signals: { schemaVersion: "contracts-relationship-signals.r4.2a.v1" } }
+      }],
+      gates: {
+        proposalPersistenceEnabled: true,
+        humanReviewEnabled: true,
+        decisionCreationEnabled: false,
+        conflictResolutionEnabled: false,
+        scheduleWritesEnabled: false
+      },
+      ...(persistence ? { persistence } : {}),
+      ...(review ? { review } : {})
+    });
+    const calls = [];
+    const fetchImpl = async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      const isReview = url.endsWith("/bidoc_contracts_review_semantic_relationship_r4_2a");
+      return new Response(JSON.stringify(isReview
+        ? projection({ review: { action: "approve", atomic: true } })
+        : projection({ persistence: { inserted: 1, reused: 0, atomic: true } })), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const semanticResult = {
+      agentVersion: CONTRACTS_RELATIONSHIPS_R4_1_AGENT_VERSION,
+      relationshipPolicyVersion: "contracts-relationships-semantic.r4.1.v2",
+      promptVersion: "contracts-relationships-semantic-prompt.r4.1.v3",
+      modelVersion: "server/model",
+      scope: "same_generation_semantic_clause_pairs",
+      proposals: [{
+        proposalKey: "b".repeat(64),
+        relationshipType: "conflicts_with",
+        relationshipTypeLabelHe: "סותר את",
+        origin: "model",
+        originLabelHe: "הצעת מודל",
+        confidence: 0.98,
+        classifierConfidence: 0.99,
+        verificationConfidence: 0.98,
+        verificationSchemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION,
+        reviewStatus: "proposed",
+        reviewStatusLabelHe: "מוצע לסקירה",
+        sourceClauseKey: "6.7",
+        sourceClauseOrder: 1,
+        sourceSummaryHe: "קנס בסך 2,000 שקלים.",
+        sourcePageStart: 5,
+        sourcePageEnd: 5,
+        sourceExcerpt: "מקור",
+        targetClauseKey: "appendix_b.3",
+        targetClauseOrder: 2,
+        targetSummaryHe: "קנס בסך 3,250 שקלים.",
+        targetPageStart: 14,
+        targetPageEnd: 14,
+        targetExcerpt: "יעד",
+        rationaleHe: "שני הסעיפים קובעים סכומים שונים לאותו קנס יומי.",
+        retrieval: { explicitReference: false },
+        relationshipPolicyVersion: "contracts-relationships-semantic.r4.1.v2",
+        promptVersion: "contracts-relationships-semantic-prompt.r4.1.v3",
+        modelVersion: "server/model"
+      }],
+      metrics: {
+        classificationComplete: true,
+        verificationComplete: true,
+        modelRelationshipCount: 1,
+        decisionCount: 0,
+        persistenceWriteCount: 0,
+        scheduleWriteCount: 0
+      },
+      gates: {
+        relationshipPersistenceEnabled: false,
+        decisionCreationEnabled: false,
+        conflictResolutionEnabled: false,
+        scheduleWritesEnabled: false
+      }
+    };
+    const config = {
+      contentSource: {
+        supabaseUrl: "https://example.supabase.co",
+        supabaseServiceRoleKey: "server-owned-test-key"
+      }
+    };
+    const persisted = await persistContractsSemanticRelationshipProposals({
+      config,
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      semanticResult,
+      env: { CONTRACTS_RELATIONSHIPS_R4_2A_APPROVED: "TRUE" },
+      fetchImpl
+    });
+    assert.equal(persisted.persistence.inserted, 1);
+    assert.deepEqual(Object.keys(calls[0].body).sort(), [
+      "p_model_version", "p_prompt_version", "p_proposals", "p_relationship_policy_version", "p_workspace_id"
+    ]);
+    assert.deepEqual(Object.keys(calls[0].body.p_proposals[0]).sort(), [
+      "classifierConfidence", "confidence", "proposalKey", "rationaleHe", "relationshipType",
+      "retrieval", "sourceClauseKey", "targetClauseKey", "verificationConfidence", "verificationSchemaVersion"
+    ]);
+    assert.equal(Object.hasOwn(calls[0].body.p_proposals[0], "sourceExcerpt"), false);
+
+    await reviewContractsSemanticRelationship({
+      config,
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      relationshipId,
+      reviewerId: MAPPING_REVIEWER_ID,
+      body: {
+        expectedRevision: 1,
+        action: "approve",
+        reasonHe: "שתי הראיות מוכיחות סתירה באותו קנס יומי."
+      },
+      env: { CONTRACTS_RELATIONSHIPS_R4_2A_APPROVED: "TRUE" },
+      fetchImpl
+    });
+    assert.equal(calls[1].body.p_reviewer_id, MAPPING_REVIEWER_ID);
+    assert.equal(calls[1].body.p_action, "approve");
+    assert.equal(calls[1].body.p_correction, null);
+    assert.equal(Object.hasOwn(calls[1].body, "p_reviewed_at"), false);
+  });
+
+  test("contracts R4.2A review projection remains readable after R4.2B decisions exist", async () => {
+    const relationshipId = "88888888-8888-4888-8888-888888888888";
+    const config = {
+      contentSource: {
+        supabaseUrl: "https://example.supabase.co",
+        supabaseServiceRoleKey: "server-owned-test-key"
+      }
+    };
+    const result = await loadContractsRelationshipReview({
+      config,
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      fetchImpl: async () => new Response(JSON.stringify({
+        agentVersion: CONTRACTS_RELATIONSHIP_REVIEW_AGENT_VERSION,
+        relationshipPolicyVersion: "contracts-relationships-semantic.r4.1.v2",
+        migrationVersion: CONTRACTS_RELATIONSHIP_REVIEW_MIGRATION_VERSION,
+        scope: "verified_semantic_proposals_and_human_review",
+        workspace: { workspaceId: MAPPING_PROJECT_LINK_ID },
+        metrics: {
+          currentRelationshipCount: 1,
+          proposedCount: 0,
+          approvedCount: 1,
+          decisionCount: 135,
+          scheduleWriteCount: 0
+        },
+        items: [{
+          relationshipId,
+          relationshipType: "depends_on",
+          origin: "model",
+          reviewStatus: "approved",
+          revision: 2,
+          evidence: { signals: { schemaVersion: "contracts-relationship-signals.r4.2a.v1" } }
+        }],
+        gates: {
+          proposalPersistenceEnabled: true,
+          humanReviewEnabled: true,
+          decisionCreationEnabled: false,
+          conflictResolutionEnabled: false,
+          scheduleWritesEnabled: false
+        }
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      })
+    });
+
+    assert.equal(result.metrics.decisionCount, 135);
+    assert.equal(result.metrics.approvedCount, 1);
+    assert.equal(result.items[0].reviewStatus, "approved");
+  });
+
+  test("contracts R4.2A migration, routes, and Hebrew review UI stay append-only and Schedule-independent", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260817093931_contracts_relationships_r4_2a_review.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_relationships_r4_2a_review.rollback.sql", import.meta.url),
+      "utf8"
+    );
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("R4.2A persists only complete"),
+      server.indexOf("Every route requires an explicit projectId")
+    );
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+
+    assert.match(migration, /bidoc_contracts_append_relationship_r1/iu);
+    assert.match(migration, /pg_advisory_xact_lock/iu);
+    assert.match(migration, /review_status/iu);
+    assert.match(migration, /reviewedProposalRelationshipId/u);
+    assert.match(migration, /security invoker/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated, service_role/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+public\.schedule_/iu);
+    assert.doesNotMatch(migration, /insert\s+into\s+private\.contracts\s*\(/iu);
+    assert.match(rollback, /rollback refused while semantic relationship proposals or review revisions exist/iu);
+    assert.match(route, /\/api\/contracts\/relationships\/review\/status/u);
+    assert.match(route, /\/semantic-proposals/u);
+    assert.match(route, /\/semantic-review/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /reviewerId:\s*reviewer\.sub/u);
+    assert.doesNotMatch(route, /runSchedule|submitContractPromotion|buildRequestConfig/u);
+    assert.match(page, /R4\.2A · סקירה אנושית שמורה/u);
+    assert.match(page, /אשר קשר/u);
+    assert.match(page, /דחה קשר/u);
+    assert.match(page, /תקן סוג קשר או כיוון/u);
+    assert.match(page, /ללא יצירת החלטות · ללא הכרעה בסתירות/u);
+  });
+
+  test("contracts R4.2B groups only operative clauses after every relationship review is complete", () => {
+    const preview = {
+      ...semanticRelationshipsFixture(),
+      document: { documentSha256: FIXTURE_SHA, documentVersionId: `sha256:${FIXTURE_SHA}` }
+    };
+    const pendingReview = {
+      metrics: { proposedCount: 1 },
+      items: [{
+        sourceClauseKey: "6.7",
+        targetClauseKey: "appendix_b.3",
+        relationshipType: "conflicts_with",
+        reviewStatus: "proposed"
+      }]
+    };
+    assert.throws(
+      () => buildContractsDecisionCandidates({ preview, relationshipReview: pendingReview }),
+      (error) => error.code === "contracts_decision_relationship_review_incomplete" && error.status === 409
+    );
+
+    const candidates = buildContractsDecisionCandidates({
+      preview,
+      relationshipReview: {
+        metrics: { proposedCount: 0, approvedCount: 1, correctedCount: 0 },
+        items: [{
+          sourceClauseKey: "6.7",
+          targetClauseKey: "appendix_b.3",
+          relationshipType: "conflicts_with",
+          reviewStatus: "approved",
+          evidence: { rationaleHe: "שני הסעיפים קובעים סכומים סותרים לאותו חיוב." }
+        }]
+      }
+    });
+    const conflict = candidates.find((candidate) => candidate.sourceClauseKeys.includes("6.7"));
+    assert.deepEqual(conflict.sourceClauseKeys, ["6.7", "appendix_b.3"]);
+    assert.equal(conflict.hasReviewedConflict, true);
+    assert.match(conflict.proposalKey, /^[0-9a-f]{64}$/u);
+    assert.match(conflict.decisionKey, /^contract:aaaaaaaaaaaa:clause:[0-9a-f]{16}:role:normalized$/u);
+    assert.equal(candidates.some((candidate) => candidate.sourceClauseKeys.includes("1")), false);
+  });
+
+  test("contracts R4.2B requires source-grounded Hebrew decisions, omits ungrounded optional parties, and never writes", async () => {
+    const relationshipReview = {
+      metrics: { proposedCount: 0, approvedCount: 1, correctedCount: 0 },
+      items: [{
+        sourceClauseKey: "6.7",
+        targetClauseKey: "appendix_b.3",
+        relationshipType: "conflicts_with",
+        reviewStatus: "approved",
+        evidence: { rationaleHe: "הסעיפים כוללים סכומים שונים לאותו חיוב יומי." }
+      }]
+    };
+    let calls = 0;
+    const result = await runContractsDecisionNormalization({
+      preview: {
+        ...semanticRelationshipsFixture(),
+        document: { documentSha256: FIXTURE_SHA, documentVersionId: `sha256:${FIXTURE_SHA}` }
+      },
+      relationshipReview,
+      config: {
+        openRouterApiKey: "server-owned-test-key",
+        models: { main: "test/contracts-r4.2b" },
+        ai: { main: { timeoutMs: 5_000 } },
+        contracts: { r4_2b: { concurrency: 1, maxProviderRetries: 0, maxRepairBatches: 0 } }
+      },
+      chatComplete: async ({ messages, responseFormat }) => {
+        calls += 1;
+        assert.equal(responseFormat.json_schema.name, "contracts_decision_normalization_batch");
+        const request = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_DECISIONS_R4_2B_MODEL_SCHEMA_VERSION,
+          items: request.candidates.map((candidate) => ({
+            candidateId: candidate.candidateId,
+            titleHe: "התחייבות חוזית מנורמלת",
+            summaryHe: "הסעיפים קובעים התחייבות חוזית המחייבת סקירה אנושית.",
+            decisionTextHe: "יש לפעול בתוך 999 ימים בהתאם להוראות החוזיות המופיעות בראיות המקור.",
+            decisionCategory: "other",
+            responsibleParty: "גורם חיצוני שאינו מופיע בראיות",
+            beneficiary: "",
+            scheduleImpact: "unknown",
+            temporalKind: "relative",
+            contractDate: "",
+            triggerKind: "external_event",
+            triggerDescriptionHe: "אירוע חיצוני בתוך 10 ימים שאינו מופיע בראיות המקור",
+            offsetValue: 10,
+            offsetUnit: "working_days",
+            calendarSemantics: "unknown",
+            recurring: false
+          }))
+        });
+      }
+    });
+    assert.ok(calls >= 1);
+    assert.equal(result.agentVersion, CONTRACTS_DECISIONS_R4_2B_AGENT_VERSION);
+    assert.equal(result.metrics.modelDecisionCount, result.proposals.length);
+    assert.equal(result.metrics.normalizationComplete, true);
+    assert.equal(result.metrics.persistenceWriteCount, 0);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+    assert.equal(result.metrics.sanitizedPartyCount, result.proposals.length);
+    assert.equal(result.metrics.sanitizedTemporalCount, result.proposals.length);
+    assert.equal(result.metrics.sanitizedNumericTextCount, result.proposals.length);
+    assert.equal(result.proposals.every((proposal) => proposal.responsibleParty === null), true);
+    assert.equal(result.proposals.every((proposal) => proposal.temporalKind === "none"), true);
+    assert.equal(result.proposals.every((proposal) => !proposal.decisionTextHe.includes("999")), true);
+    assert.equal(result.gates.conflictWinnerSelectionEnabled, false);
+    assert.equal(result.proposals.find((item) => item.sourceClauseKeys.includes("6.7")).conflictStatus, "unresolved");
+  });
+
+  test("contracts R4.2B detects max-token truncation and completes through bounded batch splitting", async () => {
+    const relationshipReview = {
+      metrics: { proposedCount: 0, approvedCount: 1, correctedCount: 0 },
+      items: [{
+        sourceClauseKey: "6.7",
+        targetClauseKey: "appendix_b.3",
+        relationshipType: "conflicts_with",
+        reviewStatus: "approved",
+        evidence: { rationaleHe: "הסעיפים כוללים סכומים שונים לאותו חיוב יומי." }
+      }]
+    };
+    const calls = [];
+    let truncatedOnce = false;
+    const result = await runContractsDecisionNormalization({
+      preview: {
+        ...semanticRelationshipsFixture(),
+        document: { documentSha256: FIXTURE_SHA, documentVersionId: `sha256:${FIXTURE_SHA}` }
+      },
+      relationshipReview,
+      config: {
+        openRouterApiKey: "server-owned-test-key",
+        models: { main: "test/contracts-r4.2b" },
+        ai: { main: { timeoutMs: 5_000 } },
+        contracts: {
+          r4_2b: {
+            concurrency: 1,
+            maxProviderRetries: 0,
+            maxRepairBatches: 0,
+            maxSplitFallbackCalls: 4
+          }
+        }
+      },
+      logger: { warn() {} },
+      chatComplete: async ({ messages, telemetry }) => {
+        const request = JSON.parse(messages[1].content);
+        calls.push({ step: telemetry.step, size: request.candidates.length });
+        if (!truncatedOnce && request.candidates.length === 2) {
+          truncatedOnce = true;
+          telemetry.record({
+            completion_tokens: 1_584,
+            finish_reason: "length",
+            native_finish_reason: "MAX_TOKENS"
+          });
+          return "{\"schemaVersion\":";
+        }
+        telemetry.record({
+          completion_tokens: 400,
+          finish_reason: "stop",
+          native_finish_reason: "STOP"
+        });
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_DECISIONS_R4_2B_MODEL_SCHEMA_VERSION,
+          items: request.candidates.map((candidate) => ({
+            candidateId: candidate.candidateId,
+            titleHe: "התחייבות חוזית מנורמלת",
+            summaryHe: "הסעיף קובע התחייבות חוזית המחייבת סקירה אנושית.",
+            decisionTextHe: "יש לפעול בהתאם להוראה החוזית המופיעה בראיית המקור.",
+            decisionCategory: "other",
+            responsibleParty: "",
+            beneficiary: "",
+            scheduleImpact: "unknown",
+            temporalKind: "none",
+            contractDate: "",
+            triggerKind: "",
+            triggerDescriptionHe: "",
+            offsetValue: null,
+            offsetUnit: "",
+            calendarSemantics: "unknown",
+            recurring: false
+          }))
+        });
+      }
+    });
+
+    assert.deepEqual(calls.map((call) => call.size), [2, 1, 1, 2, 1]);
+    assert.deepEqual(calls.map((call) => call.step), [
+      "contracts_decision_normalization_normalization",
+      "contracts_decision_normalization_normalization_split",
+      "contracts_decision_normalization_normalization_split",
+      "contracts_decision_normalization_normalization",
+      "contracts_decision_normalization_normalization"
+    ]);
+    assert.equal(result.proposals.length, 5);
+    assert.equal(result.metrics.modelCallCount, 5);
+    assert.equal(result.metrics.repairBatchCount, 0);
+    assert.equal(result.metrics.splitFallbackCallCount, 2);
+    assert.equal(result.metrics.truncatedOutputCount, 1);
+    assert.equal(result.metrics.persistenceWriteCount, 0);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+  });
+
+  test("contracts R4.2B accepts bounded Hebrew reviews and sends only server-owned RPC payloads", async () => {
+    assert.equal(contractsDecisionReviewApproved({ CONTRACTS_DECISIONS_R4_2B_APPROVED: "TRUE" }), true);
+    assert.deepEqual(parseContractsDecisionProposalRequest({}), {});
+    assert.throws(
+      () => parseContractsDecisionProposalRequest({ clauses: [] }),
+      (error) => error.code === "contracts_decision_review_request_invalid"
+    );
+    const correction = {
+      titleHe: "החלטה חוזית מתוקנת",
+      summaryHe: "ההחלטה המתוקנת נשענת על כל ראיות המקור השמורות.",
+      decisionTextHe: "יש לפעול בהתאם להוראה החוזית לאחר תיקון הניסוח בידי הסוקר.",
+      responsibleParty: null,
+      beneficiary: null,
+      decisionCategory: "other",
+      conflictStatus: "none",
+      scheduleImpact: "no",
+      temporalKind: "none",
+      contractDate: null,
+      triggerKind: null,
+      triggerDescriptionHe: null,
+      offsetValue: null,
+      offsetUnit: null,
+      calendarSemantics: "not_applicable",
+      recurring: false
+    };
+    assert.deepEqual(parseContractsDecisionReviewRequest({
+      expectedRevision: 1,
+      action: "correct",
+      reasonHe: "הניסוח תוקן כדי לשקף במדויק את הראיות.",
+      correction
+    }).correction, correction);
+
+    const decisionId = "88888888-8888-4888-8888-888888888888";
+    const projection = ({ persistence = null, review = null } = {}) => ({
+      agentVersion: CONTRACTS_DECISIONS_R4_2B_AGENT_VERSION,
+      decisionPolicyVersion: CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
+      supportRelationshipPolicyVersion: CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
+      migrationVersion: CONTRACTS_DECISION_REVIEW_MIGRATION_VERSION,
+      scope: "reviewed_relationships_to_normalized_decision_proposals",
+      workspace: { workspaceId: MAPPING_PROJECT_LINK_ID },
+      metrics: { pendingRelationshipCount: 0, currentDecisionCount: 1, proposedCount: 1, scheduleWriteCount: 0 },
+      items: [{
+        decisionId,
+        revision: 1,
+        reviewStatus: "proposed",
+        decisionCategory: "other",
+        sourceEvidence: [{
+          clauseId: "99999999-9999-4999-8999-999999999999",
+          pageStart: 1,
+          pageEnd: 1,
+          rawTextSha256: "c".repeat(64),
+          excerpt: "ראיית מקור"
+        }]
+      }],
+      gates: {
+        decisionPersistenceEnabled: true,
+        humanReviewEnabled: true,
+        relationshipReviewComplete: true,
+        conflictWinnerSelectionEnabled: false,
+        scheduleWritesEnabled: false
+      },
+      ...(persistence ? { persistence } : {}),
+      ...(review ? { review } : {})
+    });
+    const calls = [];
+    const fetchImpl = async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      const isReview = url.endsWith("/bidoc_contracts_review_decision_r4_2b");
+      return new Response(JSON.stringify(isReview
+        ? projection({ review: { action: "approve", atomic: true } })
+        : projection({ persistence: { inserted: 1, reused: 0, atomic: true } })), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const normalizationResult = {
+      agentVersion: CONTRACTS_DECISIONS_R4_2B_AGENT_VERSION,
+      decisionPolicyVersion: CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
+      supportRelationshipPolicyVersion: CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
+      promptVersion: "contracts-decisions-normalization-prompt.r4.2b.v1",
+      modelVersion: "test/contracts-r4.2b",
+      scope: "reviewed_relationships_to_normalized_decision_proposals",
+      proposals: [{
+        proposalKey: "b".repeat(64),
+        decisionKey: "contract:aaaaaaaaaaaa:clause:bbbbbbbbbbbbbbbb:role:normalized",
+        primaryClauseKey: "6.7",
+        sourceClauseKeys: ["6.7"],
+        titleHe: "התחייבות חוזית מנורמלת",
+        summaryHe: "הסעיף קובע התחייבות חוזית המחייבת סקירה.",
+        decisionTextHe: "יש לפעול בהתאם להוראה החוזית המופיעה בראיית המקור.",
+        tags: ["אחריות"],
+        people: [],
+        responsibleParty: null,
+        beneficiary: null,
+        decisionCategory: "other",
+        conflictStatus: "none",
+        scheduleImpact: "no",
+        temporalKind: "none",
+        contractDate: null,
+        triggerKind: null,
+        triggerDescriptionHe: null,
+        offsetValue: null,
+        offsetUnit: null,
+        calendarSemantics: "not_applicable",
+        recurring: false,
+        reviewStatus: "proposed",
+        projectionStatus: "not_applicable",
+        decisionPolicyVersion: CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
+        supportRelationshipPolicyVersion: CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
+        promptVersion: "contracts-decisions-normalization-prompt.r4.2b.v1",
+        modelVersion: "test/contracts-r4.2b"
+      }],
+      metrics: {
+        normalizationComplete: true,
+        pendingRelationshipCount: 0,
+        modelDecisionCount: 1,
+        persistenceWriteCount: 0,
+        scheduleWriteCount: 0
+      },
+      gates: {
+        relationshipReviewComplete: true,
+        decisionPersistenceEnabled: false,
+        humanReviewRequired: true,
+        conflictWinnerSelectionEnabled: false,
+        scheduleWritesEnabled: false
+      }
+    };
+    const config = {
+      contentSource: {
+        supabaseUrl: "https://example.supabase.co",
+        supabaseServiceRoleKey: "server-owned-test-key"
+      }
+    };
+    await persistContractsDecisionProposals({
+      config,
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      normalizationResult,
+      env: { CONTRACTS_DECISIONS_R4_2B_APPROVED: "TRUE" },
+      fetchImpl
+    });
+    assert.deepEqual(Object.keys(calls[0].body).sort(), [
+      "p_decision_policy_version", "p_model_version", "p_proposals", "p_workspace_id"
+    ]);
+    assert.equal(Object.hasOwn(calls[0].body.p_proposals[0], "sourceEvidence"), false);
+    assert.equal(Object.hasOwn(calls[0].body.p_proposals[0], "modelVersion"), false);
+
+    await reviewContractsDecision({
+      config,
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      decisionId,
+      reviewerId: MAPPING_REVIEWER_ID,
+      body: {
+        expectedRevision: 1,
+        action: "approve",
+        reasonHe: "ההחלטה נתמכת במלואה בראיית המקור."
+      },
+      env: { CONTRACTS_DECISIONS_R4_2B_APPROVED: "TRUE" },
+      fetchImpl
+    });
+    assert.equal(calls[1].body.p_reviewer_id, MAPPING_REVIEWER_ID);
+    assert.equal(calls[1].body.p_action, "approve");
+    assert.equal(calls[1].body.p_correction, null);
+  });
+
+  test("contracts R4.2C parses bounded split and merge actions without accepting reviewer or database overrides", () => {
+    const decisionId = "88888888-8888-4888-8888-888888888888";
+    const clauseA = "99999999-9999-4999-8999-999999999999";
+    const clauseB = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const output = (titleHe, sourceClauseIds) => ({
+      primaryClauseId: sourceClauseIds[0],
+      sourceClauseIds,
+      titleHe,
+      summaryHe: "תקציר החלטה חוזית הנשען על ראיות המקור שנבחרו.",
+      decisionTextHe: "הקבלן חייב לפעול בהתאם להוראה החוזית ולראיות המקור שנבחרו.",
+      tags: ["אחריות"],
+      responsibleParty: "הקבלן",
+      beneficiary: null,
+      decisionCategory: "other",
+      conflictStatus: "none",
+      scheduleImpact: "no",
+      temporalKind: "none",
+      contractDate: null,
+      triggerKind: null,
+      triggerDescriptionHe: null,
+      offsetValue: null,
+      offsetUnit: null,
+      calendarSemantics: "not_applicable",
+      recurring: false
+    });
+    const split = parseContractsDecisionSplitRequest({
+      expectedRevision: 1,
+      reasonHe: "הסעיף כולל שתי התחייבויות נפרדות ולכן נדרש פיצול מלא.",
+      outputs: [
+        output("התחייבות חוזית ראשונה", [clauseA, clauseB]),
+        output("התחייבות חוזית שנייה", [clauseA])
+      ]
+    }, decisionId);
+    assert.equal(split.action, "split");
+    assert.equal(split.sources[0].decisionId, decisionId);
+    assert.deepEqual(split.outputs[1].sourceClauseIds, [clauseA], "one clause may support both split decisions");
+    assert.equal(Object.hasOwn(split, "reviewerId"), false);
+
+    const merge = parseContractsDecisionMergeRequest({
+      sources: [
+        { decisionId, expectedRevision: 1 },
+        { decisionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", expectedRevision: 2 }
+      ],
+      reasonHe: "שתי ההחלטות מתארות אותה התחייבות חוזית ויש למזג אותן.",
+      output: output("החלטה חוזית מאוחדת", [clauseA, clauseB])
+    });
+    assert.equal(merge.action, "merge");
+    assert.equal(merge.sources.length, 2);
+    assert.throws(
+      () => parseContractsDecisionMergeRequest({
+        sources: [{ decisionId, expectedRevision: 1 }, { decisionId, expectedRevision: 1 }],
+        reasonHe: "נימוק מיזוג חוזי מפורט בעברית.",
+        output: output("החלטה חוזית מאוחדת", [clauseA])
+      }),
+      (error) => error.code === "contracts_decision_lineage_request_invalid"
+    );
+    assert.throws(
+      () => parseContractsDecisionSplitRequest({
+        expectedRevision: 1,
+        reasonHe: "נימוק פיצול חוזי מפורט בעברית.",
+        outputs: [output("החלטה חוזית ראשונה", [clauseA]), output("החלטה חוזית שנייה", [clauseB])],
+        reviewerId: MAPPING_REVIEWER_ID
+      }, decisionId),
+      (error) => error.code === "contracts_decision_lineage_request_invalid"
+    );
+    assert.equal(contractsDecisionLineageApproved({ CONTRACTS_DECISION_LINEAGE_R4_2C_APPROVED: "TRUE" }), true);
+    assert.equal(contractsDecisionLineageApproved({ CONTRACTS_DECISION_LINEAGE_R4_2C_APPROVED: "FALSE" }), false);
+  });
+
+  test("contracts R4.2C sends one server-owned atomic split RPC and accepts only complete zero-Schedule lineage", async () => {
+    const workspaceId = MAPPING_PROJECT_LINK_ID;
+    const decisionId = "88888888-8888-4888-8888-888888888888";
+    const terminalId = "99999999-9999-4999-8999-999999999998";
+    const outputA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+    const outputB = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+    const clauseId = "99999999-9999-4999-8999-999999999999";
+    const decisionOutput = (titleHe) => ({
+      primaryClauseId: clauseId,
+      sourceClauseIds: [clauseId],
+      titleHe,
+      summaryHe: "תקציר החלטה חוזית הנשען על ראיית המקור המדויקת.",
+      decisionTextHe: "הקבלן חייב לפעול בהתאם להוראה החוזית המופיעה במקור.",
+      tags: ["אחריות"],
+      responsibleParty: "הקבלן",
+      beneficiary: null,
+      decisionCategory: "other",
+      conflictStatus: "none",
+      scheduleImpact: "no",
+      temporalKind: "none",
+      contractDate: null,
+      triggerKind: null,
+      triggerDescriptionHe: null,
+      offsetValue: null,
+      offsetUnit: null,
+      calendarSemantics: "not_applicable",
+      recurring: false
+    });
+    const links = [outputA, outputB].map((targetDecisionId, index) => ({
+      relationshipId: `77777777-7777-4777-8777-77777777777${index}`,
+      relationshipType: "split_into",
+      sourceDecisionId: terminalId,
+      targetDecisionId
+    }));
+    const responseBody = {
+      agentVersion: CONTRACTS_DECISIONS_R4_2B_AGENT_VERSION,
+      decisionPolicyVersion: CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
+      supportRelationshipPolicyVersion: CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
+      migrationVersion: CONTRACTS_DECISION_REVIEW_MIGRATION_VERSION,
+      scope: "reviewed_relationships_to_normalized_decision_proposals",
+      workspace: { workspaceId },
+      metrics: { currentDecisionCount: 3, proposedCount: 0, scheduleWriteCount: 0 },
+      items: [terminalId, outputA, outputB].map((id, index) => ({
+        decisionId: id,
+        revision: index === 0 ? 2 : 1,
+        reviewStatus: index === 0 ? "split" : "corrected",
+        sourceEvidence: [{ clauseId, pageStart: 1, pageEnd: 1, rawTextSha256: "c".repeat(64), excerpt: "ראיית מקור" }]
+      })),
+      lineage: {
+        agentVersion: CONTRACTS_DECISION_LINEAGE_AGENT_VERSION,
+        decisionPolicyVersion: CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
+        supportRelationshipPolicyVersion: CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
+        relationshipPolicyVersion: CONTRACTS_DECISION_LINEAGE_POLICY_VERSION,
+        migrationVersion: CONTRACTS_DECISION_LINEAGE_MIGRATION_VERSION,
+        scope: "audited_decision_split_merge_and_lineage",
+        metrics: { activeDecisionCount: 2, splitParentCount: 1, mergedSourceCount: 0, lineageLinkCount: 2, incompleteLineageCount: 0, modelCallCount: 0, scheduleWriteCount: 0 },
+        links,
+        gates: { splitEnabled: true, mergeEnabled: true, humanReviewRequired: true, conflictWinnerSelectionEnabled: false, modelCallsEnabled: false, scheduleWritesEnabled: false }
+      },
+      lineageMutation: {
+        action: "split",
+        sourceDecisionIds: [decisionId],
+        terminalDecisionIds: [terminalId],
+        outputDecisionIds: [outputA, outputB],
+        lineageInserted: 2,
+        atomic: true,
+        modelCallCount: 0,
+        scheduleWriteCount: 0
+      }
+    };
+    const calls = [];
+    const fetchImpl = async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return new Response(JSON.stringify(responseBody), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const result = await splitContractsDecision({
+      config: { contentSource: { supabaseUrl: "https://example.supabase.co", supabaseServiceRoleKey: "server-owned-test-key" } },
+      workspaceId,
+      decisionId,
+      reviewerId: MAPPING_REVIEWER_ID,
+      body: {
+        expectedRevision: 1,
+        reasonHe: "הסעיף כולל שתי החלטות חוזיות עצמאיות ולכן נדרש פיצול.",
+        outputs: [decisionOutput("החלטה חוזית ראשונה"), decisionOutput("החלטה חוזית שנייה")]
+      },
+      env: { CONTRACTS_DECISION_LINEAGE_R4_2C_APPROVED: "TRUE" },
+      fetchImpl
+    });
+    assert.equal(result.lineageMutation.atomic, true);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /bidoc_contracts_review_decision_lineage_r4_2c$/u);
+    assert.deepEqual(Object.keys(calls[0].body).sort(), [
+      "p_action", "p_outputs", "p_reason_he", "p_reviewer_id", "p_sources", "p_workspace_id"
+    ]);
+    assert.equal(calls[0].body.p_reviewer_id, MAPPING_REVIEWER_ID);
+    assert.equal(calls[0].body.p_action, "split");
+    assert.equal(Object.hasOwn(calls[0].body, "model"), false);
+    assert.equal(Object.hasOwn(calls[0].body, "scheduleProjectId"), false);
+  });
+
+  test("contracts R4.2C migration, routes, and Hebrew UI keep append-only graph lineage and zero Schedule writes", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260817173106_contracts_decision_lineage_r4_2c.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_decision_lineage_r4_2c.rollback.sql", import.meta.url),
+      "utf8"
+    );
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+    assert.match(migration, /'split_into'/u);
+    assert.match(migration, /'merged_into'/u);
+    assert.match(migration, /bidoc_contracts_append_decision_r1/iu);
+    assert.match(migration, /bidoc_contracts_append_relationship_r1/iu);
+    assert.match(migration, /pg_advisory_xact_lock/iu);
+    assert.match(migration, /output evidence must cover every source clause exactly as a union/iu);
+    assert.match(migration, /cannot choose a winner for an unresolved conflict/iu);
+    assert.match(migration, /security invoker/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated, service_role/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.doesNotMatch(migration, /create\s+table/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+public\.schedule_/iu);
+    assert.match(rollback, /preserve the append-only review history/iu);
+    assert.match(server, /\/api\/contracts\/decisions\/lineage\/status/u);
+    assert.match(server, /contractsDecisionSplitMatch/u);
+    assert.match(server, /contractsDecisionMergeMatch/u);
+    assert.match(server, /readJsonBounded\(req,\s*262_144\)/u);
+    assert.doesNotMatch(server, /contracts\/multipart\.js/u);
+    assert.match(server, /reviewerId:\s*reviewer\.sub/u);
+    assert.match(page, /R4\.2B \+ R4\.2C/u);
+    assert.match(page, /פצל החלטה/u);
+    assert.match(page, /בחר למיזוג/u);
+    assert.match(page, /יומן יוחסין שמור/u);
+    assert.match(page, /אינו קורא שוב למודל/u);
+  });
+
+  test("contracts R5 classifies reviewed fixed and relative decisions into zero-write Schedule shadow rows", () => {
+    const documentVersionId = `sha256:${"d".repeat(64)}`;
+    const clauseId = "99999999-9999-4999-8999-999999999999";
+    const decision = (overrides = {}) => ({
+      decisionId: "88888888-8888-4888-8888-888888888888",
+      decisionKey: "contract:fixture:decision",
+      titleHe: "מועד חוזי שנבדק",
+      summaryHe: "הקבלן חייב לעמוד במועד החוזי שנבדק מול ראיית המקור.",
+      tags: ["לוח זמנים"],
+      decisionCategory: "commencement_and_completion",
+      conflictStatus: "none",
+      scheduleImpact: "yes",
+      temporalKind: "fixed",
+      contractDate: "2026-12-31",
+      triggerKind: null,
+      triggerDescriptionHe: null,
+      offsetValue: null,
+      offsetUnit: null,
+      calendarSemantics: "not_applicable",
+      recurring: false,
+      reviewStatus: "approved",
+      projectionStatus: "ready",
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      sourceEvidence: [{ clauseId, clauseKey: "6.7", pageStart: 5, excerpt: "המועד החוזי הוא 31 בדצמבר 2026." }],
+      ...overrides
+    });
+    const decisionProjection = {
+      workspace: {
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        documentVersionId,
+        parserGenerationId: "contracts-parser.fixture"
+      },
+      items: [
+        decision(),
+        decision({
+          decisionId: "88888888-8888-4888-8888-888888888889",
+          decisionKey: "contract:fixture:relative",
+          titleHe: "מועד יחסי שנבדק",
+          temporalKind: "relative",
+          contractDate: null,
+          triggerKind: "completion",
+          triggerDescriptionHe: "השלמת העבודות",
+          offsetValue: 100,
+          offsetUnit: "working_days",
+          calendarSemantics: "explicit"
+        })
+      ]
+    };
+    const mappingState = {
+      projectContext: {
+        sourceSystem: "main",
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+        projectMappingId: "55555555-5555-4555-8555-555555555555",
+        mappingStatus: "active"
+      },
+      scheduleVersion: { fileId: "fixture-file", relevancyDate: "2026-08-17", versionConflict: false },
+      activities: [],
+      existingMappings: []
+    };
+
+    const result = planReviewedScheduleProjection({ decisionProjection, mappingState });
+    assert.equal(result.agentVersion, CONTRACTS_SCHEDULE_PROJECTION_AGENT_VERSION);
+    assert.equal(result.projectionPolicyVersion, CONTRACTS_SCHEDULE_PROJECTION_POLICY_VERSION);
+    assert.equal(result.mode, "shadow_read_only");
+    assert.equal(result.metrics.reviewedDecisionCount, 2);
+    assert.equal(result.metrics.reviewedTargetShapedDecisionCount, 2);
+    assert.equal(result.metrics.promotionEligibleCount, 2);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+    assert.equal(result.metrics.runtimeDueDateWriteCount, 0);
+    assert.equal(result.operationalWritesPerformed, false);
+
+    const fixed = result.items[0];
+    assert.equal(fixed.targetTable, "schedule_contract_milestones");
+    assert.equal(fixed.status, "preview_ready");
+    assert.equal(fixed.shadowRow.source_contract_decision_id, fixed.decisionId);
+    assert.equal(fixed.shadowRow.contract_date, "2026-12-31");
+    assert.equal(fixed.shadowRow.metadata.runtime_trigger_date, null);
+    assert.equal(fixed.shadowRow.metadata.calculated_due_date, null);
+    assert.equal(fixed.activityMapping.decisionState, "unmapped");
+
+    const relative = result.items[1];
+    assert.equal(relative.targetTable, "schedule_contract_conditions");
+    assert.equal(relative.status, "preview_ready");
+    assert.equal(relative.shadowRow.status, "pending");
+    assert.equal(relative.shadowRow.trigger_event_date, null);
+    assert.equal(relative.conditionResolver.compatible, true);
+    assert.equal(relative.conditionResolver.runtimeTriggerDate, null);
+    assert.equal(relative.conditionResolver.calculatedDueDate, null);
+    assert.equal(relative.conditionResolver.contractualTruthUpdated, false);
+    assert.equal(relative.activityMapping.decisionState, "pending_trigger");
+  });
+
+  test("contracts R5 fails closed for unreviewed, conflicted, unmapped, and incomplete extension decisions", async () => {
+    const documentVersionId = `sha256:${"e".repeat(64)}`;
+    const clauseId = "99999999-9999-4999-8999-999999999999";
+    const base = {
+      decisionId: "88888888-8888-4888-8888-888888888880",
+      decisionKey: "contract:fixture:blocked",
+      titleHe: "כלל זמן לבדיקה",
+      summaryHe: "כלל זמן חוזי הנשען על ראיית מקור.",
+      tags: [],
+      decisionCategory: "other",
+      conflictStatus: "none",
+      scheduleImpact: "yes",
+      temporalKind: "fixed",
+      contractDate: "2026-12-31",
+      triggerKind: null,
+      triggerDescriptionHe: null,
+      offsetValue: null,
+      offsetUnit: null,
+      calendarSemantics: "not_applicable",
+      recurring: false,
+      reviewStatus: "proposed",
+      projectionStatus: "ready",
+      scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+      sourceEvidence: [{ clauseId, clauseKey: "6.7", pageStart: 5, excerpt: "ראיית מקור חוזית." }]
+    };
+    const decisionProjection = {
+      workspace: {
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        documentVersionId,
+        parserGenerationId: "contracts-parser.fixture"
+      },
+      items: [
+        base,
+        { ...base, decisionId: "88888888-8888-4888-8888-888888888881", decisionKey: "contract:fixture:conflict", reviewStatus: "approved", conflictStatus: "unresolved" },
+        { ...base, decisionId: "88888888-8888-4888-8888-888888888882", decisionKey: "contract:fixture:extension", reviewStatus: "corrected", temporalKind: "extension", contractDate: null }
+      ]
+    };
+    const mappingState = {
+      projectContext: {
+        sourceSystem: "main",
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+        projectMappingId: "55555555-5555-4555-8555-555555555555",
+        mappingStatus: "active"
+      },
+      scheduleVersion: { fileId: "fixture-file", relevancyDate: null, versionConflict: false },
+      activities: [],
+      existingMappings: []
+    };
+    const result = planReviewedScheduleProjection({ decisionProjection, mappingState });
+    assert.equal(result.metrics.unreviewedScheduleChangeCount, 0);
+    assert.equal(result.metrics.promotionEligibleCount, 0);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+    assert.equal(result.items[0].blockerCodes.includes("decision_not_reviewed"), true);
+    assert.equal(result.items[1].blockerCodes.includes("decision_conflict_unresolved"), true);
+    assert.deepEqual(result.items[2].blockerCodes.filter((code) => code.startsWith("extension_")), [
+      "extension_amount_missing",
+      "extension_approval_date_missing",
+      "extension_milestone_identity_missing"
+    ]);
+    assert.equal(result.items[2].shadowRow, null);
+
+    const missingDecisionMapping = planReviewedScheduleProjection({
+      decisionProjection: {
+        ...decisionProjection,
+        items: [{ ...base, reviewStatus: "approved", scheduleProjectId: null }]
+      },
+      mappingState
+    });
+    assert.equal(missingDecisionMapping.items[0].blockerCodes.includes("decision_schedule_mapping_missing"), true);
+    assert.equal(missingDecisionMapping.metrics.promotionEligibleCount, 0);
+
+    const loaderResult = await loadContractsScheduleProjectionPreview({
+      config: {},
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      env: { CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED: "TRUE" },
+      loadDecisionProjectionImpl: async () => ({ ...decisionProjection, items: [{ ...base, reviewStatus: "approved" }] }),
+      loadDecisionMappingsImpl: async () => {
+        const error = new Error("R5 source migration unavailable");
+        error.code = "contracts_workspace_migration_missing";
+        throw error;
+      },
+      loadMappingStateImpl: async () => {
+        const error = new Error("mapping unavailable");
+        error.code = "contracts_activity_mapping_database_unavailable";
+        throw error;
+      }
+    });
+    assert.equal(loaderResult.projectMapping.available, false);
+    assert.equal(loaderResult.decisionSource.migrationAvailable, false);
+    assert.equal(loaderResult.decisionSource.errorCode, "contracts_workspace_migration_missing");
+    assert.equal(loaderResult.projectMapping.errorCode, "contracts_activity_mapping_database_unavailable");
+    assert.equal(loaderResult.items[0].blockerCodes.includes("project_mapping_missing"), true);
+    assert.equal(loaderResult.metrics.scheduleWriteCount, 0);
+    assert.equal(contractsScheduleProjectionApproved({ CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED: "TRUE" }), true);
+    assert.equal(contractsScheduleProjectionApproved({ CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED: "false" }), false);
+  });
+
+  test("contracts R5 accounts for every Schedule-impacting decision without a target and never invents missing dates", () => {
+    const documentVersionId = `sha256:${"f".repeat(64)}`;
+    const base = {
+      decisionId: "77777777-7777-4777-8777-777777777770",
+      decisionKey: "contract:fixture:audit",
+      titleHe: "החלטה לביקורת לוח זמנים",
+      summaryHe: "חובה חוזית שנבדקה מול המקור.",
+      tags: ["לוח זמנים"],
+      decisionCategory: "other",
+      conflictStatus: "none",
+      scheduleImpact: "yes",
+      temporalKind: "none",
+      contractDate: null,
+      triggerKind: null,
+      triggerDescriptionHe: null,
+      offsetValue: null,
+      offsetUnit: null,
+      calendarSemantics: "not_applicable",
+      recurring: false,
+      reviewStatus: "approved",
+      projectionStatus: "blocked",
+      scheduleProjectId: null,
+      sourceEvidence: [{
+        clauseId: "99999999-9999-4999-8999-999999999999",
+        clauseKey: "fixture",
+        pageStart: 1,
+        excerpt: "ראיית מקור חוזית."
+      }]
+    };
+    const item = (index, overrides) => ({
+      ...base,
+      decisionId: `77777777-7777-4777-8777-77777777777${index}`,
+      decisionKey: `contract:fixture:audit:${index}`,
+      ...overrides
+    });
+    const result = planReviewedScheduleProjection({
+      decisionProjection: {
+        workspace: {
+          workspaceId: MAPPING_PROJECT_LINK_ID,
+          sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+          documentVersionId,
+          parserGenerationId: "contracts-parser.fixture"
+        },
+        items: [
+          item(1, { summaryHe: "המפקח יבדוק את העבודות תוך 14 ימים מקבלת ההודעה." }),
+          item(2, { summaryHe: "עם מסירת העבודות יוחזרו המסמכים למזמין." }),
+          item(3, { summaryHe: "יש להגדיר את מועד תחילת העבודות, אך המועד אינו מצוין במסמך." }),
+          item(4, { summaryHe: "הקבלן אחראי לשמור על רציפות ביצוע העבודות." }),
+          item(5, { reviewStatus: "unresolved", conflictStatus: "unresolved" })
+        ]
+      }
+    });
+
+    assert.equal(result.metrics.scheduleImpactWithoutTargetCount, 5);
+    assert.equal(result.metrics.temporalCorrectionCandidateCount, 2);
+    assert.equal(result.metrics.missingTemporalValueCount, 1);
+    assert.equal(result.metrics.scheduleContextOnlyCount, 1);
+    assert.equal(result.metrics.scheduleReviewBlockedCount, 1);
+    assert.deepEqual(result.items.map((entry) => entry.scheduleAudit.disposition), [
+      "temporal_correction_candidate",
+      "event_anchor_review",
+      "missing_temporal_value",
+      "schedule_context_only",
+      "review_blocked"
+    ]);
+    assert.equal(result.items[2].scheduleAudit.recommendedTemporalKind, null);
+    assert.equal(result.items.every((entry) => entry.targetTable === null && entry.shadowRow === null), true);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+  });
+
+  test("contracts R5 reads only server-owned decision mapping metadata from its service-role RPC", async () => {
+    const calls = [];
+    const fetchImpl = async (url, options) => {
+      calls.push({ url, method: options.method, body: JSON.parse(options.body) });
+      return new Response(JSON.stringify({
+        migrationVersion: CONTRACTS_SCHEDULE_PROJECTION_MIGRATION_VERSION,
+        mode: "read_only",
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        items: [{
+          decisionId: "88888888-8888-4888-8888-888888888888",
+          scheduleProjectId: MAPPING_SCHEDULE_PROJECT_ID,
+          projectionStatus: "ready"
+        }],
+        scheduleWriteCount: 0
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const result = await loadContractsScheduleProjectionSourceMappings({
+      config: {
+        contentSource: {
+          supabaseUrl: "https://example.supabase.co",
+          supabaseServiceRoleKey: "server-owned-test-key"
+        }
+      },
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      fetchImpl
+    });
+    assert.equal(result.items[0].scheduleProjectId, MAPPING_SCHEDULE_PROJECT_ID);
+    assert.equal(result.scheduleWriteCount, 0);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    assert.match(calls[0].url, new RegExp(`${CONTRACTS_SCHEDULE_PROJECTION_SOURCE_RPC}$`, "u"));
+    assert.deepEqual(calls[0].body, { p_workspace_id: MAPPING_PROJECT_LINK_ID });
+    assert.equal(Object.hasOwn(calls[0].body, "scheduleProjectId"), false);
+  });
+
+  test("contracts R5 migration history keeps lineage while the active route is Indicator handoff only", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260817213000_contracts_schedule_projection_r5.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_schedule_projection_r5.rollback.sql", import.meta.url),
+      "utf8"
+    );
+    const correction = fs.readFileSync(
+      new URL("../supabase/migrations/20260818102828_contracts_indicator_handoff_r5.sql", import.meta.url),
+      "utf8"
+    );
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("R5 exposes current reviewed contractual decisions"),
+      server.indexOf("const contractsDecisionLineageWorkspaceMatch")
+    );
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+    assert.equal(CONTRACTS_SCHEDULE_PROJECTION_MIGRATION_VERSION, "20260817213000");
+    assert.match(migration, /source_contract_decision_id uuid/iu);
+    assert.match(migration, /references private\.contracts\(id\)[\s\S]*on delete restrict/iu);
+    assert.match(migration, /pg_advisory_xact_lock/iu);
+    assert.match(migration, /review_status not in \('approved', 'corrected'\)/iu);
+    assert.match(migration, /schedule_impact <> 'yes'/iu);
+    assert.match(migration, /newer\.revision > v_source\.revision/iu);
+    assert.match(migration, /source decision already owns/iu);
+    assert.match(migration, /bidoc_contracts_schedule_projection_source_r5/iu);
+    assert.match(migration, /security invoker/iu);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated, service_role/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+public\.schedule_/iu);
+    assert.doesNotMatch(migration, /alter table private\.contracts/iu);
+    assert.match(rollback, /rollback refused: Schedule rows already reference contractual decisions/iu);
+    assert.match(route, /req\.method === "GET"/u);
+    assert.match(correction, /drop function if exists public\.bidoc_contracts_schedule_projection_source_r5\(uuid\)/iu);
+    assert.match(correction, /approved for Indicator handoff/iu);
+    assert.match(correction, /Indicator owns project placement, target choice, cardinality/iu);
+    assert.doesNotMatch(correction, /v_source\.schedule_project_id/iu);
+    assert.doesNotMatch(correction, /v_source\.projection_status/iu);
+    assert.doesNotMatch(correction, /(?:insert\s+into|update|delete\s+from)\s+public\.schedule_/iu);
+    assert.match(route, /indicator-handoff\/status/u);
+    assert.match(route, /indicator-handoff/u);
+    assert.doesNotMatch(route, /req\.method === "POST"/u);
+    assert.doesNotMatch(route, /submitContractPromotion|runSchedule|scheduleEngine|commit|persist/iu);
+    assert.match(page, /ערכת החלטות ל־Indicator/u);
+    assert.match(page, /אפס כתיבות · ללא שיבוץ בלוח הזמנים/u);
+    assert.match(page, /סוכן Indicator יקבע בהמשך פרויקט, יעד, פעילות, חישובי תאריך/u);
+    assert.match(page, /החלטות מתאימות למסירה ל־Indicator/u);
+    assert.match(page, /החלטות הדורשות השלמת סקירה חוזית/u);
+  });
+
+  test("contracts R5 derives a complete zero-write Indicator handoff from existing decision truth", () => {
+    const base = {
+      decisionId: "88888888-8888-4888-8888-888888888880",
+      decisionKey: "contract:fixture:handoff",
+      revision: 1,
+      titleHe: "החלטה חוזית לבדיקה",
+      summaryHe: "החלטה חוזית הנשענת על ראיית מקור מדויקת.",
+      decisionTextHe: "הקבלן יפעל בהתאם לחובה החוזית המתוארת בסעיף המקור.",
+      tags: ["לוח זמנים"],
+      sourceEvidence: [{
+        clauseId: "99999999-9999-4999-8999-999999999999",
+        clauseKey: "6.7",
+        pageStart: 5,
+        pageEnd: 5,
+        excerpt: "ראיית מקור חוזית מדויקת."
+      }],
+      decisionCategory: "commencement_and_completion",
+      reviewStatus: "approved",
+      conflictStatus: "none",
+      scheduleImpact: "yes",
+      temporalKind: "none",
+      calendarSemantics: "unknown",
+      recurring: false
+    };
+    const item = (suffix, overrides = {}) => ({
+      ...base,
+      decisionId: `88888888-8888-4888-8888-88888888888${suffix}`,
+      decisionKey: `contract:fixture:handoff:${suffix}`,
+      ...overrides
+    });
+    const result = buildContractsIndicatorHandoff({
+      workspace: {
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        documentVersionId: `sha256:${"a".repeat(64)}`,
+        parserGenerationId: "contracts-parser.fixture"
+      },
+      items: [
+        item(0),
+        item(1, { reviewStatus: "corrected", conflictStatus: "reviewed" }),
+        item(2, { scheduleImpact: "no" }),
+        item(3, { scheduleImpact: "unknown" }),
+        item(4, { reviewStatus: "proposed" }),
+        item(5, { conflictStatus: "unresolved" }),
+        item(6, { reviewStatus: "split" })
+      ]
+    });
+
+    assert.equal(result.agentVersion, CONTRACTS_INDICATOR_HANDOFF_AGENT_VERSION);
+    assert.equal(result.policyVersion, CONTRACTS_INDICATOR_HANDOFF_POLICY_VERSION);
+    assert.equal(result.migrationVersion, CONTRACTS_INDICATOR_HANDOFF_MIGRATION_VERSION);
+    assert.equal(result.mode, "indicator_handoff_read_only");
+    assert.equal(result.metrics.currentDecisionCount, 7);
+    assert.equal(result.metrics.suitableCount, 2);
+    assert.equal(result.metrics.notSuitableCount, 2);
+    assert.equal(result.metrics.requiresReviewCount, 3);
+    assert.equal(result.suitableItems.length, 2);
+    assert.equal(result.items[0].suitableForIndicator, true);
+    assert.equal(result.items[2].reasonCodes.includes("no_indicator_impact"), true);
+    assert.equal(result.items[3].reasonCodes.includes("indicator_suitability_unknown"), true);
+    assert.equal(result.items[4].reasonCodes.includes("decision_not_reviewed"), true);
+    assert.equal(result.items[5].reasonCodes.includes("decision_conflict_unresolved"), true);
+    assert.equal(result.items[6].reasonCodes.includes("decision_inactive"), true);
+    assert.equal(result.items.some((entry) => Object.hasOwn(entry, "scheduleProjectId")), false);
+    assert.equal(result.items.some((entry) => Object.hasOwn(entry, "targetTable")), false);
+    assert.equal(result.items.some((entry) => Object.hasOwn(entry, "shadowRow")), false);
+    assert.equal(result.metrics.modelCallCount, 0);
+    assert.equal(result.metrics.contractTruthWriteCount, 0);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+    assert.equal(result.operationalWritesPerformed, false);
+  });
+
+  test("contracts R5 handoff loader accepts the approved flag and the legacy R5 activation alias", async () => {
+    const projection = {
+      workspace: {
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        documentVersionId: `sha256:${"b".repeat(64)}`,
+        parserGenerationId: "contracts-parser.fixture"
+      },
+      items: [{
+        decisionId: "88888888-8888-4888-8888-888888888888",
+        decisionKey: "contract:fixture:handoff-loader",
+        revision: 1,
+        titleHe: "החלטה חוזית למסירה",
+        summaryHe: "החלטה חוזית שנבדקה ומוכנה למסירה לסוכן Indicator.",
+        decisionTextHe: "החלטה חוזית שנבדקה מול ראיית המקור ונמצאה רלוונטית.",
+        tags: [],
+        sourceEvidence: [{
+          clauseId: "99999999-9999-4999-8999-999999999999",
+          clauseKey: "3.1",
+          pageStart: 2,
+          excerpt: "ראיית מקור חוזית."
+        }],
+        decisionCategory: "other",
+        reviewStatus: "approved",
+        conflictStatus: "none",
+        scheduleImpact: "yes",
+        temporalKind: "none",
+        calendarSemantics: "unknown",
+        recurring: false
+      }]
+    };
+    const loadDecisionProjectionImpl = async ({ workspaceId }) => {
+      assert.equal(workspaceId, MAPPING_PROJECT_LINK_ID);
+      return projection;
+    };
+    const currentFlag = await loadContractsIndicatorHandoff({
+      config: {},
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      env: { CONTRACTS_INDICATOR_HANDOFF_R5_APPROVED: "TRUE" },
+      loadDecisionProjectionImpl
+    });
+    const legacyFlag = await loadContractsIndicatorHandoff({
+      config: {},
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      env: { CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED: "TRUE" },
+      loadDecisionProjectionImpl
+    });
+    assert.equal(currentFlag.metrics.suitableCount, 1);
+    assert.equal(legacyFlag.metrics.suitableCount, 1);
+    assert.equal(contractsIndicatorHandoffApproved({ CONTRACTS_INDICATOR_HANDOFF_R5_APPROVED: "TRUE" }), true);
+    assert.equal(contractsIndicatorHandoffApproved({ CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED: "TRUE" }), true);
+    assert.equal(contractsIndicatorHandoffApproved({}), false);
+  });
+
+  test("contracts R4.2B migration, routes, and Hebrew UI are append-only and Schedule-independent", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260817121000_contracts_decisions_r4_2b_review.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_decisions_r4_2b_review.rollback.sql", import.meta.url),
+      "utf8"
+    );
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const route = server.slice(
+      server.indexOf("R4.2B creates normalized contractual decision proposals"),
+      server.indexOf("Every route requires an explicit projectId")
+    );
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+    assert.match(migration, /bidoc_contracts_append_decision_r1/iu);
+    assert.match(migration, /bidoc_contracts_append_relationship_r1/iu);
+    assert.match(migration, /pg_advisory_xact_lock/iu);
+    assert.match(migration, /security invoker/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated, service_role/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.doesNotMatch(migration, /insert\s+into\s+private\.contracts\s*\(/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+public\.schedule_/iu);
+    assert.match(rollback, /preserve the append-only review history/iu);
+    assert.match(route, /\/api\/contracts\/decisions\/status/u);
+    assert.match(route, /\/proposals/u);
+    assert.match(route, /contractsDecisionReviewItemMatch/u);
+    assert.match(route, /getSuperadminSession\(req\)/u);
+    assert.match(route, /reviewerId:\s*reviewer\.sub/u);
+    assert.doesNotMatch(route, /runSchedule|submitContractPromotion|buildRequestConfig/u);
+    assert.match(page, /R4\.2B/u);
+    assert.match(page, /צור ושמור הצעות החלטה/u);
+    assert.match(page, /אשר החלטה/u);
+    assert.match(page, /סמן כלא פתורה/u);
+    assert.match(page, /ללא הכרעת סתירות · ללא כתיבה ללוח הזמנים/u);
+  });
+
+  test("contracts R3.2 UI exposes saved clause generations and preserves the classic comparison", () => {
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+    const styles = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
+    const presentation = fs.readFileSync(new URL("../src/contracts/clausePresentation.js", import.meta.url), "utf8");
+    assert.match(page, /\/api\/contracts\/clauses\/status/u);
+    assert.match(page, /\/api\/contracts\/clauses\/workspaces\/extract/u);
+    assert.match(page, /חלץ ושמור את כל תוצאת סוכן החוזים/u);
+    assert.match(page, /חילוצי סוכן החוזים שנשמרו/u);
+    assert.match(page, /פתח ללא חילוץ חוזר/u);
+    assert.match(page, /תוכן החוזה שחולץ/u);
+    assert.match(page, /הוראות חוזיות בלבד/u);
+    assert.match(page, /כל רשומות המסמך/u);
+    assert.match(page, /כותרות ומבנה/u);
+    assert.match(page, /הטקסט המקורי/u);
+    assert.match(page, /תוצאת סוכן החוזים/u);
+    assert.match(page, /תוכן החיפוש בעברית/u);
+    assert.match(page, /פרטים טכניים של הרשומה/u);
+    assert.match(page, /contractsTagLabelHe/u);
+    assert.match(presentation, /relationshipEligible/u);
+    assert.doesNotMatch(page, /Contracts Agent ·/u);
+    assert.match(page, /תוצאת הסוכן הקלאסי: סקירת מועמדים/u);
+    assert.match(page, /classicDocumentVersionId === presentedPreview\.document\.documentVersionId/u);
+    assert.match(page, /presentedPreview\.persisted/u);
+    assert.match(page, /presentedPreview\.coverage\.accountedSourceLineCount/u);
+    assert.match(page, /row\.clause\.crossReferences/u);
+    assert.match(page, /\/api\/contracts\/relationships\/status/u);
+    assert.match(styles, /\.contractsClausePreviewPanel/u);
+    assert.match(styles, /\.contractsClauseCard/u);
+    assert.match(styles, /\.contractsComparisonNotice\.is-same-document/u);
+  });
+
   test("contracts Phase 2 routes require the reviewer session and server-owned APP DATA config", () => {
     const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
     const route = server.slice(
@@ -3430,6 +6282,128 @@ export function registerContractsAgentTests(test) {
     assert.match(page, /פתח והמשך/u);
     assert.match(page, /שומר טיוטה/u);
   });
+}
+
+function semanticRelationshipsFixture() {
+  return {
+    clauses: [
+      {
+        clauseKey: "1",
+        clauseOrder: 1,
+        parentClauseKey: null,
+        clauseType: "clause",
+        clauseTitle: "מבוא, נספחים וכותרות",
+        rawText: "1. מבוא, נספחים וכותרות",
+        summaryHe: "כותרת מבנית של פרק המבוא.",
+        hashtags: ["document_context"],
+        crossReferences: [],
+        pageStart: 1,
+        pageEnd: 1
+      },
+      {
+        clauseKey: "1.1",
+        clauseOrder: 2,
+        parentClauseKey: "1",
+        clauseType: "subclause",
+        clauseTitle: null,
+        rawText: "1.1 הנספחים וההסכם מהווים מסמך אחד ומחייב.",
+        summaryHe: "הנספחים וההסכם מהווים מסמך מחייב אחד.",
+        hashtags: ["appendix", "documents"],
+        crossReferences: [],
+        pageStart: 1,
+        pageEnd: 1
+      },
+      {
+        clauseKey: "6.7",
+        clauseOrder: 3,
+        parentClauseKey: "6",
+        clauseType: "subclause",
+        clauseTitle: null,
+        rawText: "6.7 בגין כל יום עיכוב ישלם הקבלן פיצוי מוסכם בסך 2,000 ש״ח ליום.",
+        summaryHe: "פיצוי מוסכם של 2,000 ש״ח ליום בגין עיכוב.",
+        hashtags: ["delay", "schedule", "commercial"],
+        crossReferences: [],
+        pageStart: 6,
+        pageEnd: 6
+      },
+      {
+        clauseKey: "appendix_b.3",
+        clauseOrder: 4,
+        parentClauseKey: "appendix_b.heading",
+        clauseType: "appendix_item",
+        clauseTitle: null,
+        rawText: "נספח ב סעיף 3: הפיצוי המוסכם בגין כל יום איחור הוא 3,250 ש״ח ליום.",
+        summaryHe: "פיצוי מוסכם של 3,250 ש״ח ליום בגין איחור.",
+        hashtags: ["delay", "schedule", "commercial", "appendix"],
+        crossReferences: [],
+        pageStart: 18,
+        pageEnd: 18
+      },
+      {
+        clauseKey: "9.1",
+        clauseOrder: 5,
+        parentClauseKey: "9",
+        clauseType: "subclause",
+        clauseTitle: null,
+        rawText: "9.1 חשבון מאושר ישולם בתוך 30 ימים מקבלת חשבונית כדין.",
+        summaryHe: "תשלום חשבון מאושר בתוך 30 ימים.",
+        hashtags: ["payment", "approval"],
+        crossReferences: [],
+        pageStart: 9,
+        pageEnd: 9
+      },
+      {
+        clauseKey: "19.6",
+        clauseOrder: 6,
+        parentClauseKey: "19",
+        clauseType: "subclause",
+        clauseTitle: null,
+        rawText: "19.6 סמל תהיה רשאית לקזז מכל סכום המגיע לקבלן כל חוב של הקבלן.",
+        summaryHe: "סמל רשאית לקזז חובות מסכומים המגיעים לקבלן.",
+        hashtags: ["payment", "commercial"],
+        crossReferences: [],
+        pageStart: 15,
+        pageEnd: 15
+      },
+      {
+        clauseKey: "19.7",
+        clauseOrder: 7,
+        parentClauseKey: "19",
+        clauseType: "subclause",
+        clauseTitle: null,
+        rawText: "19.7 הקבלן לא יהיה רשאי לקזז סכום כלשהו מן התמורה המגיעה לו מסמל.",
+        summaryHe: "הקבלן אינו רשאי לקזז סכומים מן התמורה.",
+        hashtags: ["payment", "commercial"],
+        crossReferences: [],
+        pageStart: 15,
+        pageEnd: 15
+      }
+    ]
+  };
+}
+
+function semanticPairPreview(clauses) {
+  return {
+    clauses: clauses.map((clause, index) => ({
+      clauseOrder: index + 1,
+      parentClauseKey: clause.clauseKey.split(".").slice(0, -1).join(".") || null,
+      clauseType: "subclause",
+      clauseTitle: null,
+      crossReferences: [],
+      pageStart: index + 1,
+      pageEnd: index + 1,
+      ...clause
+    }))
+  };
+}
+
+function semanticTestConfig() {
+  return {
+    openRouterApiKey: "server-owned-test-key",
+    models: { main: "test/contracts-r4.1" },
+    ai: { main: { timeoutMs: 5_000 } },
+    contracts: { r4_1: { maxCandidates: 10, concurrency: 1 } }
+  };
 }
 
 function representativeOutput(id) {
