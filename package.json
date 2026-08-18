@@ -12,6 +12,29 @@
     "data-query:provision": "node scripts/provision-data-query-service-account.mjs",
     "test": "node test/run-tests.js",
     "test:data-query": "node test/run-tests.js --filter \"^data query\"",
+    "test:contracts": "node test/run-tests.js --filter \"^contracts\"",
+    "test:contracts:ui": "node scripts/verify-contracts-review-ui.mjs",
+    "test:contracts:db": "node scripts/test-contracts-phase2-db.mjs",
+    "test:contracts:phase3-db": "node scripts/test-contracts-phase3-db.mjs",
+    "test:contracts:phase3-db:rollback": "node scripts/test-contracts-phase3-db.mjs --rollback-only",
+    "test:contracts:phase3e:live": "node scripts/verify-contracts-phase3e-live.mjs",
+    "test:contracts:phase3f:ui": "node scripts/verify-contracts-phase3f-ui.mjs",
+    "test:contracts:phase3g": "node scripts/verify-contracts-phase3g.mjs",
+    "test:contracts:phase3g:db": "node scripts/test-contracts-phase3g-concurrency.mjs",
+    "test:contracts:phase3g:rollback": "node scripts/test-contracts-phase3-db.mjs --phase3g-rollback-only",
+    "test:contracts:r1-db": "node scripts/test-contracts-pipeline-r1-db.mjs",
+    "test:contracts:r2": "node test/run-tests.js --filter \"^contracts R2\"",
+    "test:contracts:r2-db": "node scripts/test-contracts-clause-parser-r2.mjs",
+    "test:contracts:r3": "node test/run-tests.js --filter \"^contracts R3\"",
+    "test:contracts:r3-db": "node scripts/test-contracts-clause-enrichment-r3.mjs",
+    "test:contracts:r3-2-db": "node scripts/test-contracts-clause-persistence-r3-2.mjs",
+    "test:contracts:r4-db": "node scripts/test-contracts-relationships-r4-0.mjs",
+    "contracts:r3-live": "node scripts/evaluate-contracts-clause-enrichment-r3-live.mjs",
+    "contracts:r5-audit-live": "node scripts/audit-contracts-indicator-handoff-r5-live.mjs",
+    "contracts:r5-handoff-live": "node scripts/audit-contracts-indicator-handoff-r5-live.mjs",
+    "contracts:gold": "node scripts/evaluate-contracts-gold-set.mjs",
+    "contracts:representative": "node scripts/evaluate-contracts-representative-set.mjs",
+    "contracts:sample-live": "node scripts/evaluate-contracts-sample-live.mjs",
     "test:schedule": "node test/schedule-engine.test.js",
     "test:memory:smoke": "node scripts/smoke-chat-memory.mjs",
     "logs:memory": "node scripts/read-memory-log.mjs",
@@ -23,13 +46,17 @@
     "node": ">=20"
   },
   "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "graphology": "^0.26.0",
+    "pdfjs-dist": "4.10.38",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
     "@vitejs/plugin-react": "^6.0.3",
+    "supabase": "2.113.0",
     "vite": "^8.1.0"
   }
 }

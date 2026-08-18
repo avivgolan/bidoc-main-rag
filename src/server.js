@@ -16,6 +16,9 @@ import { authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { runScheduleConditionResolver } from "./subagents/scheduleConditionResolver.js";
+import { CONTRACTS_AGENT_VERSION, CONTRACTS_EXTRACTION_BUDGET_MS, CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES, CONTRACTS_MAX_RESPONSE_BYTES, CONTRACTS_PDF_READER_VERSION } from "./contracts/constants.js";
+import { contractsErrorResponse } from "./contracts/errors.js";
+import { readJsonBounded } from "./contracts/request.js";
 import { listScheduleProjects, loadScheduleSource, scheduleSettings } from "./scheduleIngestion.js";
 import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
@@ -27,13 +30,25 @@ import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalR
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession } from "./auth.js";
-import { deleteAllChatMemoryForUser, deleteChatSessionMemory, getChatMemoryStats } from "./chatMemory.js";
 
 loadEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const config = () => getConfig();
+
+function logContractsRouteFailure(scope, error) {
+  const cause = error?.cause;
+  console.error(`[contracts:${scope}] request failed`, {
+    code: String(error?.code || "contracts_internal_error").slice(0, 160),
+    status: Number(error?.status) || 500,
+    message: String(error?.message || "Contract request failed.").replace(/[\r\n]+/gu, " ").slice(0, 1000),
+    ...(cause ? {
+      causeCode: String(cause?.code || cause?.name || "unknown").slice(0, 160),
+      causeMessage: String(cause?.message || "").replace(/[\r\n]+/gu, " ").slice(0, 1000)
+    } : {})
+  });
+}
 
 // ─── Multi-tenant helpers ─────────────────────────────────────────────────────
 
@@ -54,21 +69,9 @@ function checkBidocSecret(req) {
  * so the app's own interface can still load history/hashtags.
  */
 function checkBidocSecretForRead(req) {
-  const isCrossTenant = isCrossTenantRequest(req);
+  const isCrossTenant = Boolean(req.headers["x-content-supabase-url"]);
   if (!isCrossTenant) return true;
   return checkBidocSecret(req);
-}
-
-function isCrossTenantRequest(req) {
-  return Boolean(req.headers["x-content-supabase-url"] || req.headers["x-user-id"]);
-}
-
-function resolveRequestUserId(req, body = {}) {
-  if (isCrossTenantRequest(req)) {
-    if (!checkBidocSecret(req)) return null;
-    return String(req.headers["x-user-id"] || body.userId || "").trim() || null;
-  }
-  return String(getSuperadminSession(req)?.sub || "").trim() || null;
 }
 
 /**
@@ -174,11 +177,53 @@ async function handleApi(req, res, url) {
   // secret — merely sending the content-supabase-url header is not enough to
   // bypass the login wall. Same-origin calls (the standalone UI) need a session.
   if (!url.pathname.startsWith("/api/auth/")) {
-    const isCrossTenantApiRequest = isCrossTenantRequest(req);
-    if (isCrossTenantApiRequest) {
-      if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
-    } else if (!getSuperadminSession(req)) {
-      return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
+    const isContractsActivityMappingRoute = url.pathname.startsWith("/api/contracts/activity-mapping/");
+    const isContractsWorkspaceRoute = url.pathname.startsWith("/api/contracts/workspaces");
+    const isContractsClausePreviewRoute = url.pathname === "/api/contracts/clauses/preview";
+    const isContractsClausePersistenceRoute = url.pathname.startsWith("/api/contracts/clauses/workspaces")
+      || url.pathname === "/api/contracts/clauses/status";
+    const isContractsRelationshipsRoute = url.pathname.startsWith("/api/contracts/relationships/");
+    const isContractsDecisionsRoute = url.pathname.startsWith("/api/contracts/decisions/");
+    const isContractsServerOwnedRoute = isContractsActivityMappingRoute
+      || isContractsWorkspaceRoute
+      || isContractsClausePreviewRoute
+      || isContractsClausePersistenceRoute
+      || isContractsRelationshipsRoute
+      || isContractsDecisionsRoute;
+    const hasContractsDatabaseHeaderOverride = isContractsServerOwnedRoute && [
+      "x-content-supabase-url",
+      "x-content-supabase-key",
+      "x-hybrid-rpc-name",
+      "x-index-table",
+      "x-alerts-table"
+    ].some((header) => Object.prototype.hasOwnProperty.call(req.headers, header));
+    if (isContractsServerOwnedRoute) {
+      if (!getSuperadminSession(req)) {
+        return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
+      }
+      if (hasContractsDatabaseHeaderOverride) {
+        return sendJson(res, 400, {
+          error: isContractsActivityMappingRoute
+            ? "contracts_activity_mapping_database_override_rejected"
+            : isContractsClausePreviewRoute
+              ? "contracts_clause_preview_database_override_rejected"
+              : isContractsClausePersistenceRoute
+                ? "contracts_clause_persistence_database_override_rejected"
+                : isContractsRelationshipsRoute
+                  ? "contracts_relationships_database_override_rejected"
+                  : isContractsDecisionsRoute
+                    ? "contracts_decisions_database_override_rejected"
+              : "contracts_workspace_database_override_rejected",
+          message: "Contracts APIs use server-owned MAIN and KAPAIM connections; client database overrides are not accepted."
+        });
+      }
+    } else {
+      const isCrossTenantApiRequest = Boolean(req.headers["x-content-supabase-url"]);
+      if (isCrossTenantApiRequest) {
+        if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
+      } else if (!getSuperadminSession(req)) {
+        return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
+      }
     }
   }
 
@@ -189,7 +234,6 @@ async function handleApi(req, res, url) {
     const sessionId = body.sessionId || `session_${Date.now()}`;
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const cfg = buildRequestConfig(req, body);
-    const userId = resolveRequestUserId(req, body);
     createRun(runId);
 
     // Opt-in inline-stream mode (body.stream === true, used by the standalone
@@ -217,7 +261,6 @@ async function handleApi(req, res, url) {
         const output = await runChatPipeline({
           message: body.message,
           sessionId,
-          userId,
           config: cfg,
           runId,
           sourcesEnabled: body.sourcesEnabled !== false,
@@ -242,7 +285,6 @@ async function handleApi(req, res, url) {
       const output = await runChatPipeline({
         message: body.message,
         sessionId,
-        userId,
         config: cfg,
         runId,
         sourcesEnabled: body.sourcesEnabled !== false,
@@ -692,39 +734,6 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { messages });
   }
 
-  if (req.method === "GET" && url.pathname === "/api/memory/stats") {
-    const userId = resolveRequestUserId(req);
-    const stats = await getChatMemoryStats({ config: config(), userId }).catch((error) => ({
-      memoryItems: 0,
-      sessions: 0,
-      lastUpdatedAt: null,
-      degraded: true,
-      error: error.message
-    }));
-    return sendJson(res, 200, { ...stats, mode: userId ? "user_and_session" : "session_only" });
-  }
-
-  const memorySessionMatch = url.pathname.match(/^\/api\/memory\/session\/([^/]+)$/);
-  if (req.method === "DELETE" && memorySessionMatch) {
-    const sessionId = decodeURIComponent(memorySessionMatch[1]);
-    const userId = resolveRequestUserId(req);
-    const deleted = await deleteChatSessionMemory({ config: config(), sessionId, userId });
-    return sendJson(res, deleted ? 200 : 404, deleted
-      ? { ok: true, sessionId }
-      : { ok: false, error: "Session memory was not found for this owner" });
-  }
-
-  if (req.method === "DELETE" && url.pathname === "/api/memory/me") {
-    const body = await readJson(req);
-    if (body.confirm !== "DELETE_ALL_MEMORY") {
-      return sendJson(res, 400, { error: "confirm must equal DELETE_ALL_MEMORY" });
-    }
-    const userId = resolveRequestUserId(req, body);
-    if (!userId) return sendJson(res, 400, { error: "Authenticated userId is required" });
-    const deleted = await deleteAllChatMemoryForUser({ config: config(), userId });
-    return sendJson(res, 200, { ok: true, deleted });
-  }
-
   if (req.method === "GET" && url.pathname === "/api/settings") {
     await reloadSettingsFromDb();
     return sendJson(res, 200, publicSettings(config()));
@@ -861,10 +870,1102 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, result);
   }
 
+  // Contracts Agent Phase 1: authenticated, bounded, dry-run extraction only.
+  // This route intentionally has no project-data override, persistence option,
+  // Schedule service call, or database writer.
+  if (req.method === "POST" && url.pathname === "/api/contracts/extract") {
+    try {
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { runContractsExtractionRequest, safeContractTelemetry } = await import("./subagents/contracts.js");
+      const { sendContractsJson } = await import("./contracts/response.js");
+      const result = await runContractsExtractionRequest({
+        body,
+        config: config(),
+        emit: (payload) => {
+          const safe = safeContractTelemetry(payload.event, payload);
+          if (safe) console.info("[contracts]", JSON.stringify(safe));
+        }
+      });
+      return sendContractsJson(res, 200, result);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // Contracts Agent R3.1 acceptance preview: authenticated, bounded, and
+  // deliberately ephemeral. It runs the complete clause parser/enricher but
+  // performs no Supabase, Storage, Schedule, decision, or relationship write.
+  if (req.method === "POST" && url.pathname === "/api/contracts/clauses/preview") {
+    try {
+      if (!getSuperadminSession(req)) {
+        return sendJson(res, 401, { error: "נדרשת התחברות כסופראדמין" });
+      }
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { runContractsClausePreview } = await import("./contracts/clausePreview.js");
+      const { sendContractsJson } = await import("./contracts/response.js");
+      const result = await runContractsClausePreview({ body, config: config() });
+      return sendContractsJson(res, 200, result);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
   // ─── Schedule Intelligence Service (spec 4.4) ──────────────────────────────
+  // Contracts Agent R3.2 persistence: save the accepted R2/R3 generation
+  // atomically and reopen it later without another parser or model run.
+  if (req.method === "GET" && url.pathname === "/api/contracts/clauses/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsClausePersistenceStatus } = await import("./contracts/clausePersistence.js");
+      return sendJson(res, 200, await loadContractsClausePersistenceStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/contracts/clauses/workspaces") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const {
+        contractsClausePersistenceApproved,
+        listSavedContractsClauseWorkspaces,
+        parseContractsClauseWorkspaceListRequest
+      } = await import("./contracts/clausePersistence.js");
+      if (!contractsClausePersistenceApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_clause_persistence_not_enabled",
+          code: "contracts_clause_persistence_not_enabled"
+        });
+      }
+      const request = parseContractsClauseWorkspaceListRequest(url.searchParams);
+      const result = await listSavedContractsClauseWorkspaces({ config: config(), ...request });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsClauseWorkspaceMatch = url.pathname.match(/^\/api\/contracts\/clauses\/workspaces\/([0-9a-f-]+)$/iu);
+  if (req.method === "GET" && contractsClauseWorkspaceMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const {
+        contractsClausePersistenceApproved,
+        getSavedContractsClauseWorkspace
+      } = await import("./contracts/clausePersistence.js");
+      if (!contractsClausePersistenceApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_clause_persistence_not_enabled",
+          code: "contracts_clause_persistence_not_enabled"
+        });
+      }
+      const result = await getSavedContractsClauseWorkspace({
+        config: config(),
+        workspaceId: contractsClauseWorkspaceMatch[1]
+      });
+      const { sendContractsJson } = await import("./contracts/response.js");
+      return sendContractsJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/clauses/workspaces/extract") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractsClausePersistenceApproved,
+        runContractsClausePersistence
+      } = await import("./contracts/clausePersistence.js");
+      if (!contractsClausePersistenceApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_clause_persistence_not_enabled",
+          code: "contracts_clause_persistence_not_enabled"
+        });
+      }
+      const result = await runContractsClausePersistence({
+        body,
+        config: config(),
+        reviewerId: reviewer.sub,
+        emit: (event) => console.info("[contracts-r3.2]", JSON.stringify(event))
+      });
+      const { sendContractsJson } = await import("./contracts/response.js");
+      return sendContractsJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r3.2-persist", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // Contracts Relationships Agent R4.0 foundation. This slice persists only
+  // deterministic clause-to-clause links for explicit references already
+  // extracted by R3. It creates no decisions and never calls Schedule.
+  if (req.method === "GET" && url.pathname === "/api/contracts/relationships/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsRelationshipsStatus } = await import("./contracts/relationshipPersistence.js");
+      return sendJson(res, 200, await loadContractsRelationshipsStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // R4.1 is a read/model-only semantic preview over one server-loaded saved
+  // clause generation. The browser cannot supply clauses, model settings,
+  // database routing, or review decisions, and this route performs no write.
+  if (req.method === "GET" && url.pathname === "/api/contracts/relationships/semantic/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsSemanticRelationshipsStatus } = await import("./contracts/semanticRelationshipService.js");
+      return sendJson(res, 200, loadContractsSemanticRelationshipsStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // R4.2A persists only complete, skeptically verified R4.1 proposals and
+  // exposes append-only authenticated review. It creates no normalized
+  // contractual decisions and never calls Schedule.
+  if (req.method === "GET" && url.pathname === "/api/contracts/relationships/review/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsRelationshipReviewStatus } = await import("./contracts/semanticRelationshipReview.js");
+      return sendJson(res, 200, await loadContractsRelationshipReviewStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsRelationshipsWorkspaceMatch = url.pathname.match(
+    /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)$/iu
+  );
+  if (req.method === "GET" && contractsRelationshipsWorkspaceMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const {
+        contractsRelationshipsApproved,
+        loadContractsRelationships
+      } = await import("./contracts/relationshipPersistence.js");
+      if (!contractsRelationshipsApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_relationships_not_enabled",
+          code: "contracts_relationships_not_enabled"
+        });
+      }
+      return sendJson(res, 200, await loadContractsRelationships({
+        config: config(),
+        workspaceId: contractsRelationshipsWorkspaceMatch[1]
+      }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsRelationshipsPersistMatch = url.pathname.match(
+    /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)\/explicit$/iu
+  );
+  if (req.method === "POST" && contractsRelationshipsPersistMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const {
+        contractsRelationshipsApproved,
+        persistContractsExplicitRelationships
+      } = await import("./contracts/relationshipPersistence.js");
+      if (!contractsRelationshipsApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_relationships_not_enabled",
+          code: "contracts_relationships_not_enabled"
+        });
+      }
+      const result = await persistContractsExplicitRelationships({
+        config: config(),
+        workspaceId: contractsRelationshipsPersistMatch[1],
+        timeoutMs: 60_000
+      });
+      console.info("[contracts-r4.0]", JSON.stringify({
+        workspaceId: result.workspace.workspaceId,
+        inserted: result.persistence.inserted,
+        reused: result.persistence.reused,
+        unresolved: result.metrics.unresolvedReferenceCount,
+        scheduleWrites: 0
+      }));
+      return sendJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.0-explicit-relationships", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsSemanticRelationshipsPreviewMatch = url.pathname.match(
+    /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)\/semantic-preview$/iu
+  );
+  if (req.method === "POST" && contractsSemanticRelationshipsPreviewMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractsSemanticRelationshipsApproved,
+        previewContractsSemanticRelationships
+      } = await import("./contracts/semanticRelationshipService.js");
+      if (!contractsSemanticRelationshipsApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_semantic_relationships_not_enabled",
+          code: "contracts_semantic_relationships_not_enabled"
+        });
+      }
+      const result = await previewContractsSemanticRelationships({
+        config: config(),
+        workspaceId: contractsSemanticRelationshipsPreviewMatch[1],
+        body,
+        deadlineAt: Date.now() + 180_000
+      });
+      console.info("[contracts-r4.1]", JSON.stringify({
+        workspaceId: result.workspace.workspaceId,
+        candidates: result.metrics.candidatePairCount,
+        proposed: result.metrics.modelRelationshipCount,
+        classificationComplete: result.metrics.classificationComplete,
+        classificationFailedPairs: result.metrics.classificationFailedPairCount,
+        verificationComplete: result.metrics.verificationComplete,
+        verificationFailedPairs: result.metrics.verificationFailedPairCount,
+        decisions: 0,
+        persistenceWrites: 0,
+        scheduleWrites: 0
+      }));
+      const { sendContractsJson } = await import("./contracts/response.js");
+      return sendContractsJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.1-semantic-relationships-preview", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsSemanticRelationshipsPersistMatch = url.pathname.match(
+    /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)\/semantic-proposals$/iu
+  );
+  if (req.method === "POST" && contractsSemanticRelationshipsPersistMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractsSemanticRelationshipsApproved,
+        previewContractsSemanticRelationships
+      } = await import("./contracts/semanticRelationshipService.js");
+      const {
+        contractsRelationshipReviewApproved,
+        persistContractsSemanticRelationshipProposals
+      } = await import("./contracts/semanticRelationshipReview.js");
+      if (!contractsSemanticRelationshipsApproved() || !contractsRelationshipReviewApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_relationship_review_not_enabled",
+          code: "contracts_relationship_review_not_enabled"
+        });
+      }
+      const analysis = await previewContractsSemanticRelationships({
+        config: config(),
+        workspaceId: contractsSemanticRelationshipsPersistMatch[1],
+        body,
+        deadlineAt: Date.now() + 180_000
+      });
+      const review = await persistContractsSemanticRelationshipProposals({
+        config: config(),
+        workspaceId: contractsSemanticRelationshipsPersistMatch[1],
+        semanticResult: analysis,
+        timeoutMs: 60_000
+      });
+      console.info("[contracts-r4.2a]", JSON.stringify({
+        workspaceId: analysis.workspace.workspaceId,
+        verifiedProposals: analysis.metrics.modelRelationshipCount,
+        inserted: review.persistence.inserted,
+        reused: review.persistence.reused,
+        pendingReview: review.metrics.proposedCount,
+        decisions: 0,
+        scheduleWrites: 0
+      }));
+      const { sendContractsJson } = await import("./contracts/response.js");
+      return sendContractsJson(res, 200, { analysis, review });
+    } catch (error) {
+      logContractsRouteFailure("r4.2a-semantic-proposals", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsSemanticRelationshipReviewWorkspaceMatch = url.pathname.match(
+    /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)\/semantic-review$/iu
+  );
+  if (req.method === "GET" && contractsSemanticRelationshipReviewWorkspaceMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const {
+        contractsRelationshipReviewApproved,
+        loadContractsRelationshipReview
+      } = await import("./contracts/semanticRelationshipReview.js");
+      if (!contractsRelationshipReviewApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_relationship_review_not_enabled",
+          code: "contracts_relationship_review_not_enabled"
+        });
+      }
+      return sendJson(res, 200, await loadContractsRelationshipReview({
+        config: config(),
+        workspaceId: contractsSemanticRelationshipReviewWorkspaceMatch[1],
+        timeoutMs: 60_000
+      }));
+    } catch (error) {
+      logContractsRouteFailure("r4.2a-relationship-review-load", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsSemanticRelationshipReviewItemMatch = url.pathname.match(
+    /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)\/semantic-review\/([0-9a-f-]+)$/iu
+  );
+  if (req.method === "POST" && contractsSemanticRelationshipReviewItemMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractsRelationshipReviewApproved,
+        reviewContractsSemanticRelationship
+      } = await import("./contracts/semanticRelationshipReview.js");
+      if (!contractsRelationshipReviewApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_relationship_review_not_enabled",
+          code: "contracts_relationship_review_not_enabled"
+        });
+      }
+      const result = await reviewContractsSemanticRelationship({
+        config: config(),
+        workspaceId: contractsSemanticRelationshipReviewItemMatch[1],
+        relationshipId: contractsSemanticRelationshipReviewItemMatch[2],
+        reviewerId: reviewer.sub,
+        body,
+        timeoutMs: 60_000
+      });
+      console.info("[contracts-r4.2a-review]", JSON.stringify({
+        workspaceId: result.workspace.workspaceId,
+        action: result.review.action,
+        reviewedRelationshipId: result.review.reviewedRelationshipId,
+        correctedRelationshipId: result.review.correctedRelationshipId,
+        pendingReview: result.metrics.proposedCount,
+        decisions: 0,
+        scheduleWrites: 0
+      }));
+      return sendJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.2a-relationship-review-apply", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // R4.2B creates normalized contractual decision proposals only after every
+  // saved R4.2A relationship has been reviewed. Proposals and human decisions
+  // are append-only in KAPAIM; this slice never selects a conflict winner and
+  // never calls or writes to Schedule.
+  if (req.method === "GET" && url.pathname === "/api/contracts/decisions/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsDecisionReviewStatus } = await import("./contracts/decisionReview.js");
+      return sendJson(res, 200, await loadContractsDecisionReviewStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // R4.2C adds authenticated split/merge actions over existing decision
+  // proposals. Every action appends terminal/source and output revisions plus
+  // explicit decision-to-decision lineage; it performs no model or Schedule call.
+  if (req.method === "GET" && url.pathname === "/api/contracts/decisions/lineage/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsDecisionLineageStatus } = await import("./contracts/decisionLineage.js");
+      return sendJson(res, 200, await loadContractsDecisionLineageStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // R5 exposes current reviewed contractual decisions as a read-only handoff
+  // to the future Indicator agent. Contracts decides suitability only;
+  // Indicator owns project placement, target selection, calendars, and every
+  // Schedule write. This route performs no model or database mutation.
+  if (req.method === "GET" && url.pathname === "/api/contracts/decisions/indicator-handoff/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsIndicatorHandoffStatus } = await import("./contracts/indicatorHandoff.js");
+      return sendJson(res, 200, await loadContractsIndicatorHandoffStatus());
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsIndicatorHandoffWorkspaceMatch = url.pathname.match(
+    /^\/api\/contracts\/decisions\/workspaces\/([0-9a-f-]+)\/indicator-handoff$/iu
+  );
+  if (req.method === "GET" && contractsIndicatorHandoffWorkspaceMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsIndicatorHandoff } = await import("./contracts/indicatorHandoff.js");
+      const result = await loadContractsIndicatorHandoff({
+        config: config(),
+        workspaceId: contractsIndicatorHandoffWorkspaceMatch[1],
+        timeoutMs: 60_000
+      });
+      console.info("[contracts-r5-indicator-handoff]", JSON.stringify({
+        workspaceId: result.workspace.workspaceId,
+        suitable: result.metrics.suitableCount,
+        notSuitable: result.metrics.notSuitableCount,
+        requiresReview: result.metrics.requiresReviewCount,
+        scheduleWrites: 0
+      }));
+      return sendJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r5-indicator-handoff-load", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsDecisionLineageWorkspaceMatch = url.pathname.match(
+    /^\/api\/contracts\/decisions\/workspaces\/([0-9a-f-]+)\/lineage$/iu
+  );
+  if (req.method === "GET" && contractsDecisionLineageWorkspaceMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsDecisionLineageReview } = await import("./contracts/decisionLineage.js");
+      return sendJson(res, 200, await loadContractsDecisionLineageReview({
+        config: config(),
+        workspaceId: contractsDecisionLineageWorkspaceMatch[1],
+        timeoutMs: 60_000
+      }));
+    } catch (error) {
+      logContractsRouteFailure("r4.2c-decision-lineage-load", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsDecisionSplitMatch = url.pathname.match(
+    /^\/api\/contracts\/decisions\/workspaces\/([0-9a-f-]+)\/lineage\/split\/([0-9a-f-]+)$/iu
+  );
+  if (req.method === "POST" && contractsDecisionSplitMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, 262_144);
+      const { splitContractsDecision } = await import("./contracts/decisionLineage.js");
+      const result = await splitContractsDecision({
+        config: config(),
+        workspaceId: contractsDecisionSplitMatch[1],
+        decisionId: contractsDecisionSplitMatch[2],
+        reviewerId: reviewer.sub,
+        body,
+        timeoutMs: 60_000
+      });
+      console.info("[contracts-r4.2c-lineage]", JSON.stringify({
+        workspaceId: result.workspace.workspaceId,
+        action: "split",
+        sourceDecisionCount: result.lineageMutation.sourceDecisionIds.length,
+        outputDecisionCount: result.lineageMutation.outputDecisionIds.length,
+        lineageInserted: result.lineageMutation.lineageInserted,
+        modelCalls: 0,
+        scheduleWrites: 0
+      }));
+      return sendJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.2c-decision-split", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsDecisionMergeMatch = url.pathname.match(
+    /^\/api\/contracts\/decisions\/workspaces\/([0-9a-f-]+)\/lineage\/merge$/iu
+  );
+  if (req.method === "POST" && contractsDecisionMergeMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, 262_144);
+      const { mergeContractsDecisions } = await import("./contracts/decisionLineage.js");
+      const result = await mergeContractsDecisions({
+        config: config(),
+        workspaceId: contractsDecisionMergeMatch[1],
+        reviewerId: reviewer.sub,
+        body,
+        timeoutMs: 60_000
+      });
+      console.info("[contracts-r4.2c-lineage]", JSON.stringify({
+        workspaceId: result.workspace.workspaceId,
+        action: "merge",
+        sourceDecisionCount: result.lineageMutation.sourceDecisionIds.length,
+        outputDecisionCount: result.lineageMutation.outputDecisionIds.length,
+        lineageInserted: result.lineageMutation.lineageInserted,
+        modelCalls: 0,
+        scheduleWrites: 0
+      }));
+      return sendJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.2c-decision-merge", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsDecisionReviewWorkspaceMatch = url.pathname.match(
+    /^\/api\/contracts\/decisions\/workspaces\/([0-9a-f-]+)$/iu
+  );
+  if (req.method === "GET" && contractsDecisionReviewWorkspaceMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const {
+        contractsDecisionReviewApproved,
+        loadContractsDecisionReview
+      } = await import("./contracts/decisionReview.js");
+      if (!contractsDecisionReviewApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_decision_review_not_enabled",
+          code: "contracts_decision_review_not_enabled"
+        });
+      }
+      return sendJson(res, 200, await loadContractsDecisionReview({
+        config: config(),
+        workspaceId: contractsDecisionReviewWorkspaceMatch[1],
+        timeoutMs: 60_000
+      }));
+    } catch (error) {
+      logContractsRouteFailure("r4.2b-decision-review-load", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsDecisionProposalMatch = url.pathname.match(
+    /^\/api\/contracts\/decisions\/workspaces\/([0-9a-f-]+)\/proposals$/iu
+  );
+  if (req.method === "POST" && contractsDecisionProposalMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractsDecisionReviewApproved,
+        generateAndPersistContractsDecisions
+      } = await import("./contracts/decisionReview.js");
+      if (!contractsDecisionReviewApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_decision_review_not_enabled",
+          code: "contracts_decision_review_not_enabled"
+        });
+      }
+      const result = await generateAndPersistContractsDecisions({
+        config: config(),
+        workspaceId: contractsDecisionProposalMatch[1],
+        body,
+        deadlineAt: Date.now() + 300_000
+      });
+      console.info("[contracts-r4.2b]", JSON.stringify({
+        workspaceId: result.review.workspace.workspaceId,
+        modelAvoided: result.modelAvoided,
+        decisions: result.review.metrics.currentDecisionCount,
+        pendingRelationshipReview: result.review.metrics.pendingRelationshipCount,
+        pendingDecisionReview: result.review.metrics.proposedCount,
+        scheduleWrites: 0
+      }));
+      const { sendContractsJson } = await import("./contracts/response.js");
+      return sendContractsJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.2b-decision-proposals", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsDecisionReviewItemMatch = url.pathname.match(
+    /^\/api\/contracts\/decisions\/workspaces\/([0-9a-f-]+)\/review\/([0-9a-f-]+)$/iu
+  );
+  if (req.method === "POST" && contractsDecisionReviewItemMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractsDecisionReviewApproved,
+        reviewContractsDecision
+      } = await import("./contracts/decisionReview.js");
+      if (!contractsDecisionReviewApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_decision_review_not_enabled",
+          code: "contracts_decision_review_not_enabled"
+        });
+      }
+      const result = await reviewContractsDecision({
+        config: config(),
+        workspaceId: contractsDecisionReviewItemMatch[1],
+        decisionId: contractsDecisionReviewItemMatch[2],
+        reviewerId: reviewer.sub,
+        body,
+        timeoutMs: 60_000
+      });
+      console.info("[contracts-r4.2b-review]", JSON.stringify({
+        workspaceId: result.workspace.workspaceId,
+        action: result.review.action,
+        reviewedProposalDecisionId: result.review.reviewedProposalDecisionId,
+        reviewedDecisionId: result.review.reviewedDecisionId,
+        pendingDecisionReview: result.metrics.proposedCount,
+        scheduleWrites: 0
+      }));
+      return sendJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.2b-decision-review-apply", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
   // Every route requires an explicit projectId — there is no default project
   // (acceptance criterion 24). DB routing comes from the schedule source
   // profile (scheduleSettings), never from this layer.
+
+  // Contracts saved-workspace Phase 3F.1: same-origin saved contract workspaces.
+  // Canonical extraction snapshots and source PDFs are immutable; reviewer
+  // drafts remain mutable and separate from Phase 2/3 audit decisions.
+  // These routes never run Schedule arithmetic, create mappings, or emit alerts.
+  if (req.method === "GET" && url.pathname === "/api/contracts/workspaces/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsWorkspaceStatus } = await import("./contracts/workspacePersistence.js");
+      return sendJson(res, 200, await loadContractsWorkspaceStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/contracts/workspaces") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const {
+        contractsWorkspacePersistenceApproved,
+        listSavedContractWorkspaces,
+        parseWorkspaceListRequest
+      } = await import("./contracts/workspacePersistence.js");
+      if (!contractsWorkspacePersistenceApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_workspace_persistence_not_enabled",
+          code: "contracts_workspace_persistence_not_enabled"
+        });
+      }
+      const request = parseWorkspaceListRequest(url.searchParams);
+      const result = await listSavedContractWorkspaces({ config: config(), reviewerId: reviewer.sub, ...request });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractWorkspaceMatch = url.pathname.match(/^\/api\/contracts\/workspaces\/([0-9a-f-]+)$/iu);
+  if (req.method === "GET" && contractWorkspaceMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { contractsWorkspacePersistenceApproved, getSavedContractWorkspace } = await import("./contracts/workspacePersistence.js");
+      if (!contractsWorkspacePersistenceApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_workspace_persistence_not_enabled",
+          code: "contracts_workspace_persistence_not_enabled"
+        });
+      }
+      const workspace = await getSavedContractWorkspace({
+        config: config(),
+        workspaceId: contractWorkspaceMatch[1],
+        reviewerId: reviewer.sub
+      });
+      return sendJson(res, 200, { ok: true, workspace });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractWorkspaceDraftMatch = url.pathname.match(/^\/api\/contracts\/workspaces\/([0-9a-f-]+)\/draft$/iu);
+  if (req.method === "PUT" && contractWorkspaceDraftMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractsWorkspacePersistenceApproved,
+        getSavedContractWorkspace,
+        saveContractWorkspaceDraft
+      } = await import("./contracts/workspacePersistence.js");
+      if (!contractsWorkspacePersistenceApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_workspace_persistence_not_enabled",
+          code: "contracts_workspace_persistence_not_enabled"
+        });
+      }
+      const workspaceId = contractWorkspaceDraftMatch[1];
+      const workspace = await getSavedContractWorkspace({ config: config(), workspaceId, reviewerId: reviewer.sub });
+      const saved = await saveContractWorkspaceDraft({
+        config: config(),
+        workspaceId,
+        reviewerId: reviewer.sub,
+        draft: body,
+        extraction: workspace.extraction
+      });
+      return sendJson(res, 200, { ok: true, saved });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/workspaces/extract") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractPdfSha256,
+        contractsWorkspacePersistenceApproved,
+        findSavedContractWorkspace,
+        parseWorkspaceExtractionRequest,
+        persistExtractedContractWorkspace,
+        projectSavedContractExtractionResponse
+      } = await import("./contracts/workspacePersistence.js");
+      if (!contractsWorkspacePersistenceApproved()) {
+        return sendJson(res, 503, {
+          error: "contracts_workspace_persistence_not_enabled",
+          code: "contracts_workspace_persistence_not_enabled"
+        });
+      }
+      const request = parseWorkspaceExtractionRequest(body);
+      const existing = await findSavedContractWorkspace({
+        config: config(),
+        sourceProjectId: request.parsedExtraction.projectSelection.projectId,
+        scheduleProjectId: request.scheduleProjectId,
+        documentSha256: contractPdfSha256(request.parsedExtraction.pdfBytes),
+        reviewerId: reviewer.sub
+      });
+      const { sendContractsJson } = await import("./contracts/response.js");
+      if (existing) {
+        return sendContractsJson(res, 200, projectSavedContractExtractionResponse(existing, { modelAvoided: true }));
+      }
+
+      const { runContractsExtractionRequest, safeContractTelemetry } = await import("./subagents/contracts.js");
+      const extraction = await runContractsExtractionRequest({
+        body: request.extractionRequest,
+        config: config(),
+        emit: (payload) => {
+          const safe = safeContractTelemetry(payload.event, payload);
+          if (safe) console.info("[contracts]", JSON.stringify(safe));
+        }
+      });
+      const workspace = await persistExtractedContractWorkspace({
+        config: config(),
+        parsedExtraction: request.parsedExtraction,
+        extraction,
+        scheduleProjectId: request.scheduleProjectId,
+        reviewerId: reviewer.sub
+      });
+      return sendContractsJson(res, 200, projectSavedContractExtractionResponse(workspace, { modelAvoided: false }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // Contracts Agent Phase 2: authenticated human review and separately gated
+  // atomic promotion. These routes never accept per-request database credentials
+  // and never run Schedule arithmetic; the existing Schedule Engine consumes the
+  // reviewed rows through its existing ingestion path.
+  if (req.method === "GET" && url.pathname === "/api/contracts/review/status") {
+    const { CONTRACTS_PHASE2_MIGRATION_VERSION, contractsPhase2ApplyApproved } = await import("./contracts/reviewWorkflow.js");
+    const applyApproved = contractsPhase2ApplyApproved();
+    return sendJson(res, 200, {
+      active: true,
+      mode: applyApproved ? "promotion_enabled" : "review_only",
+      migrationVersion: CONTRACTS_PHASE2_MIGRATION_VERSION,
+      applyApproved,
+      scheduleEngineMode: "reuse_existing_logic"
+    });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/review/plan") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { prepareContractReview } = await import("./contracts/reviewWorkflow.js");
+      const prepared = prepareContractReview({ body, reviewerId: reviewer.sub });
+      return sendJson(res, 200, prepared);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/review/save") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { contractsPhase2ApplyApproved, prepareContractReview } = await import("./contracts/reviewWorkflow.js");
+      if (!contractsPhase2ApplyApproved()) {
+        return sendJson(res, 503, {
+          error: "Contracts review persistence is disabled by the server-only Phase 2 activation gate.",
+          code: "contracts_review_persistence_not_enabled"
+        });
+      }
+      if (body.persistReview !== true) {
+        return sendJson(res, 409, { error: "An explicit review-only persistence confirmation is required.", code: "contracts_review_persistence_required" });
+      }
+      const prepared = prepareContractReview({ body, reviewerId: reviewer.sub });
+      const { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } = await import("./contracts/reviewMode.js");
+      if (contractReviewSubmissionMode(prepared.plan) !== CONTRACT_REVIEW_SUBMISSION_MODE.reviewOnly) {
+        return sendJson(res, 409, {
+          error: "This endpoint accepts only a complete rejection-only review and can never promote Schedule facts.",
+          code: "contracts_review_only_not_ready"
+        });
+      }
+      const { submitContractPromotion } = await import("./contracts/promotionWriter.js");
+      const result = await submitContractPromotion({
+        ...prepared,
+        config: config(),
+        commit: true,
+        migrationApplyApproved: true
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/review/commit") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { contractsPhase2ApplyApproved, prepareContractReview } = await import("./contracts/reviewWorkflow.js");
+      if (!contractsPhase2ApplyApproved()) {
+        return sendJson(res, 503, {
+          error: "Contracts fact promotion is disabled by the server-only Phase 2 activation gate.",
+          code: "contracts_promotion_apply_not_approved"
+        });
+      }
+      if (body.commit !== true) {
+        return sendJson(res, 409, { error: "An explicit commit confirmation is required.", code: "contracts_promotion_commit_required" });
+      }
+      const prepared = prepareContractReview({ body, reviewerId: reviewer.sub });
+      const { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } = await import("./contracts/reviewMode.js");
+      if (contractReviewSubmissionMode(prepared.plan) !== CONTRACT_REVIEW_SUBMISSION_MODE.promotion) {
+        return sendJson(res, 409, {
+          error: "No transaction-ready approved fact exists. Use the review-only save endpoint for a complete rejection review.",
+          code: "contracts_promotion_not_ready"
+        });
+      }
+      const { submitContractPromotion } = await import("./contracts/promotionWriter.js");
+      const result = await submitContractPromotion({
+        ...prepared,
+        config: config(),
+        commit: true,
+        migrationApplyApproved: true
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // Contracts Agent Phase 3E: same-origin, read-only activity-mapping inputs
+  // and candidates. The authoritative MAIN project UUID is the only routing
+  // input; the server resolves the approved KAPAIM project context and owns
+  // both database connections. No review RPC or Schedule arithmetic runs here.
+  if (req.method === "GET" && url.pathname === "/api/contracts/activity-mapping/status") {
+    const {
+      CONTRACTS_ACTIVITY_MAPPING_HISTORY_MIGRATION,
+      CONTRACTS_ACTIVITY_MAPPING_REVIEW_API_VERSION,
+      contractsActivityMappingReviewApproved
+    } = await import("./contracts/activityMappingReview.js");
+    const {
+      CONTRACTS_ACTIVITY_MAPPING_RECONCILIATION_API_VERSION,
+      contractsActivityMappingUploadReconciliationApproved
+    } = await import("./contracts/activityMappingReconciliation.js");
+    return sendJson(res, 200, {
+      active: true,
+      apiVersion: CONTRACTS_ACTIVITY_MAPPING_REVIEW_API_VERSION,
+      mode: "manual_review",
+      reviewApplyApproved: contractsActivityMappingReviewApproved(),
+      reconciliationApiVersion: CONTRACTS_ACTIVITY_MAPPING_RECONCILIATION_API_VERSION,
+      uploadReconciliationApplyApproved: contractsActivityMappingUploadReconciliationApproved(),
+      historyMigrationVersion: CONTRACTS_ACTIVITY_MAPPING_HISTORY_MIGRATION,
+      automaticReviewActionsEnabled: false
+    });
+  }
+
+  // Contracts Agent Phase 3G: server-owned upload reconciliation. Both routes
+  // accept only the authoritative MAIN project UUID. Preview is read-only;
+  // apply uses a separate exact activation flag and the existing atomic review
+  // RPC. Browser callers can never submit an auto_continue decision or task set.
+  if (
+    req.method === "POST"
+    && [
+      "/api/contracts/activity-mapping/reconciliation/preview",
+      "/api/contracts/activity-mapping/reconciliation/apply"
+    ].includes(url.pathname)
+  ) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        applyActivityMappingUploadReconciliation,
+        contractsActivityMappingUploadReconciliationApproved,
+        parseActivityMappingReconciliationRequest,
+        previewActivityMappingUploadReconciliation
+      } = await import("./contracts/activityMappingReconciliation.js");
+      const request = parseActivityMappingReconciliationRequest({
+        headers: req.headers,
+        query: url.searchParams,
+        body
+      });
+      const applying = url.pathname.endsWith("/apply");
+      const result = applying
+        ? await applyActivityMappingUploadReconciliation({
+            config: config(),
+            sourceProjectId: request.sourceProjectId,
+            reconciliationApplyApproved: contractsActivityMappingUploadReconciliationApproved()
+          })
+        : await previewActivityMappingUploadReconciliation({
+            config: config(),
+            sourceProjectId: request.sourceProjectId
+          });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/contracts/activity-mapping/activities") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractActivityMappingState, parseActivityMappingListRequest } = await import("./contracts/activityMappingService.js");
+      const request = parseActivityMappingListRequest({ headers: req.headers, query: url.searchParams });
+      const result = await loadContractActivityMappingState({
+        config: config(),
+        sourceProjectId: request.sourceProjectId
+      });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/activity-mapping/candidates") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { buildContractActivityMappingCandidatesFromSources, parseActivityMappingCandidateRequest } = await import("./contracts/activityMappingService.js");
+      const request = parseActivityMappingCandidateRequest({ headers: req.headers, query: url.searchParams, body });
+      const result = await buildContractActivityMappingCandidatesFromSources({
+        config: config(),
+        sourceProjectId: request.sourceProjectId,
+        obligation: request.obligation
+      });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  // Contracts Agent Phase 3F: authenticated manual review/history only. The
+  // server rebuilds alternatives from current MAIN/KAPAIM state, owns reviewer
+  // identity/time and database credentials, and calls the single atomic RPC.
+  if (req.method === "GET" && url.pathname === "/api/contracts/activity-mapping/history") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { listActivityMappingReviewHistory, parseActivityMappingHistoryRequest } = await import("./contracts/activityMappingReview.js");
+      const request = parseActivityMappingHistoryRequest({ headers: req.headers, query: url.searchParams });
+      const result = await listActivityMappingReviewHistory({ config: config(), ...request });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/contracts/activity-mapping/review") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const {
+        contractsActivityMappingReviewApproved,
+        parseActivityMappingReviewRequest,
+        submitActivityMappingReview
+      } = await import("./contracts/activityMappingReview.js");
+      const request = parseActivityMappingReviewRequest({ headers: req.headers, query: url.searchParams, body });
+      const result = await submitActivityMappingReview({
+        config: config(),
+        request,
+        reviewerId: reviewer.sub,
+        reviewApplyApproved: contractsActivityMappingReviewApproved()
+      });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/indicator") {
     const projectId = url.searchParams.get("projectId") || "";
@@ -2423,6 +3524,21 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
       active: true,
       plannerEnabled: cfg.dataQuery?.plannerEnabled !== false,
       configuredTables: Array.isArray(cfg.dataQuery?.tables) ? cfg.dataQuery.tables.length : 0
+    };
+  });
+
+  add("subagent_contracts", "Contracts Agent", "subagents", async () => {
+    if (!cfg.openRouterApiKey) inactive("Contracts Agent is inactive: OpenRouter API Key is missing");
+    if (!cfg.models?.main) inactive("Contracts Agent is inactive: main model is missing");
+    return {
+      active: true,
+      mode: "dry_run",
+      agentVersion: CONTRACTS_AGENT_VERSION,
+      pdfReaderVersion: CONTRACTS_PDF_READER_VERSION,
+      maxJsonBytes: CONTRACTS_MAX_JSON_BYTES,
+      maxPdfBytes: CONTRACTS_MAX_PDF_BYTES,
+      maxResponseBytes: CONTRACTS_MAX_RESPONSE_BYTES,
+      extractionBudgetMs: CONTRACTS_EXTRACTION_BUDGET_MS
     };
   });
 

@@ -1,0 +1,70 @@
+{
+  "expectedVersion": "contracts-representative-expected.phase1.v1",
+  "generatedFrom": "contracts-representative-inputs.phase1.v1",
+  "annotationPolicy": "Each canonical SHA-256 freezes the complete deterministic output. Assertions independently document the human-reviewed material expectations.",
+  "cases": [
+    {
+      "id": "signed_fixed_completion",
+      "canonicalSha256": "2d59742d9c68dce62c2bb63c72fc32c99edad9a1f227ceb362979e9ce1a636e3",
+      "assertions": {
+        "candidateCount": 1, "type": "fixed_milestone", "role": "fixed_completion", "fixedDate": "2027-03-31",
+        "projection": "project_schedule", "storageDisposition": "candidate_for_schedule_contract_milestones", "projectBindingStatus": "confirmed",
+        "computedDate": null, "automaticPromotionAllowed": false, "approvedScheduleProjectionCount": 0,
+        "requiredGates": ["authority_unverified", "human_review_required"]
+      }
+    },
+    {
+      "id": "relative_working_days_missing_calendar",
+      "canonicalSha256": "dc07e01215513dac36dcb2c33b7523684e2239af55ac6b1cf1b9d69f18c54786",
+      "assertions": {
+        "candidateCount": 1, "type": "relative_condition", "role": "contractual_completion",
+        "offset": { "value": 45, "unit": "working_day", "direction": "after" },
+        "projection": "project_schedule", "storageDisposition": "candidate_for_schedule_contract_conditions", "projectBindingStatus": "confirmed",
+        "computedDate": null, "automaticPromotionAllowed": false, "approvedScheduleProjectionCount": 0,
+        "requiredGates": ["authority_unverified", "human_review_required", "trigger_event_missing", "working_calendar_missing"]
+      }
+    },
+    {
+      "id": "approved_extension_event",
+      "canonicalSha256": "e80733bb061dfcc7146acd04bc1e0e0a150ac36cd17de1e26e40080a93ddfca4",
+      "assertions": {
+        "candidateCount": 1, "type": "extension_event", "role": "approved_extension",
+        "projection": "project_schedule", "storageDisposition": "candidate_for_schedule_contract_extensions", "projectBindingStatus": "confirmed",
+        "computedDate": null, "automaticPromotionAllowed": false, "approvedScheduleProjectionCount": 0,
+        "requiredGates": ["authority_unverified", "existing_milestone_identity_required", "extension_approval_review_required", "human_review_required"]
+      }
+    },
+    {
+      "id": "unsigned_project_mismatch",
+      "canonicalSha256": "30484133c838a321a90c4c47415923884e201528e362867345fb6864f232a498",
+      "assertions": {
+        "candidateCount": 1, "type": "fixed_milestone", "role": "fixed_completion", "fixedDate": "2027-04-30",
+        "projection": "project_schedule", "storageDisposition": "candidate_for_schedule_contract_milestones", "projectBindingStatus": "needs_review",
+        "projectBindingMismatchReasons": ["site_address_number_mismatch", "site_address_text_mismatch"],
+        "computedDate": null, "automaticPromotionAllowed": false, "approvedScheduleProjectionCount": 0,
+        "requiredGates": ["authority_unverified", "human_review_required", "project_binding_unreviewed"]
+      }
+    },
+    {
+      "id": "compound_monthly_payment_rule",
+      "canonicalSha256": "c29c2aa76e6bcc0088fe3e9781675b747d0d56edeeb9f8152ae1e6255370105a",
+      "assertions": {
+        "candidateCount": 1, "type": "recurring_rule", "role": "monthly_payment_chain",
+        "projection": "contract_compliance", "storageDisposition": "dry_run_only", "projectBindingStatus": "confirmed",
+        "computedDate": null, "automaticPromotionAllowed": false, "approvedScheduleProjectionCount": 0,
+        "requiredGates": ["approval_guard_not_supported", "authority_unverified", "compliance_engine_not_approved", "compound_rule_not_supported", "human_review_required", "recurring_occurrence_history_not_supported"]
+      }
+    },
+    {
+      "id": "negative_offset_bond_notice",
+      "canonicalSha256": "7c2fb672790957ba6c761cdaa681600ea00541c53ad34ffbdc0a96912fb4c630",
+      "assertions": {
+        "candidateCount": 1, "type": "relative_condition", "role": "performance_bond_renewal",
+        "offset": { "value": 30, "unit": "calendar_day", "direction": "before" },
+        "projection": "contract_compliance", "storageDisposition": "dry_run_only", "projectBindingStatus": "confirmed",
+        "computedDate": null, "automaticPromotionAllowed": false, "approvedScheduleProjectionCount": 0,
+        "requiredGates": ["authority_unverified", "compliance_engine_not_approved", "human_review_required", "negative_offset_not_supported", "trigger_event_missing"]
+      }
+    }
+  ]
+}

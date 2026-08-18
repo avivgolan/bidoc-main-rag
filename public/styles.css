@@ -9947,6 +9947,373 @@ body:has(#timeline.active) .sidebar {
    ══════════════════════════════════════════════════════════════════ */
 
 .schedulePage { display: flex; flex-direction: column; gap: 14px; padding: 4px 2px 40px; }
+
+/* Contracts Agent Phase 2 reviewer */
+#contracts.panel { background: #f6f4ee; }
+.contractsPage { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 44px; color: #26332c; }
+.contractsHero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding: 24px; border: 1px solid #dfe4dc; border-radius: 18px; background: linear-gradient(135deg, #fff 0%, #f5f8f3 100%); box-shadow: 0 10px 26px rgba(43, 59, 49, .06); }
+.contractsHero h1 { margin: 4px 0 8px; font-size: clamp(24px, 3vw, 34px); line-height: 1.15; }
+.contractsHero p { margin: 0; color: #617068; max-width: 720px; }
+.contractsEyebrow { color: #39775a !important; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.contractsMode { min-width: 150px; display: grid; gap: 4px; padding: 12px 14px; border-radius: 12px; border: 1px solid; text-align: center; }
+.contractsMode strong { font-size: 14px; }
+.contractsMode span { font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.contractsMode.is-paused { color: #925c1f; background: #fff7e8; border-color: #e6c998; }
+.contractsMode.is-ready { color: #22613f; background: #edf8f0; border-color: #a9d5b7; }
+.contractsPanel { display: grid; gap: 16px; padding: 22px; border: 1px solid #dfe4dc; border-radius: 16px; background: #fff; box-shadow: 0 8px 20px rgba(43, 59, 49, .045); }
+.contractsPanel h2 { margin: 0; font-size: 20px; }
+.contractsFieldGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.contractsPage label { display: grid; gap: 7px; color: #4f5d55; font-size: 13px; font-weight: 700; }
+.contractsPage input, .contractsPage select, .contractsPage textarea { width: 100%; box-sizing: border-box; border: 1px solid #cfd8d1; border-radius: 10px; background: #fbfcfa; color: #233129; padding: 10px 12px; font: inherit; }
+.contractsPage textarea { resize: vertical; line-height: 1.5; }
+.contractsFieldHint { color: #708078; font-size: 11px; font-weight: 500; line-height: 1.45; }
+.contractsPage input:focus, .contractsPage select:focus, .contractsPage textarea:focus { outline: 3px solid rgba(67, 132, 93, .16); border-color: #4f8d68; }
+.contractsPrimary, .contractsCommit { justify-self: start; border: 0; border-radius: 10px; padding: 11px 18px; font-weight: 800; cursor: pointer; }
+.contractsPrimary { background: #3e8060; color: #fff; }
+.contractsSecondary { border: 1px solid #79a58a; border-radius: 10px; background: #f1f7f3; color: #2f6849; padding: 10px 17px; font-weight: 800; cursor: pointer; }
+.contractsCommit { background: #253d31; color: #fff; }
+.contractsPrimary:disabled, .contractsSecondary:disabled, .contractsCommit:disabled { cursor: not-allowed; opacity: .5; }
+.contractsSectionHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.contractsSectionHeader p { margin: 5px 0 0; color: #718078; font-size: 13px; }
+.contractsDryBadge, .contractsPlanReady, .contractsPlanBlocked { border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.contractsDryBadge { color: #426b53; background: #eef6f0; border: 1px solid #c8ddce; }
+.contractsPlanReady { color: #22613f; background: #edf8f0; }
+.contractsPlanBlocked { color: #944036; background: #fff0ee; }
+.contractsCandidateList { display: grid; gap: 14px; }
+.contractsCandidate { display: grid; gap: 14px; padding: 18px; border: 1px solid #dce3dd; border-inline-start-width: 4px; border-radius: 14px; background: #fcfdfb; }
+.contractsCandidate.is-approved { border-inline-start-color: #4a9068; }
+.contractsCandidate.is-rejected { border-inline-start-color: #bd6b61; }
+.contractsCandidate > header { display: flex; justify-content: space-between; gap: 18px; }
+.contractsCandidate h3 { margin: 4px 0; max-width: 100%; overflow-wrap: anywhere; font-size: 17px; white-space: normal; }
+.contractsCandidate header p { margin: 0; color: #68766e; }
+.contractsCandidateRole { color: #5f7066; font-size: 12px; font-weight: 750; line-height: 1.4; }
+.contractsTarget { align-self: flex-start; max-width: 280px; overflow-wrap: anywhere; border-radius: 8px; background: #edf1ed; padding: 6px 8px; color: #4b5b52; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.contractsEvidenceList { display: grid; gap: 8px; }
+.contractsEvidenceList blockquote { margin: 0; padding: 11px 13px; border-inline-start: 3px solid #8cb39a; background: #f3f7f3; }
+.contractsEvidenceList span { color: #708078; font-size: 11px; font-weight: 700; }
+.contractsEvidenceList p { margin: 5px 0 0; line-height: 1.55; white-space: pre-wrap; }
+.contractsGateList { display: flex; flex-wrap: wrap; gap: 6px; }
+.contractsGateList span { border-radius: 999px; background: #fff5e4; color: #8b5d25; padding: 5px 8px; font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.contractsDecisionRow { display: flex; gap: 8px; }
+.contractsDecisionRow button { border: 1px solid #ccd5ce; border-radius: 9px; background: #fff; padding: 8px 12px; cursor: pointer; font-weight: 700; }
+.contractsDecisionRow button.is-selected { color: #245e3d; border-color: #6da580; background: #edf7f0; }
+.contractsDecisionRow button.is-selected.danger { color: #8a3d34; border-color: #d29a93; background: #fff0ee; }
+.contractsCheck { display: flex !important; flex-wrap: wrap; grid-template-columns: auto 1fr; align-items: center; gap: 9px !important; padding: 10px 12px; border-radius: 10px; background: #f6f8f5; }
+.contractsCheck input { width: auto; }
+.contractsCheck small { flex-basis: 100%; color: #8a5a22; font-size: 11px; font-weight: 600; line-height: 1.45; }
+.contractsReviewReason { padding-top: 4px; }
+.contractsPlanCounts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.contractsPlanCounts span { display: flex; justify-content: space-between; padding: 12px; border-radius: 10px; background: #f3f6f2; }
+.contractsBlockers { margin: 0; color: #93453b; }
+.contractsMessage { padding: 13px 15px; border-radius: 11px; font-weight: 700; }
+.contractsMessage.is-error { color: #8c382f; background: #fff0ee; border: 1px solid #e4aaa3; }
+.contractsMessage.is-success { color: #245f3e; background: #edf8f0; border: 1px solid #abd5b8; }
+.contractsMessage.is-warning { color: #765018; background: #fff8e9; border: 1px solid #e4c98e; }
+.contractsActionBlock { display: grid; gap: 10px; justify-items: start; padding-top: 4px; }
+.contractsActionBlock p { margin: 0; color: #607068; font-size: 13px; line-height: 1.5; }
+.contractsActivationNotice { padding: 10px 12px; border: 1px solid #e6c998; border-radius: 10px; background: #fff7e8; color: #85551d !important; }
+.contractsReviewOnlyAction { background: #3e6753; }
+.contractsModeStack { display: grid; gap: 8px; min-width: 220px; }
+.contractsModeStack .contractsMode { min-width: 0; }
+.contractsWorkspacePanel { border-color: #cfded4; background: linear-gradient(180deg, #fff 0%, #f8fbf8 100%); }
+.contractsSavedList { display: grid; gap: 10px; }
+.contractsSavedList article { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px; border: 1px solid #d6dfd8; border-radius: 12px; background: #fff; }
+.contractsSavedList article > div { display: grid; gap: 4px; min-width: 0; }
+.contractsSavedList article strong, .contractsSavedList article span, .contractsSavedList article small { overflow-wrap: anywhere; }
+.contractsSavedList article span { color: #596960; font-size: 12px; }
+.contractsSavedList article small { color: #718078; font-size: 11px; }
+.contractsSavedList article button { flex: 0 0 auto; border: 1px solid #6e9e80; border-radius: 9px; background: #edf7f0; color: #286044; padding: 9px 13px; cursor: pointer; font-weight: 800; }
+.contractsSavedList article button:disabled { cursor: wait; opacity: .6; }
+.contractsWorkspaceSaveState { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.contractsUploadActions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.contractsClausePreviewPanel { border-color: #9fc8ae; background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%); }
+.contractsComparisonNotice { padding: 12px 14px; border: 1px solid; border-radius: 11px; font-size: 13px; font-weight: 750; line-height: 1.5; }
+.contractsComparisonNotice.is-same-document { color: #245f3e; border-color: #abd5b8; background: #edf8f0; }
+.contractsComparisonNotice.is-classic-missing { color: #6d572d; border-color: #d8c8a6; background: #faf6ec; }
+.contractsComparisonNotice.is-different-document { color: #8c382f; border-color: #e4aaa3; background: #fff0ee; }
+.contractsClauseMetrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.contractsClauseMetrics span { display: grid; gap: 5px; min-width: 0; padding: 12px; border: 1px solid #dce6df; border-radius: 11px; background: #fff; }
+.contractsClauseMetrics small { color: #718078; font-size: 11px; }
+.contractsClauseMetrics strong { color: #264c37; font-size: 18px; overflow-wrap: anywhere; }
+.contractsClauseFilters { display: grid; grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(145px, 1fr)) auto; align-items: end; gap: 10px; padding: 14px; border-radius: 12px; background: #eef5f0; }
+.contractsClauseReferenceFilter { align-self: end; min-height: 42px; box-sizing: border-box; }
+.contractsClauseResultBar { display: flex; align-items: center; gap: 5px; color: #607068; font-size: 13px; }
+.contractsClauseResultBar strong { color: #285f42; font-size: 16px; }
+.contractsClauseResultBar button { margin-inline-start: auto; border: 0; background: transparent; color: #2f6f4d; cursor: pointer; font-weight: 800; }
+.contractsClauseList { display: grid; gap: 9px; }
+.contractsClauseHeading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-top: 7px; padding: 12px 15px; border-inline-start: 4px solid #5f9472; border-radius: 10px; background: #edf6f0; color: #264c37; }
+.contractsClauseHeading > div { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.contractsClauseHeading bdi { color: #2d6848; font: 800 13px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.contractsClauseHeading h3 { margin: 0; overflow-wrap: anywhere; font-size: 15px; line-height: 1.4; }
+.contractsClauseHeadingText { flex: 1 1 auto; min-width: 0; }
+.contractsClauseHeadingText p { margin: 3px 0 0; color: #587064; font-size: 12px; font-weight: 550; line-height: 1.5; }
+.contractsClauseHeading span { flex: 0 0 auto; color: #587064; font-size: 11px; font-weight: 750; }
+.contractsClauseHeading .contractsClauseHeadingText { flex: 1 1 auto; }
+.contractsRelationshipsPanel { border-color: #acd1b9; background: linear-gradient(180deg, #ffffff 0%, #fbfefc 100%); }
+.contractsRelationshipBoundary { padding: 12px 15px; border: 1px solid #e1c38f; border-radius: 11px; background: #fff8ec; color: #704b12; font-size: 13px; font-weight: 700; line-height: 1.7; }
+.contractsRelationshipActions { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 11px; background: #eef6f0; }
+.contractsRelationshipActions p { margin: 0; color: #587064; font-size: 12px; line-height: 1.6; }
+.contractsRelationshipList { display: grid; gap: 10px; }
+.contractsRelationshipCard { display: grid; gap: 10px; padding: 15px; border: 1px solid #d8e5dc; border-radius: 13px; background: #fff; }
+.contractsRelationshipRoute { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: stretch; gap: 12px; }
+.contractsRelationshipRoute > span { display: grid; align-content: start; gap: 5px; padding: 12px; border-radius: 10px; background: #f7faf8; }
+.contractsRelationshipRoute small { color: #75847b; font-size: 11px; }
+.contractsRelationshipRoute strong { color: #28533b; font-size: 13px; }
+.contractsRelationshipRoute p { margin: 0; color: #52645a; font-size: 12px; line-height: 1.6; }
+.contractsRelationshipArrow { align-self: center; color: #337452; font-size: 22px; }
+.contractsRelationshipMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.contractsRelationshipMeta i { padding: 5px 8px; border-radius: 999px; background: #edf6f0; color: #286044; font-size: 11px; font-style: normal; font-weight: 750; }
+.contractsRelationshipMeta span { color: #65766c; font-size: 11px; }
+.contractsRelationshipRationale { margin: 0; padding-top: 9px; border-top: 1px solid #edf2ee; color: #53655b; font-size: 12px; line-height: 1.65; }
+.contractsRelationshipUnresolved { padding: 12px 14px; border: 1px solid #e4cda8; border-radius: 11px; background: #fffaf1; color: #704b12; }
+.contractsRelationshipUnresolved summary { cursor: pointer; font-size: 12px; font-weight: 800; }
+.contractsRelationshipUnresolved ul { display: grid; gap: 7px; margin: 10px 0 0; padding-inline-start: 22px; font-size: 12px; line-height: 1.6; }
+.contractsSemanticRelationships { display: grid; gap: 15px; margin-top: 8px; padding-top: 22px; border-top: 1px solid #d8e5dc; }
+.contractsSemanticRelationships .contractsSectionHeader h3 { margin: 2px 0 6px; color: #173c2a; font-size: 20px; }
+.contractsRelationshipBoundary.is-semantic { border-color: #bdd4e7; background: #f3f8fc; color: #31576f; }
+.contractsRelationshipCard.is-semantic { border-color: #bfd8ca; box-shadow: 0 6px 18px rgba(28, 79, 52, 0.05); }
+.contractsRelationshipEvidence { padding: 10px 12px; border: 1px dashed #c9d9ce; border-radius: 10px; background: #fbfdfc; }
+.contractsRelationshipEvidence summary { cursor: pointer; color: #345944; font-size: 12px; font-weight: 800; }
+.contractsRelationshipEvidence > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.contractsRelationshipEvidence blockquote { margin: 0; padding: 10px 12px; border-inline-start: 3px solid #77a98a; border-radius: 7px; background: #f4f8f5; color: #53645a; font-size: 12px; line-height: 1.7; white-space: pre-wrap; }
+.contractsRelationshipReviewQueue { display: grid; gap: 14px; margin-top: 18px; padding-top: 18px; border-top: 1px solid #d8e7dc; }
+.contractsRelationshipReviewQueue h4 { margin: 2px 0 6px; color: #173d2b; font-size: 20px; }
+.contractsRelationshipReviewForm { display: grid; gap: 10px; padding: 13px; border-radius: 11px; background: #f2f8f4; }
+.contractsRelationshipReviewForm label { display: grid; gap: 6px; color: #365c47; font-size: 12px; font-weight: 750; }
+.contractsRelationshipReviewForm textarea,
+.contractsRelationshipReviewForm select { width: 100%; padding: 9px 11px; border: 1px solid #b9d1c1; border-radius: 9px; background: #fff; color: #183c2b; font: inherit; }
+.contractsRelationshipReviewForm textarea { resize: vertical; line-height: 1.55; }
+.contractsRelationshipReviewActions { display: flex; flex-wrap: wrap; gap: 8px; }
+.contractsRelationshipReviewActions button,
+.contractsRelationshipCorrection button { min-height: 38px; padding: 8px 14px; border: 1px solid #8ab39a; border-radius: 9px; background: #fff; color: #285d41; font-weight: 800; cursor: pointer; }
+.contractsRelationshipReviewActions button:disabled,
+.contractsRelationshipCorrection button:disabled { cursor: not-allowed; opacity: 0.5; }
+.contractsRelationshipCorrection { padding: 10px 12px; border: 1px dashed #bad1c2; border-radius: 9px; background: #fbfdfb; }
+.contractsRelationshipCorrection summary { cursor: pointer; color: #315a42; font-size: 12px; font-weight: 800; }
+.contractsRelationshipCorrection > div { display: grid; grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.2fr) auto; align-items: end; gap: 10px; margin-top: 10px; }
+.contractsRelationshipCorrection small { color: #6a796f; font-size: 11px; }
+.contractsRelationshipDirectionToggle { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 8px !important; min-height: 40px; }
+.contractsRelationshipDirectionToggle input { width: 16px; height: 16px; accent-color: #377d57; }
+.contractsRelationshipReviewedState { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 11px 13px; border-radius: 10px; background: #eef6f0; color: #315a42; font-size: 12px; }
+.contractsRelationshipReviewedState p { flex-basis: 100%; margin: 0; line-height: 1.6; }
+.contractsRelationshipReviewedState time { color: #687a70; }
+.contractsRelationshipCard.is-review-approved,
+.contractsRelationshipCard.is-review-corrected { border-color: #86b99a; }
+.contractsRelationshipCard.is-review-rejected { border-color: #dfaaa2; background: #fffafa; }
+.contractsRelationshipCard.is-review-superseded { border-color: #cfd7d1; background: #f8faf8; opacity: 0.82; }
+.contractsDecisionsPanel { border-color: #9fc8af; background: linear-gradient(180deg, #ffffff 0%, #f8fcf9 100%); }
+.contractsDecisionList { display: grid; gap: 13px; }
+.contractsDecisionCard { display: grid; gap: 11px; padding: 17px; border: 1px solid #cfe0d5; border-inline-start: 4px solid #6fa183; border-radius: 14px; background: #fff; box-shadow: 0 7px 20px rgba(31, 78, 51, 0.05); }
+.contractsDecisionCard.is-approved,
+.contractsDecisionCard.is-corrected { border-color: #78ad8d; }
+.contractsDecisionCard.is-rejected { border-color: #dfa89f; border-inline-start-color: #c87869; background: #fffafa; }
+.contractsDecisionCard.is-unresolved { border-color: #dfbd7b; border-inline-start-color: #b9872d; background: #fffdf8; }
+.contractsDecisionCardHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.contractsDecisionCardHeader small { color: #718078; font-size: 11px; }
+.contractsDecisionCardHeader h4 { margin: 4px 0 0; color: #1d4d32; font-size: 19px; line-height: 1.4; }
+.contractsDecisionSummary { margin: 0; color: #52655a; font-size: 13px; line-height: 1.7; }
+.contractsDecisionMeaning { padding: 13px 15px; border-radius: 11px; background: #f1f7f3; }
+.contractsDecisionMeaning strong { color: #315a42; font-size: 12px; }
+.contractsDecisionMeaning p { margin: 6px 0 0; color: #273b30; font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
+.contractsDecisionTemporal { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 10px 12px; border: 1px solid #dce8e0; border-radius: 9px; color: #53665b; background: #fbfdfb; font-size: 12px; }
+.contractsDecisionReviewForm { display: grid; gap: 11px; padding: 13px; border-radius: 11px; background: #f2f8f4; }
+.contractsDecisionReviewForm > label { display: grid; gap: 6px; color: #365c47; font-size: 12px; font-weight: 750; }
+.contractsDecisionReviewForm textarea,
+.contractsDecisionReviewForm input,
+.contractsDecisionReviewForm select { width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #b9d1c1; border-radius: 9px; background: #fff; color: #183c2b; font: inherit; }
+.contractsDecisionReviewForm textarea { resize: vertical; line-height: 1.55; }
+.contractsDecisionCorrection { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 11px; padding: 13px; border: 1px dashed #aac8b5; border-radius: 10px; background: #fbfdfb; }
+.contractsDecisionCorrection label { display: grid; gap: 6px; color: #365c47; font-size: 12px; font-weight: 750; }
+.contractsDecisionCorrectionWide { grid-column: 1 / -1; }
+.contractsDecisionCorrection > button { min-height: 42px; justify-self: start; }
+.contractsDecisionCard.is-split,
+.contractsDecisionCard.is-merged { border-color: #9aa9a0; border-inline-start-color: #718077; background: #f8faf8; }
+.contractsDecisionLineageActions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px 15px; padding: 11px 13px; border: 1px dashed #9fc8af; border-radius: 10px; background: #f6fbf7; }
+.contractsDecisionLineageActions label { display: inline-flex; align-items: center; gap: 7px; color: #315a42; font-size: 12px; font-weight: 800; }
+.contractsDecisionLineageActions input { width: 16px; height: 16px; accent-color: #377d57; }
+.contractsDecisionLineageEditor { display: grid; gap: 13px; padding: 16px; border: 1px solid #88b59a; border-radius: 13px; background: #f2f8f4; box-shadow: inset 0 0 0 1px rgba(255,255,255,.8); }
+.contractsDecisionLineageEditor.is-merge { margin: 13px 0; border-color: #6e9e82; background: #edf7f0; }
+.contractsDecisionLineageEditor label { display: grid; gap: 6px; color: #365c47; font-size: 12px; font-weight: 750; }
+.contractsDecisionLineageEditor input,
+.contractsDecisionLineageEditor textarea,
+.contractsDecisionLineageEditor select { width: 100%; box-sizing: border-box; padding: 9px 11px; border: 1px solid #b4cebc; border-radius: 9px; background: #fff; color: #183c2b; font: inherit; }
+.contractsDecisionLineageEditor textarea { resize: vertical; line-height: 1.55; }
+.contractsDecisionSplitParts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.contractsDecisionSplitPart { display: grid; align-content: start; gap: 10px; min-width: 0; margin: 0; padding: 13px; border: 1px solid #c7dbcd; border-radius: 11px; background: #fff; }
+.contractsDecisionSplitPart legend { padding: 0 7px; color: #28573d; font-weight: 850; }
+.contractsDecisionLineageFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.contractsDecisionEvidencePicker { display: grid; gap: 7px; padding: 10px; border-radius: 9px; background: #f6faf7; }
+.contractsDecisionEvidencePicker > label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 8px; font-weight: 500; line-height: 1.45; }
+.contractsDecisionEvidencePicker input { width: 16px; height: 16px; margin-top: 2px; accent-color: #377d57; }
+.contractsLineageValidation { margin: 0; color: #995a1f; font-size: 12px; font-weight: 750; }
+.contractsDecisionMergeSources { display: flex; flex-wrap: wrap; gap: 7px; }
+.contractsDecisionMergeSources span { padding: 6px 9px; border-radius: 999px; background: #fff; color: #315a42; font-size: 11px; font-weight: 750; }
+.contractsDecisionLineageHistory { display: grid; gap: 12px; margin-top: 17px; padding-top: 17px; border-top: 1px solid #d7e5db; }
+.contractsDecisionLineageLinks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.contractsDecisionLineageLinks article { padding: 12px; border: 1px solid #c9ddcf; border-radius: 10px; background: #f7fbf8; }
+.contractsDecisionLineageLinks strong { color: #2a6545; }
+.contractsDecisionLineageLinks p { margin: 7px 0; color: #3d5146; line-height: 1.5; }
+.contractsDecisionLineageLinks small { color: #6b7a71; }
+@media (max-width: 760px) {
+  .contractsDecisionCardHeader { flex-direction: column; }
+  .contractsDecisionCorrection { grid-template-columns: 1fr; }
+  .contractsDecisionCorrectionWide { grid-column: auto; }
+  .contractsDecisionSplitParts,
+  .contractsDecisionLineageFields { grid-template-columns: 1fr; }
+}
+.contractsClauseCard { overflow: hidden; border: 1px solid #d8e1da; border-radius: 12px; background: #fff; content-visibility: auto; contain-intrinsic-size: auto 96px; }
+.contractsClauseCard[open] { border-color: #88b39a; box-shadow: 0 7px 18px rgba(39, 83, 57, .07); }
+.contractsClauseCard.is-definition { border-inline-start: 4px solid #8ba0c5; }
+.contractsClauseCard.is-context { border-inline-start: 4px solid #c6b58d; background: #fffdf8; }
+.contractsClauseCard > summary { display: grid; grid-template-columns: minmax(120px, .6fr) minmax(240px, 2.4fr) minmax(150px, 1fr); align-items: center; gap: 14px; padding: 14px 16px; cursor: pointer; list-style-position: inside; }
+.contractsClauseCard > summary:hover { background: #f6faf7; }
+.contractsClauseIdentity { display: grid; gap: 3px; min-width: 0; }
+.contractsClauseIdentity bdi { color: #2d6848; font: 800 13px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+.contractsClauseIdentity small { color: #78867e; font-size: 10px; }
+.contractsClauseSummary { min-width: 0; color: #2b3730; font-size: 14px; line-height: 1.5; }
+.contractsClauseTags { display: flex; justify-content: flex-end; gap: 5px; flex-wrap: wrap; }
+.contractsClauseTags i { border-radius: 999px; background: #edf4ef; color: #46705a; padding: 4px 7px; font: normal 700 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.contractsClauseBody { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px; border-top: 1px solid #e2e8e3; background: #fbfdfb; }
+.contractsClauseSource, .contractsClauseEnrichment, .contractsClauseReferences, .contractsClauseSearchContent { display: grid; align-content: start; gap: 7px; min-width: 0; padding: 13px; border-radius: 10px; background: #fff; }
+.contractsClauseSource { border-inline-start: 3px solid #8db69b; }
+.contractsClauseEnrichment { border-inline-start: 3px solid #7d9fc0; }
+.contractsClauseBody strong { color: #405248; font-size: 12px; }
+.contractsClauseBody p { margin: 0; color: #344139; line-height: 1.65; white-space: pre-wrap; }
+.contractsClauseBody small { color: #718078; }
+.contractsClauseReferences, .contractsClauseSearchContent, .contractsClauseBody footer, .contractsClauseRecordTechnical { grid-column: 1 / -1; }
+.contractsClauseReferences ul { display: grid; gap: 7px; margin: 0; padding-inline-start: 20px; }
+.contractsClauseReferences li { color: #4d5d54; line-height: 1.5; }
+.contractsClauseReferences li span { display: inline-block; margin-inline-start: 8px; border-radius: 999px; padding: 3px 7px; font-size: 10px; font-weight: 800; }
+.contractsClauseReferences .is-resolved { color: #245f3e; background: #edf8f0; }
+.contractsClauseReferences .is-unresolved { color: #8a5120; background: #fff5e5; }
+.contractsClauseSearchContent { background: #f4f7f5; }
+.contractsClauseSearchContent p { color: #5c6a62; font-size: 12px; }
+.contractsClauseBody footer { display: flex; gap: 10px; flex-wrap: wrap; }
+.contractsClauseBody footer code, .contractsClauseTechnical code { max-width: 100%; overflow-wrap: anywhere; color: #748078; font-size: 9px; }
+.contractsClauseTechnical { padding: 11px 13px; border: 1px dashed #cbd7ce; border-radius: 10px; color: #607068; }
+.contractsClauseTechnical summary { cursor: pointer; font-size: 12px; font-weight: 800; }
+.contractsClauseTechnical[open] { display: grid; gap: 5px; }
+.contractsClauseRecordTechnical { background: #f7f9f7; }
+.contractsClauseRecordTechnical[open] { gap: 9px; }
+.contractsClauseRecordTechnical footer { display: flex; gap: 10px; flex-wrap: wrap; }
+.contractsAutosave { border-radius: 999px; padding: 6px 10px; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.contractsAutosave.is-pending, .contractsAutosave.is-saving { color: #82581f; background: #fff6e7; }
+.contractsAutosave.is-saved, .contractsAutosave.is-idle { color: #22613f; background: #edf8f0; }
+.contractsAutosave.is-error { color: #944036; background: #fff0ee; }
+.contractsMappingPanel { border-color: #cfded4; background: linear-gradient(180deg, #ffffff 0%, #fbfdfb 100%); }
+.contractsMappingCandidates { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.contractsMappingCandidates > button { display: grid; grid-template-rows: auto 1fr auto; gap: 8px; min-width: 0; min-height: 128px; overflow: hidden; padding: 16px; border: 1px solid #d3ddd5; border-radius: 12px; background: #fbfcfa; color: #26332c; text-align: start; white-space: normal; cursor: pointer; }
+.contractsMappingCandidates > button:hover:not(:disabled), .contractsMappingCandidates > button.is-selected { border-color: #5b9270; background: #eef7f1; box-shadow: inset 0 0 0 1px #5b9270; }
+.contractsMappingCandidates > button:disabled { cursor: wait; opacity: .65; }
+.contractsMappingCandidates span { max-width: 100%; overflow-wrap: anywhere; color: #697870; font-size: 11px; font-weight: 750; line-height: 1.4; white-space: normal; }
+.contractsMappingCandidates strong { display: block; max-width: 100%; overflow-wrap: anywhere; font-size: 15px; line-height: 1.5; white-space: normal; }
+.contractsMappingCandidates small { max-width: 100%; overflow-wrap: anywhere; color: #39775a; font-weight: 800; white-space: normal; }
+.contractsMappingWorkspace { display: grid; gap: 16px; padding-top: 4px; border-top: 1px solid #e2e8e3; }
+.contractsMappingOutcome { padding: 13px 15px; border: 1px solid; border-radius: 11px; font-size: 13px; font-weight: 800; line-height: 1.5; }
+.contractsMappingOutcome:focus { outline: 3px solid rgba(67, 132, 93, .18); }
+.contractsMappingOutcome.is-blocked { color: #85551d; border-color: #e6c998; background: #fff7e8; }
+.contractsMappingOutcome.is-found { color: #245f3e; border-color: #abd5b8; background: #edf8f0; }
+.contractsMappingOutcome.is-empty { color: #6b532d; border-color: #d9c9a9; background: #faf6ed; }
+.contractsMappingSummary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.contractsMappingSummary span { display: grid; gap: 4px; padding: 11px; border-radius: 10px; background: #f1f5f1; color: #718078; font-size: 11px; }
+.contractsMappingSummary strong { color: #2d3b33; overflow-wrap: anywhere; font-size: 12px; }
+.contractsMappingEvidence { display: grid; gap: 8px; }
+.contractsMappingEvidence > strong { font-size: 13px; }
+.contractsMappingEvidence blockquote { margin: 0; padding: 11px 13px; border-inline-start: 3px solid #8cb39a; background: #f3f7f3; }
+.contractsMappingEvidence blockquote span { color: #708078; font-size: 11px; font-weight: 700; }
+.contractsMappingEvidence blockquote p { margin: 5px 0 0; line-height: 1.55; white-space: pre-wrap; }
+.contractsAlternativeList { display: grid; gap: 9px; }
+.contractsAlternativeList > label { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 13px; border: 1px solid #d6dfd8; border-radius: 12px; background: #fff; cursor: pointer; }
+.contractsAlternativeList > label.is-selected { border-color: #5b9270; background: #eef7f1; box-shadow: inset 0 0 0 1px #5b9270; }
+.contractsAlternativeList input { width: auto; margin-top: 3px; }
+.contractsAlternativeList label > span:not(.contractsAlternativeRank) { display: grid; gap: 4px; min-width: 0; }
+.contractsAlternativeList small { color: #68776f; overflow-wrap: anywhere; font-weight: 500; }
+.contractsAlternativeList b { color: #2e6d4b; }
+.contractsAlternativeList details { grid-column: 3 / -1; color: #5f6e66; font-size: 12px; }
+.contractsAlternativeList details summary { cursor: pointer; font-weight: 800; }
+.contractsAlternativeList details p { margin: 5px 0 0; overflow-wrap: anywhere; }
+.contractsAlternativeList details p.is-blocker { color: #91533f; }
+.contractsSourceLabel { color: #63726a; font-size: 11px; font-weight: 700; }
+.contractsAlternativeRank { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 999px; background: #e7eee9; color: #486354; font-size: 11px; }
+.contractsConflictBox { display: grid; gap: 10px; padding: 13px; border: 1px solid #e1bd7d; border-radius: 12px; background: #fff8ea; }
+.contractsConflictBox p { margin: 0; color: #745527; font-size: 13px; line-height: 1.55; }
+.contractsMappingActions { flex-wrap: wrap; }
+.contractsMappingEmpty { margin: 0; padding: 13px; border: 1px dashed #cfd8d1; border-radius: 10px; background: #f8faf8; color: #68776f; font-size: 13px; }
+.contractsHistory { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid #e2e8e3; }
+.contractsHistory h3 { margin: 0; }
+.contractsHistory .contractsSectionHeader > button { border: 1px solid #ccd5ce; border-radius: 9px; background: #fff; padding: 8px 11px; color: #31453a; cursor: pointer; font-weight: 700; }
+.contractsHistory article { display: grid; gap: 6px; padding: 13px; border: 1px solid #dce3dd; border-radius: 11px; background: #fcfdfb; }
+.contractsHistory article header { display: flex; justify-content: space-between; gap: 12px; }
+.contractsHistory article time, .contractsHistory article small { color: #68776f; font-size: 11px; overflow-wrap: anywhere; }
+.contractsHistory article p { margin: 0; line-height: 1.5; }
+
+@media (max-width: 760px) {
+  .contractsHero, .contractsSectionHeader, .contractsCandidate > header { flex-direction: column; }
+  .contractsMode, .contractsModeStack { width: 100%; box-sizing: border-box; }
+  .contractsFieldGrid, .contractsPlanCounts, .contractsMappingSummary, .contractsClauseMetrics, .contractsClauseFilters, .contractsClauseBody, .contractsRelationshipRoute { grid-template-columns: 1fr; }
+  .contractsRelationshipActions { align-items: stretch; flex-direction: column; }
+  .contractsRelationshipArrow { justify-self: center; transform: rotate(-90deg); }
+  .contractsRelationshipEvidence > div { grid-template-columns: 1fr; }
+  .contractsRelationshipCorrection > div { grid-template-columns: 1fr; align-items: stretch; }
+  .contractsRelationshipReviewActions { flex-direction: column; }
+  .contractsUploadActions { align-items: stretch; flex-direction: column; }
+  .contractsUploadActions button { width: 100%; }
+  .contractsClauseCard > summary { grid-template-columns: 1fr; align-items: start; }
+  .contractsClauseTags { justify-content: flex-start; }
+  .contractsClauseReferences, .contractsClauseSearchContent, .contractsClauseBody footer, .contractsClauseRecordTechnical { grid-column: 1; }
+  .contractsClauseHeading { align-items: flex-start; flex-direction: column; }
+  .contractsAlternativeList > label { grid-template-columns: auto auto minmax(0, 1fr); }
+  .contractsAlternativeList > label > b { grid-column: 3; }
+  .contractsAlternativeList details { grid-column: 1 / -1; }
+  .contractsPanel { padding: 16px; }
+  .contractsSavedList article { align-items: stretch; flex-direction: column; }
+  .contractsSavedList article button { width: 100%; }
+  .contractsWorkspaceSaveState { align-items: stretch; justify-content: flex-start; }
+}
+
+.contractsScheduleProjectionPanel { border-color: #a6c8b3; background: linear-gradient(180deg, #fcfefc 0%, #f7fbf8 100%); }
+.contractsScheduleProjectionMetrics { grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); }
+.contractsScheduleProjectionList { display: grid; gap: 14px; }
+.contractsScheduleProjectionCard { display: grid; gap: 12px; padding: 16px; border: 1px solid #cfdcd3; border-inline-start: 4px solid #c3cec6; border-radius: 14px; background: #fff; }
+.contractsScheduleProjectionCard.is-preview_ready { border-inline-start-color: #36845d; }
+.contractsScheduleProjectionCard.is-blocked { border-inline-start-color: #d5a45d; }
+.contractsScheduleProjectionCard.is-not_applicable { border-inline-start-color: #aab4ad; background: #fafbfa; }
+.contractsScheduleProjectionCard.is-suitable { border-inline-start-color: #36845d; }
+.contractsScheduleProjectionCard.is-requires_review { border-inline-start-color: #d5a45d; background: #fffdf8; }
+.contractsScheduleProjectionCard.is-not_suitable { border-inline-start-color: #aab4ad; background: #fafbfa; }
+.contractsScheduleProjectionCard > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.contractsScheduleProjectionCard > header div { display: grid; gap: 4px; }
+.contractsScheduleProjectionCard > header small { color: #66786d; }
+.contractsScheduleProjectionCard > header h3 { margin: 0; color: #143c2c; font-size: 1rem; }
+.contractsScheduleProjectionCard > header > span { flex: none; padding: 5px 10px; border-radius: 999px; background: #edf5ef; color: #256543; font-size: 12px; font-weight: 800; }
+.contractsScheduleProjectionCard > p { margin: 0; color: #4e6156; line-height: 1.65; }
+.contractsScheduleProjectionCard .contractsRelationshipEvidence pre { max-height: 320px; margin: 10px 0 0; padding: 12px; overflow: auto; border-radius: 10px; background: #12251c; color: #e4f2e8; direction: ltr; text-align: left; font-size: 11px; line-height: 1.5; }
+.contractsScheduleProjectionBlockers { display: grid; gap: 6px; margin: 0; padding-inline-start: 22px; color: #80591f; }
+.contractsScheduleProjectionBlockers li { line-height: 1.45; }
+.contractsScheduleAuditSection { display: grid; gap: 16px; margin-top: 22px; padding-top: 22px; border-top: 1px solid #dbe6de; }
+.contractsScheduleAuditSection .contractsSectionHeader { align-items: flex-start; }
+.contractsScheduleAuditList { display: grid; gap: 10px; }
+.contractsScheduleAuditCard { overflow: hidden; border: 1px solid #d7e1da; border-inline-start: 4px solid #829d8b; border-radius: 12px; background: #fff; }
+.contractsScheduleAuditCard.is-temporal_correction_candidate,
+.contractsScheduleAuditCard.is-event_anchor_review { border-inline-start-color: #d39a45; }
+.contractsScheduleAuditCard.is-missing_temporal_value { border-inline-start-color: #b66c57; }
+.contractsScheduleAuditCard.is-review_blocked { border-inline-start-color: #bd4f4f; }
+.contractsScheduleAuditCard > summary { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; cursor: pointer; list-style-position: inside; }
+.contractsScheduleAuditCard > summary span { display: grid; flex: 1; gap: 4px; }
+.contractsScheduleAuditCard > summary strong { color: #173e2e; }
+.contractsScheduleAuditCard > summary small { color: #6a796f; }
+.contractsScheduleAuditCard > summary i { flex: none; padding: 4px 9px; border-radius: 999px; background: #edf4ef; color: #38644d; font-size: 11px; font-style: normal; font-weight: 800; }
+.contractsScheduleAuditBody { display: grid; gap: 12px; padding: 0 16px 16px; border-top: 1px solid #edf1ee; }
+.contractsScheduleAuditBody > p { margin: 14px 0 0; color: #4e6156; line-height: 1.65; }
+.contractsScheduleAuditEvidence { display: grid; gap: 10px; margin-top: 10px; }
+.contractsScheduleAuditEvidence blockquote { margin: 0; padding: 12px; border-inline-start: 3px solid #7baa8e; border-radius: 8px; background: #f7faf8; }
+.contractsScheduleAuditEvidence blockquote small { color: #6a796f; }
+.contractsScheduleAuditEvidence blockquote p { margin: 6px 0 0; line-height: 1.65; }
+
+@media (max-width: 760px) {
+  .contractsScheduleProjectionCard > header { flex-direction: column; }
+  .contractsScheduleAuditCard > summary { align-items: flex-start; flex-direction: column; }
+}
 .schedToolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .schedTitle { margin: 0; font-size: 1.15rem; color: var(--text-primary); }
 .schedControls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

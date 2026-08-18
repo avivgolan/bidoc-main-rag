@@ -13,8 +13,9 @@ bidoc-settings-max-quality.json
 # Node
 node_modules/
 
-# Runtime diagnostic logs (may contain redacted conversation excerpts)
-logs/
+# Supabase CLI local state
+supabase/.branches/
+supabase/.temp/
 
 # bedrock: noisy auto-generated content excluded from git
 # Curated knowledge (Memory/, History/, Evidence/imports/, Dashboards/) IS tracked.

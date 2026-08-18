@@ -1,13 +1,13 @@
 # BIDoc Contracts Agent and Schedule Intelligence Implementation Plan
 
-- Status: Phase 0 evidence package complete; CTO/product approval checkpoint open
-- Version: 0.3
-- Date: 2026-08-08
+- Status: Phase 1 accepted; Phase 2 schema, mapping, and remote security gate complete; activation and live-promotion approval pending
+- Version: 1.0
+- Date: 2026-08-10
 - Audience: CTO, product, contract operations, engineering, and security
 - Confidentiality: Internal planning document
-- Requested decision: Approve the Phase 0 checkpoint and authorize Phase 1 dry-run implementation only
-- Implementation status: Phase 0 documentation and evidence are complete; Phase 1 has not started
-- Production status: No database migration, deployment, notification, or production-data change is authorized
+- Requested decision: Review the completed KAPAIM schema/mapping evidence, then authorize or reject activation and one reviewed end-to-end promotion
+- Implementation status: Phase 1 remains accepted. Phase 2 now includes the remote KAPAIM migration history, one approved MAIN-to-KAPAIM mapping, private immutable audit storage, pure planner, atomic RPC, fail-closed backend transport, authenticated review routes, reviewer UI, rollback plan, 50 focused Contracts tests, the passing isolated database suite, and passing Phase 2 remote security checks. The server apply flag, live contract promotion, and deployment remain pending separate approval
+- Production status: KAPAIM received three additive Phase 2 migrations and one approved mapping row. No contract fact, Schedule date, alert, application flag, deployment, or notification changed
 
 Related specification: [BIDoc Schedule Intelligence Engine Specification](./BIDoc_Schedule_Intelligence_Engine_Spec.md)
 
@@ -27,13 +27,15 @@ Recommended CTO reading path:
 
 Appendices A-C contain the engineering findings and source map supporting the executive plan.
 
-## 0. CTO-Locked Pre-Implementation Constraints — 2026-08-08
+## 0. CTO-Locked Pre-Implementation Constraints — updated 2026-08-10
 
 These constraints record the CTO's review feedback and override any conflicting wording elsewhere in this plan or the related Schedule Intelligence specification.
 
-### 0.1 Preserve the existing Schedule Engine
+### 0.1 Reuse and extend the existing Schedule Engine
 
-The existing Schedule Engine calculation core is considered an important, already implemented working baseline. The Contracts Agent must integrate additively around it and must not rewrite, replace, refactor, or silently change its scheduling logic.
+The existing Schedule Engine calculation core is an important, already implemented working baseline and remains the canonical owner of schedule arithmetic. The CTO clarified on 2026-08-10 that this does not make its files immutable: Contracts and Indicator integration may modify or extend the Engine when the integration genuinely requires it. This clarification supersedes earlier blanket wording that every Engine edit required a separate exception.
+
+The governing rule is reuse rather than avoidance. New work must call, extend, or feed the existing basis priority, calendar arithmetic, extension handling, lateness/remaining-time calculations, statuses, confidence, severity, snapshots, and alert behavior. It must not recreate those calculations in a Contracts service, Indicator service, UI consumer, prompt, or parallel "new engine."
 
 Protected baseline:
 
@@ -53,7 +55,8 @@ Default allowed work:
 Conditional work:
 
 - Changes at ingestion, orchestration, API, resolver, or UI boundaries are allowed only when necessary for the approved Contracts integration, with focused regression evidence showing that existing Schedule calculations and behavior did not change.
-- Any required modification to src/scheduleEngine.js, src/scheduleCalendar.js, their formulas, status precedence, basis priority, extension logic, or alert-severity calculation is a separate exception request requiring CTO approval before editing.
+- Changes to `src/scheduleEngine.js`, `src/scheduleCalendar.js`, or adjacent Schedule services are permitted when needed for the approved integration slice. Every such change must identify the existing logic being reused, add focused regression coverage, preserve unchanged-input behavior unless an intentional product change is documented, and explain why an additive extension is preferable to duplicate computation.
+- Opportunistic rewrites, parallel formula implementations, and unrelated refactors remain out of scope.
 - Opportunistic Schedule refactoring, cleanup, renaming, or redesign is out of scope.
 
 Required regression gate:
@@ -101,9 +104,9 @@ Before the first implementation phase, produce:
 - A field compatibility matrix mapping each Contracts Agent output to an existing column.
 - A gap register separating: fits as-is, fits through an existing safe metadata field, requires application validation only, or requires a separately approved additive schema change.
 - A baseline Schedule regression report and representative unchanged-output fixtures.
-- A written confirmation that no core Schedule Engine change and no new table is required for the authorized slice.
+- A written integration note identifying whether the slice reuses the Engine unchanged or requires a bounded, regression-tested Engine extension; no duplicate calculation path is permitted.
 
-If that confirmation cannot be made, implementation pauses and returns to the CTO with a bounded exception request.
+If a required behavior cannot be expressed by reusing or safely extending the existing Engine, implementation pauses and returns to the CTO with the concrete gap and alternatives.
 
 ## 1. Executive Summary
 
@@ -113,11 +116,11 @@ The sequencing is:
 
 1. Establish a reviewed Contracts Agent output contract.
 2. Promote only approved schedule-driving facts into the contract axis.
-3. Integrate through the existing Schedule Engine's supported table and service contracts without changing its calculation logic.
+3. Integrate through the existing Schedule Engine's table, service, and calculation contracts; extend them only where required and keep the Engine as the single calculation authority.
 4. Add reviewed contract-to-activity mapping and observed project evidence.
 5. Operate alerts in shadow mode before enabling broader delivery.
 
-The deterministic Schedule Engine calculation core is already implemented and is now a protected baseline. Adjacent three-axis inputs and consumer integrations are not all complete or end-to-end verified, but that does not authorize changing the working calculation logic. The missing critical capability is a trustworthy, additive bridge from contracts to structured, versioned, reviewed facts in the existing Schedule tables.
+The deterministic Schedule Engine calculation core is already implemented and is the regression baseline. Adjacent three-axis inputs and consumer integrations are not all complete or end-to-end verified. Required integration changes may build on the core, but must not duplicate its working calculation logic. The missing critical capability is a trustworthy bridge from contracts to structured, versioned, reviewed facts in the existing Schedule tables and Engine inputs.
 
 The sample contract proves that this bridge cannot be implemented as simple date extraction. It includes a blank commencement date, visibly blank signature fields with unverified execution authority, absent BOQ/plans/specifications referenced by Appendix A, no Appendix C in the supplied packet, conflicting daily delay-charge figures, recurring obligations, event-relative deadlines, channel-dependent notice rules, and a project-address mismatch. The safe output is therefore a partially computable contract record with explicit conflicts and missing anchors—not a completed project timeline.
 
@@ -226,14 +229,14 @@ The CTO confirmed the existing Schedule-table baseline on 2026-08-08. The dated 
 
 | Area | Current state | Verification boundary |
 |---|---|---|
-| Deterministic Schedule Engine | Implemented working calculation core and protected behavioral baseline for basis priority, extensions, lateness, remaining time, status, confidence, severity, lookup, and sweep | 47 focused Schedule tests passed; no logic change authorized |
+| Deterministic Schedule Engine | Implemented working calculation core and protected behavioral baseline for basis priority, extensions, lateness, remaining time, status, confidence, severity, lookup, and sweep | 47 focused Schedule tests passed; later integration changes are allowed only when required, reuse existing logic, and include focused regression evidence |
 | Calendar arithmetic | Implemented for calendar days, weeks, months, integral-day hours, and working days | Unit-tested |
 | Schedule ingestion | Implemented, but Gantt input is forced to MAIN App DB test tables while engine data uses KAPAIM Content DB | Source inspection; not live-verified in this review |
 | Schedule APIs | Indicator, sweep, health, recalculate, versions, alerts, conditions, and resolver routes exist | Source and unit/mocked tests |
 | Schedule UI | Three-axis Schedule view, alerts, health, and pending-condition actions exist | Source inspection; no browser verification in this review |
-| Contract milestones/extensions | Existing tables and readers are implemented. The additive Contracts writer must provide reviewed authority, explicit status, confidence, and evidence so unsafe defaults are never reached | Existing Engine behavior is frozen; containment belongs in the new writer/adapter |
+| Contract milestones/extensions | Existing tables and readers are implemented. The additive Contracts writer must provide reviewed authority, explicit status, confidence, and evidence so unsafe defaults are never reached | Prefer containment in the writer/adapter; extend the existing Engine only if the approved integration genuinely requires it and regressions prove unchanged-input compatibility |
 | Relative condition resolver | Can search for trigger evidence and promote a pre-extracted condition at the current confidence gate | Unit-tested; writes are not transactional and the UI can commit without a separate contract-review object |
-| Contracts Agent | Missing: no PDF extractor, typed candidate contract, review queue, writer, API, or UI | Repository-wide audit |
+| Contracts Agent | Phase 1 dry-run PDF extractor, typed candidate contract, authenticated API, diagnostics, evaluators, and tests are implemented; review queue, writer, persistence, and upload/review UI remain deferred | Phase 1 accepted: final live gold evaluation, deterministic verification, and protected regressions are green |
 | Activity mapping | schedule_activity_map already exists; current engine pipeline does not yet consume it | Existing table confirmed in the dated inventory; caller integration missing |
 | Observed events | schedule_observed_events already exists; current engine pipeline does not yet consume it | Existing table confirmed in the dated inventory; caller integration missing |
 | Dependencies and critical path | Not implemented; the specification/source-artifact review reports useful XML fields that the active backend input does not persist | Specification and repository audit; parser not present here |
@@ -723,7 +726,7 @@ If no valid basis exists, status is insufficient_data. The system must never inf
 
 | Bundle | Decisions | Executive question |
 |---|---|---|
-| Protected baseline, table reuse, and identity compatibility | D-00 to D-03 | Which existing engine, tables, callers, and identities are frozen, and where may additive Contracts code connect? |
+| Protected baseline, table reuse, and identity compatibility | D-00 to D-03 | Which existing behaviors must remain compatible, which tables/callers/identities are reused, and where may Contracts integration extend the existing Engine? |
 | Contract authority, semantics, and review | D-04 to D-08 | Which document facts may become operational, under which calendar and human approval policy? |
 | Deterministic indicator and evidence security | D-09, D-10, D-12 | How is every result replayed, classified, and permissioned? |
 | Alert ownership and rollout | D-11 | Who owns severity consumption, lifecycle, scheduling, and delivery, and when can users be notified? |
@@ -732,7 +735,7 @@ If no valid basis exists, status is insufficient_data. The system must never inf
 
 | ID | Decision | Recommended direction | Required approver | Blocks |
 |---|---|---|---|---|
-| D-00 | Protected Schedule baseline | Freeze existing Schedule Engine formulas, protected files, APIs, tables, tests, and representative outputs; any behavioral diff requires a separate exception | CTO and Schedule owner | All implementation |
+| D-00 | Canonical Schedule baseline | Reuse the existing Engine as the single owner of formulas and status behavior. Necessary integration extensions are allowed with focused tests and an explained behavioral diff; duplicate calculation paths are prohibited | CTO and Schedule owner | All implementation |
 | D-01 | Existing schema ownership and reuse | Read-only audit the actual databases and eight CTO-created tables; produce a field-level reuse matrix; no migration or DDL is authorized by Phase 0 | CTO, backend owner, security | All persistence |
 | D-02 | Gantt parser ownership | Assign the repository/component and owner responsible for reliable Gantt persistence, including predecessors, slack, actual dates, and calendars | CTO and frontend/backend owners | Basic production indicators, dependencies, and critical path |
 | D-03 | Existing identity compatibility | Audit current task_uid, stableKey, activity_key, schedule_activity_map, and constraints; prefer an additive crosswalk in existing structures; any core identity change requires separate approval | CTO and backend owner | Mapping, slippage, alert continuity |
@@ -742,7 +745,7 @@ If no valid basis exists, status is insufficient_data. The system must never inf
 | D-07 | Schedule versus compliance | Approve which obligation classes affect project-delay indicators | Product, contract owner, CTO | Alert correctness |
 | D-08 | Human-review policy | Supersede current confidence-only auto-promotion for the MVP; require approval for every fact that can change a basis or create an alert | Product, contract owner, CTO | Safe automation |
 | D-09 | Existing snapshot compatibility | Freeze current snapshot behavior as the regression baseline; map Contracts inputs through an additive writer/adapter first; any index or snapshot-identity change requires a separate exception | Backend owner and CTO | Audit and alert linkage |
-| D-10 | Existing status/confidence/clock contract | Record current tested formulas, precedence, asOf, and calculatedAt behavior as authoritative regression expectations; Contracts outputs must conform; formula changes are out of scope | Product, data/AI owner, CTO | Consistent indicators |
+| D-10 | Existing status/confidence/clock contract | Record current tested formulas, precedence, asOf, and calculatedAt behavior as authoritative regression expectations. Contracts and Indicators must reuse them; a necessary change belongs in the Engine with focused regression coverage, not in a parallel consumer calculation | Product, data/AI owner, CTO | Consistent indicators |
 | D-11 | Alert ownership and channel | Run back-office shadow alerts first; approve main-alert or external delivery separately | Product and CTO | Proactive rollout |
 | D-12 | Evidence access | Preserve source permissions through every snapshot, API, and UI | Security, backend owner, CTO | Tenant-safe launch |
 
@@ -755,7 +758,7 @@ No calendar estimate is committed here. Team sizing and delivery estimates shoul
 | Step | Outcome | Approval evidence |
 |---|---|---|
 | Phase 0 | Decisions and contracts locked; no runtime change | Approved architecture decision record |
-| Schema Reuse and Regression Gate | Existing engine/tables frozen; additive seam proven with zero DDL by default | Schema/caller audit, reuse matrix, golden outputs, and no-schema-diff proof |
+| Schema Reuse and Regression Gate | Existing Engine logic reused and baseline behavior protected; integration seam proven with zero DDL by default | Schema/caller audit, reuse matrix, golden outputs, focused Engine regressions when touched, and no-schema-diff proof |
 | Phase 1 | Dry-run Contracts Agent with no operational writes | Representative gold-set evaluation |
 | Phase 2 | Reviewed staging and atomic promotion | Review/audit/transaction report |
 | Phase 3 | Contract-to-schedule mapping through schedule_activity_map | Mapping reuse and conflict-review report |
@@ -777,7 +780,8 @@ Checkpoint status — 2026-08-08:
 - Live verification confirmed all eight existing Schedule tables through read-only OpenAPI and `HEAD` requests; no DDL or data write occurred.
 - The protected Schedule suite passes 47/47 on the local baseline.
 - The Contracts output schema, sample-contract gold annotation draft, and representative synthetic variants are ready for review.
-- Phase 1 remains unstarted until the approval checklist in the Phase 0 record is accepted.
+- Phase 1 was authorized on 2026-08-08 and is accepted after its final real-contract evaluation passed every unchanged hard gate and quality threshold. Phase 2 entry work is recorded in [BIDoc Phase 2 Entry and Schema-Reuse Gate](./BIDoc_Phase_2_Entry_Schema_Reuse_and_Promotion_Gate.md). D2-01 through D2-04 were approved on 2026-08-10; operational persistence remains paused until the exact migration/apply checkpoint is approved.
+- The local-only schema/RPC/transport package and its remaining database verification gate are recorded in [BIDoc Phase 2 Migration and Apply Checkpoint](./BIDoc_Phase_2_Migration_Apply_Checkpoint.md).
 
 Deliverables:
 
@@ -852,6 +856,14 @@ Backend, security, Schedule, and architecture owners must approve this gate befo
 
 ### Phase 1 — Dry-Run Contracts Agent
 
+Checkpoint status - 2026-08-08:
+
+- The authenticated, bounded, no-write extraction core is implemented.
+- Focused Contracts and protected Schedule regression suites are green.
+- The existing Schedule Engine/Calendar and all CTO-created Schedule tables remain unchanged.
+- The six-case deterministic representative gate passes. Phase 1 is not accepted for exit until the post-fix real-contract sample also completes within budget and passes the unchanged quality gates.
+- See [BIDoc Phase 1 Contracts Agent Dry Run](./BIDoc_Phase_1_Contracts_Agent_Dry_Run.md) for implementation, verification, live chronology, manual checks, and deferred scope.
+
 Goal:
 
 Extract typed, evidence-backed candidates without writing operational schedule facts.
@@ -892,6 +904,13 @@ Contract/product owner and CTO approve candidate quality before staging and revi
 Goal:
 
 Create a controlled contract-fact lifecycle with human accountability.
+
+Checkpoint status - 2026-08-10:
+
+- The read-only live catalog, constraint, index, permission, row-count, function, and cross-database project-identity audit is complete.
+- The pure fail-closed promotion planner is implemented and covered by focused tests; it performs no I/O.
+- Operational persistence is paused because project namespace, immutable review/audit storage, atomic promotion, and the permission model are not yet approved.
+- See [BIDoc Phase 2 Entry and Schema-Reuse Gate](./BIDoc_Phase_2_Entry_Schema_Reuse_and_Promotion_Gate.md).
 
 Entry criteria:
 
@@ -1205,10 +1224,11 @@ Metric thresholds must be agreed during Phase 0; they should not be invented aft
 
 ## 16. CTO Approval Checklist
 
-### CTO directives confirmed on 2026-08-08
+### CTO directives confirmed on 2026-08-08 and clarified on 2026-08-10
 
-- [x] Preserve the existing Schedule Engine logic as a protected baseline.
-- [x] Integrate Contracts additively; do not rewrite or replace the Schedule Engine.
+- [x] Keep the existing Schedule Engine as the canonical schedule-calculation baseline.
+- [x] Reuse and, where genuinely required, extend the existing Engine instead of building duplicate schedule logic.
+- [x] Require focused regression tests and an explicit behavioral explanation for every Engine integration change.
 - [x] Reuse the eight existing CTO-created Schedule tables.
 - [x] Perform a read-only schema/caller compatibility audit before coding.
 - [x] Do not create duplicate tables or execute DDL without separate approval.
@@ -1236,8 +1256,8 @@ Metric thresholds must be agreed during Phase 0; they should not be invented aft
 
 ### Not approved by this document
 
-- [ ] Any change to Schedule Engine formulas, basis priority, status, confidence, severity, or calendar arithmetic.
-- [ ] Any unapproved edit to src/scheduleEngine.js or src/scheduleCalendar.js.
+- [ ] Any unrelated or duplicate implementation of Schedule formulas, basis priority, status, confidence, severity, or calendar arithmetic.
+- [ ] Any Schedule Engine/Calendar edit that is unnecessary for the approved integration slice, lacks an explicit reuse rationale, or lacks focused regression evidence.
 - [ ] Any duplicate, replacement, cloned, or parallel schedule/contract table.
 - [ ] Any CREATE, ALTER, DROP, TRUNCATE, index, trigger, function, RLS, grant, policy, permission, or backfill operation.
 - [ ] Replaying the specification's historical CREATE/DROP blocks against the existing environment.
@@ -1454,7 +1474,7 @@ It should contain:
 - Logical-to-physical field reuse matrix.
 - Explicit zero-DDL and no-duplicate-table confirmation for the authorized slice.
 - Protected Schedule test baseline and representative golden outputs.
-- Protected-file list and no-Engine-change confirmation.
+- Protected-behavior list, existing-logic reuse map, and confirmation of whether the approved slice required an Engine change.
 - Final JSON schemas.
 - Stable-key examples.
 - Authority/version rules.

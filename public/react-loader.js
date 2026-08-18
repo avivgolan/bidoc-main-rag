@@ -1,4 +1,4 @@
-const REACT_BRIDGE_URL = "/react/bidoc-react.js?v=20260705-internal-agents";
+const REACT_BRIDGE_URL = "/react/bidoc-react.js?v=20260815-contracts-r3-3";
 
 function loadReactBridge() {
   if (!document.querySelector("[data-react-island]")) return;

@@ -46,9 +46,11 @@ import { adjacentTimelineRange, buildTimelineEventsUrl, canCommitTimelineRequest
 import { buildTimelineSearchText, createTimelineSearchController, timelineEventMatchesQuery } from "../public/timelineSearch.js";
 import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigateByMonths, calWeekBoundary } from "../public/calendarHelpers.js";
 import { cleanChatUrl, renderChatMarkdown } from "../public/chatMarkdown.js";
+import { registerContractsAgentTests } from "./contracts-agent.tests.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
+registerContractsAgentTests(test);
 const testJwt = (claims) => [
   Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
   Buffer.from(JSON.stringify(claims)).toString("base64url"),
@@ -7248,6 +7250,48 @@ test("chatCompletion exposes provider capacity metadata without leaking it into 
   }
 });
 
+test("chatCompletion unwraps bounded provider metadata for actionable diagnostics", async () => {
+  const previousFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: false,
+    status: 400,
+    json: async () => ({
+      error: {
+        message: "Provider returned error",
+        code: 400,
+        metadata: {
+          provider_name: "Google AI Studio",
+          raw: JSON.stringify({
+            error: {
+              code: 400,
+              message: "The specified schema produces too many states for serving.",
+              status: "INVALID_ARGUMENT"
+            }
+          })
+        }
+      }
+    })
+  });
+  try {
+    await assert.rejects(
+      () => chatCompletion({
+        apiKey: "sk-test",
+        model: "openai/gpt-4o",
+        messages: [{ role: "user", content: "hello" }]
+      }),
+      (error) => {
+        assert.equal(error.message, "The specified schema produces too many states for serving.");
+        assert.equal(error.httpStatus, 400);
+        assert.equal(error.providerName, "Google AI Studio");
+        assert.equal(error.providerCode, "INVALID_ARGUMENT");
+        return true;
+      }
+    );
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("main synthesis credit failures use one compact lower-cost retry policy", () => {
   const policy = mainSynthesisRetryPolicy(Object.assign(
     new Error("This request requires more credits, but can only afford 1,581 tokens"),
@@ -13820,6 +13864,7 @@ test("connection diagnostics list every operational internal subagent", () => {
   const expectedIds = [
     "alert", "meetings", "emails", "whatsapp_messages", "financial_transactions", "safety_report",
     "meeting_evidence", "data_query", "indexing", "schedule", "schedule_conditions",
+    "contracts",
     "project_insights", "graph_enrichment", "delay_claim"
   ];
   assert.match(appSource, /id:\s*"subagents"/);
@@ -13831,6 +13876,7 @@ test("internal subagent diagnostics are read-only readiness probes", () => {
   const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   const expectedIds = [
     "alert", "meeting_evidence", "data_query", "indexing", "schedule", "schedule_conditions",
+    "contracts",
     "project_insights", "graph_enrichment", "delay_claim"
   ];
   for (const id of expectedIds) assert.match(serverSource, new RegExp(`add\\("subagent_${id}"`));

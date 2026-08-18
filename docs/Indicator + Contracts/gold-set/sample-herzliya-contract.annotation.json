@@ -1,6 +1,6 @@
 {
   "schemaVersion": "contract-extraction.v1",
-  "extractionVersion": "human-gold.phase0.v1",
+  "extractionVersion": "human-gold.phase1.v4",
   "mode": "dry_run",
   "document": {
     "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
@@ -10,22 +10,22 @@
     "executionStatus": "unverified",
     "authorityStatus": "needs_review",
     "executionDate": null,
-    "visibleSignatureStatus": "blank",
+    "visibleSignatureStatus": "unknown",
     "attachmentsStatus": "incomplete",
     "sourceId": null,
     "supersedesDocumentVersionId": null
   },
   "projectBinding": {
-    "projectId": null,
-    "selectedByUser": false,
+    "projectId": "phase1-sample-project",
+    "selectedByUser": true,
     "status": "needs_review",
     "contractSiteRaw": "החושלים 5, הרצליה",
     "contractSiteNormalized": "5 HaHoshlim Street, Herzliya",
     "candidateProjectSite": "15 HaHoshlim Street, Herzliya",
     "automaticBindingAllowed": false,
     "mismatchReasons": [
-      "contract_site_differs_from_schedule_specification",
-      "no_explicit_user_project_selection"
+      "site_address_number_mismatch",
+      "site_address_text_mismatch"
     ]
   },
   "candidates": [
@@ -72,13 +72,13 @@
         {
           "pdfPage": 4,
           "clause": "6.1",
-          "sourceText": "הקבלן מתחייב כי הוא יבצע את העבודות וישלימן במועד כקבוע בנספח ב'.",
+          "sourceText": "6.1. הקבלן מתחייב כי הוא יבצע את העבודות וישלימן במועד כקבוע בנספח ב' וכי הוא יחל בביצוע\nהעבודות לא יאוחר מאשר מהמועד להתחלת העבודות הקבוע בנספח ב'.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         },
         {
           "pdfPage": 14,
           "clause": "Appendix B, item 2",
-          "sourceText": "העבודות יושלמו וימסרו לסמל בתוך 100 ימי עבודה ממועד תחילת העבודות.",
+          "sourceText": "2. מועד השלמת השירותים: העבודות יושלמו וימסרו לסמל בתוך 100 ימי עבודה ממועד תחילת העבודות.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -88,7 +88,7 @@
       }
     },
     {
-      "candidateKey": "contract:0ff80eb28a15:clause:6.7:role:daily_delay_charge_2000",
+      "candidateKey": "contract:0ff80eb28a15:clause:6.7:role:daily_delay_charge",
       "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
       "type": "consequence",
       "role": "daily_delay_charge",
@@ -113,32 +113,35 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
-        "material_value_conflict",
-        "day_semantics_unresolved",
-        "human_review_required"
+        "authority_unverified",
+        "human_review_required",
+        "project_binding_unreviewed",
+        "trigger_event_missing",
+        "material_value_conflict"
       ],
       "sourceEvidence": [
         {
           "pdfPage": 5,
           "clause": "6.7",
-          "sourceText": "ישלם הקבלן 2,000 שקלים חדשים בגין כל יום איחור ממועד השלמת העבודות.",
+          "sourceText": "6.7. מבלי לגרוע מכל דבר אחר האמור בחוזה זה ונספחיו, הקבלן ישלם 2,000 שקלים חדשים בגין כל\nיום איחור ממועד השלמת העבודות )להלן - \"הקנס בגין האיחור בהשלמת העבודות\"(. סמל תהיה\nרשאית לקזז את הקנס בגין האיחור בהשלמת העבודות מכל סכום שיגיע לקבלן מאת סמל. למען\nהסר ספק, תשלום או ניכוי הקנס בגין האיחור בהשלמת העבודות, כאמור, אין בו כשלעצמו משום\nשחרור הקבלן מהתחייבותו להשלים את ביצוע העבודות או מכל התחייבות אחרת לפי הסכם זה.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
       "metadata": {
-        "value": 2000,
+        "amount": 2000,
         "currency": "ILS",
+        "rateUnit": "per_day",
         "originalSourceLabel": "קנס",
         "dayType": "unresolved"
       }
     },
     {
-      "candidateKey": "contract:0ff80eb28a15:clause:appendix_b.3:role:daily_delay_charge_3250",
+      "candidateKey": "contract:0ff80eb28a15:clause:appendix_b.3:role:daily_delay_charge",
       "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
       "type": "consequence",
       "role": "daily_delay_charge",
-      "responsibleParty": "הקבלן",
-      "beneficiary": "סמל",
+      "responsibleParty": null,
+      "beneficiary": null,
       "action": "Pay a daily charge for delayed completion",
       "trigger": {
         "kind": "event",
@@ -158,21 +161,26 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
+        "authority_unverified",
+        "beneficiary_unverified",
+        "human_review_required",
         "material_value_conflict",
-        "day_semantics_unresolved",
-        "human_review_required"
+        "project_binding_unreviewed",
+        "responsible_party_unverified",
+        "trigger_event_missing"
       ],
       "sourceEvidence": [
         {
           "pdfPage": 14,
           "clause": "Appendix B, item 3",
-          "sourceText": "הקנס בגין האיחור בהשלמת העבודות: 3,250 ש״ח ליום.",
+          "sourceText": "3. הקנס בגין האיחור בהשלמת העבודות: 3,250 ש\"ח ליום.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
       "metadata": {
-        "value": 3250,
+        "amount": 3250,
         "currency": "ILS",
+        "rateUnit": "per_day",
         "originalSourceLabel": "קנס",
         "dayType": "unresolved"
       }
@@ -182,7 +190,7 @@
       "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
       "type": "notice_rule",
       "role": "exceptional_event_notice",
-      "responsibleParty": "הקבלן",
+      "responsibleParty": null,
       "beneficiary": "סמל",
       "action": "Provide written notice of an exceptional event",
       "trigger": {
@@ -210,6 +218,11 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
+        "authority_unverified",
+        "human_review_required",
+        "project_binding_unreviewed",
+        "responsible_party_unverified",
+        "trigger_event_missing",
         "subday_deadline_not_storable_as_date",
         "compliance_engine_not_approved"
       ],
@@ -217,7 +230,7 @@
         {
           "pdfPage": 2,
           "clause": "3.14",
-          "sourceText": "מיד לאחר התרחשותם, ובכל מקרה לא יאוחר מ-8 שעות ממועד קרות אירוע כאמור.",
+          "sourceText": "3.14. כי ידווח בכתב לסמל ו/או למפקח הפרויקט על כל אירוע חריג אשר יתרחש במהלך אספקת\nהשירותים על ידו, ובכלל זה ידווח בכתב על כל פגיעה ו/או נזק לסמל או למפקח הפרויקט או\nלעובדיו, מייד לאחר התרחשותם, ובכל מקרה לא יאוחר מ- 8 שעות ממועד קרות אירוע כאמור.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -253,6 +266,10 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
+        "authority_unverified",
+        "human_review_required",
+        "project_binding_unreviewed",
+        "trigger_event_missing",
         "recurring_occurrence_history_not_supported",
         "compliance_engine_not_approved"
       ],
@@ -260,7 +277,7 @@
         {
           "pdfPage": 3,
           "clause": "3.17",
-          "sourceText": "יקפיד לסלק, מדי שבוע, לכל הפחות, את כל מצבורי האשפה ופסולת הבנין.",
+          "sourceText": "3.17. כי יקפיד לסלק, מדי שבוע, לכל הפחות ו/או בהתאם להוראת המנהל, את כל מצבורי האשפה\nופסולת הבנין שהצטברו באתר במהלך ביצוע העבודות בהתאם לדרישת המנהל או סמל וכי בגמר\nהעבודות ו/או חלק כלשהו מביצוע העבודות, יפנה מהאתר כל יתרת פסולת, לכלוך, אשפה, חומרים,\nמבנים ארעיים מכל סוג שהוא וציוד השייכים לו, לאתר מאושר. ככל ויידרש על ידי סמל ו/או\nהרשויות, הקבלן יציג אסמכתאות לפינוי האשפה ופסולת הבנין לאתר מורשה. מבלי לגרוע מהאמור\nבהסכם זה.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -282,7 +299,7 @@
       "fixedDate": null,
       "offset": {
         "value": 25,
-        "unit": "calendar_day",
+        "unit": "day",
         "direction": "after",
         "calendarId": null,
         "inclusivity": "unspecified",
@@ -303,21 +320,27 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
+        "authority_unverified",
+        "calendar_semantics_unresolved",
+        "compliance_engine_not_approved",
         "compound_rule_not_supported",
+        "human_review_required",
+        "project_binding_unreviewed",
         "approval_guard_not_supported",
-        "recurring_occurrence_history_not_supported"
+        "recurring_occurrence_history_not_supported",
+        "trigger_event_missing"
       ],
       "sourceEvidence": [
         {
           "pdfPage": 5,
           "clause": "7.7",
-          "sourceText": "חשבונות קבלן יוגשו למפקח הפרויקט, חודש בחודשו, בין הימים 1-5 לכל חודש קלנדרי.",
+          "sourceText": "7.7. חשבונות קבלן יוגשו למפקח הפרויקט, חודש בחודשו, בין הימים 1 – 5 לכל חודש קלנדרי.\nמפקח הפרויקט יבדוק את החשבון עד ל 10 ימים מיום קבלתו.\nהחשבון יהיה עבור ביצוע העבודות במהלך החודש הקלנדרי הקודם להגשה. התשלום יהיה בהתאם שיקול\nדעתו הבלעדי של המפקח, ע״פ התקדמות העבודות באתר.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         },
         {
           "pdfPage": 5,
           "clause": "7.8",
-          "sourceText": "ישולם לקבלן בתוך 25 ימים מתום החודש שבו הוגש חשבון הביניים.",
+          "sourceText": "7.8. סכום שאושר כאמור והתשלומים המגיעים לסמל מהקבלן לפי חוזה זה כאמור, ישולם לקבלן\nכתשלום ביניים, על חשבון התמורה, בתוך 25 ימים מתום החודש שבו הוגש חשבון הביניים בכפוף\nלכך שאושר, ואם תאריך זה נופל בשבת או בחג, ישולם אותו תשלום ביום החול הראשון שלאחריו\nהתמורה תשולם לקבלן בתשלומים לפי קצב התקדמות העבודות, בהתאם למפורט בכתב הכמויות\nובאופן המפורט להלן.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -352,6 +375,10 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
+        "authority_unverified",
+        "human_review_required",
+        "project_binding_unreviewed",
+        "trigger_event_missing",
         "extension_event_missing",
         "quantified_days_missing",
         "entitlement_review_required"
@@ -360,7 +387,7 @@
         {
           "pdfPage": 4,
           "clause": "6.6",
-          "sourceText": "כל עיכוב בלוח הזמנים בהתאם לדרישת סמל שאינו נובע מפעולות ו/או מחדלי הקבלן יאפשר דחייה מקבילה של מועד סיום העבודות.",
+          "sourceText": "6.6. מוסכם כי סמל תהיה רשאית לקבוע סדר קדימויות אחר לעומת זה הקבוע בלוח הזמנים, לפי שיקול\nדעתה הבלעדית, אולם כל עיכוב בלוח הזמנים בהתאם לדרישת סמל שאינו נובע מפעולות ו/או\nמחדלי הקבלן יאפשר דחייה מקבילה של מועד סיום העבודות על פי הסכם זה.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -373,7 +400,7 @@
       "documentVersionId": "sha256:0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA",
       "type": "relative_condition",
       "role": "completion_inspection",
-      "responsibleParty": "מפקח הפרויקט",
+      "responsibleParty": "המפקח",
       "beneficiary": "הקבלן",
       "action": "Complete the inspection of the works",
       "trigger": {
@@ -384,7 +411,7 @@
       "fixedDate": null,
       "offset": {
         "value": 14,
-        "unit": "calendar_day",
+        "unit": "day",
         "direction": "after",
         "calendarId": null,
         "inclusivity": "unspecified",
@@ -401,15 +428,17 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "candidate_for_schedule_contract_conditions",
       "gates": [
+        "authority_unverified",
+        "calendar_semantics_unresolved",
+        "human_review_required",
         "inspection_start_event_missing",
-        "inspection_start_due_missing",
-        "human_review_required"
+        "project_binding_unreviewed"
       ],
       "sourceEvidence": [
         {
           "pdfPage": 8,
           "clause": "13.1",
-          "sourceText": "המפקח יחל בבדיקת העבודות וישלים את הבדיקה תוך 14 ימים מיום שהחל בה.",
+          "sourceText": "13.1. מיד עם קבלת הודעה בכתב מצד הקבלן כי העבודות הושלמו, יחל המפקח בבדיקת העבודות וישלים\nאת הבדיקה תוך 14 ימים מיום שהחל בה. מצא המפקח את העבודות מתאימות לתנאי ההסכם\nוקיבל את אישור היועצים על כך - ייתן לקבלן תעודת השלמה עם תום הבדיקה בנוסח המצורף\nכנספח ו' להסכם זה כשהיא חתומה בחתימת ידו )לעיל ולהלן: \"תעודת ההשלמה\"(.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -448,6 +477,9 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
+        "authority_unverified",
+        "human_review_required",
+        "project_binding_unreviewed",
         "offset_missing",
         "future_manager_decision_required"
       ],
@@ -455,7 +487,7 @@
         {
           "pdfPage": 8,
           "clause": "13.2",
-          "sourceText": "הקבלן מתחייב לבצע את עבודות ההשלמה תוך התקופה שתקבע לכך על ידי המפקח.",
+          "sourceText": "13.2. לא מצא המפקח את העבודות מתאימות לתנאי ההסכם ימסור לקבלן רשימת התיקונים הדרושים\nלדעת המפקח )להלן: \"עבודות ההשלמה\"(, והקבלן מתחייב לבצע את עבודות ההשלמה תוך\nהתקופה שתיקבע לכך על ידי המפקח, וזאת מבלי לגרוע מהתחייבות כלשהי של הקבלן לפי הסכם\nזה. תעודת ההשלמה תינתן לקבלן רק לאחר ביצוע כל עבודות ההשלמה לשביעות רצונם המלאה\nשל המפקח וסמל. להסרת ספק מובהר, כי העבודות או כל חלק מהן תיחשבנה כגמורות וכמבוצעות\nלכל דבר ועניין לצרכי הסכם זה, רק עם מתן אישור המפקח ואישור סמל כי העבודות אכן בוצעו\nלשביעות רצונם בהתאם להוראות הסכם זה.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -477,7 +509,7 @@
       "fixedDate": null,
       "offset": {
         "value": 14,
-        "unit": "calendar_day",
+        "unit": "day",
         "direction": "after",
         "calendarId": null,
         "inclusivity": "unspecified",
@@ -494,6 +526,10 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "candidate_for_schedule_contract_conditions",
       "gates": [
+        "authority_unverified",
+        "calendar_semantics_unresolved",
+        "human_review_required",
+        "project_binding_unreviewed",
         "execution_date_unverified",
         "compliance_engine_not_approved"
       ],
@@ -501,7 +537,7 @@
         {
           "pdfPage": 8,
           "clause": "14.1.1",
-          "sourceText": "הקבלן ימציא לסמל, לא יאוחר מ-14 יום ממועד חתימת הסכם זה, ערבות בנקאית אוטונומית בלתי מותנית.",
+          "sourceText": "14.1.1. להבטחת מילוי כל התחייבויות הקבלן לפי הוראות ההסכם במלואן ובמועדן, וכתנאי\nלביצוע תשלום כלשהו על ידי סמל, ימציא הקבלן לסמל, לא יאוחר מ-14 יום ממועד\nחתימת הסכם זה, ערבות בנקאית אוטונומית בלתי מותנית, בסך של 325,000 ש״ח ₪\nהשווה ל- 10% מסכום התמורה המוערכת, בהתאם לכתב הכמויות, בתוקף ל-6\nחודשים, בתנאים ובנוסח הקבועים בנספח ז' להסכם )להלן: \"הערבות לביצוע\nההסכם\"(.",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -525,7 +561,7 @@
       "fixedDate": null,
       "offset": {
         "value": 45,
-        "unit": "calendar_day",
+        "unit": "day",
         "direction": "before",
         "calendarId": null,
         "inclusivity": "unspecified",
@@ -542,15 +578,19 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
+        "authority_unverified",
+        "calendar_semantics_unresolved",
+        "human_review_required",
+        "project_binding_unreviewed",
+        "trigger_event_missing",
         "negative_offset_not_supported",
-        "bond_expiry_event_missing",
         "compliance_engine_not_approved"
       ],
       "sourceEvidence": [
         {
           "pdfPage": 8,
           "clause": "14.1.3",
-          "sourceText": "לפחות 45 ימים טרם מועד פקיעתה, רשאית סמל לחלט את הערבות לאחר התראה מוקדמת.",
+          "sourceText": "14.1.3. הערבות לביצוע ההסכם תשמש להבטחת ביצוע וקיום כל התחייבויות הקבלן על פי\nתנאי ההסכם ולהבטחת כל סכום שהקבלן יהיה חייב לסמל במידה והקבלן לא יעמוד\nבהתחייבויותיו. במידה ותקופת ביצוע העבודות תעלה על משך הזמן הקבוע בסעיף\n14.1.2 לעיל, ולא האריך הקבלן את תוקף הערבות לביצוע ההסכם בהתאם לבקשת\nסמל ולפחות 45 ימים טרם מועד פקיעתה, רשאית סמל, לאחר התראה מוקדמת ומתן\nשהות מספקת לתיקון, לחלט את הערבות, להחזיק בסכום שיתקבל כבטחון חלף\nהערבות ולעשות בו שימוש לגביית כל סכום המגיע לסמל מהקבלן על פי הסכם זה ועל",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
@@ -582,6 +622,10 @@
       "automaticPromotionAllowed": false,
       "storageDisposition": "dry_run_only",
       "gates": [
+        "authority_unverified",
+        "human_review_required",
+        "project_binding_unreviewed",
+        "trigger_event_missing",
         "branching_rule_not_supported",
         "channel_specific_clock_not_supported",
         "compliance_engine_not_approved"
@@ -590,22 +634,49 @@
         {
           "pdfPage": 11,
           "clause": "19.12",
-          "sourceText": "הודעה בדואר רשום תיחשב כאילו הגיעה למענה תוך 5 ימים מעת שנמסרה למשלוח.",
+          "sourceText": "19.12. כתובות הצדדים לעניין הסכם זה הינן כמפורט ברישא להסכם זה. כל הודעה, שתשלח ע\"י צד\nלמשנהו בדואר רשום לפי כתובתו דלעיל תיחשב כאילו הגיעה למענה תוך 5 ימים, מעת שנמסרה",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         },
         {
           "pdfPage": 12,
           "clause": "19.12",
-          "sourceText": "אם נמסרה ביד - בעת מסירתה, ואם נשלחה בדוא״ל - בתוך יום עסקים או במועד קבלת מענה חוזר, לפי המוקדם.",
+          "sourceText": "סמל הקבלן\nלמשלוח בדואר רשום, ואם נמסרה ביד - בעת מסירתה ואם נשלחה בדוא\"ל – אזי בתוך יום עסקים\nאחר ממועד שליחתה או במועד קבלת מענה חזרה )שאינו אוטומטי( מהנמען בדוא\"ל, לפי המוקדם\nמבין 2 המועדים.\nולראיה באו הצדדים על החתום:\n_______________________ _______________________\nהקבלן סמל",
           "documentSha256": "0FF80EB28A157E748C02676B3C3897EA1FBBB1AD429F12E8AECE0EF062629DDA"
         }
       ],
       "metadata": {
-        "branches": [
-          "registered_mail",
-          "hand_delivery",
-          "email"
-        ]
+      "branches": [
+        {
+          "channel": "registered_mail",
+          "offset": {
+            "value": 5,
+            "unit": "day",
+            "direction": "after"
+          },
+          "alternative": null,
+          "selection": "single_clock"
+        },
+        {
+          "channel": "hand_delivery",
+          "offset": {
+            "value": 0,
+            "unit": "day",
+            "direction": "after"
+          },
+          "alternative": null,
+          "selection": "immediate"
+        },
+        {
+          "channel": "email",
+          "offset": {
+            "value": 1,
+            "unit": "working_day",
+            "direction": "after"
+          },
+          "alternative": "non_automatic_reply",
+          "selection": "earlier_of"
+        }
+      ]
       }
     }
   ],
@@ -616,8 +687,8 @@
       "materiality": "high",
       "status": "unresolved",
       "candidateKeys": [
-        "contract:0ff80eb28a15:clause:6.7:role:daily_delay_charge_2000",
-        "contract:0ff80eb28a15:clause:appendix_b.3:role:daily_delay_charge_3250"
+        "contract:0ff80eb28a15:clause:6.7:role:daily_delay_charge",
+        "contract:0ff80eb28a15:clause:appendix_b.3:role:daily_delay_charge"
       ],
       "selectedCandidateKey": null,
       "reviewDecision": null
@@ -627,7 +698,7 @@
     {
       "key": "contractual_commencement_date",
       "field": "completion_rule.trigger.eventDate",
-      "description": "Appendix B contains a blank commencement-date field.",
+      "description": "The contractual commencement event is not established by a reviewed date.",
       "blocks": [
         "computed_completion_date",
         "schedule_contract_milestone_promotion"
@@ -636,7 +707,7 @@
     {
       "key": "authoritative_working_calendar",
       "field": "completion_rule.offset.calendarId",
-      "description": "The document does not define the authoritative working-day calendar.",
+      "description": "No authoritative working-day calendar is attached to the extracted rule.",
       "blocks": [
         "computed_completion_date"
       ]
@@ -644,7 +715,7 @@
     {
       "key": "execution_authority",
       "field": "document.executionStatus",
-      "description": "Visible signature fields are blank, so execution is not established by this artifact.",
+      "description": "Text-layer extraction cannot establish contract execution or visible signatures.",
       "blocks": [
         "operational_projection",
         "signing_relative_rules"
@@ -653,7 +724,7 @@
     {
       "key": "inspection_start_due",
       "field": "completion_inspection.trigger",
-      "description": "Clause 13.1 defines when inspection must finish after it starts, but not when it must start after completion notice.",
+      "description": "The rule defines when inspection finishes after it starts, but not when inspection must start after completion notice.",
       "blocks": [
         "inspection_start_deadline"
       ]
@@ -661,7 +732,7 @@
     {
       "key": "manager_set_correction_period",
       "field": "manager_set_corrections.offset.value",
-      "description": "Clause 13.2 leaves the correction period to a future inspector decision.",
+      "description": "The correction period depends on a future inspector decision.",
       "blocks": [
         "correction_due_date"
       ]

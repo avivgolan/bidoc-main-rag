@@ -18,8 +18,10 @@ export async function chatCompletion({
   frequencyPenalty = 0,
   presencePenalty = 0,
   seed = null,
+  reasoning = null,
   responseFormat = null,
-  telemetry = null
+  telemetry = null,
+  signal = null
 }) {
   if (!apiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const startedAt = Date.now();
@@ -29,7 +31,20 @@ export async function chatCompletion({
   // and stream the completion body for minutes, so a fetch-only timeout never fires
   // and response.json() hangs unbounded.
   const controller = new AbortController();
-  const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
+  let abortError = null;
+  const abortWith = (reason, fallbackMessage) => {
+    if (controller.signal.aborted) return;
+    abortError = reason instanceof Error ? reason : new Error(fallbackMessage);
+    controller.abort(abortError);
+  };
+  const externalSignal = signal && typeof signal.addEventListener === "function" ? signal : null;
+  const abortFromExternal = () => abortWith(externalSignal?.reason, "OpenRouter response was cancelled");
+  if (externalSignal?.aborted) abortFromExternal();
+  else externalSignal?.addEventListener("abort", abortFromExternal, { once: true });
+  const abortTimer = setTimeout(
+    () => abortWith(null, `OpenRouter response timed out after ${timeoutMs}ms`),
+    timeoutMs
+  );
   try {
     response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -49,20 +64,23 @@ export async function chatCompletion({
         frequency_penalty: frequencyPenalty,
         presence_penalty: presencePenalty,
         seed,
+        reasoning,
         response_format: responseFormat
       }))
     });
 
     data = await response.json().catch((error) => {
-      if (controller.signal.aborted) throw new Error(`OpenRouter response timed out after ${timeoutMs}ms`);
+      if (controller.signal.aborted && abortError) throw abortError;
       if (!response.ok) return {};
       throw error;
     });
     if (!response.ok) {
-      const providerMessage = data?.error?.message || `OpenRouter request failed: ${response.status}`;
-      const providerError = new Error(providerMessage);
+      const providerDetails = extractProviderErrorDetails(data, response.status);
+      const providerError = new Error(providerDetails.message);
       providerError.httpStatus = response.status;
-      const affordableMatch = String(providerMessage).match(/can\s+only\s+afford\s+([\d,]+)(?:\s+tokens?)?/i);
+      providerError.providerName = providerDetails.providerName;
+      providerError.providerCode = providerDetails.providerCode;
+      const affordableMatch = String(providerDetails.message).match(/can\s+only\s+afford\s+([\d,]+)(?:\s+tokens?)?/i);
       if (affordableMatch) {
         providerError.affordableMaxTokens = Number(affordableMatch[1].replaceAll(",", ""));
       }
@@ -77,18 +95,20 @@ export async function chatCompletion({
     }));
     return data.choices?.[0]?.message?.content || "";
   } catch (error) {
+    const reportedError = controller.signal.aborted && abortError ? abortError : error;
     recordTelemetry(telemetry, buildTelemetryEntry({
       kind: "chat",
       requestedModel: model,
       data,
       durationMs: Date.now() - startedAt,
       status: "error",
-      error: error.message,
+      error: reportedError.message,
       httpStatus: response?.status || null
     }));
-    throw error;
+    throw reportedError;
   } finally {
     clearTimeout(abortTimer);
+    externalSignal?.removeEventListener("abort", abortFromExternal);
   }
 }
 
@@ -229,6 +249,30 @@ export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, 
 
 function omitNullish(value = {}) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== ""));
+}
+
+function extractProviderErrorDetails(data, status) {
+  const outer = data?.error && typeof data.error === "object" ? data.error : {};
+  const metadata = outer?.metadata && typeof outer.metadata === "object" ? outer.metadata : {};
+  let nested = {};
+  if (typeof metadata.raw === "string" && metadata.raw.length <= 20_000) {
+    try {
+      const parsed = JSON.parse(metadata.raw);
+      nested = parsed?.error && typeof parsed.error === "object" ? parsed.error : {};
+    } catch {
+      nested = {};
+    }
+  }
+  const outerMessage = String(outer.message || "").trim();
+  const nestedMessage = String(nested.message || "").trim();
+  const message = nestedMessage
+    || outerMessage
+    || `OpenRouter request failed: ${status}`;
+  return {
+    message: message.slice(0, 2_000),
+    providerName: String(metadata.provider_name || "").trim().slice(0, 200) || null,
+    providerCode: String(nested.status || nested.code || outer.code || "").trim().slice(0, 200) || null
+  };
 }
 
 function extractResultText(row) {

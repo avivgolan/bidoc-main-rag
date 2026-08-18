@@ -1,0 +1,79 @@
+{
+  "evaluationVersion": "contracts-sample-live.phase1.v1",
+  "evaluatedAt": "2026-08-10T10:14:08.073Z",
+  "model": "google/gemini-2.5-pro",
+  "durationMs": 172120,
+  "documentSha256": "0ff80eb28a157e748c02676b3c3897ea1fbbb1ad429f12e8aece0ef062629dda",
+  "status": "accepted_phase1",
+  "outputSummary": {
+    "candidateCount": 12,
+    "conflictCount": 1,
+    "missingInformationCount": 5,
+    "packetGapCount": 3,
+    "approvedScheduleProjectionCount": 0,
+    "computedCompletionDate": null
+  },
+  "fallbackSummary": {
+    "initialChunkCount": 7,
+    "fallbackChunkNumber": 5,
+    "fallbackSegmentCount": 3,
+    "reasonCode": "contracts_model_draft_invalid",
+    "fallbackCallsCompleted": 3
+  },
+  "report": {
+    "passed": true,
+    "hardGates": {
+      "expectedSchemaValid": true,
+      "actualSchemaValid": true,
+      "actualDomainValid": true,
+      "materialFactsExact": true,
+      "evidenceCoverageComplete": true,
+      "evidencePageAndClauseExact": true,
+      "conflictsExact": true,
+      "projectBindingExact": true,
+      "candidateSemanticsExact": true,
+      "candidateGatesExact": true,
+      "missingInformationExact": true,
+      "packetGapsExact": true,
+      "storageDispositionExact": true,
+      "dryRunOnly": true,
+      "noFalseOperationalEligibility": true
+    },
+    "thresholds": {
+      "candidateTypeMicroF1": true,
+      "projectionMacroF1": true,
+      "criticalRoleRecall": true,
+      "falseOperationalEligibility": true
+    },
+    "metrics": {
+      "candidateTypeMicroPrecision": 1,
+      "candidateTypeMicroRecall": 1,
+      "candidateTypeMicroF1": 1,
+      "projectionMacroF1": 1,
+      "criticalRoleRecall": 1,
+      "materialFactPrecision": 1,
+      "materialFactRecall": 1,
+      "evidenceCoverage": 1,
+      "evidenceLocationAccuracy": 1,
+      "falseOperationalEligibility": 0
+    },
+    "issues": {
+      "expectedSchema": [],
+      "actualSchema": [],
+      "actualDomain": [],
+      "materialFacts": []
+    }
+  },
+  "localVerification": {
+    "contractsTestsPassed": 32,
+    "representativeCasesPassed": 6,
+    "scheduleTestsPassed": 47,
+    "reactBuildPassed": true,
+    "productionVulnerabilities": 0
+  },
+  "privacy": {
+    "rawContractTextIncluded": false,
+    "rawProviderResponseIncluded": false,
+    "credentialsIncluded": false
+  }
+}

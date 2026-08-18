@@ -346,6 +346,7 @@
         },
         "unit": {
           "enum": [
+            "day",
             "calendar_day",
             "working_day",
             "week",

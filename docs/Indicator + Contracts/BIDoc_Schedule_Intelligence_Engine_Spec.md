@@ -16,7 +16,7 @@
 
 This addendum records implementation constraints confirmed by the CTO and overrides conflicting implementation/runbook wording later in this document:
 
-1. The existing Schedule Engine calculation logic is a protected, already implemented baseline. Contracts work is additive and must not rewrite, replace, refactor, or silently change src/scheduleEngine.js, src/scheduleCalendar.js, basis priority, extension behavior, date arithmetic, status, confidence, severity, lookup, or sweep.
+1. The existing Schedule Engine calculation logic is a protected, already implemented baseline and remains the canonical owner of schedule arithmetic. Per the CTO clarification dated 2026-08-10, Contracts/Indicator integration may modify or extend the existing Engine when genuinely required, but must reuse its current logic, document the intended behavior, and add focused unchanged-input regressions. It must not replace the Engine, duplicate its calculations, make silent behavior changes, or perform unrelated refactors.
 2. The existing eight CTO-created tables are canonical and must be reused: schedule_calendars, schedule_contract_milestones, schedule_contract_extensions, schedule_contract_conditions, schedule_indicator_snapshots, schedule_alerts, schedule_activity_map, and schedule_observed_events.
 3. No duplicate/replacement Schedule table and no unapproved CREATE, ALTER, DROP, TRUNCATE, index, trigger, function, RLS, grant, policy, permission, or backfill operation is authorized.
 4. Before Contracts implementation, perform a read-only live schema/caller audit, approve a field-level reuse matrix, and capture the existing Schedule regression/golden-output baseline.
