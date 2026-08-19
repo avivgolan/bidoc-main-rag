@@ -76,7 +76,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   emitRunEvent(runId, "sanitize", "Message sanitized", { changed: sanitized !== message, length: sanitized.length });
   const routingMemory = ephemeral
     ? { mode: "disabled", recent: [], summary: null, sessionRow: null, memories: [], errors: [] }
-    : await loadRoutingMemory({ config, sessionId, userId }).catch((error) => ({
+    : await loadRoutingMemory({ config, sessionId, userId, query: sanitized }).catch((error) => ({
       mode: "session_only", recent: [], summary: null, sessionRow: null, memories: [], errors: [error.message]
     }));
   if (routingMemory.errors.length) {
@@ -161,6 +161,8 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
       mode: userId ? "user_and_session" : "session_only",
       recent: routingMemory.recent,
       summary: routingMemory.summary,
+      summarySource: routingMemory.summarySource,
+      previousSessionRecalled: routingMemory.previousSessionRecalled,
       sessionRow: routingMemory.sessionRow,
       memories: [],
       errors: [error.message]
@@ -173,6 +175,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     mode: memoryContext.mode,
     recent_messages: memoryContext.recent.length,
     recalled_items: memoryContext.memories.length,
+    previous_session_recalled: Boolean(memoryContext.previousSessionRecalled),
     errors: memoryContext.errors
   });
   const memoryLoadLatencyMs = Date.now() - memoryLoadStartedAt;
@@ -247,6 +250,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     turnCount: memoryWrite?.turnCount || memoryContext.sessionRow?.turn_count || 0,
     degraded: Boolean(memoryContext.errors.length || memoryWrite?.errors?.length),
     queryRewritten: resolvedMessage !== sanitized,
+    previousSessionRecalled: Boolean(memoryContext.previousSessionRecalled || routingMemory.previousSessionRecalled),
     contextEstimatedTokens: memory.reduce((sum, item) => sum + estimateTokens(item.content), 0),
     loadLatencyMs: memoryLoadLatencyMs,
     maintenanceLatencyMs: memoryWrite?.latencyMs || 0,
@@ -264,6 +268,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
       originalMessage: message,
       standaloneQuery: resolvedMessage,
       queryRewritten: memoryDebug.queryRewritten,
+      previousSessionRecalled: memoryDebug.previousSessionRecalled,
       recentTurns: memoryDebug.recentTurns,
       recalledItems: memoryDebug.recalledItems,
       recalledScores: memoryContext.memories,

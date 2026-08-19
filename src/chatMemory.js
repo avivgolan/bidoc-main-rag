@@ -3,6 +3,7 @@ import {
   deleteAllChatMemoryForUser,
   deleteChatSessionMemory,
   getChatMemoryStats,
+  getLatestPreviousChatSessionMemory,
   getChatSessionMemory,
   invalidateChatMemoryItems,
   matchChatMemory,
@@ -23,7 +24,7 @@ import {
 
 export const MEMORY_EMBEDDING_MODEL = "openai/text-embedding-3-large";
 
-export async function loadRoutingMemory({ config, sessionId, userId = null }) {
+export async function loadRoutingMemory({ config, sessionId, userId = null, query = "" }) {
   const settings = config.memory;
   if (!settings?.enabled || !sessionId) return emptyContext("disabled");
   const [historyResult, sessionResult] = await Promise.allSettled([
@@ -36,16 +37,19 @@ export async function loadRoutingMemory({ config, sessionId, userId = null }) {
       ? historyResult.value
       : getLocalMemory(sessionId, settings.routingRecentTurns);
   const row = sessionResult.status === "fulfilled" ? sessionResult.value : null;
-  const summary = row?.summary ? setMemorySummary(sessionId, row.summary) : getMemorySummary(sessionId);
+  const currentSummary = row?.summary ? setMemorySummary(sessionId, row.summary) : getMemorySummary(sessionId);
+  const errors = settledErrors(historyResult, sessionResult);
+  const previous = await loadPreviousConversationSummary({ config, sessionId, userId, query, errors });
+  const summary = previous?.summary || currentSummary;
   return {
     mode: "session",
     recent: trimMessagesToBudget(recent, settings.routingTokenBudget),
     summary,
+    summarySource: previous ? "previous_session" : summarySource(row, currentSummary),
+    previousSessionRecalled: Boolean(previous),
     sessionRow: row,
     memories: [],
-    errors: [historyResult, sessionResult]
-      .filter((result) => result.status === "rejected")
-      .map((result) => result.reason?.message || "memory load failed")
+    errors
   };
 }
 
@@ -63,10 +67,10 @@ export async function loadAgentMemory({ config, sessionId, userId = null, query,
       ? historyResult.value
       : getLocalMemory(sessionId, settings.recentTurns);
   const sessionRow = sessionResult.status === "fulfilled" ? sessionResult.value : null;
-  const summary = sessionRow?.summary ? setMemorySummary(sessionId, sessionRow.summary) : getMemorySummary(sessionId);
-  const errors = [historyResult, sessionResult]
-    .filter((result) => result.status === "rejected")
-    .map((result) => result.reason?.message || "memory load failed");
+  const currentSummary = sessionRow?.summary ? setMemorySummary(sessionId, sessionRow.summary) : getMemorySummary(sessionId);
+  const errors = settledErrors(historyResult, sessionResult);
+  const previous = await loadPreviousConversationSummary({ config, sessionId, userId, query, errors });
+  const summary = previous?.summary || currentSummary;
   let memories = [];
   if (userId && global.crossSessionEnabled && settings.useLongTermMemory && settings.semanticTopK > 0 && config.openRouterApiKey) {
     try {
@@ -85,6 +89,10 @@ export async function loadAgentMemory({ config, sessionId, userId = null, query,
     mode: userId && global.crossSessionEnabled ? "user_and_session" : "session_only",
     recent: trimMessagesToBudget(recent, settings.contextTokenBudget),
     summary: settings.useSessionSummary ? summary : null,
+    summarySource: settings.useSessionSummary
+      ? (previous ? "previous_session" : summarySource(sessionRow, currentSummary))
+      : "none",
+    previousSessionRecalled: Boolean(settings.useSessionSummary && previous),
     sessionRow,
     memories,
     errors
@@ -92,10 +100,11 @@ export async function loadAgentMemory({ config, sessionId, userId = null, query,
 }
 
 export function buildClassifierContext(memory, tokenBudget = 1200) {
-  const messages = [
-    ...memorySummaryMessages(memory?.summary),
-    ...(memory?.recent || [])
-  ];
+  const summaries = summaryMessages(memory);
+  const recent = memory?.recent || [];
+  const messages = memory?.summarySource === "previous_session"
+    ? [...recent, ...summaries]
+    : [...summaries, ...recent];
   return trimMessagesToBudget(messages, tokenBudget)
     .map((item) => `${item.role.toUpperCase()}: ${item.content}`)
     .join("\n");
@@ -108,11 +117,18 @@ export function memoryMessagesForAgent(context, tokenBudget) {
       .map((item, index) => `${index + 1}. ${item.content}`)
       .join("\n")}\nUse these items only to personalize or resolve references. Re-retrieve a project source before stating any project fact.`
   }] : [];
-  return trimMessagesToBudget([
-    ...memorySummaryMessages(context?.summary),
-    ...longTerm,
-    ...(context?.recent || [])
-  ], tokenBudget);
+  const summaries = summaryMessages(context);
+  const recent = context?.recent || [];
+  const messages = context?.summarySource === "previous_session"
+    ? [...longTerm, ...recent, ...summaries]
+    : [...summaries, ...longTerm, ...recent];
+  return trimMessagesToBudget(messages, tokenBudget);
+}
+
+export function isPreviousConversationRecallQuery(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return /(?:השיחה|שיחה)\s+ה?(?:אחרונה|קודמת)|(?:על\s+)?מה\s+(?:דיברנו|שוחחנו)|בפעם\s+ה?(?:אחרונה|קודמת)|(?:קודם|בעבר)\s+(?:דיברנו|שוחחנו)|\b(?:last|previous)\s+(?:conversation|chat)\b|\bwhat\s+did\s+we\s+(?:talk|discuss)(?:\s+about)?\b|\bpreviously\s+discussed\b/iu.test(text);
 }
 
 export function detectMemoryCommand(message = "") {
@@ -348,5 +364,54 @@ function looksLikeRawDocument(value) {
 }
 
 function emptyContext(mode) {
-  return { mode, recent: [], summary: null, sessionRow: null, memories: [], errors: [] };
+  return {
+    mode,
+    recent: [],
+    summary: null,
+    summarySource: "none",
+    previousSessionRecalled: false,
+    sessionRow: null,
+    memories: [],
+    errors: []
+  };
+}
+
+async function loadPreviousConversationSummary({ config, sessionId, userId, query, errors }) {
+  if (!userId || !config.memory?.crossSessionEnabled || !isPreviousConversationRecallQuery(query)) return null;
+  try {
+    const previous = await getLatestPreviousChatSessionMemory({ config, userId, excludeSessionId: sessionId });
+    if (!previous?.summary) return null;
+    const summary = normalizeMemorySummary(previous.summary);
+    if (!memorySummaryMessages(summary).length) return null;
+    return { ...previous, summary };
+  } catch (error) {
+    errors.push(error.message || "previous conversation memory load failed");
+    return null;
+  }
+}
+
+function summaryMessages(context) {
+  const messages = memorySummaryMessages(context?.summary);
+  if (context?.summarySource !== "previous_session") return messages;
+  return messages.map((message) => ({
+    ...message,
+    content: message.content.replace(
+      "CONVERSATION MEMORY SUMMARY:",
+      "PREVIOUS CONVERSATION SUMMARY (same authenticated user):"
+    ).replace(
+      "Use this summary only as conversational context.",
+      "This is the previous conversation the user explicitly asked to recall. Use it only as conversational context."
+    )
+  }));
+}
+
+function settledErrors(...results) {
+  return results
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason?.message || "memory load failed");
+}
+
+function summarySource(sessionRow, summary) {
+  if (sessionRow?.summary && memorySummaryMessages(normalizeMemorySummary(sessionRow.summary)).length) return "current_session";
+  return memorySummaryMessages(summary).length ? "local" : "none";
 }

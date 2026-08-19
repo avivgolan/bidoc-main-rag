@@ -662,6 +662,14 @@ export async function getChatSessionMemory({ config, sessionId, userId = null })
   return row;
 }
 
+export async function getLatestPreviousChatSessionMemory({ config, userId, excludeSessionId }) {
+  if (!isConfigured(config) || !userId || !excludeSessionId) return null;
+  const rows = await supabaseFetch(config,
+    `/rest/v1/${SESSION_MEMORY_TABLE}?user_id=eq.${encodeURIComponent(userId)}&session_id=neq.${encodeURIComponent(excludeSessionId)}&select=session_id,user_id,summary,turn_count,summary_version,updated_at&order=updated_at.desc&limit=1`
+  );
+  return rows?.[0] || null;
+}
+
 export async function upsertChatSessionMemory({ config, sessionId, userId = null, summary = {}, turnCount = 0, summaryVersion = 1 }) {
   if (!isConfigured(config) || !sessionId) return null;
   const existing = await supabaseFetch(config,

@@ -29,7 +29,7 @@ import { compactJsonList, CONTENT_TOOL_SPECS, contentToolRowDate, contentToolSet
 import { detectColumnRoles, extractSearchTerms, mergeRetrievalRows, parseOpenApiTableColumns } from "../src/subagents/contentRetrieval.js";
 import { analyzeFinancial, analyzeGeneric, analyzeMeetings, analyzeSafety, analyzeWhatsapp } from "../src/subagents/contentAnalysis.js";
 import { DEFAULT_CONTENT_TOOL_SETTINGS, DEFAULT_MEMORY_SETTINGS, INTERNAL_CONTENT_TOOL_NAMES, normalizeContentToolsSettings, normalizeIndexingSettings, normalizeMemorySettings } from "../src/config.js";
-import { buildClassifierContext, canonicalMemoryKey, containsSensitiveSecret, detectMemoryCommand, estimateTokens, loadAgentMemory, memoryMessagesForAgent, trimMessagesToBudget } from "../src/chatMemory.js";
+import { buildClassifierContext, canonicalMemoryKey, containsSensitiveSecret, detectMemoryCommand, estimateTokens, isPreviousConversationRecallQuery, loadAgentMemory, memoryMessagesForAgent, trimMessagesToBudget } from "../src/chatMemory.js";
 import { hashLogIdentifier, redactLogText, sanitizeMemoryLogEntry } from "../src/memoryLogger.js";
 import { aggregateInsightQualityMetrics } from "../src/subagents/projectInsights.js";
 import { exportFullSettings, getConfig, initSettings, isMaskedSecret, mergeSecret, normalizeContentSourceSettings, normalizeDataQuerySettings, normalizeImportedSettingsFile, normalizeInsightsSettings, normalizeToolUrlValue, previewImportedSettingsFile, publicSettings, readLocalSettings, resolveSecret, resolveToolUrl, supabaseHeaders, supabaseKeyRole, writeLocalSettings } from "../src/config.js";
@@ -3199,6 +3199,41 @@ test("routing memory keeps Hebrew follow-up references across a 15-message seque
   assert.match(context, /ומה לגביו/);
 });
 
+test("previous conversation recall intent is detected without matching ordinary follow-ups", () => {
+  for (const query of [
+    "אתה זוכר על מה דיברנו בשיחה האחרונה?",
+    "מה דיברנו בפעם הקודמת?",
+    "What did we discuss in the previous conversation?",
+    "Open our last chat"
+  ]) {
+    assert.equal(isPreviousConversationRecallQuery(query), true, query);
+  }
+  for (const query of ["ומה לגביו?", "תבדוק את הספק האחרון", "מה קרה בחודש הקודם?"]) {
+    assert.equal(isPreviousConversationRecallQuery(query), false, query);
+  }
+});
+
+test("previous conversation summary is explicitly labeled as conversational non-evidence", () => {
+  const messages = memoryMessagesForAgent({
+    summary: { active_topics: ["ספק אלפא"], date_context: [], open_questions: [], last_intent: "השוואת ספקים" },
+    summarySource: "previous_session",
+    recent: [],
+    memories: []
+  }, 500);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0].content, /PREVIOUS CONVERSATION SUMMARY/);
+  assert.match(messages[0].content, /explicitly asked to recall/);
+  assert.match(messages[0].content, /Do not treat it as project evidence/);
+
+  const prioritized = memoryMessagesForAgent({
+    summary: { active_topics: ["ספק אלפא"], date_context: [], open_questions: [], last_intent: "השוואת ספקים" },
+    summarySource: "previous_session",
+    recent: [{ role: "user", content: "x".repeat(2000) }],
+    memories: []
+  }, 100);
+  assert.match(prioritized.at(-1).content, /PREVIOUS CONVERSATION SUMMARY/);
+});
+
 test("agent memory labels personal recall as non-evidence", () => {
   const messages = memoryMessagesForAgent({
     summary: null,
@@ -3239,12 +3274,14 @@ test("memory diagnostic log redacts secrets and never includes recalled content"
     routeType: "RAG",
     originalMessage: "password=topsecret123 email user@example.com",
     standaloneQuery: "Bearer abcdefghijklmnop",
+    previousSessionRecalled: true,
     recalledScores: [{ content: "private personal memory", similarity: 0.81234, score: 0.7 }]
   });
   const serialized = JSON.stringify(entry);
   assert.doesNotMatch(serialized, /topsecret123|user@example\.com|abcdefghijklmnop|private personal memory/);
   assert.match(serialized, /REDACTED/);
   assert.equal(entry.recalledScores[0].similarity, 0.8123);
+  assert.equal(entry.previousSessionRecalled, true);
   assert.equal(entry.userHash, hashLogIdentifier("user@example.com"));
   assert.equal(redactLogText("api_key=sk-or-secretvalue12345").includes("secretvalue"), false);
 });
