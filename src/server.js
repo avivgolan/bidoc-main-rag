@@ -2188,13 +2188,14 @@ async function handleApi(req, res, url) {
     try {
       // This agent is SETTINGS-owned. Refresh MAIN.agent_settings on every
       // explicit row action so a stale process can never use the env fallback.
-      await reloadSettingsFromDb();
+      if (!body.manualTriggerDate) await reloadSettingsFromDb();
       const result = await runScheduleConditionResolver({
         projectId,
         conditionId: body.conditionId || body.condition_id || null,
         limit: body.limit,
         commit: body.commit === true,
         minConfidence: body.minConfidence,
+        manualTriggerDate: body.manualTriggerDate || null,
         config: buildRequestConfig(req, body),
         runId
       });

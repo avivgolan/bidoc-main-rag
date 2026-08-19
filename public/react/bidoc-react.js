@@ -12452,10 +12452,8 @@ function At(e) {
 	let r = new URLSearchParams({ decisionId: n });
 	return e.source_page && r.set("page", String(e.source_page)), `/api/contracts/workspaces/${encodeURIComponent(t)}/source-link?${r}`;
 }
-var jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, rowResults: a }) => {
-	let o = e?.conditions ?? [];
-	if (!o.length) return null;
-	let s = Object.entries(o.reduce((e, t) => ((e[t.category] ||= []).push(t), e), {}));
+var jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onManualResolve: a, manualDates: o, onManualDateChange: s, rowResults: c }) => {
+	let l = e?.conditions ?? [], u = Object.entries(l.reduce((e, t) => ((e[t.category] ||= []).push(t), e), {}));
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "condBox",
 		children: [/* @__PURE__ */ (0, x.jsxs)("button", {
@@ -12465,14 +12463,14 @@ var jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, row
 			children: [
 				/* @__PURE__ */ (0, x.jsxs)("span", {
 					className: "condHeadTitle",
-					children: ["⏳ אבני דרך הממתינות לטריגר", /* @__PURE__ */ (0, x.jsx)("span", {
+					children: ["⏳ פנקס זמנים יחסיים מהחוזה", /* @__PURE__ */ (0, x.jsx)("span", {
 						className: "condHeadCount",
-						children: o.length
+						children: l.length
 					})]
 				}),
 				/* @__PURE__ */ (0, x.jsx)("span", {
 					className: "condHeadHint",
-					children: "התחייבויות יחסיות מהחוזה — יקבלו תאריך ויעלו על ציר הזמן ברגע שהאירוע המפעיל ייקלט"
+					children: "כל נקודת זמן שנמשכה מהחוזה, הפעולה שמפעילה אותה והתאריך שנקלט בפועל"
 				}),
 				/* @__PURE__ */ (0, x.jsx)("span", {
 					className: "condChevron",
@@ -12483,8 +12481,8 @@ var jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, row
 			className: "condBody",
 			children: [/* @__PURE__ */ (0, x.jsx)("div", {
 				className: "condResolverBar",
-				children: /* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "סוכן איתור תאריכים" }), /* @__PURE__ */ (0, x.jsx)("span", { children: "כל כפתור מפעיל חיפוש נפרד שמוגבל להתניה, לאירוע ולתאריך של אותה שורה בלבד." })] })
-			}), s.map(([e, t]) => /* @__PURE__ */ (0, x.jsxs)("div", {
+				children: /* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "אותו שדה — הזנה ידנית היום, השלמה אוטומטית בהמשך" }), /* @__PURE__ */ (0, x.jsx)("span", { children: "בחירת תאריך מפעילה את מנוע הלו״ז הדטרמיניסטי. איתור אוטומטי מחפש את אותו אירוע ב־Gantt, באירועים מזוהים ורק אז ב־RAG." })] })
+			}), u.length ? u.map(([e, t]) => /* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "condGroup",
 				children: [/* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "condGroupTitle",
@@ -12497,69 +12495,107 @@ var jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, row
 					children: /* @__PURE__ */ (0, x.jsxs)("table", {
 						className: "condTable",
 						children: [/* @__PURE__ */ (0, x.jsx)("thead", { children: /* @__PURE__ */ (0, x.jsxs)("tr", { children: [
-							/* @__PURE__ */ (0, x.jsx)("th", { children: "אבן הדרך" }),
-							/* @__PURE__ */ (0, x.jsx)("th", { children: "הכלל החוזי" }),
-							/* @__PURE__ */ (0, x.jsx)("th", { children: "סוג הטריגר" }),
-							/* @__PURE__ */ (0, x.jsx)("th", { children: "מקור" }),
-							/* @__PURE__ */ (0, x.jsx)("th", { children: "פעולה" })
+							/* @__PURE__ */ (0, x.jsx)("th", { children: "הזמן שנמשך מהחוזה" }),
+							/* @__PURE__ */ (0, x.jsx)("th", { children: "תיאור הפעולה בסעיף" }),
+							/* @__PURE__ */ (0, x.jsx)("th", { children: "תאריך האירוע בפועל" })
 						] }) }), /* @__PURE__ */ (0, x.jsx)("tbody", { children: t.map((e) => {
-							let t = a?.[e.id], n = r === e.id, o = At(e), s = e.metadata?.pending_reason;
+							let t = c?.[e.id], n = r === e.id, l = At(e), u = e.metadata?.pending_reason, d = o?.[e.id] ?? e.trigger_event_date ?? "", f = e.status === "resolved";
 							return /* @__PURE__ */ (0, x.jsxs)("tr", {
+								className: f ? "is-resolved" : "",
 								title: e.source_excerpt,
 								children: [
-									/* @__PURE__ */ (0, x.jsx)("td", {
-										className: "condName",
-										children: e.name
-									}),
 									/* @__PURE__ */ (0, x.jsxs)("td", {
-										className: "condRule",
+										className: "condContractPoint",
 										children: [
-											/* @__PURE__ */ (0, x.jsx)("b", { children: kt(e) }),
-											" מ־",
-											e.anchor_description
+											/* @__PURE__ */ (0, x.jsxs)("div", {
+												className: "condOffsetLine",
+												children: [/* @__PURE__ */ (0, x.jsx)("b", { children: kt(e) }), /* @__PURE__ */ (0, x.jsx)("span", {
+													className: `condState is-${e.status}`,
+													children: f ? "הושלם" : "ממתין"
+												})]
+											}),
+											/* @__PURE__ */ (0, x.jsx)("strong", {
+												className: "condName",
+												children: e.name
+											}),
+											/* @__PURE__ */ (0, x.jsx)("span", {
+												className: "condPage",
+												children: l ? /* @__PURE__ */ (0, x.jsxs)("a", {
+													href: l,
+													target: "_blank",
+													rel: "noreferrer",
+													title: "פתיחת מסמך החוזה בקישור מאובטח קצר־חיים",
+													children: [e.metadata?.source_filename || "מסמך החוזה", e.source_page ? ` · עמ׳ ${e.source_page}` : ""]
+												}) : e.source_page ? `עמ׳ ${e.source_page}` : "מקור חוזי"
+											})
 										]
 									}),
-									/* @__PURE__ */ (0, x.jsx)("td", { children: /* @__PURE__ */ (0, x.jsx)("span", {
-										className: `condAnchor is-${e.anchor_kind}`,
-										children: Ot[e.anchor_kind] ?? e.anchor_kind
-									}) }),
 									/* @__PURE__ */ (0, x.jsxs)("td", {
-										className: "condPage",
-										children: [o ? /* @__PURE__ */ (0, x.jsxs)("a", {
-											href: o,
-											target: "_blank",
-											rel: "noreferrer",
-											title: "פתיחת מסמך החוזה בקישור מאובטח קצר־חיים",
-											children: [e.metadata?.source_filename || "מסמך החוזה", e.source_page ? ` · עמ׳ ${e.source_page}` : ""]
-										}) : e.source_page ? `עמ׳ ${e.source_page}` : "—", s ? /* @__PURE__ */ (0, x.jsx)("span", {
-											className: "condPendingReason",
-											children: s
-										}) : null]
+										className: "condTriggerCell",
+										children: [
+											/* @__PURE__ */ (0, x.jsx)("strong", { children: e.anchor_description || "האירוע המפעיל טרם תואר" }),
+											/* @__PURE__ */ (0, x.jsx)("span", {
+												className: `condAnchor is-${e.anchor_kind}`,
+												children: Ot[e.anchor_kind] ?? e.anchor_kind
+											}),
+											u ? /* @__PURE__ */ (0, x.jsx)("span", {
+												className: "condPendingReason",
+												children: u
+											}) : null
+										]
 									}),
 									/* @__PURE__ */ (0, x.jsxs)("td", {
-										className: "condActionCell",
-										children: [/* @__PURE__ */ (0, x.jsx)("button", {
-											type: "button",
-											className: "condResolveBtn",
-											onClick: () => i(e),
-											disabled: !!r,
-											children: n ? "סוכן AI מחפש…" : "חפש והשלם עם AI"
-										}), t ? /* @__PURE__ */ (0, x.jsxs)("span", {
-											className: `condRowResult is-${t.status}`,
-											title: t.reason || t.evidence?.reason || "",
-											children: [t.status === "not_found" ? "לא נמצא תאריך" : t.status === "needs_review" ? "נדרשת בדיקה" : t.status === "error" ? t.reason || "החיפוש נכשל" : t.dueDate || "הושלם", t.errorCode === "openrouter_auth" ? /* @__PURE__ */ (0, x.jsx)("a", {
-												className: "condSettingsLink",
-												href: "#settings",
-												children: "עדכון מפתח בהגדרות"
-											}) : null]
-										}) : null]
+										className: "condDateCell",
+										children: [
+											/* @__PURE__ */ (0, x.jsxs)("div", {
+												className: "condDateEntry",
+												children: [/* @__PURE__ */ (0, x.jsx)("input", {
+													type: "date",
+													value: d,
+													disabled: f || !!r,
+													"aria-label": `תאריך האירוע בפועל עבור ${e.name}`,
+													onChange: (t) => s(e.id, t.target.value)
+												}), f ? /* @__PURE__ */ (0, x.jsx)("span", {
+													className: "condVerifiedDate",
+													children: "תאריך מאומת"
+												}) : /* @__PURE__ */ (0, x.jsx)("button", {
+													type: "button",
+													className: "condManualBtn",
+													onClick: () => a(e, d),
+													disabled: !d || !!r,
+													children: n ? "שומר…" : "שמור וחשב מועד"
+												})]
+											}),
+											f ? null : /* @__PURE__ */ (0, x.jsx)("button", {
+												type: "button",
+												className: "condResolveBtn",
+												onClick: () => i(e),
+												disabled: !!r,
+												children: n ? "מנוע הלו״ז מחפש…" : "איתור אוטומטי במנוע הלו״ז"
+											}),
+											t ? /* @__PURE__ */ (0, x.jsxs)("span", {
+												className: `condRowResult is-${t.status}`,
+												title: t.reason || t.evidence?.reason || "",
+												children: [t.status === "not_found" ? "לא נמצא תאריך" : t.status === "needs_review" ? "נדרשת בדיקה" : t.status === "error" ? t.reason || "החיפוש נכשל" : t.dueDate || "הושלם", t.errorCode === "openrouter_auth" ? /* @__PURE__ */ (0, x.jsx)("a", {
+													className: "condSettingsLink",
+													href: "#settings",
+													children: "עדכון מפתח בהגדרות"
+												}) : null]
+											}) : null
+										]
 									})
 								]
 							}, e.id);
 						}) })]
 					})
 				})]
-			}, e))]
+			}, e)) : /* @__PURE__ */ (0, x.jsxs)("div", {
+				className: "condEmptyState",
+				children: [/* @__PURE__ */ (0, x.jsx)("span", {
+					className: "condEmptyIcon",
+					children: "⌛"
+				}), /* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "התנאים היחסיים טרם סונכרנו למאגר הלו״ז" }), /* @__PURE__ */ (0, x.jsx)("span", { children: "לאחר הפעלת חיבור Indicator הם יופיעו כאן אוטומטית, ללא חילוץ חוזר של החוזה." })] })]
+			})]
 		}) : null]
 	});
 }, Mt = ({ health: e }) => {
@@ -12635,12 +12671,12 @@ var jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, row
 	});
 };
 function Nt() {
-	let [e, t] = (0, b.useState)([]), [n, r] = (0, b.useState)(""), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(null), [u, d] = (0, b.useState)([]), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(null), [g, _] = (0, b.useState)(!0), [v, y] = (0, b.useState)(null), [S, C] = (0, b.useState)({}), [w, T] = (0, b.useState)(""), [E, ee] = (0, b.useState)("axes"), [D, te] = (0, b.useState)(!0), [ne, O] = (0, b.useState)(""), [k, A] = (0, b.useState)(null), [re, j] = (0, b.useState)(!1), [M, N] = (0, b.useState)(!1), [P, ie] = (0, b.useState)(""), [ae, oe] = (0, b.useState)([]), se = (0, b.useCallback)(async () => {
+	let [e, t] = (0, b.useState)([]), [n, r] = (0, b.useState)(""), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(null), [u, d] = (0, b.useState)([]), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(null), [g, _] = (0, b.useState)(!0), [v, y] = (0, b.useState)(null), [S, C] = (0, b.useState)({}), [w, T] = (0, b.useState)(""), [E, ee] = (0, b.useState)({}), [D, te] = (0, b.useState)("axes"), [ne, O] = (0, b.useState)(!0), [k, A] = (0, b.useState)(""), [re, j] = (0, b.useState)(null), [M, N] = (0, b.useState)(!1), [P, ie] = (0, b.useState)(!1), [ae, oe] = (0, b.useState)(""), [se, F] = (0, b.useState)([]), ce = (0, b.useCallback)(async () => {
 		let e = await ht("/api/schedule/projects");
 		return t(e.projects ?? []), e.projects ?? [];
-	}, []), F = (0, b.useCallback)(async (e, t) => {
+	}, []), I = (0, b.useCallback)(async (e, t) => {
 		if (e) {
-			j(!0), ie("");
+			N(!0), oe("");
 			try {
 				let n = t ? `&asOf=${encodeURIComponent(t)}` : "", r = (e, t, n) => e.catch((e) => ({
 					...t,
@@ -12658,9 +12694,9 @@ function Nt() {
 					}),
 					r(ht(`/api/schedule/alerts?projectId=${encodeURIComponent(e)}&baselined=false&lifecycle=open,updated`), { alerts: [] }, "טעינת התראות"),
 					r(ht(`/api/schedule/alerts?projectId=${encodeURIComponent(e)}&baselined=true`), { count: 0 }, "טעינת היסטוריית התראות"),
-					r(ht(`/api/schedule/conditions?projectId=${encodeURIComponent(e)}&status=pending`), { conditions: [] }, "טעינת אבני דרך חוזיות")
+					r(ht(`/api/schedule/conditions?projectId=${encodeURIComponent(e)}&status=pending,resolved`), { conditions: [] }, "טעינת אבני דרך חוזיות")
 				]);
-				s(i), l(a), d(o.alerts ?? []), p(c.count ?? 0), h(u), oe([...new Set([
+				s(i), l(a), d(o.alerts ?? []), p(c.count ?? 0), h(u), F([...new Set([
 					...i.warnings ?? [],
 					...a.warnings ?? [],
 					o.warning,
@@ -12668,14 +12704,14 @@ function Nt() {
 					u.warning
 				].filter(Boolean))]);
 			} catch (e) {
-				ie(e.message);
+				oe(e.message);
 			} finally {
-				j(!1);
+				N(!1);
 			}
 		}
-	}, []), ce = (0, b.useCallback)(async () => {
+	}, []), le = (0, b.useCallback)(async () => {
 		if (n) {
-			N(!0), ie("");
+			ie(!0), oe("");
 			try {
 				await ht("/api/schedule/alert-scan", {
 					method: "POST",
@@ -12684,38 +12720,39 @@ function Nt() {
 						asOf: i || null
 					},
 					timeoutMs: 24e4
-				}), await F(n, i);
+				}), await I(n, i);
 			} catch (e) {
-				ie(e.message);
+				oe(e.message);
 			} finally {
-				N(!1);
+				ie(!1);
 			}
 		}
 	}, [
 		n,
 		i,
-		F
-	]), I = (0, b.useCallback)(async (e) => {
+		I
+	]), ue = (0, b.useCallback)(async (e, t = null) => {
 		if (!(!n || !e?.id)) {
-			y(e.id), ie(""), T("");
+			y(e.id), oe(""), T("");
 			try {
-				let t = (await ht("/api/schedule/conditions/resolve", {
+				let r = (await ht("/api/schedule/conditions/resolve", {
 					method: "POST",
 					body: {
 						projectId: n,
 						conditionId: e.id,
 						commit: !0,
-						minConfidence: .8
+						minConfidence: .8,
+						...t ? { manualTriggerDate: t } : {}
 					},
 					timeoutMs: 9e5
 				})).results?.[0] ?? {
 					status: "error",
 					reason: "הסוכן לא החזיר תוצאה"
 				};
-				C((n) => ({
-					...n,
-					[e.id]: t
-				})), t.status === "resolved" && (T(`הושלם: ${e.name} — המועד החוזי ${t.dueDate} נשמר בבסיס הנתונים.`), await F(n, i));
+				C((t) => ({
+					...t,
+					[e.id]: r
+				})), r.status === "resolved" ? (T(`הושלם: ${e.name} — האירוע ${r.evidence?.triggerDate || t || "אותר"}, והמועד החוזי ${r.dueDate} נשמר.`), await I(n, i)) : r.triggerSaved && (T(`תאריך האירוע ${r.evidence?.triggerDate || t} נשמר. חישוב המועד ממתין להשלמת לוח ימי העבודה והחגים.`), await I(n, i));
 			} catch (t) {
 				C((n) => ({
 					...n,
@@ -12723,7 +12760,7 @@ function Nt() {
 						status: "error",
 						reason: t.message
 					}
-				})), ie(t.message);
+				})), oe(t.message);
 			} finally {
 				y(null);
 			}
@@ -12731,30 +12768,30 @@ function Nt() {
 	}, [
 		n,
 		i,
-		F
+		I
 	]);
 	(0, b.useEffect)(() => {
 		let e = !1;
-		return se().then((t) => {
+		return ce().then((t) => {
 			e || !t.length || r((e) => e || t[0].projectId);
-		}).catch((e) => ie(e.message)), () => {
+		}).catch((e) => oe(e.message)), () => {
 			e = !0;
 		};
-	}, [se]), (0, b.useEffect)(() => {
+	}, [ce]), (0, b.useEffect)(() => {
 		if (!n) return;
-		location.hash === "#schedule" && F(n, i);
-		let e = () => F(n, i);
+		location.hash === "#schedule" && I(n, i);
+		let e = () => I(n, i);
 		return window.addEventListener("bidoc:schedule-activated", e), () => window.removeEventListener("bidoc:schedule-activated", e);
 	}, [
 		n,
 		i,
-		F
+		I
 	]);
-	let le = (0, b.useMemo)(() => [...(c?.indicators ?? []).filter((e) => !(D && e.lateness?.isLate !== !0 || ne && !(e.lateness?.daysLate >= Number(ne))))].sort((e, t) => Number(t.subject.kind === "milestone") - Number(e.subject.kind === "milestone")), [
+	let de = (0, b.useMemo)(() => [...(c?.indicators ?? []).filter((e) => !(ne && e.lateness?.isLate !== !0 || k && !(e.lateness?.daysLate >= Number(k))))].sort((e, t) => Number(t.subject.kind === "milestone") - Number(e.subject.kind === "milestone")), [
 		c,
-		D,
-		ne
-	]), ue = c?.scheduleMeta, de = (0, b.useMemo)(() => {
+		ne,
+		k
+	]), fe = c?.scheduleMeta, pe = (0, b.useMemo)(() => {
 		let e = c?.indicators ?? [];
 		if (!e.length) return null;
 		let t = {
@@ -12774,19 +12811,19 @@ function Nt() {
 				children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("h2", {
 					className: "schedTitle",
 					children: "לוח זמנים — שלושת הצירים"
-				}), ue ? /* @__PURE__ */ (0, x.jsxs)("div", {
+				}), fe ? /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "schedSubtitle",
 					children: [
 						"נכון ל-",
 						/* @__PURE__ */ (0, x.jsx)("b", { children: c.asOf }),
 						" · מקור: ",
-						/* @__PURE__ */ (0, x.jsx)("b", { children: ue.displayName ?? ue.sourceVersionId }),
+						/* @__PURE__ */ (0, x.jsx)("b", { children: fe.displayName ?? fe.sourceVersionId }),
 						" (Data Date: ",
-						ue.relevancyDate ?? "?",
+						fe.relevancyDate ?? "?",
 						") · ",
-						ue.versionCount,
+						fe.versionCount,
 						" ",
-						ue.versionCount === 1 ? "גרסה" : "גרסאות"
+						fe.versionCount === 1 ? "גרסה" : "גרסאות"
 					]
 				}) : null] }), /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "schedControls",
@@ -12820,32 +12857,32 @@ function Nt() {
 						/* @__PURE__ */ (0, x.jsx)("button", {
 							type: "button",
 							className: "schedBtn",
-							onClick: () => F(n, i),
-							disabled: re || !n,
-							children: re ? "טוען…" : "רענן"
+							onClick: () => I(n, i),
+							disabled: M || !n,
+							children: M ? "טוען…" : "רענן"
 						}),
 						/* @__PURE__ */ (0, x.jsx)("button", {
 							type: "button",
 							className: "schedBtn schedBtnPrimary",
-							onClick: ce,
-							disabled: M || !n,
+							onClick: le,
+							disabled: P || !n,
 							title: "סריקה מלאה: חישוב אינדיקטורים, שמירת Snapshots ועדכון התראות",
-							children: M ? "סורק…" : "סריקת התראות"
+							children: P ? "סורק…" : "סריקת התראות"
 						})
 					]
 				})]
 			}),
-			de ? /* @__PURE__ */ (0, x.jsx)(bt, {
-				gates: de,
+			pe ? /* @__PURE__ */ (0, x.jsx)(bt, {
+				gates: pe,
 				compact: !0
 			}) : null,
-			P ? /* @__PURE__ */ (0, x.jsx)("div", {
+			ae ? /* @__PURE__ */ (0, x.jsx)("div", {
 				className: "schedError",
-				children: P
+				children: ae
 			}) : null,
-			ae.length ? /* @__PURE__ */ (0, x.jsx)("div", {
+			se.length ? /* @__PURE__ */ (0, x.jsx)("div", {
 				className: "schedWarnings",
-				children: ae.map((e) => /* @__PURE__ */ (0, x.jsxs)("div", { children: ["⚠ ", e] }, e))
+				children: se.map((e) => /* @__PURE__ */ (0, x.jsxs)("div", { children: ["⚠ ", e] }, e))
 			}) : null,
 			/* @__PURE__ */ (0, x.jsx)(Mt, { health: o }),
 			u.length ? /* @__PURE__ */ (0, x.jsx)("div", {
@@ -12879,7 +12916,13 @@ function Nt() {
 				expanded: g,
 				onToggle: () => _((e) => !e),
 				resolvingId: v,
-				onResolve: I,
+				onResolve: ue,
+				onManualResolve: ue,
+				manualDates: E,
+				onManualDateChange: (e, t) => ee((n) => ({
+					...n,
+					[e]: t
+				})),
 				rowResults: S
 			}),
 			/* @__PURE__ */ (0, x.jsxs)("div", {
@@ -12889,40 +12932,40 @@ function Nt() {
 						className: "schedViewToggle",
 						children: [/* @__PURE__ */ (0, x.jsx)("button", {
 							type: "button",
-							className: E === "axes" ? "is-active" : "",
-							onClick: () => ee("axes"),
+							className: D === "axes" ? "is-active" : "",
+							onClick: () => te("axes"),
 							children: "צירים"
 						}), /* @__PURE__ */ (0, x.jsx)("button", {
 							type: "button",
-							className: E === "table" ? "is-active" : "",
-							onClick: () => ee("table"),
+							className: D === "table" ? "is-active" : "",
+							onClick: () => te("table"),
 							children: "טבלה"
 						})]
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("label", { children: [/* @__PURE__ */ (0, x.jsx)("input", {
 						type: "checkbox",
-						checked: D,
-						onChange: (e) => te(e.target.checked)
+						checked: ne,
+						onChange: (e) => O(e.target.checked)
 					}), " רק באיחור"] }),
 					/* @__PURE__ */ (0, x.jsxs)("label", { children: ["מינימום ימי איחור: ", /* @__PURE__ */ (0, x.jsx)("input", {
 						type: "number",
 						min: "1",
-						value: ne,
-						onChange: (e) => O(e.target.value),
+						value: k,
+						onChange: (e) => A(e.target.value),
 						className: "schedNum"
 					})] }),
 					/* @__PURE__ */ (0, x.jsxs)("span", {
 						className: "schedCount",
-						children: [le.length, " פעילויות"]
+						children: [de.length, " פעילויות"]
 					})
 				]
 			}),
-			E === "axes" ? /* @__PURE__ */ (0, x.jsx)(wt, {
-				indicators: le,
+			D === "axes" ? /* @__PURE__ */ (0, x.jsx)(wt, {
+				indicators: de,
 				allIndicators: c?.indicators,
 				asOf: c?.asOf,
-				selected: k,
-				onSelect: A
+				selected: re,
+				onSelect: j
 			}) : /* @__PURE__ */ (0, x.jsx)("div", {
 				className: "schedTableWrap",
 				children: /* @__PURE__ */ (0, x.jsxs)("table", {
@@ -12935,9 +12978,9 @@ function Nt() {
 						/* @__PURE__ */ (0, x.jsx)("th", { children: "% ביצוע" }),
 						/* @__PURE__ */ (0, x.jsx)("th", { children: "ביטחון" }),
 						/* @__PURE__ */ (0, x.jsx)("th", { children: "חומרה" })
-					] }) }), /* @__PURE__ */ (0, x.jsxs)("tbody", { children: [le.map((e) => /* @__PURE__ */ (0, x.jsxs)("tr", {
-						onClick: () => A(e),
-						className: k?.subject.activityKey === e.subject.activityKey ? "is-selected" : "",
+					] }) }), /* @__PURE__ */ (0, x.jsxs)("tbody", { children: [de.map((e) => /* @__PURE__ */ (0, x.jsxs)("tr", {
+						onClick: () => j(e),
+						className: re?.subject.activityKey === e.subject.activityKey ? "is-selected" : "",
 						children: [
 							/* @__PURE__ */ (0, x.jsxs)("td", {
 								className: "schedName",
@@ -12953,7 +12996,7 @@ function Nt() {
 							/* @__PURE__ */ (0, x.jsx)("td", { children: /* @__PURE__ */ (0, x.jsx)(yt, { confidence: e.confidence }) }),
 							/* @__PURE__ */ (0, x.jsx)("td", { children: e.severity ?? "—" })
 						]
-					}, e.subject.activityKey)), !le.length && !re ? /* @__PURE__ */ (0, x.jsx)("tr", { children: /* @__PURE__ */ (0, x.jsx)("td", {
+					}, e.subject.activityKey)), !de.length && !M ? /* @__PURE__ */ (0, x.jsx)("tr", { children: /* @__PURE__ */ (0, x.jsx)("td", {
 						colSpan: 7,
 						className: "schedEmpty",
 						children: "אין פעילויות תואמות לפילטר"
@@ -12961,8 +13004,8 @@ function Nt() {
 				})
 			}),
 			/* @__PURE__ */ (0, x.jsx)(Tt, {
-				indicator: k,
-				onClose: () => A(null)
+				indicator: re,
+				onClose: () => j(null)
 			})
 		]
 	});

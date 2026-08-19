@@ -405,9 +405,18 @@ export async function runScheduleConditionResolver({
   calendar: suppliedCalendar = undefined,
   projectContext: suppliedProjectContext = null,
   contractOnly = false,
+  manualTriggerDate = null,
   env = process.env
 } = {}) {
   if (!projectId) throw new Error("runScheduleConditionResolver: projectId is required");
+  const hasManualTriggerDate = manualTriggerDate != null && String(manualTriggerDate).trim() !== "";
+  const normalizedManualTriggerDate = hasManualTriggerDate ? toIsoDate(String(manualTriggerDate).trim()) : null;
+  if (hasManualTriggerDate && !normalizedManualTriggerDate) {
+    throw new Error("manualTriggerDate must be an ISO date (YYYY-MM-DD)");
+  }
+  if (hasManualTriggerDate && !conditionId) {
+    throw new Error("manualTriggerDate requires one conditionId");
+  }
   const aiConfig = config || getConfig();
   const cfg = {
     ...aiConfig,
@@ -462,8 +471,21 @@ export async function runScheduleConditionResolver({
         results.push(item);
         continue;
       }
-      let evidence = storedTriggerEvidence(condition);
-      if (evidence) {
+      let evidence = normalizedManualTriggerDate ? {
+        status: "found",
+        triggerDate: normalizedManualTriggerDate,
+        evidenceQuote: `תאריך האירוע הוזן ידנית בלוח הזמנים: ${normalizedManualTriggerDate}`,
+        sourceUrl: null,
+        sourceTitle: "אימות ידני בעמוד Schedule",
+        sourceTable: "manual_schedule_input",
+        sourceId: null,
+        confidence: 1,
+        reason: "manual_trigger_date"
+      } : storedTriggerEvidence(condition);
+      if (normalizedManualTriggerDate) {
+        item.evidenceSource = "manual_schedule_input";
+        item.searchQuestion = "Manual trigger date supplied by an authorized Schedule user";
+      } else if (evidence) {
         item.evidenceSource = "stored";
       } else {
         const structured = await findStructured({

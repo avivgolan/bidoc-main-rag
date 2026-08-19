@@ -429,9 +429,18 @@ function conditionSourceHref(condition) {
   return `/api/contracts/workspaces/${encodeURIComponent(workspaceId)}/source-link?${params}`;
 }
 
-const PendingConditionsBox = ({ data, expanded, onToggle, resolvingId, onResolve, rowResults }) => {
+const PendingConditionsBox = ({
+  data,
+  expanded,
+  onToggle,
+  resolvingId,
+  onResolve,
+  onManualResolve,
+  manualDates,
+  onManualDateChange,
+  rowResults
+}) => {
   const conditions = data?.conditions ?? [];
-  if (!conditions.length) return null;
   const grouped = Object.entries(
     conditions.reduce((acc, c) => {
       (acc[c.category] ||= []).push(c);
@@ -442,11 +451,11 @@ const PendingConditionsBox = ({ data, expanded, onToggle, resolvingId, onResolve
     <div className="condBox">
       <button type="button" className="condHead" onClick={onToggle}>
         <span className="condHeadTitle">
-          ⏳ אבני דרך הממתינות לטריגר
+          ⏳ פנקס זמנים יחסיים מהחוזה
           <span className="condHeadCount">{conditions.length}</span>
         </span>
         <span className="condHeadHint">
-          התחייבויות יחסיות מהחוזה — יקבלו תאריך ויעלו על ציר הזמן ברגע שהאירוע המפעיל ייקלט
+          כל נקודת זמן שנמשכה מהחוזה, הפעולה שמפעילה אותה והתאריך שנקלט בפועל
         </span>
         <span className="condChevron">{expanded ? "▲" : "▼"}</span>
       </button>
@@ -454,11 +463,19 @@ const PendingConditionsBox = ({ data, expanded, onToggle, resolvingId, onResolve
         <div className="condBody">
           <div className="condResolverBar">
             <div>
-              <strong>סוכן איתור תאריכים</strong>
-              <span>כל כפתור מפעיל חיפוש נפרד שמוגבל להתניה, לאירוע ולתאריך של אותה שורה בלבד.</span>
+              <strong>אותו שדה — הזנה ידנית היום, השלמה אוטומטית בהמשך</strong>
+              <span>בחירת תאריך מפעילה את מנוע הלו״ז הדטרמיניסטי. איתור אוטומטי מחפש את אותו אירוע ב־Gantt, באירועים מזוהים ורק אז ב־RAG.</span>
             </div>
           </div>
-          {grouped.map(([category, items]) => (
+          {!grouped.length ? (
+            <div className="condEmptyState">
+              <span className="condEmptyIcon">⌛</span>
+              <div>
+                <strong>התנאים היחסיים טרם סונכרנו למאגר הלו״ז</strong>
+                <span>לאחר הפעלת חיבור Indicator הם יופיעו כאן אוטומטית, ללא חילוץ חוזר של החוזה.</span>
+              </div>
+            </div>
+          ) : grouped.map(([category, items]) => (
             <div key={category} className="condGroup">
               <div className="condGroupTitle">
                 {CATEGORY_LABELS[category] ?? category}
@@ -467,7 +484,11 @@ const PendingConditionsBox = ({ data, expanded, onToggle, resolvingId, onResolve
               <div className="condTableWrap">
                 <table className="condTable">
                   <thead>
-                    <tr><th>אבן הדרך</th><th>הכלל החוזי</th><th>סוג הטריגר</th><th>מקור</th><th>פעולה</th></tr>
+                    <tr>
+                      <th>הזמן שנמשך מהחוזה</th>
+                      <th>תיאור הפעולה בסעיף</th>
+                      <th>תאריך האירוע בפועל</th>
+                    </tr>
                   </thead>
                   <tbody>
                     {items.map((c) => {
@@ -475,23 +496,54 @@ const PendingConditionsBox = ({ data, expanded, onToggle, resolvingId, onResolve
                       const isBusy = resolvingId === c.id;
                       const sourceHref = conditionSourceHref(c);
                       const pendingReason = c.metadata?.pending_reason;
+                      const selectedDate = manualDates?.[c.id] ?? c.trigger_event_date ?? "";
+                      const isResolved = c.status === "resolved";
                       return (
-                        <tr key={c.id} title={c.source_excerpt}>
-                          <td className="condName">{c.name}</td>
-                          <td className="condRule"><b>{offsetText(c)}</b> מ־{c.anchor_description}</td>
-                          <td><span className={`condAnchor is-${c.anchor_kind}`}>{ANCHOR_KIND_LABELS[c.anchor_kind] ?? c.anchor_kind}</span></td>
-                          <td className="condPage">
-                            {sourceHref ? (
-                              <a href={sourceHref} target="_blank" rel="noreferrer" title="פתיחת מסמך החוזה בקישור מאובטח קצר־חיים">
-                                {c.metadata?.source_filename || "מסמך החוזה"}{c.source_page ? ` · עמ׳ ${c.source_page}` : ""}
-                              </a>
-                            ) : c.source_page ? `עמ׳ ${c.source_page}` : "—"}
+                        <tr key={c.id} className={isResolved ? "is-resolved" : ""} title={c.source_excerpt}>
+                          <td className="condContractPoint">
+                            <div className="condOffsetLine">
+                              <b>{offsetText(c)}</b>
+                              <span className={`condState is-${c.status}`}>{isResolved ? "הושלם" : "ממתין"}</span>
+                            </div>
+                            <strong className="condName">{c.name}</strong>
+                            <span className="condPage">
+                              {sourceHref ? (
+                                <a href={sourceHref} target="_blank" rel="noreferrer" title="פתיחת מסמך החוזה בקישור מאובטח קצר־חיים">
+                                  {c.metadata?.source_filename || "מסמך החוזה"}{c.source_page ? ` · עמ׳ ${c.source_page}` : ""}
+                                </a>
+                              ) : c.source_page ? `עמ׳ ${c.source_page}` : "מקור חוזי"}
+                            </span>
+                          </td>
+                          <td className="condTriggerCell">
+                            <strong>{c.anchor_description || "האירוע המפעיל טרם תואר"}</strong>
+                            <span className={`condAnchor is-${c.anchor_kind}`}>{ANCHOR_KIND_LABELS[c.anchor_kind] ?? c.anchor_kind}</span>
                             {pendingReason ? <span className="condPendingReason">{pendingReason}</span> : null}
                           </td>
-                          <td className="condActionCell">
-                            <button type="button" className="condResolveBtn" onClick={() => onResolve(c)} disabled={Boolean(resolvingId)}>
-                              {isBusy ? "סוכן AI מחפש…" : "חפש והשלם עם AI"}
-                            </button>
+                          <td className="condDateCell">
+                            <div className="condDateEntry">
+                              <input
+                                type="date"
+                                value={selectedDate}
+                                disabled={isResolved || Boolean(resolvingId)}
+                                aria-label={`תאריך האירוע בפועל עבור ${c.name}`}
+                                onChange={(event) => onManualDateChange(c.id, event.target.value)}
+                              />
+                              {!isResolved ? (
+                                <button
+                                  type="button"
+                                  className="condManualBtn"
+                                  onClick={() => onManualResolve(c, selectedDate)}
+                                  disabled={!selectedDate || Boolean(resolvingId)}
+                                >
+                                  {isBusy ? "שומר…" : "שמור וחשב מועד"}
+                                </button>
+                              ) : <span className="condVerifiedDate">תאריך מאומת</span>}
+                            </div>
+                            {!isResolved ? (
+                              <button type="button" className="condResolveBtn" onClick={() => onResolve(c)} disabled={Boolean(resolvingId)}>
+                                {isBusy ? "מנוע הלו״ז מחפש…" : "איתור אוטומטי במנוע הלו״ז"}
+                              </button>
+                            ) : null}
                             {result ? (
                               <span className={`condRowResult is-${result.status}`} title={result.reason || result.evidence?.reason || ""}>
                                 {result.status === "not_found" ? "לא נמצא תאריך" : result.status === "needs_review" ? "נדרשת בדיקה" : result.status === "error" ? result.reason || "החיפוש נכשל" : result.dueDate || "הושלם"}
@@ -560,6 +612,7 @@ export function SchedulePage() {
   const [resolverBusyId, setResolverBusyId] = useState(null);
   const [resolverResults, setResolverResults] = useState({});
   const [resolverNotice, setResolverNotice] = useState("");
+  const [manualConditionDates, setManualConditionDates] = useState({});
   const [view, setView] = useState("axes");
   const [onlyLate, setOnlyLate] = useState(true);
   const [minDaysLate, setMinDaysLate] = useState("");
@@ -602,7 +655,7 @@ export function SchedulePage() {
           "טעינת היסטוריית התראות"
         ),
         optional(
-          api(`/api/schedule/conditions?projectId=${encodeURIComponent(pid)}&status=pending`),
+          api(`/api/schedule/conditions?projectId=${encodeURIComponent(pid)}&status=pending,resolved`),
           { conditions: [] },
           "טעינת אבני דרך חוזיות"
         )
@@ -640,7 +693,7 @@ export function SchedulePage() {
     }
   }, [projectId, asOf, loadData]);
 
-  const resolveCondition = useCallback(async (condition) => {
+  const resolveCondition = useCallback(async (condition, manualTriggerDate = null) => {
     if (!projectId || !condition?.id) return;
     setResolverBusyId(condition.id);
     setError("");
@@ -648,13 +701,22 @@ export function SchedulePage() {
     try {
       const result = await api("/api/schedule/conditions/resolve", {
         method: "POST",
-        body: { projectId, conditionId: condition.id, commit: true, minConfidence: 0.8 },
+        body: {
+          projectId,
+          conditionId: condition.id,
+          commit: true,
+          minConfidence: 0.8,
+          ...(manualTriggerDate ? { manualTriggerDate } : {})
+        },
         timeoutMs: 900_000
       });
       const rowResult = result.results?.[0] ?? { status: "error", reason: "הסוכן לא החזיר תוצאה" };
       setResolverResults((current) => ({ ...current, [condition.id]: rowResult }));
       if (rowResult.status === "resolved") {
-        setResolverNotice(`הושלם: ${condition.name} — המועד החוזי ${rowResult.dueDate} נשמר בבסיס הנתונים.`);
+        setResolverNotice(`הושלם: ${condition.name} — האירוע ${rowResult.evidence?.triggerDate || manualTriggerDate || "אותר"}, והמועד החוזי ${rowResult.dueDate} נשמר.`);
+        await loadData(projectId, asOf);
+      } else if (rowResult.triggerSaved) {
+        setResolverNotice(`תאריך האירוע ${rowResult.evidence?.triggerDate || manualTriggerDate} נשמר. חישוב המועד ממתין להשלמת לוח ימי העבודה והחגים.`);
         await loadData(projectId, asOf);
       }
     } catch (err) {
@@ -783,6 +845,9 @@ export function SchedulePage() {
         onToggle={() => setConditionsOpen((v) => !v)}
         resolvingId={resolverBusyId}
         onResolve={resolveCondition}
+        onManualResolve={resolveCondition}
+        manualDates={manualConditionDates}
+        onManualDateChange={(conditionId, value) => setManualConditionDates((current) => ({ ...current, [conditionId]: value }))}
         rowResults={resolverResults}
       />
 

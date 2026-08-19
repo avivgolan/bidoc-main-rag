@@ -759,6 +759,37 @@ test("schedule condition resolver: structured trigger wins before RAG", async ()
   assert.equal(result.results[0].dueDate, "2026-01-06");
 });
 
+test("schedule condition resolver: a manual trigger date bypasses discovery and uses deterministic arithmetic", async () => {
+  const writes = [];
+  const result = await runScheduleConditionResolver({
+    projectId: PROJECT,
+    conditionId: "cond-manual",
+    manualTriggerDate: "2026-08-05",
+    conditions: [{
+      id: "cond-manual",
+      condition_key: "contract-decision:manual",
+      name: "מועד הגשת המסמכים",
+      anchor_kind: "event",
+      anchor_description: "מועד קבלת דרישת המזמין",
+      offset_value: 14,
+      offset_unit: "calendar_days",
+      confidence: 1
+    }],
+    calendar: CAL,
+    commit: true,
+    config: { projectId: PROJECT },
+    findStructured: async () => { throw new Error("structured discovery must not run"); },
+    planSearch: async () => { throw new Error("RAG planning must not run"); },
+    persistResolution: async (payload) => { writes.push(payload); return {}; }
+  });
+  assert.equal(result.summary.resolved, 1);
+  assert.equal(result.results[0].evidenceSource, "manual_schedule_input");
+  assert.equal(result.results[0].evidence.triggerDate, "2026-08-05");
+  assert.equal(result.results[0].dueDate, "2026-08-19");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].dueDate, "2026-08-19");
+});
+
 test("schedule condition resolver: saves a verified trigger but keeps working-day rule pending without holiday coverage", async () => {
   const writes = [];
   const result = await runScheduleConditionResolver({

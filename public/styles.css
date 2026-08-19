@@ -10494,6 +10494,15 @@ body:has(#timeline.active) .sidebar {
 .condResolverBar > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .condResolverBar strong { color: var(--text-primary); font-size: 0.84rem; }
 .condResolverBar span { color: var(--text-secondary); font-size: 0.76rem; line-height: 1.5; }
+.condEmptyState {
+  display: flex; align-items: center; gap: 12px; padding: 18px;
+  border: 1px dashed color-mix(in srgb, var(--amber) 52%, var(--line)); border-radius: 10px;
+  background: color-mix(in srgb, var(--amber-soft) 46%, var(--surface));
+}
+.condEmptyState > div { display: flex; flex-direction: column; gap: 3px; }
+.condEmptyState strong { color: var(--text-primary); font-size: 0.83rem; }
+.condEmptyState span:not(.condEmptyIcon) { color: var(--text-secondary); font-size: 0.75rem; }
+.condEmptyIcon { font-size: 1.35rem; }
 .condResolverBar button {
   flex: none; min-height: 38px; padding: 7px 13px; border: 1px solid var(--brand-500); border-radius: 8px;
   color: #fff; background: var(--brand-600); font: inherit; font-size: 0.78rem; font-weight: 700; cursor: pointer;
@@ -10510,11 +10519,26 @@ body:has(#timeline.active) .sidebar {
 }
 .condGroupCount { background: var(--surface-3); border-radius: 999px; padding: 0 7px; font-size: 0.72rem; font-weight: 600; }
 .condTableWrap { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
-.condTable { width: 100%; min-width: 850px; border-collapse: collapse; font-size: 0.8rem; }
+.condTable { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; font-size: 0.8rem; }
 .condTable th { padding: 7px 9px; color: var(--text-secondary); background: var(--surface-2); text-align: right; font-size: 0.72rem; }
+.condTable th:nth-child(1) { width: 32%; }
+.condTable th:nth-child(2) { width: 31%; }
+.condTable th:nth-child(3) { width: 37%; }
 .condTable td { padding: 8px 9px; border-top: 1px solid var(--line); vertical-align: middle; }
 .condTable tbody tr:hover { background: var(--brand-50); }
+.condTable tbody tr.is-resolved { background: color-mix(in srgb, var(--success-bg) 58%, var(--surface)); }
 .condName { font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; }
+.condContractPoint, .condTriggerCell, .condDateCell { min-width: 0; }
+.condContractPoint { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+.condOffsetLine { display: flex; align-items: center; gap: 8px; }
+.condOffsetLine > b {
+  display: inline-flex; align-items: center; min-height: 28px; padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--amber) 48%, transparent); border-radius: 7px;
+  background: var(--amber-soft); color: color-mix(in srgb, var(--amber) 78%, #4b3210); font-size: 0.82rem;
+}
+.condState { padding: 2px 7px; border-radius: 999px; background: var(--surface-3); color: var(--text-muted); font-size: 0.66rem; font-weight: 800; }
+.condState.is-resolved { background: var(--success-bg); color: var(--success-text); }
+.condTriggerCell strong { display: block; margin-bottom: 7px; color: var(--text-primary); line-height: 1.5; }
 .condRule { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; }
 .condRule b { color: var(--amber); font-weight: 700; }
 .condAnchor { font-size: 0.72rem; border-radius: 999px; padding: 1px 9px; white-space: nowrap; background: var(--surface-3); color: var(--text-secondary); }
@@ -10525,9 +10549,24 @@ body:has(#timeline.active) .sidebar {
 .condPage a { color: var(--brand-700); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
 .condPendingReason { display: block; margin-top: 3px; max-width: 190px; white-space: normal; color: var(--amber); }
 .condActionCell { min-width: 170px; }
+.condDateCell { min-width: 250px; }
+.condDateEntry { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+.condDateEntry input[type="date"] {
+  min-width: 138px; min-height: 36px; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 7px;
+  background: var(--surface); color: var(--text-primary); font: inherit; font-size: 0.78rem; direction: ltr;
+}
+.condDateEntry input[type="date"]:focus { outline: 2px solid color-mix(in srgb, var(--brand-500) 34%, transparent); border-color: var(--brand-500); }
+.condDateEntry input[type="date"]:disabled { background: var(--surface-2); color: var(--text-secondary); }
+.condManualBtn {
+  min-height: 36px; padding: 6px 10px; border: 1px solid var(--success-text); border-radius: 7px;
+  color: var(--success-text); background: var(--success-bg); font: inherit; font-size: 0.73rem; font-weight: 800; cursor: pointer;
+}
+.condManualBtn:hover:not(:disabled) { filter: brightness(0.98); box-shadow: 0 3px 10px rgba(20, 95, 60, 0.12); }
+.condManualBtn:disabled { opacity: 0.48; cursor: not-allowed; }
+.condVerifiedDate { color: var(--success-text); font-size: 0.72rem; font-weight: 800; }
 .condResolveBtn {
-  min-height: 36px; padding: 6px 11px; border: 1px solid var(--brand-500); border-radius: 7px;
-  color: #fff; background: var(--brand-600); font: inherit; font-size: 0.75rem; font-weight: 700; cursor: pointer;
+  min-height: 32px; padding: 5px 9px; border: 1px solid var(--brand-300); border-radius: 7px;
+  color: var(--brand-700); background: var(--brand-50); font: inherit; font-size: 0.7rem; font-weight: 800; cursor: pointer;
 }
 .condResolveBtn:hover:not(:disabled) { filter: brightness(1.05); }
 .condResolveBtn:disabled { opacity: 0.6; cursor: wait; }
@@ -10539,4 +10578,15 @@ body:has(#timeline.active) .sidebar {
 @media (max-width: 700px) {
   .condResolverBar { align-items: stretch; flex-direction: column; }
   .condResolverBar button { width: 100%; }
+  .condBody { max-height: none; }
+  .condTableWrap { overflow: visible; border: none; }
+  .condTable { min-width: 0; table-layout: auto; }
+  .condTable thead { display: none; }
+  .condTable tbody, .condTable tr, .condTable td { display: block; width: 100%; }
+  .condTable tr { margin-bottom: 10px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .condTable td { border-top: 1px solid var(--line); padding: 10px 11px; }
+  .condTable td:first-child { border-top: none; }
+  .condDateCell { min-width: 0; }
+  .condDateEntry { align-items: stretch; flex-direction: column; }
+  .condDateEntry input[type="date"], .condManualBtn, .condResolveBtn { width: 100%; }
 }
