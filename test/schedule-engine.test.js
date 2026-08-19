@@ -713,7 +713,84 @@ test("schedule condition resolver: computes supported offset units deterministic
   assert.equal(resolveConditionDueDate({ offset_value: 1, offset_unit: "months" }, "2026-01-31").dueDate, "2026-02-28");
   assert.equal(addWorkingDays("2026-08-06", 2, CAL), "2026-08-10");
   assert.equal(resolveConditionDueDate({ offset_value: 7, offset_unit: "working_days" }, "2026-08-05", null).dueDate, null);
+  assert.equal(resolveConditionDueDate({ offset_value: 7, offset_unit: "working_days" }, "2026-08-05", CAL).reason, "working_calendar_coverage_incomplete");
+  assert.equal(resolveConditionDueDate(
+    { offset_value: 7, offset_unit: "working_days" },
+    "2026-08-05",
+    { ...CAL, holidaysThrough: "2026-12-31" }
+  ).dueDate, "2026-08-16");
   assert.equal(resolveConditionDueDate({ offset_value: 12, offset_unit: "hours" }, "2026-08-05").reason, "subday_deadline_cannot_be_stored_as_date");
+});
+
+test("schedule condition resolver: structured trigger wins before RAG", async () => {
+  let ragCalls = 0;
+  const result = await runScheduleConditionResolver({
+    projectId: PROJECT,
+    conditions: [{
+      id: "cond-structured",
+      condition_key: "contract-decision:structured",
+      name: "מועד השלמת השירותים",
+      anchor_kind: "schedule_task",
+      anchor_description: "מועד תחילת העבודות",
+      offset_value: 100,
+      offset_unit: "calendar_days",
+      confidence: 1
+    }],
+    calendar: CAL,
+    commit: false,
+    config: { projectId: PROJECT },
+    findStructured: async () => ({
+      status: "found",
+      triggerDate: "2025-09-28",
+      evidenceQuote: "צו תחילת עבודה — 2025-09-28",
+      sourceUrl: "/api/schedule/versions",
+      sourceTitle: "לוח הקבלן",
+      sourceTable: "gantt_tasks_test",
+      sourceExternalId: "1",
+      confidence: 1
+    }),
+    planSearch: async () => { ragCalls += 1; return { searchQuestion: "unused" }; },
+    askChat: async () => { ragCalls += 1; return {}; },
+    verify: async () => { ragCalls += 1; return {}; }
+  });
+  assert.equal(ragCalls, 0);
+  assert.equal(result.summary.ready, 1);
+  assert.equal(result.results[0].evidenceSource, "gantt_tasks_test");
+  assert.equal(result.results[0].dueDate, "2026-01-06");
+});
+
+test("schedule condition resolver: saves a verified trigger but keeps working-day rule pending without holiday coverage", async () => {
+  const writes = [];
+  const result = await runScheduleConditionResolver({
+    projectId: PROJECT,
+    conditions: [{
+      id: "cond-working",
+      condition_key: "contract-decision:working",
+      name: "מועד השלמת השירותים",
+      anchor_kind: "schedule_task",
+      anchor_description: "מועד תחילת העבודות",
+      offset_value: 100,
+      offset_unit: "working_days",
+      confidence: 1
+    }],
+    calendar: CAL,
+    commit: true,
+    config: { projectId: PROJECT },
+    findStructured: async () => ({
+      status: "found",
+      triggerDate: "2025-09-28",
+      evidenceQuote: "צו תחילת עבודה — 2025-09-28",
+      sourceTable: "gantt_tasks_test",
+      confidence: 1
+    }),
+    persistResolution: async (payload) => { writes.push(payload); return {}; }
+  });
+  assert.equal(result.summary.needs_review, 1);
+  assert.equal(result.results[0].reason, "working_calendar_coverage_incomplete");
+  assert.equal(result.results[0].triggerSaved, true);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].dueDate, null);
+  assert.equal(writes[0].evidence.triggerDate, "2025-09-28");
 });
 
 test("schedule condition resolver: rejects an alleged found result without a valid date", () => {

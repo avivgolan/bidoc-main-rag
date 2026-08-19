@@ -7,12 +7,102 @@
 import { runChatPipeline } from "../agent.js";
 import { getConfig, settingsOpenRouterApiKey } from "../config.js";
 import { chatCompletion, extractJsonObject } from "../openrouter.js";
-import { addCalendarDays, isWorkingDay, normalizeCalendar, toIsoDate } from "../scheduleCalendar.js";
-import { scheduleDataRequest, scheduleSettings } from "../scheduleIngestion.js";
-import { listScheduleConditions } from "./schedule.js";
+import { addCalendarDays, calendarCoverageState, isWorkingDay, normalizeCalendar, toIsoDate } from "../scheduleCalendar.js";
+import { loadScheduleSource, scheduleDataRequest, scheduleRpcRequest, scheduleSettings } from "../scheduleIngestion.js";
+import { resolveIndicatorProjectContext } from "../indicator/contractConditions.js";
 
 export const CONDITION_RESOLVER_VERSION = "schedule-condition-resolver.v1";
 export const MIN_AUTO_RESOLVE_CONFIDENCE = 0.8;
+export const SCHEDULE_CONDITION_RESOLVE_RPC = "bidoc_schedule_resolve_condition_v1";
+
+const COMMENCEMENT_TASK_ALIASES = new Set([
+  "צו תחילת עבודה",
+  "תחילת עבודה",
+  "תחילת העבודות",
+  "מועד תחילת העבודות"
+]);
+
+function normalizedLabel(value) {
+  return String(value || "").normalize("NFC").replace(/[\s־–—-]+/gu, " ").trim();
+}
+
+function structuredEvidence(candidates, source) {
+  const dated = candidates.filter((candidate) => toIsoDate(candidate.triggerDate));
+  const dates = [...new Set(dated.map((candidate) => toIsoDate(candidate.triggerDate)))];
+  if (!dated.length) return { status: "not_found", reason: `No dated ${source} trigger matched.` };
+  if (dates.length !== 1) {
+    return {
+      status: "ambiguous",
+      reason: `Structured ${source} sources contain conflicting trigger dates.`,
+      candidates: dated
+    };
+  }
+  const candidate = dated[0];
+  return {
+    status: "found",
+    triggerDate: dates[0],
+    evidenceQuote: candidate.evidenceQuote,
+    sourceUrl: candidate.sourceUrl || null,
+    sourceTitle: candidate.sourceTitle || source,
+    sourceTable: candidate.sourceTable || source,
+    sourceId: candidate.sourceId || null,
+    sourceExternalId: candidate.sourceExternalId || null,
+    confidence: Number(candidate.confidence) || 1,
+    reason: `Matched one unambiguous ${source} trigger date.`
+  };
+}
+
+export async function findStructuredTriggerEvidence({
+  condition,
+  sourceProjectId,
+  scheduleProjectId,
+  config,
+  settings
+} = {}) {
+  const triggerKind = String(condition?.anchor_kind === "schedule_task"
+    ? condition?.metadata?.trigger_kind || condition?.trigger_kind || "commencement_of_works"
+    : condition?.metadata?.trigger_kind || condition?.trigger_kind || "");
+
+  if (triggerKind === "commencement_of_works") {
+    const source = await loadScheduleSource({ config, projectId: sourceProjectId, settings });
+    const candidates = source.tasks
+      .filter((task) => task.isSummary !== true && COMMENCEMENT_TASK_ALIASES.has(normalizedLabel(task.name)))
+      .map((task) => ({
+        triggerDate: task.plannedStart || task.plannedFinish,
+        evidenceQuote: `${task.name} — ${task.plannedStart || task.plannedFinish}`,
+        sourceTitle: source.scheduleMeta.displayName || "לוח הקבלן",
+        sourceUrl: `/api/schedule/versions?projectId=${encodeURIComponent(sourceProjectId)}`,
+        sourceTable: "gantt_tasks_test",
+        sourceExternalId: String(task.stableKey),
+        confidence: 1
+      }));
+    const gantt = structuredEvidence(candidates, "gantt_tasks_test");
+    if (gantt.status !== "not_found") return gantt;
+  }
+
+  if (!triggerKind) return { status: "not_found", reason: "The contract condition has no controlled trigger kind." };
+  const events = await scheduleDataRequest({
+    config,
+    settings,
+    path: `/rest/v1/schedule_observed_events?select=id,event_type,event_date,source_table,source_id,source_page,evidence_text,confidence,human_status&project_id=eq.${encodeURIComponent(scheduleProjectId)}&event_type=eq.${encodeURIComponent(triggerKind)}&order=event_date.asc`
+  }).catch((error) => {
+    if (error.missingTable) return [];
+    throw error;
+  });
+  const reviewed = events.filter((event) =>
+    ["approved", "confirmed", "reviewed"].includes(String(event.human_status || ""))
+    && Number(event.confidence) >= MIN_AUTO_RESOLVE_CONFIDENCE
+  );
+  return structuredEvidence(reviewed.map((event) => ({
+    triggerDate: event.event_date,
+    evidenceQuote: event.evidence_text,
+    sourceTitle: event.source_table || "schedule_observed_events",
+    sourceTable: "schedule_observed_events",
+    sourceId: event.id,
+    sourceExternalId: event.source_id,
+    confidence: event.confidence
+  })), "schedule_observed_events");
+}
 
 export function scheduleResolverError(error) {
   const message = String(error?.message || error || "Unknown resolver error");
@@ -127,7 +217,11 @@ export function resolveConditionDueDate(condition = {}, triggerDate, calendar = 
     case "months": return { dueDate: addCalendarMonths(anchor, value), reason: null };
     case "working_days": {
       const dueDate = addWorkingDays(anchor, value, calendar);
-      return { dueDate, reason: dueDate ? null : "working_calendar_missing" };
+      if (!dueDate) return { dueDate: null, reason: "working_calendar_missing" };
+      const normalized = normalizeCalendar(calendar);
+      return calendarCoverageState(normalized, dueDate) === "ok"
+        ? { dueDate, reason: null }
+        : { dueDate: null, reason: "working_calendar_coverage_incomplete", provisionalDueDate: dueDate };
     }
     case "hours":
       return value % 24 === 0
@@ -172,8 +266,12 @@ export function promotionRows({ projectId, condition, evidence, dueDate, searchQ
       status: condition.recurring === true ? "pending" : "resolved",
       resolved_milestone_key: milestoneKey,
       trigger_source_table: "chat_rag",
-      trigger_source_id: evidence.sourceUrl || null,
-      trigger_event_date: evidence.triggerDate
+      trigger_source_id: evidence.sourceId || null,
+      trigger_event_date: evidence.triggerDate,
+      metadata: {
+        ...(condition.metadata || {}),
+        trigger_evidence: evidence
+      }
     }
   };
 }
@@ -235,23 +333,58 @@ async function defaultVerify({ chatResult, config }) {
   return normalizeEvidenceResult(extractJsonObject(content));
 }
 
-async function persistPromotion({ projectId, condition, evidence, dueDate, searchQuestion, config, settings }) {
+async function persistPromotion({ projectId, condition, evidence, dueDate, searchQuestion, pendingReason = null, config, settings }) {
   const rows = promotionRows({ projectId, condition, evidence, dueDate, searchQuestion });
-  await scheduleDataRequest({
-    config, settings,
-    path: `/rest/v1/${settings.milestonesTable}?on_conflict=project_id,milestone_key`,
-    options: {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-      body: [rows.milestone]
+  const result = await scheduleRpcRequest({
+    config,
+    settings,
+    rpc: SCHEDULE_CONDITION_RESOLVE_RPC,
+    payload: {
+      p_condition_id: condition.id,
+      p_project_id: projectId,
+      p_trigger_date: evidence.triggerDate,
+      p_due_date: dueDate,
+      p_trigger_source_table: evidence.sourceTable || "chat_rag",
+      p_trigger_source_id: evidence.sourceId || null,
+      p_trigger_evidence: {
+        ...evidence,
+        searchQuestion
+      },
+      p_confidence: evidence.confidence,
+      p_extractor_version: CONDITION_RESOLVER_VERSION,
+      p_pending_reason: pendingReason
     }
   });
-  await scheduleDataRequest({
-    config, settings,
-    path: `/rest/v1/${settings.conditionsTable}?id=eq.${encodeURIComponent(condition.id)}&project_id=eq.${encodeURIComponent(projectId)}`,
-    options: { method: "PATCH", headers: { Prefer: "return=minimal" }, body: rows.conditionPatch }
+  return { ...rows, result };
+}
+
+async function loadPendingConditions({ projectId, conditionId, contractOnly = false, config, settings }) {
+  const filters = [`project_id=eq.${encodeURIComponent(projectId)}`, "status=eq.pending"];
+  if (conditionId) filters.push(`id=eq.${encodeURIComponent(conditionId)}`);
+  if (contractOnly) filters.push("source_contract_decision_id=not.is.null");
+  return scheduleDataRequest({
+    config,
+    settings,
+    path: `/rest/v1/${settings.conditionsTable}?select=*&${filters.join("&")}&order=category.asc,name.asc`
   });
-  return rows;
+}
+
+function storedTriggerEvidence(condition) {
+  const triggerDate = toIsoDate(condition?.trigger_event_date);
+  if (!triggerDate) return null;
+  const stored = condition?.metadata?.trigger_evidence || {};
+  return {
+    status: "found",
+    triggerDate,
+    evidenceQuote: stored.evidenceQuote || condition.source_excerpt || condition.name,
+    sourceUrl: stored.sourceUrl || null,
+    sourceTitle: stored.sourceTitle || condition.trigger_source_table || null,
+    sourceTable: stored.sourceTable || condition.trigger_source_table || "stored_trigger",
+    sourceId: stored.sourceId || condition.trigger_source_id || null,
+    sourceExternalId: stored.sourceExternalId || null,
+    confidence: Math.max(Number(stored.confidence) || Number(condition.confidence) || MIN_AUTO_RESOLVE_CONFIDENCE, MIN_AUTO_RESOLVE_CONFIDENCE),
+    reason: "Reused previously verified trigger evidence."
+  };
 }
 
 export async function runScheduleConditionResolver({
@@ -266,25 +399,38 @@ export async function runScheduleConditionResolver({
   planSearch = defaultPlanSearch,
   askChat = defaultAskChat,
   verify = defaultVerify,
+  findStructured = findStructuredTriggerEvidence,
+  persistResolution = persistPromotion,
   conditions: suppliedConditions = null,
-  calendar: suppliedCalendar = undefined
+  calendar: suppliedCalendar = undefined,
+  projectContext: suppliedProjectContext = null,
+  contractOnly = false,
+  env = process.env
 } = {}) {
   if (!projectId) throw new Error("runScheduleConditionResolver: projectId is required");
-  const settingsKey = settingsOpenRouterApiKey();
-  const usesDefaultAi = planSearch === defaultPlanSearch || askChat === defaultAskChat || verify === defaultVerify;
-  const aiConfig = usesDefaultAi
-    ? settingsOwnedAiConfig(config || getConfig(), settingsKey)
-    : (config || getConfig());
+  const aiConfig = config || getConfig();
   const cfg = {
     ...aiConfig,
-    // Deliberately override getConfig(): getConfig has a legacy env fallback,
-    // while this resolver is owned by MAIN.agent_settings.
     projectId,
     requireProjectScope: true
   };
   const settings = settingsInput || scheduleSettings();
+  const projectContext = suppliedProjectContext || await resolveIndicatorProjectContext({
+    projectId,
+    config: cfg,
+    settings,
+    env
+  });
+  const sourceProjectId = projectContext.sourceProjectId;
+  const scheduleProjectId = projectContext.scheduleProjectId;
   const count = conditionId ? 1 : Math.min(Math.max(Number(limit) || 10, 1), 25);
-  const loadedConditions = suppliedConditions || (await listScheduleConditions({ projectId, conditionId, status: "pending", config: cfg, settings })).conditions;
+  const loadedConditions = suppliedConditions || await loadPendingConditions({
+    projectId: scheduleProjectId,
+    conditionId,
+    contractOnly,
+    config: cfg,
+    settings
+  });
   const conditions = conditionId
     ? loadedConditions.filter((condition) => String(condition.id) === String(conditionId))
     : loadedConditions;
@@ -293,7 +439,7 @@ export async function runScheduleConditionResolver({
   if (calendar === undefined) {
     const rows = await scheduleDataRequest({
       config: cfg, settings,
-      path: `/rest/v1/${settings.calendarsTable}?select=working_weekdays,holidays,holidays_through&project_id=eq.${encodeURIComponent(projectId)}&order=is_default.desc&limit=1`
+      path: `/rest/v1/${settings.calendarsTable}?select=working_weekdays,holidays,holidays_through&project_id=eq.${encodeURIComponent(scheduleProjectId)}&order=is_default.desc&limit=1`
     }).catch(() => []);
     calendar = rows[0] || null;
   }
@@ -302,28 +448,67 @@ export async function runScheduleConditionResolver({
   for (const condition of conditions.slice(0, count)) {
     const item = { conditionId: condition.id, conditionKey: condition.condition_key, name: condition.name, status: "pending" };
     try {
-      // Fail before spending three model calls when the stored contractual
-      // rule cannot be represented by the date-only milestone schema.
-      const arithmeticCheck = resolveConditionDueDate(condition, "2000-01-01", calendar);
-      if (!arithmeticCheck.dueDate) {
+      const offsetValue = Number(condition.offset_value);
+      const unsupported = !Number.isInteger(offsetValue) || offsetValue < 0
+        ? "fractional_offset_not_supported"
+        : condition.offset_unit === "hours" && offsetValue % 24 !== 0
+          ? "subday_deadline_cannot_be_stored_as_date"
+          : !["calendar_days", "weeks", "months", "working_days", "hours"].includes(condition.offset_unit)
+            ? "unsupported_offset_unit"
+            : null;
+      if (unsupported) {
         item.status = "needs_review";
-        item.reason = arithmeticCheck.reason;
+        item.reason = unsupported;
         results.push(item);
         continue;
       }
-      const plan = await planSearch({ condition, projectId, config: cfg });
-      item.searchQuestion = plan.searchQuestion || fallbackConditionQuestion(condition);
-      item.planFallback = plan.fallback === true;
-      const chatResult = await askChat({
-        question: item.searchQuestion,
-        condition,
-        projectId,
-        config: cfg,
-        runId: runId ? `${runId}:${condition.id}` : null
-      });
-      item.chatAnswer = String(chatResult.answer || "").slice(0, 3000);
-      item.sources = chatResult.sources || [];
-      const evidence = normalizeEvidenceResult(await verify({ chatResult, condition, projectId, config: cfg }));
+      let evidence = storedTriggerEvidence(condition);
+      if (evidence) {
+        item.evidenceSource = "stored";
+      } else {
+        const structured = await findStructured({
+          condition,
+          sourceProjectId,
+          scheduleProjectId,
+          projectId,
+          config: cfg,
+          settings
+        });
+        if (structured?.status === "ambiguous") {
+          item.status = "needs_review";
+          item.reason = structured.reason || "Structured trigger sources conflict";
+          item.structuredCandidates = structured.candidates || [];
+          results.push(item);
+          continue;
+        }
+        if (structured?.status === "found") {
+          evidence = structured;
+          item.evidenceSource = structured.sourceTable || "structured";
+          item.searchQuestion = `Structured trigger lookup: ${condition.anchor_description || condition.name}`;
+        }
+      }
+      if (!evidence) {
+        const usesDefaultAi = planSearch === defaultPlanSearch || askChat === defaultAskChat || verify === defaultVerify;
+        const ragConfig = usesDefaultAi
+          ? settingsOwnedAiConfig(cfg, settingsOpenRouterApiKey())
+          : cfg;
+        const plan = await planSearch({ condition, projectId: sourceProjectId, config: ragConfig });
+        item.searchQuestion = plan.searchQuestion || fallbackConditionQuestion(condition);
+        item.planFallback = plan.fallback === true;
+        const chatResult = await askChat({
+          question: item.searchQuestion,
+          condition,
+          projectId: sourceProjectId,
+          config: ragConfig,
+          runId: runId ? `${runId}:${condition.id}` : null
+        });
+        item.chatAnswer = String(chatResult.answer || "").slice(0, 3000);
+        item.sources = chatResult.sources || [];
+        evidence = normalizeEvidenceResult(await verify({ chatResult, condition, projectId: sourceProjectId, config: ragConfig }));
+        evidence.sourceTable = "chat_rag";
+        evidence.sourceId = null;
+        item.evidenceSource = "chat_rag";
+      }
       item.evidence = evidence;
       if (evidence.status !== "found" || evidence.confidence < Number(minConfidence)) {
         item.status = evidence.status === "not_found" ? "not_found" : "needs_review";
@@ -336,12 +521,34 @@ export async function runScheduleConditionResolver({
       if (!resolved.dueDate) {
         item.status = "needs_review";
         item.reason = resolved.reason;
+        item.provisionalDueDate = resolved.provisionalDueDate || null;
+        if (commit && evidence.triggerDate) {
+          await persistResolution({
+            projectId: scheduleProjectId,
+            condition,
+            evidence,
+            dueDate: null,
+            searchQuestion: item.searchQuestion || "Stored trigger evidence",
+            pendingReason: resolved.reason,
+            config: cfg,
+            settings
+          });
+          item.triggerSaved = true;
+        }
         results.push(item);
         continue;
       }
       item.status = commit ? "resolved" : "ready";
       item.milestoneKey = milestoneKeyForCondition(condition, evidence.triggerDate);
-      if (commit) await persistPromotion({ projectId, condition, evidence, dueDate: resolved.dueDate, searchQuestion: item.searchQuestion, config: cfg, settings });
+      if (commit) await persistResolution({
+        projectId: scheduleProjectId,
+        condition,
+        evidence,
+        dueDate: resolved.dueDate,
+        searchQuestion: item.searchQuestion || "Stored trigger evidence",
+        config: cfg,
+        settings
+      });
     } catch (error) {
       const normalizedError = scheduleResolverError(error);
       item.status = "error";
@@ -353,5 +560,15 @@ export async function runScheduleConditionResolver({
 
   const summary = Object.fromEntries(["resolved", "ready", "not_found", "needs_review", "error"]
     .map((status) => [status, results.filter((item) => item.status === status).length]));
-  return { ok: true, resolverVersion: CONDITION_RESOLVER_VERSION, projectId, commit, processed: results.length, remaining: Math.max(conditions.length - results.length, 0), summary, results };
+  return {
+    ok: true,
+    resolverVersion: CONDITION_RESOLVER_VERSION,
+    projectId: sourceProjectId,
+    scheduleProjectId,
+    commit,
+    processed: results.length,
+    remaining: Math.max(conditions.length - results.length, 0),
+    summary,
+    results
+  };
 }

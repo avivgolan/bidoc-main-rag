@@ -50,6 +50,20 @@ function logContractsRouteFailure(scope, error) {
   });
 }
 
+async function reconcileIndicatorAfterContractMutation({ workspaceId }) {
+  const {
+    bestEffortReconcileContractConditions,
+    indicatorContractConditionsApproved
+  } = await import("./indicator/contractConditions.js");
+  if (!indicatorContractConditionsApproved()) {
+    return { ok: true, committed: false, skipped: true, reason: "activation_not_approved" };
+  }
+  return bestEffortReconcileContractConditions({
+    workspaceId,
+    config: config()
+  });
+}
+
 // ─── Multi-tenant helpers ─────────────────────────────────────────────────────
 
 /**
@@ -184,12 +198,14 @@ async function handleApi(req, res, url) {
       || url.pathname === "/api/contracts/clauses/status";
     const isContractsRelationshipsRoute = url.pathname.startsWith("/api/contracts/relationships/");
     const isContractsDecisionsRoute = url.pathname.startsWith("/api/contracts/decisions/");
+    const isIndicatorContractsRoute = url.pathname.startsWith("/api/indicator/contracts/");
     const isContractsServerOwnedRoute = isContractsActivityMappingRoute
       || isContractsWorkspaceRoute
       || isContractsClausePreviewRoute
       || isContractsClausePersistenceRoute
       || isContractsRelationshipsRoute
-      || isContractsDecisionsRoute;
+      || isContractsDecisionsRoute
+      || isIndicatorContractsRoute;
     const hasContractsDatabaseHeaderOverride = isContractsServerOwnedRoute && [
       "x-content-supabase-url",
       "x-content-supabase-key",
@@ -1407,7 +1423,8 @@ async function handleApi(req, res, url) {
         modelCalls: 0,
         scheduleWrites: 0
       }));
-      return sendJson(res, 200, result);
+      const indicatorSync = await reconcileIndicatorAfterContractMutation({ workspaceId: contractsDecisionSplitMatch[1] });
+      return sendJson(res, 200, { ...result, indicatorSync });
     } catch (error) {
       logContractsRouteFailure("r4.2c-decision-split", error);
       const response = contractsErrorResponse(error);
@@ -1440,7 +1457,8 @@ async function handleApi(req, res, url) {
         modelCalls: 0,
         scheduleWrites: 0
       }));
-      return sendJson(res, 200, result);
+      const indicatorSync = await reconcileIndicatorAfterContractMutation({ workspaceId: contractsDecisionMergeMatch[1] });
+      return sendJson(res, 200, { ...result, indicatorSync });
     } catch (error) {
       logContractsRouteFailure("r4.2c-decision-merge", error);
       const response = contractsErrorResponse(error);
@@ -1552,9 +1570,66 @@ async function handleApi(req, res, url) {
         pendingDecisionReview: result.metrics.proposedCount,
         scheduleWrites: 0
       }));
-      return sendJson(res, 200, result);
+      const indicatorSync = await reconcileIndicatorAfterContractMutation({ workspaceId: contractsDecisionReviewItemMatch[1] });
+      return sendJson(res, 200, { ...result, indicatorSync });
     } catch (error) {
       logContractsRouteFailure("r4.2b-decision-review-apply", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const indicatorContractWorkspaceMatch = url.pathname.match(
+    /^\/api\/indicator\/contracts\/workspaces\/([0-9a-f-]+)\/(status|reconcile)$/iu
+  );
+  if (indicatorContractWorkspaceMatch
+      && ((req.method === "GET" && indicatorContractWorkspaceMatch[2] === "status")
+        || (req.method === "POST" && indicatorContractWorkspaceMatch[2] === "reconcile"))) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = req.method === "POST" ? await readJson(req).catch(() => ({})) : {};
+      const { reconcileContractConditions } = await import("./indicator/contractConditions.js");
+      const result = await reconcileContractConditions({
+        workspaceId: indicatorContractWorkspaceMatch[1],
+        commit: req.method === "POST" ? body.commit !== false : false,
+        config: config()
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("indicator-contract-conditions", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractSourceLinkMatch = url.pathname.match(
+    /^\/api\/contracts\/workspaces\/([0-9a-f-]+)\/source-link$/iu
+  );
+  if (req.method === "GET" && contractSourceLinkMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const decisionId = url.searchParams.get("decisionId") || "";
+      const page = Number(url.searchParams.get("page"));
+      if (!decisionId) return sendJson(res, 400, { error: "decisionId is required" });
+      const { createContractSourceSignedUrl } = await import("./indicator/contractConditions.js");
+      const source = await createContractSourceSignedUrl({
+        workspaceId: contractSourceLinkMatch[1],
+        decisionId,
+        expiresIn: 60,
+        config: config()
+      });
+      const location = `${source.signedUrl}${Number.isInteger(page) && page > 0 ? `#page=${page}` : ""}`;
+      res.writeHead(302, {
+        Location: location,
+        "Cache-Control": "private, no-store, max-age=0",
+        Pragma: "no-cache",
+        "Referrer-Policy": "no-referrer"
+      });
+      return res.end();
+    } catch (error) {
+      logContractsRouteFailure("contract-source-link", error);
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
     }

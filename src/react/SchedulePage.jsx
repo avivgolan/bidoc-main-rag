@@ -420,6 +420,15 @@ function offsetText(condition) {
   return `${Number(condition.offset_value)} ${unit}`.trim();
 }
 
+function conditionSourceHref(condition) {
+  const workspaceId = condition?.metadata?.contracts_workspace_id;
+  const decisionId = condition?.source_contract_decision_id;
+  if (!workspaceId || !decisionId) return null;
+  const params = new URLSearchParams({ decisionId });
+  if (condition.source_page) params.set("page", String(condition.source_page));
+  return `/api/contracts/workspaces/${encodeURIComponent(workspaceId)}/source-link?${params}`;
+}
+
 const PendingConditionsBox = ({ data, expanded, onToggle, resolvingId, onResolve, rowResults }) => {
   const conditions = data?.conditions ?? [];
   if (!conditions.length) return null;
@@ -464,12 +473,21 @@ const PendingConditionsBox = ({ data, expanded, onToggle, resolvingId, onResolve
                     {items.map((c) => {
                       const result = rowResults?.[c.id];
                       const isBusy = resolvingId === c.id;
+                      const sourceHref = conditionSourceHref(c);
+                      const pendingReason = c.metadata?.pending_reason;
                       return (
                         <tr key={c.id} title={c.source_excerpt}>
                           <td className="condName">{c.name}</td>
                           <td className="condRule"><b>{offsetText(c)}</b> מ־{c.anchor_description}</td>
                           <td><span className={`condAnchor is-${c.anchor_kind}`}>{ANCHOR_KIND_LABELS[c.anchor_kind] ?? c.anchor_kind}</span></td>
-                          <td className="condPage">{c.source_page ? `עמ׳ ${c.source_page}` : "—"}</td>
+                          <td className="condPage">
+                            {sourceHref ? (
+                              <a href={sourceHref} target="_blank" rel="noreferrer" title="פתיחת מסמך החוזה בקישור מאובטח קצר־חיים">
+                                {c.metadata?.source_filename || "מסמך החוזה"}{c.source_page ? ` · עמ׳ ${c.source_page}` : ""}
+                              </a>
+                            ) : c.source_page ? `עמ׳ ${c.source_page}` : "—"}
+                            {pendingReason ? <span className="condPendingReason">{pendingReason}</span> : null}
+                          </td>
                           <td className="condActionCell">
                             <button type="button" className="condResolveBtn" onClick={() => onResolve(c)} disabled={Boolean(resolvingId)}>
                               {isBusy ? "סוכן AI מחפש…" : "חפש והשלם עם AI"}

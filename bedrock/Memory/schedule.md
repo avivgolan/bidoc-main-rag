@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: schedule
-last_updated: 2026-08-12
+last_updated: 2026-08-19
 tags:
   - schedule
   - contract
@@ -20,6 +20,10 @@ tags:
 - Schedule has no separate URL, project ID, key, or Settings card. Direct KAPAIM introspection confirms that `gantt_files`/`gantt_tasks` exist there but are empty; the active upload source is therefore MAIN's populated `_test` tables.
 - The upload UI currently persists its schedule source in MAIN as `gantt_files_test` (1 row) and `gantt_tasks_test` (382 rows). Schedule source reads use those two MAIN tables; engine-owned `schedule_*` reads/writes remain on APP DATA/KAPAIM. The unsuffixed MAIN names return 404.
 - Contract dates live in `schedule_contract_milestones`; relative obligations waiting for a trigger live in `schedule_contract_conditions`.
+- Indicator-owned contract-condition synchronization is implemented behind `INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED=TRUE`. It accepts only current human-approved/corrected, conflict-free relative decisions with `scheduleImpact=yes` and an active project mapping; decision-revision IDs make the UPSERT idempotent, while superseded pending rows become `dismissed` and resolved history is preserved.
+- Schedule sweeps reconcile contract conditions before operational resolution. Trigger lookup is structured-first (Gantt, then `schedule_observed_events`) and uses RAG only when no unambiguous structured source exists. Resolution is atomic through `bidoc_schedule_resolve_condition_v1`; the deterministic Schedule engine remains the only offset calculator.
+- Working-day conditions may retain a verified trigger while remaining `pending` with `calendar_coverage_missing`; they cannot resolve until `holidays_through` covers the computed range.
+- Contract source links are generated server-side as 60-second private Storage signed URLs after workspace/decision authorization. Schedule stores document identity and source metadata, never a public Storage URL.
 - Unlinked active contract milestones still produce milestone-only indicators and visible global contract markers; they do not need an activity mapping to appear.
 - `src/subagents/scheduleConditionResolver.js` resolves pending conditions row by row: it plans an event-date question, calls the complete chat RAG path ephemerally, verifies an ISO date plus quote, source URL, and confidence, then computes the due date deterministically.
 - Resolver searches require `project_id_filter`; older hybrid RPCs that cannot enforce it fail closed instead of widening to tenant-wide retrieval.
@@ -39,6 +43,7 @@ tags:
 
 ## Recent Changes
 
+- 2026-08-19 -- Implemented the Indicator-to-Schedule relative-condition bridge locally on `codex/contracts-relative-schedule`: review-triggered and sweep-start reconciliation, service-role-only transactional RPCs, structured-first trigger resolution, atomic milestone/condition lifecycle, calendar-coverage blocking, multiple-relative-mention splitting, secure source links, pending-table UI, and management status/retry APIs. Contracts 152/152 and Schedule 49/49 pass; React and syntax/diff checks pass. No live migration or Schedule row was written; local PostgreSQL compilation remains unavailable without Docker, and the worktree lacks the live KAPAIM settings needed for a fresh read-only dry run.
 - 2026-08-18 -- Corrected the R5 ownership boundary. Contracts no longer exposes a Schedule-shadow planner or promotion gate; it provides a GET-only, zero-write Indicator handoff derived from reviewed `private.contracts` decisions. KAPAIM migration `20260818080957` removes the legacy projection RPC and Contracts-owned one-target uniqueness while preserving optional one-way provenance guards. The retained workspace now reports 40 suitable, 24 unsuitable, and 73 review-required decisions out of 137; Schedule target tables and linked rows remain zero. Project/activity mapping, target choice, cardinality, date/calendar calculation, and Schedule writes belong to the future Indicator agent.
 - 2026-08-12 -- הושלם Phase 3G עד גבול schema-only. המאמת הייעודי עבר 25/25, Contracts עבר 96/96, Schedule עבר 47/47, וחבילת מסד Phase 3, מרוץ PostgreSQL ו־rollback לא־הרסני עברו. KAPAIM מתעד את מיגרציות `20260812200241` ו־`20260812200652`; בדיקת קטלוג האבטחה עברה, ומיפויים/אירועי ביקורת נשארו `0`. PID `60996` עלה עם Phase 3F.1 פעיל ושער 3G סגור; preview החזיר 409 `previous_version_missing` ו־apply החזיר 503 `not_approved`. לא נוצרו שורות Schedule או התראות. הדרישה הבאה היא להעלות גרסת MAIN שנייה אמיתית ולהריץ שוב preview בלבד; apply חי דורש אישור נפרד.
 - 2026-08-12 -- Activated and certified Phase 3F.1 reuse. Remote migration `20260812152042` and private PDF-only `contracts-private` with a 3,000,000-byte cap are active; process-local server PID `39492` reported `ready: true`. The initial exact-PDF run saved one workspace and revision-1 draft with 12 candidates and logged eight model-call events: seven completions plus one 90-second chunk-7 failure before a successful `gpt-4o-mini` retry. Reopen and a byte-identical second upload restored the Hebrew draft with zero additional model calls, as the UI explicitly reported. Credential rotation remains recommended, user-accepted unresolved risk; no mapping, Schedule row, arithmetic, or alert changed.
@@ -69,7 +74,7 @@ tags:
 - Never let an LLM calculate schedule offsets; only validated trigger evidence crosses into deterministic date arithmetic.
 - A `found` result without both a pinpoint excerpt and a traceable source is treated as ambiguous.
 - Recurring conditions remain pending and use the trigger date in the generated milestone key so later occurrences can create distinct milestones.
-- The resolver first upserts the milestone and then patches the condition. Reruns are safe because milestone identity is stable.
+- The resolver uses one service-role-only RPC to upsert the milestone and transition the condition in the same transaction. Reruns are safe because milestone identity is stable.
 - A configured key is not necessarily a valid key. The resolver maps OpenRouter 401/`User not found` to `openrouter_auth`; the UI must expose this instead of a generic search failure.
 - Do not diagnose this resolver with `getConfig().openRouterApiKey` alone because generic config supports env fallback. Use the settings-owned boundary.
 - A healthy Gantt source does not imply the Schedule schema is provisioned. `gantt_*` and every `schedule_*` table must be exposed by the KAPAIM Data API reached through APP DATA.

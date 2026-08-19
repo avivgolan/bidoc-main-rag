@@ -10522,6 +10522,8 @@ body:has(#timeline.active) .sidebar {
 .condAnchor.is-schedule_task { background: var(--brand-100); color: var(--brand-700); }
 .condAnchor.is-milestone { background: var(--success-bg); color: var(--success-text); }
 .condPage { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.condPage a { color: var(--brand-700); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
+.condPendingReason { display: block; margin-top: 3px; max-width: 190px; white-space: normal; color: var(--amber); }
 .condActionCell { min-width: 170px; }
 .condResolveBtn {
   min-height: 36px; padding: 6px 11px; border: 1px solid var(--brand-500); border-radius: 7px;

@@ -153,6 +153,7 @@ import {
   CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
   CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
   buildContractsDecisionCandidates,
+  relativeTemporalMentions,
   runContractsDecisionNormalization
 } from "../src/contracts/decisionNormalization.js";
 import {
@@ -180,6 +181,13 @@ import {
   contractsIndicatorHandoffApproved,
   loadContractsIndicatorHandoff
 } from "../src/contracts/indicatorHandoff.js";
+import {
+  CONTRACT_SOURCE_OBJECT_RPC,
+  INDICATOR_CONTRACT_SYNC_RPC,
+  createContractSourceSignedUrl,
+  indicatorContractConditionsApproved,
+  reconcileContractConditions
+} from "../src/indicator/contractConditions.js";
 import {
   CONTRACTS_SCHEDULE_PROJECTION_AGENT_VERSION,
   CONTRACTS_SCHEDULE_PROJECTION_MIGRATION_VERSION,
@@ -5712,6 +5720,151 @@ export function registerContractsAgentTests(test) {
     assert.equal(relative.conditionResolver.calculatedDueDate, null);
     assert.equal(relative.conditionResolver.contractualTruthUpdated, false);
     assert.equal(relative.activityMapping.decisionState, "pending_trigger");
+  });
+
+  test("contracts R4.2B splits multiple relative time mentions into separate decision candidates", () => {
+    assert.deepEqual(
+      relativeTemporalMentions([{ clauseKey: "8.1", rawText: "הודעה בתוך 15 ימים ותיקון בתוך 30 ימי עבודה." }])
+        .map((item) => item.text),
+      ["15 ימים", "30 ימי עבודה"]
+    );
+    const preview = structuredClone(semanticRelationshipsFixture());
+    preview.document = { documentSha256: FIXTURE_SHA, documentVersionId: `sha256:${FIXTURE_SHA}` };
+    const clause = preview.clauses.find((item) => item.clauseKey === "6.7");
+    clause.rawText = "יש למסור הודעה בתוך 15 ימים ולהשלים תיקון בתוך 30 ימי עבודה ממועד הדרישה.";
+    clause.summaryHe = "שני מועדים יחסיים נפרדים חלים על הודעה ועל תיקון.";
+    const candidates = buildContractsDecisionCandidates({
+      preview,
+      relationshipReview: { metrics: { proposedCount: 0 }, items: [] }
+    });
+    const split = candidates.filter((candidate) => candidate.sourceClauseKeys.includes("6.7"));
+    assert.equal(split.length, 2);
+    assert.deepEqual(split.map((candidate) => candidate.temporalFocus.text), ["15 ימים", "30 ימי עבודה"]);
+    assert.equal(new Set(split.map((candidate) => candidate.decisionKey)).size, 2);
+    assert.equal(new Set(split.map((candidate) => candidate.proposalKey)).size, 2);
+  });
+
+  test("contracts Indicator sync is feature-gated and calls only the atomic service-role RPC", async () => {
+    assert.equal(indicatorContractConditionsApproved({ INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED: "TRUE" }), true);
+    assert.equal(indicatorContractConditionsApproved({}), false);
+    await assert.rejects(
+      reconcileContractConditions({
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        commit: true,
+        env: {},
+        config: {}
+      }),
+      (error) => error.code === "indicator_contract_conditions_not_enabled" && error.status === 503
+    );
+
+    const requests = [];
+    const result = await reconcileContractConditions({
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      commit: true,
+      env: { INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED: "TRUE" },
+      config: {
+        contentSource: {
+          supabaseUrl: "https://app-data.example",
+          supabaseServiceRoleKey: "service-role-test"
+        }
+      },
+      fetchImpl: async (url, options) => {
+        requests.push({ url, options });
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          text: async () => JSON.stringify({
+            ok: true,
+            committed: true,
+            workspaceId: MAPPING_PROJECT_LINK_ID,
+            eligible: 1,
+            inserted: 1,
+            updated: 0,
+            unchanged: 0,
+            dismissed: 0,
+            blocked: 0
+          })
+        };
+      }
+    });
+    assert.equal(result.inserted, 1);
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, new RegExp(`/rpc/${INDICATOR_CONTRACT_SYNC_RPC}$`));
+    assert.equal(requests[0].options.headers.apikey, "service-role-test");
+    assert.deepEqual(JSON.parse(requests[0].options.body), {
+      p_workspace_id: MAPPING_PROJECT_LINK_ID,
+      p_commit: true
+    });
+  });
+
+  test("contracts source link resolves private lineage before creating a 60-second signed URL", async () => {
+    const decisionId = "88888888-8888-4888-8888-888888888888";
+    const requests = [];
+    const result = await createContractSourceSignedUrl({
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      decisionId,
+      expiresIn: 600,
+      config: {
+        contentSource: {
+          supabaseUrl: "https://app-data.example",
+          supabaseServiceRoleKey: "service-role-test"
+        }
+      },
+      fetchImpl: async (url, options) => {
+        requests.push({ url, options });
+        if (url.includes(`/rpc/${CONTRACT_SOURCE_OBJECT_RPC}`)) {
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            text: async () => JSON.stringify({
+              workspaceId: MAPPING_PROJECT_LINK_ID,
+              decisionId,
+              documentVersionId: `sha256:${"f".repeat(64)}`,
+              filename: "contract.pdf",
+              storageBucket: "contracts-private",
+              storageObjectKey: "contracts/private/contract.pdf"
+            })
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ signedURL: "/object/sign/contracts-private/signed-token" })
+        };
+      }
+    });
+    assert.equal(result.expiresIn, 60);
+    assert.equal(result.signedUrl, "https://app-data.example/storage/v1/object/sign/contracts-private/signed-token");
+    assert.equal(requests.length, 2);
+    assert.deepEqual(JSON.parse(requests[1].options.body), { expiresIn: 60 });
+    assert.equal(requests[1].options.headers.apikey, "service-role-test");
+  });
+
+  test("contracts Indicator migration is invoker-safe, transactional, review-gated, and least privilege", () => {
+    const sql = fs.readFileSync(
+      new URL("../supabase/migrations/20260819113955_indicator_contract_conditions_v1.sql", import.meta.url),
+      "utf8"
+    );
+    assert.match(sql, /security invoker/iu);
+    assert.doesNotMatch(sql, /security definer/iu);
+    assert.match(sql, /current_user <> 'service_role'/u);
+    assert.match(sql, /pg_advisory_xact_lock/iu);
+    assert.match(sql, /on conflict \(project_id, condition_key\) do update/iu);
+    assert.match(sql, /review_status in \('approved', 'corrected'\)/iu);
+    assert.match(sql, /schedule_impact = 'yes'/iu);
+    assert.match(sql, /temporal_kind in \('relative', 'recurring'\)/iu);
+    assert.match(sql, /status = 'dismissed'/iu);
+    assert.match(sql, /private\.indicator_contract_condition_sync_state/iu);
+    assert.match(sql, /'lastSyncAt'/u);
+    assert.match(sql, /R5 condition lifecycle update changed contractual truth/iu);
+    assert.match(sql, /new\.status not in \('pending', 'resolved', 'dismissed'\)/iu);
+    assert.match(sql, /nullif\(v_condition\.metadata ->> 'document_version_id', ''\)/iu);
+    assert.doesNotMatch(sql, /v_source_url/iu);
+    assert.match(sql, /revoke execute[\s\S]+from public, anon, authenticated/iu);
+    assert.match(sql, /grant execute[\s\S]+to service_role/iu);
+    assert.match(sql, /bidoc_schedule_resolve_condition_v1/iu);
   });
 
   test("contracts R5 fails closed for unreviewed, conflicted, unmapped, and incomplete extension decisions", async () => {

@@ -165,6 +165,7 @@ async function scheduleFetch({
     error.missingTable = isMissingTableError(response.status, message);
     throw error;
   }
+  if (options.rawJson === true) return data;
   const rows = Array.isArray(data) ? data : [];
   if (options.includeExactCount === true) {
     const contentRange = String(response.headers?.get?.("content-range") || "");
@@ -181,6 +182,25 @@ async function scheduleFetch({
 // schedule_* tables only, never application tables).
 export async function scheduleDataRequest({ config = null, settings = null, path, options = {} }) {
   return scheduleFetch({ config: config || getConfig(), settings: settings || scheduleSettings(), path, options });
+}
+
+export async function scheduleRpcRequest({
+  config = null,
+  settings = null,
+  rpc,
+  payload = {},
+  fetchImpl = fetch
+} = {}) {
+  if (!/^[a-z][a-z0-9_]{2,100}$/u.test(String(rpc || ""))) {
+    throw new Error("scheduleRpcRequest: rpc is invalid");
+  }
+  return scheduleFetch({
+    config: config || getConfig(),
+    settings: settings || scheduleSettings(),
+    path: `/rest/v1/rpc/${rpc}`,
+    options: { method: "POST", body: payload, rawJson: true },
+    fetchImpl
+  });
 }
 
 const TASK_COLUMNS = "file_id,task_uid,task_name,start_date,finish_date,percent_complete,is_summary,is_milestone,outline_level";
@@ -344,16 +364,18 @@ export async function listScheduleProjects({ config = null, settings: settingsIn
 
 // One-call convenience for the orchestrator: everything sweep()/computeIndicator()
 // need, plus warnings about degraded inputs (missing engine tables).
-export async function loadScheduleInputs({ config = null, projectId, settings: settingsInput = null }) {
+export async function loadScheduleInputs({ config = null, projectId, engineProjectId = null, settings: settingsInput = null }) {
   if (!projectId) throw new Error("loadScheduleInputs: projectId is required");
   const cfg = config || getConfig();
   const settings = settingsInput || scheduleSettings();
   const warnings = [];
   const source = await loadScheduleSource({ config: cfg, projectId, settings });
-  const calendar = await loadScheduleCalendar({ config: cfg, projectId, settings, warnings });
-  const contractMilestones = await loadContractMilestones({ config: cfg, projectId, settings, warnings });
+  const scheduleProjectId = engineProjectId || projectId;
+  const calendar = await loadScheduleCalendar({ config: cfg, projectId: scheduleProjectId, settings, warnings });
+  const contractMilestones = await loadContractMilestones({ config: cfg, projectId: scheduleProjectId, settings, warnings });
   return {
-    projectId,
+    projectId: scheduleProjectId,
+    sourceProjectId: projectId,
     tasks: source.tasks,
     previousTasks: source.previousTasks,
     scheduleMeta: source.scheduleMeta,

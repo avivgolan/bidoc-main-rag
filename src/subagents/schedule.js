@@ -16,6 +16,12 @@ import { getProjectDateTime } from "../clock.js";
 import { computeIndicator, sweep, deriveAlert, deriveSeverity, ENGINE_VERSION, CONTRACT_VERSION } from "../scheduleEngine.js";
 import { diffCalendarDays, toIsoDate } from "../scheduleCalendar.js";
 import { loadScheduleInputs, scheduleDataRequest, scheduleSettings } from "../scheduleIngestion.js";
+import {
+  indicatorContractConditionsApproved,
+  reconcileProjectContractConditions,
+  resolveIndicatorProjectContext
+} from "../indicator/contractConditions.js";
+import { runScheduleConditionResolver } from "./scheduleConditionResolver.js";
 
 export const SCHEDULE_HEALTH_VERSION = "schedule-health.v1";
 
@@ -203,7 +209,54 @@ export async function runScheduleSweep({ projectId, asOf: asOfInput = null, filt
     return item;
   };
 
-  const inputs = await loadScheduleInputs({ config: cfg, projectId, settings });
+  const preflightWarnings = [];
+  const projectContext = await resolveIndicatorProjectContext({ projectId, config: cfg, settings }).catch((error) => {
+    preflightWarnings.push(`Indicator project mapping: ${error.message}`);
+    return { mappingFound: false, sourceProjectId: projectId, scheduleProjectId: projectId };
+  });
+  let contractConditionSync = null;
+  let conditionResolution = null;
+  if (indicatorContractConditionsApproved()) {
+    contractConditionSync = await reconcileProjectContractConditions({
+      projectId,
+      commit: persist,
+      config: cfg,
+      settings
+    }).catch((error) => {
+      preflightWarnings.push(`Indicator contract sync: ${error.message}`);
+      return { ok: false, committed: false, reason: error.message };
+    });
+    step("contract_condition_sync", "Reviewed relative contract conditions reconciled", contractConditionSync,
+      contractConditionSync?.ok === false ? "error" : "done");
+
+    if (persist) {
+      conditionResolution = await runScheduleConditionResolver({
+        projectId: projectContext.sourceProjectId,
+        limit: 25,
+        commit: true,
+        config: cfg,
+        settings,
+        projectContext,
+        contractOnly: true,
+        runId: runId ? `${runId}:conditions` : null
+      }).catch((error) => {
+        preflightWarnings.push(`Schedule condition resolver: ${error.message}`);
+        return { ok: false, processed: 0, reason: error.message };
+      });
+      step("contract_condition_resolution", "Pending contract triggers checked", {
+        processed: conditionResolution?.processed || 0,
+        summary: conditionResolution?.summary || null
+      }, conditionResolution?.ok === false ? "error" : "done");
+    }
+  }
+
+  const inputs = await loadScheduleInputs({
+    config: cfg,
+    projectId: projectContext.sourceProjectId,
+    engineProjectId: projectContext.scheduleProjectId,
+    settings
+  });
+  inputs.warnings.unshift(...preflightWarnings);
   step("schedule_source", "Schedule source loaded", {
     tasks: inputs.tasks.length,
     previousTasks: inputs.previousTasks.length,
@@ -212,7 +265,7 @@ export async function runScheduleSweep({ projectId, asOf: asOfInput = null, filt
   });
 
   const engineInput = {
-    projectId,
+    projectId: projectContext.scheduleProjectId,
     tasks: inputs.tasks,
     previousTasks: inputs.previousTasks,
     contractMilestones: inputs.contractMilestones,
@@ -231,7 +284,7 @@ export async function runScheduleSweep({ projectId, asOf: asOfInput = null, filt
 
   const dataVersion = scheduleDataVersion(inputs.scheduleMeta);
   const persistOutcome = persist
-    ? await persistIndicatorSnapshots({ config: cfg, settings, projectId, indicators: full.indicators, dataVersion, warnings: inputs.warnings })
+    ? await persistIndicatorSnapshots({ config: cfg, settings, projectId: projectContext.scheduleProjectId, indicators: full.indicators, dataVersion, warnings: inputs.warnings })
     : null;
   if (persistOutcome) {
     step("snapshot_write", "Indicator snapshots persisted", persistOutcome, persistOutcome.persisted ? "done" : "error");
@@ -242,6 +295,7 @@ export async function runScheduleSweep({ projectId, asOf: asOfInput = null, filt
     contractVersion: CONTRACT_VERSION,
     engineVersion: ENGINE_VERSION,
     projectId,
+    scheduleProjectId: projectContext.scheduleProjectId,
     asOf,
     calculatedAt,
     dataVersion,
@@ -250,6 +304,8 @@ export async function runScheduleSweep({ projectId, asOf: asOfInput = null, filt
     indicators: matched.indicators,
     scheduleMeta: inputs.scheduleMeta,
     persistOutcome,
+    contractConditionSync,
+    conditionResolution,
     warnings: inputs.warnings,
     trace,
     workflowLog: buildScheduleWorkflowLog({
@@ -273,7 +329,13 @@ export async function runScheduleIndicator({ projectId, activityKey = null, mile
   const settings = settingsInput || scheduleSettings();
   const calculatedAt = getProjectDateTime(cfg.timezone);
   const asOf = toIsoDate(asOfInput) || calculatedAt.slice(0, 10);
-  const inputs = await loadScheduleInputs({ config: cfg, projectId, settings });
+  const projectContext = await resolveIndicatorProjectContext({ projectId, config: cfg, settings });
+  const inputs = await loadScheduleInputs({
+    config: cfg,
+    projectId: projectContext.sourceProjectId,
+    engineProjectId: projectContext.scheduleProjectId,
+    settings
+  });
 
   let task = null;
   let contractMilestone = null;
@@ -291,7 +353,7 @@ export async function runScheduleIndicator({ projectId, activityKey = null, mile
   }
 
   const indicator = computeIndicator({
-    projectId,
+    projectId: projectContext.scheduleProjectId,
     task,
     contractMilestone,
     asOf,
@@ -515,6 +577,7 @@ export async function runScheduleAlertScan({ projectId, asOf: asOfInput = null, 
     projectId, asOf: asOfInput, config: cfg, settings,
     persist: true, filters: { excludeCompleted: false }, runId, emit
   });
+  const scheduleProjectId = sweepResult.scheduleProjectId || projectId;
   if (!sweepResult.persistOutcome?.persisted) {
     return {
       ok: false,
@@ -526,13 +589,13 @@ export async function runScheduleAlertScan({ projectId, asOf: asOfInput = null, 
 
   const existingAlerts = await scheduleDataRequest({
     config: cfg, settings,
-    path: `/rest/v1/${table}?select=*&project_id=eq.${encodeURIComponent(projectId)}&lifecycle_status=in.(open,updated)`
+    path: `/rest/v1/${table}?select=*&project_id=eq.${encodeURIComponent(scheduleProjectId)}&lifecycle_status=in.(open,updated)`
   });
   const anyRow = existingAlerts.length
     ? existingAlerts
     : await scheduleDataRequest({
       config: cfg, settings,
-      path: `/rest/v1/${table}?select=id&project_id=eq.${encodeURIComponent(projectId)}&limit=1`
+      path: `/rest/v1/${table}?select=id&project_id=eq.${encodeURIComponent(scheduleProjectId)}&limit=1`
     });
   const isBootstrap = !anyRow.length;
 
@@ -583,12 +646,14 @@ export async function runScheduleAlertScan({ projectId, asOf: asOfInput = null, 
 export async function listScheduleAlerts({ projectId, lifecycle = null, baselined = null, minSeverity = null, config = null, settings: settingsInput = null } = {}) {
   if (!projectId) throw new Error("listScheduleAlerts: projectId is required");
   const settings = settingsInput || scheduleSettings();
-  const filters = [`project_id=eq.${encodeURIComponent(projectId)}`];
+  const cfg = config || getConfig();
+  const projectContext = await resolveIndicatorProjectContext({ projectId, config: cfg, settings });
+  const filters = [`project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}`];
   if (lifecycle) filters.push(`lifecycle_status=in.(${encodeURIComponent(lifecycle)})`);
   if (baselined != null) filters.push(`baselined=eq.${baselined === true || baselined === "true"}`);
   if (minSeverity != null) filters.push(`severity_level=gte.${Number(minSeverity)}`);
   return scheduleDataRequest({
-    config: config || getConfig(), settings,
+    config: cfg, settings,
     path: `/rest/v1/${settings.alertsTable}?select=*&${filters.join("&")}&order=severity_level.desc,days_late.desc.nullslast`
   });
 }
@@ -604,15 +669,23 @@ export async function listScheduleAlerts({ projectId, lifecycle = null, baseline
 export async function listScheduleConditions({ projectId, conditionId = null, status = "pending", category = null, config = null, settings: settingsInput = null } = {}) {
   if (!projectId) throw new Error("listScheduleConditions: projectId is required");
   const settings = settingsInput || scheduleSettings();
-  const filters = [`project_id=eq.${encodeURIComponent(projectId)}`];
+  const cfg = config || getConfig();
+  const projectContext = await resolveIndicatorProjectContext({ projectId, config: cfg, settings });
+  const filters = [`project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}`];
   if (conditionId) filters.push(`id=eq.${encodeURIComponent(conditionId)}`);
   if (status) filters.push(`status=in.(${encodeURIComponent(status)})`);
   if (category) filters.push(`category=in.(${encodeURIComponent(category)})`);
   const rows = await scheduleDataRequest({
-    config: config || getConfig(), settings,
+    config: cfg, settings,
     path: `/rest/v1/${settings.conditionsTable}?select=*&${filters.join("&")}&order=category.asc,name.asc`
   });
-  return { conditions: rows, byCategory: countBy(rows, "category"), byAnchorKind: countBy(rows, "anchor_kind") };
+  return {
+    projectId: projectContext.sourceProjectId,
+    scheduleProjectId: projectContext.scheduleProjectId,
+    conditions: rows,
+    byCategory: countBy(rows, "category"),
+    byAnchorKind: countBy(rows, "anchor_kind")
+  };
 }
 
 function countBy(rows, key) {
