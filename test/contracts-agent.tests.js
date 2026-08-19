@@ -5847,6 +5847,10 @@ export function registerContractsAgentTests(test) {
       new URL("../supabase/migrations/20260819113955_indicator_contract_conditions_v1.sql", import.meta.url),
       "utf8"
     );
+    const guardFixSql = fs.readFileSync(
+      new URL("../supabase/migrations/20260819141000_indicator_contract_conditions_r5_guard_fix.sql", import.meta.url),
+      "utf8"
+    );
     assert.match(sql, /security invoker/iu);
     assert.doesNotMatch(sql, /security definer/iu);
     assert.match(sql, /current_user <> 'service_role'/u);
@@ -5865,6 +5869,12 @@ export function registerContractsAgentTests(test) {
     assert.match(sql, /revoke execute[\s\S]+from public, anon, authenticated/iu);
     assert.match(sql, /grant execute[\s\S]+to service_role/iu);
     assert.match(sql, /bidoc_schedule_resolve_condition_v1/iu);
+    assert.match(guardFixSql, /v_indicator_condition/iu);
+    assert.match(guardFixSql, /new\.written_by = 'indicator_agent'/iu);
+    assert.match(guardFixSql, /schedule_contract_project_mappings/iu);
+    assert.match(guardFixSql, /mapping\.status = 'active'/iu);
+    assert.match(guardFixSql, /mapping\.schedule_project_id = new\.project_id/iu);
+    assert.match(guardFixSql, /v_source\.projection_status not in \('ready', 'projected'\)/iu);
   });
 
   test("contracts R5 fails closed for unreviewed, conflicted, unmapped, and incomplete extension decisions", async () => {
