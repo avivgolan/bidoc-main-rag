@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { makeScheduleScale, scheduleSubjectKey } from "./scheduleTimeline.js";
 
 // Schedule Intelligence tab (spec section 15, phases 1-2 screens).
 //
@@ -147,47 +148,6 @@ const GatesBlock = ({ gates, compact = false }) => {
 
 // ─── The three-axis timeline ─────────────────────────────────────────────────
 
-// Presentation-only date scaling (see header note — Rule 001 stays server-side).
-function makeScale(indicators, asOf) {
-  let min = Infinity;
-  let max = -Infinity;
-  const consider = (value) => {
-    if (!value) return;
-    const ms = Date.parse(`${value}T00:00:00Z`);
-    if (!Number.isNaN(ms)) {
-      if (ms < min) min = ms;
-      if (ms > max) max = ms;
-    }
-  };
-  consider(asOf);
-  for (const ind of indicators) {
-    const t = ind.timing ?? {};
-    // forecastFinish is deliberately NOT part of the domain: a 5%-progress
-    // task forecasts years out and would squash every other bar into pixels.
-    // Out-of-range forecasts clamp to the edge (pos() clamps) with a tooltip.
-    consider(t.plannedStart); consider(t.plannedFinish); consider(t.contractFinish);
-    consider(t.observedStart); consider(t.observedFinish);
-  }
-  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max) return null;
-  const pad = (max - min) * 0.03;
-  min -= pad; max += pad;
-  const pos = (value) => {
-    const ms = Date.parse(`${value}T00:00:00Z`);
-    if (Number.isNaN(ms)) return null;
-    return Math.min(100, Math.max(0, ((ms - min) / (max - min)) * 100));
-  };
-  const months = [];
-  const cursor = new Date(min);
-  cursor.setUTCDate(1);
-  while (cursor.getTime() <= max) {
-    const iso = cursor.toISOString().slice(0, 10);
-    const left = pos(iso);
-    if (left != null) months.push({ iso, left, label: `${MONTHS_HE[cursor.getUTCMonth()]} ${String(cursor.getUTCFullYear()).slice(2)}` });
-    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
-  }
-  return { pos, months };
-}
-
 const AxisLegend = () => (
   <div className="axisLegend">
     <span><i className="axisSwatch swPlan" /> תכנון הקבלן</span>
@@ -195,6 +155,7 @@ const AxisLegend = () => (
     <span><i className="axisSwatch swLate" /> חריגה עד "נכון ל-"</span>
     <span><i className="axisSwatch swForecast" >◆</i> תחזית סיום</span>
     <span><i className="axisSwatch swContract">⚑</i> אבן דרך חוזית</span>
+    <span><i className="axisSwatch swTrigger">▶</i> תחילת ספירה חוזית</span>
     <span><i className="axisSwatch swObserved" /> ביצוע נצפה (BIDoc)</span>
     <span><i className="axisSwatch swToday" /> קו "נכון ל-"</span>
   </div>
@@ -268,8 +229,33 @@ function AxisRow({ indicator, scale, asOf, selected, onSelect }) {
   );
 }
 
-function ThreeAxesView({ indicators, allIndicators, asOf, selected, onSelect }) {
-  const scale = useMemo(() => makeScale(indicators, asOf), [indicators, asOf]);
+function ThreeAxesView({ indicators, allIndicators, pendingConditions, asOf, selected, onSelect }) {
+  const provisionalMarkers = useMemo(() => (pendingConditions ?? []).flatMap((condition) => {
+    const date = condition?.metadata?.trigger_evidence?.provisionalDueDate;
+    return date ? [{ date, name: condition.name || "אבן דרך חוזית", provisional: true }] : [];
+  }), [pendingConditions]);
+  const triggerMarkers = useMemo(() => {
+    const byDate = new Map();
+    for (const condition of pendingConditions ?? []) {
+      const date = condition?.trigger_event_date;
+      if (!date) continue;
+      const current = byDate.get(date) || { date, names: [] };
+      const name = condition.name || "נקודת זמן חוזית";
+      if (!current.names.includes(name)) current.names.push(name);
+      byDate.set(date, current);
+    }
+    return [...byDate.values()].map((marker) => ({
+      date: marker.date,
+      name: marker.names.join(" · "),
+      count: marker.names.length
+    }));
+  }, [pendingConditions]);
+  const scaleIndicators = useMemo(() => [
+    ...(allIndicators ?? indicators),
+    ...provisionalMarkers.map((marker) => ({ timing: { contractFinish: marker.date } })),
+    ...triggerMarkers.map((marker) => ({ timing: { contractFinish: marker.date } }))
+  ], [allIndicators, indicators, provisionalMarkers, triggerMarkers]);
+  const scale = useMemo(() => makeScheduleScale(indicators, asOf, scaleIndicators), [indicators, scaleIndicators, asOf]);
   // The contract axis, chart-wide: every contractual milestone date extracted
   // from the contract renders as a labeled vertical line across all rows —
   // the supervisor sees plan and execution against the contract, not a glyph.
@@ -286,8 +272,11 @@ function ThreeAxesView({ indicators, allIndicators, asOf, selected, onSelect }) 
         name: ind.subject?.milestoneKey ? ind.subject.name : "אבן דרך חוזית"
       });
     }
+    for (const marker of provisionalMarkers) {
+      if (!byDate.has(marker.date)) byDate.set(marker.date, marker);
+    }
     return [...byDate.values()];
-  }, [indicators, allIndicators]);
+  }, [indicators, allIndicators, provisionalMarkers]);
   if (!scale) return <div className="schedEmpty">אין תאריכים להצגה</div>;
   const shown = indicators.slice(0, AXES_ROW_CAP);
   const asOfPos = scale.pos(asOf);
@@ -298,19 +287,33 @@ function ThreeAxesView({ indicators, allIndicators, asOf, selected, onSelect }) 
         <div className="axesTimeArea" dir="ltr">
           <div className="axesMonths">
             {scale.months.map((m) => (
-              <span key={m.iso} className="axesMonthTick" style={{ left: `${m.left}%` }}>{m.label}</span>
+              <span key={m.iso} className="axesMonthTick" style={{ left: `${m.left}%` }}>
+                {MONTHS_HE[m.month]} {String(m.year).slice(2)}
+              </span>
             ))}
           </div>
           <div className="axesRowsOverlay">
             {scale.months.map((m) => (
               <span key={m.iso} className="axesGridLine" style={{ left: `${m.left}%` }} />
             ))}
+            {triggerMarkers.map((marker) => {
+              const left = scale.pos(marker.date);
+              if (left == null) return null;
+              const label = `תחילת ספירה: ${marker.name} · ${marker.date}`;
+              return (
+                <span key={`trigger:${marker.date}`} className="axesTriggerLine" style={{ left: `${left}%` }} title={label}>
+                  <label>▶ {label}{marker.count > 1 ? ` (${marker.count})` : ""}</label>
+                </span>
+              );
+            })}
             {contractMarkers.map((marker) => {
               const left = scale.pos(marker.date);
               if (left == null) return null;
               return (
-                <span key={marker.date} className="axesContractLine" style={{ left: `${left}%` }}>
-                  <label>⚑ {marker.name} · {marker.date}</label>
+                <span key={`${marker.date}:${marker.name}`} className={`axesContractLine ${marker.provisional ? "is-provisional" : ""}`}
+                  style={{ left: `${left}%` }}
+                  title={marker.provisional ? "מועד משוער בלבד — ממתין להשלמת לוח ימי העבודה והחגים" : undefined}>
+                  <label>⚑ {marker.provisional ? "משוער: " : ""}{marker.name} · {marker.date}</label>
                 </span>
               );
             })}
@@ -323,8 +326,8 @@ function ThreeAxesView({ indicators, allIndicators, asOf, selected, onSelect }) 
         </div>
         <div className="axesRows">
           {shown.map((ind) => (
-            <AxisRow key={ind.subject.activityKey} indicator={ind} scale={scale} asOf={asOf}
-              selected={selected?.subject.activityKey === ind.subject.activityKey} onSelect={onSelect} />
+            <AxisRow key={scheduleSubjectKey(ind)} indicator={ind} scale={scale} asOf={asOf}
+              selected={scheduleSubjectKey(selected) === scheduleSubjectKey(ind)} onSelect={onSelect} />
           ))}
         </div>
       </div>
@@ -546,7 +549,7 @@ const PendingConditionsBox = ({
                             ) : null}
                             {result ? (
                               <span className={`condRowResult is-${result.status}`} title={result.reason || result.evidence?.reason || ""}>
-                                {result.status === "not_found" ? "לא נמצא תאריך" : result.status === "needs_review" ? "נדרשת בדיקה" : result.status === "error" ? result.reason || "החיפוש נכשל" : result.dueDate || "הושלם"}
+                                {result.status === "not_found" ? "לא נמצא תאריך" : result.status === "needs_review" ? (result.provisionalDueDate ? `מועד משוער: ${result.provisionalDueDate}` : "נדרשת בדיקה") : result.status === "error" ? result.reason || "החיפוש נכשל" : result.dueDate || "הושלם"}
                                 {result.errorCode === "openrouter_auth" ? <a className="condSettingsLink" href="#settings">עדכון מפתח בהגדרות</a> : null}
                               </span>
                             ) : null}
@@ -716,7 +719,8 @@ export function SchedulePage() {
         setResolverNotice(`הושלם: ${condition.name} — האירוע ${rowResult.evidence?.triggerDate || manualTriggerDate || "אותר"}, והמועד החוזי ${rowResult.dueDate} נשמר.`);
         await loadData(projectId, asOf);
       } else if (rowResult.triggerSaved) {
-        setResolverNotice(`תאריך האירוע ${rowResult.evidence?.triggerDate || manualTriggerDate} נשמר. חישוב המועד ממתין להשלמת לוח ימי העבודה והחגים.`);
+        const provisional = rowResult.provisionalDueDate ? ` מועד משוער ${rowResult.provisionalDueDate} סומן בדגלון כתום על הציר.` : "";
+        setResolverNotice(`תאריך האירוע ${rowResult.evidence?.triggerDate || manualTriggerDate} נשמר.${provisional} המועד החוזי הסופי ממתין להשלמת לוח ימי העבודה והחגים.`);
         await loadData(projectId, asOf);
       }
     } catch (err) {
@@ -862,7 +866,8 @@ export function SchedulePage() {
       </div>
 
       {view === "axes" ? (
-        <ThreeAxesView indicators={rows} allIndicators={sweepResult?.indicators} asOf={sweepResult?.asOf} selected={selected} onSelect={setSelected} />
+        <ThreeAxesView indicators={rows} allIndicators={sweepResult?.indicators} pendingConditions={conditions?.conditions}
+          asOf={sweepResult?.asOf} selected={selected} onSelect={setSelected} />
       ) : (
         <div className="schedTableWrap">
           <table className="schedTable">
@@ -873,8 +878,8 @@ export function SchedulePage() {
             </thead>
             <tbody>
               {rows.map((ind) => (
-                <tr key={ind.subject.activityKey} onClick={() => setSelected(ind)}
-                  className={selected?.subject.activityKey === ind.subject.activityKey ? "is-selected" : ""}>
+                <tr key={scheduleSubjectKey(ind)} onClick={() => setSelected(ind)}
+                  className={scheduleSubjectKey(selected) === scheduleSubjectKey(ind) ? "is-selected" : ""}>
                   <td className="schedName">{ind.subject.name}{ind.subject.isMilestone ? " ◆" : ""}</td>
                   <td><StatusBadge status={ind.status} /></td>
                   <td>{latenessText(ind.lateness)}</td>

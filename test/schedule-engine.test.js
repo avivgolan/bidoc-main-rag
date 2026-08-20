@@ -19,13 +19,14 @@ import {
 import {
   buildScheduleHealth, scheduleDataVersion, snapshotRowFromIndicator,
   buildScheduleWorkflowLog, planScheduleAlerts, subjectKeyOf,
-  BOOTSTRAP_SUMMARY_KEY, SCHEDULE_HEALTH_VERSION
+  BOOTSTRAP_SUMMARY_KEY, enrichConditionProvisionalDueDates, SCHEDULE_HEALTH_VERSION
 } from "../src/subagents/schedule.js";
 import {
   addWorkingDays, milestoneKeyForCondition, normalizeEvidenceResult,
   promotionRows, resolveConditionDueDate, runScheduleConditionResolver,
   scheduleResolverError, settingsOwnedAiConfig
 } from "../src/subagents/scheduleConditionResolver.js";
+import { makeScheduleScale, scheduleSubjectKey } from "../src/react/scheduleTimeline.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -33,6 +34,22 @@ const test = (name, fn) => tests.push({ name, fn });
 const AS_OF = "2026-08-04";
 const PROJECT = "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5";
 const CAL = { workingWeekdays: [0, 1, 2, 3, 4], holidays: [] };
+
+test("schedule timeline: filtered future contract milestone remains positioned on the chart", () => {
+  const lateActivity = {
+    subject: { activityKey: "gantt:file-a:9", milestoneKey: null },
+    timing: { plannedStart: "2025-12-02", plannedFinish: "2025-12-21", contractFinish: null }
+  };
+  const futureMilestone = {
+    subject: { activityKey: null, milestoneKey: "condition:handover", kind: "milestone" },
+    timing: { contractFinish: "2027-03-31" }
+  };
+  const scale = makeScheduleScale([lateActivity], AS_OF, [lateActivity, futureMilestone]);
+  const markerPosition = scale.pos(futureMilestone.timing.contractFinish);
+
+  assert.ok(markerPosition > 90 && markerPosition < 100, `expected an in-range milestone flag, got ${markerPosition}`);
+  assert.equal(scheduleSubjectKey(futureMilestone), "milestone:condition:handover");
+});
 
 // Mirrors the real measured row: "אישור גופי תאורה" — the spec's flagship case.
 const LIGHTING_TASK = {
@@ -821,7 +838,21 @@ test("schedule condition resolver: saves a verified trigger but keeps working-da
   assert.equal(result.results[0].triggerSaved, true);
   assert.equal(writes.length, 1);
   assert.equal(writes[0].dueDate, null);
+  assert.equal(writes[0].provisionalDueDate, result.results[0].provisionalDueDate);
   assert.equal(writes[0].evidence.triggerDate, "2025-09-28");
+});
+
+test("schedule condition read side derives a provisional flag for an already-saved trigger", () => {
+  const [condition] = enrichConditionProvisionalDueDates([{
+    id: "cond-existing",
+    name: "מועד השלמת השירותים",
+    trigger_event_date: "2025-09-30",
+    offset_value: 100,
+    offset_unit: "working_days",
+    metadata: { pending_reason: "working_calendar_coverage_incomplete", trigger_evidence: {} }
+  }], CAL);
+
+  assert.equal(condition.metadata.trigger_evidence.provisionalDueDate, "2026-02-17");
 });
 
 test("schedule condition resolver: rejects an alleged found result without a valid date", () => {

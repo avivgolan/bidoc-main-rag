@@ -21,7 +21,7 @@ import {
   reconcileProjectContractConditions,
   resolveIndicatorProjectContext
 } from "../indicator/contractConditions.js";
-import { runScheduleConditionResolver } from "./scheduleConditionResolver.js";
+import { resolveConditionDueDate, runScheduleConditionResolver } from "./scheduleConditionResolver.js";
 
 export const SCHEDULE_HEALTH_VERSION = "schedule-health.v1";
 
@@ -679,13 +679,41 @@ export async function listScheduleConditions({ projectId, conditionId = null, st
     config: cfg, settings,
     path: `/rest/v1/${settings.conditionsTable}?select=*&${filters.join("&")}&order=category.asc,name.asc`
   });
+  const needsProvisionalDate = rows.some((row) => row?.trigger_event_date
+    && row?.offset_unit === "working_days"
+    && !row?.metadata?.trigger_evidence?.provisionalDueDate);
+  const calendarRows = needsProvisionalDate
+    ? await scheduleDataRequest({
+      config: cfg, settings,
+      path: `/rest/v1/${settings.calendarsTable}?select=working_weekdays,holidays,holidays_through&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&order=is_default.desc&limit=1`
+    }).catch(() => [])
+    : [];
+  const conditions = enrichConditionProvisionalDueDates(rows, calendarRows[0] || null);
   return {
     projectId: projectContext.sourceProjectId,
     scheduleProjectId: projectContext.scheduleProjectId,
-    conditions: rows,
-    byCategory: countBy(rows, "category"),
-    byAnchorKind: countBy(rows, "anchor_kind")
+    conditions,
+    byCategory: countBy(conditions, "category"),
+    byAnchorKind: countBy(conditions, "anchor_kind")
   };
+}
+
+export function enrichConditionProvisionalDueDates(rows = [], calendar = null) {
+  return rows.map((row) => {
+    if (!row?.trigger_event_date || row?.metadata?.trigger_evidence?.provisionalDueDate) return row;
+    const resolved = resolveConditionDueDate(row, row.trigger_event_date, calendar);
+    if (!resolved.provisionalDueDate) return row;
+    return {
+      ...row,
+      metadata: {
+        ...(row.metadata || {}),
+        trigger_evidence: {
+          ...(row.metadata?.trigger_evidence || {}),
+          provisionalDueDate: resolved.provisionalDueDate
+        }
+      }
+    };
+  });
 }
 
 function countBy(rows, key) {

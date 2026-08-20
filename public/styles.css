@@ -10449,17 +10449,24 @@ body:has(#timeline.active) .sidebar {
 .swLate { background: repeating-linear-gradient(45deg, var(--danger-soft), var(--danger-soft) 4px, rgba(216,106,93,0.4) 4px, rgba(216,106,93,0.4) 8px); border: 1px solid var(--danger); }
 .swForecast { color: var(--amber); background: none; font-size: 11px; }
 .swContract { color: var(--brand-700); background: none; font-size: 11px; }
+.swTrigger { color: var(--cobalt); background: none; font-size: 10px; }
 .swObserved { background: var(--cobalt-soft); border: 1px solid var(--cobalt); }
 .swToday { background: var(--danger); width: 2px; height: 14px; }
 
 .axesBody { position: relative; direction: ltr; }
 .axesTimeArea { position: absolute; inset: 0 0 0 240px; pointer-events: none; }
-.axesMonths { position: relative; height: 20px; }
-.axesMonthTick { position: absolute; top: 0; transform: translateX(2px); font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
-.axesRowsOverlay { position: absolute; inset: 20px 0 0 0; }
+.axesMonths { position: relative; height: 64px; border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent); }
+.axesMonthTick { position: absolute; top: 46px; transform: translateX(2px); font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
+.axesRowsOverlay { position: absolute; inset: 64px 0 0 0; }
 .axesGridLine { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
 .axesContractLine { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--brand-700); z-index: 2; }
-.axesContractLine label { position: absolute; bottom: -20px; transform: translateX(-50%); background: var(--brand-700); color: #fff; font-size: 0.68rem; padding: 1px 8px; border-radius: 6px; white-space: nowrap; direction: rtl; }
+.axesContractLine label, .axesTriggerLine label { position: absolute; max-width: 280px; overflow: hidden; padding: 2px 8px; border-radius: 5px; font-size: 0.68rem; font-weight: 700; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; direction: rtl; box-shadow: 0 1px 3px rgba(28, 42, 34, 0.16); }
+.axesContractLine label { top: -62px; transform: translateX(-50%); background: var(--brand-700); color: #fff; }
+.axesContractLine.is-provisional { border-left-color: var(--amber); border-left-style: dotted; }
+.axesContractLine.is-provisional label { background: var(--amber); color: #2f2615; }
+.axesTriggerLine { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dotted var(--cobalt); z-index: 2; }
+.axesTriggerLine::before { content: ""; position: absolute; top: -7px; left: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--cobalt); border: 2px solid var(--surface); box-shadow: 0 0 0 1px var(--cobalt); }
+.axesTriggerLine label { top: -38px; transform: translateX(-50%); background: var(--cobalt); color: #fff; }
 .axesTodayLine { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--danger); z-index: 3; }
 .axesTodayLine label { position: absolute; top: -18px; transform: translateX(-50%); background: var(--danger); color: #fff; font-size: 0.68rem; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
 

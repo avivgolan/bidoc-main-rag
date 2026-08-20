@@ -333,7 +333,7 @@ async function defaultVerify({ chatResult, config }) {
   return normalizeEvidenceResult(extractJsonObject(content));
 }
 
-async function persistPromotion({ projectId, condition, evidence, dueDate, searchQuestion, pendingReason = null, config, settings }) {
+async function persistPromotion({ projectId, condition, evidence, dueDate, provisionalDueDate = null, searchQuestion, pendingReason = null, config, settings }) {
   const rows = promotionRows({ projectId, condition, evidence, dueDate, searchQuestion });
   const result = await scheduleRpcRequest({
     config,
@@ -348,7 +348,8 @@ async function persistPromotion({ projectId, condition, evidence, dueDate, searc
       p_trigger_source_id: evidence.sourceId || null,
       p_trigger_evidence: {
         ...evidence,
-        searchQuestion
+        searchQuestion,
+        ...(provisionalDueDate ? { provisionalDueDate } : {})
       },
       p_confidence: evidence.confidence,
       p_extractor_version: CONDITION_RESOLVER_VERSION,
@@ -550,6 +551,7 @@ export async function runScheduleConditionResolver({
             condition,
             evidence,
             dueDate: null,
+            provisionalDueDate: resolved.provisionalDueDate || null,
             searchQuestion: item.searchQuestion || "Stored trigger evidence",
             pendingReason: resolved.reason,
             config: cfg,

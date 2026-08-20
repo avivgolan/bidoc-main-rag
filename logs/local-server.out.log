@@ -1,0 +1,9 @@
+
+> bidoc-agent@0.1.0 start
+> node src/server.js
+
+bidoc agent running at http://localhost:4000
+[startup] OpenRouter : ✓ configured
+[startup] App DB     : ✓ configured
+[startup] APP DATA   : ✓ configured
+[startup] Timezone   : Asia/Jerusalem
