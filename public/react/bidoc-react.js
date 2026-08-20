@@ -1011,14 +1011,14 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		var e = Ue;
 		return Ue <<= 1, !(Ue & 62914560) && (Ue = 4194304), e;
 	}
-	function z(e) {
+	function Ye(e) {
 		for (var t = [], n = 0; 31 > n; n++) t.push(e);
 		return t;
 	}
-	function B(e, t) {
+	function Xe(e, t) {
 		e.pendingLanes |= t, t !== 268435456 && (e.suspendedLanes = 0, e.pingedLanes = 0, e.warmLanes = 0);
 	}
-	function Ye(e, t, n, r, i, a) {
+	function z(e, t, n, r, i, a) {
 		var o = e.pendingLanes;
 		e.pendingLanes = n, e.suspendedLanes = 0, e.pingedLanes = 0, e.warmLanes = 0, e.expiredLanes &= n, e.entangledLanes &= n, e.errorRecoveryDisabledLanes &= n, e.shellSuspendCounter = 0;
 		var s = e.entanglements, c = e.expirationTimes, l = e.hiddenUpdates;
@@ -1032,9 +1032,9 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 			}
 			n &= ~d;
 		}
-		r !== 0 && Xe(e, r, 0), a !== 0 && i === 0 && e.tag !== 0 && (e.suspendedLanes |= a & ~(o & ~t));
+		r !== 0 && B(e, r, 0), a !== 0 && i === 0 && e.tag !== 0 && (e.suspendedLanes |= a & ~(o & ~t));
 	}
-	function Xe(e, t, n) {
+	function B(e, t, n) {
 		e.pendingLanes |= t, e.suspendedLanes &= ~t;
 		var r = 31 - R(t);
 		e.entangledLanes |= t, e.entanglements[r] = e.entanglements[r] | 1073741824 | n & 261930;
@@ -1722,17 +1722,17 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 	})), Vn = _n(h({}, vn, {
 		newState: 0,
 		oldState: 0
-	})), H = [
+	})), Hn = [
 		9,
 		13,
 		27,
 		32
-	], Hn = sn && "CompositionEvent" in window, Un = null;
-	sn && "documentMode" in document && (Un = document.documentMode);
-	var Wn = sn && "TextEvent" in window && !Un, Gn = sn && (!Hn || Un && 8 < Un && 11 >= Un), Kn = " ", qn = !1;
+	], Un = sn && "CompositionEvent" in window, Wn = null;
+	sn && "documentMode" in document && (Wn = document.documentMode);
+	var H = sn && "TextEvent" in window && !Wn, Gn = sn && (!Un || Wn && 8 < Wn && 11 >= Wn), Kn = " ", qn = !1;
 	function Jn(e, t) {
 		switch (e) {
-			case "keyup": return H.indexOf(t.keyCode) !== -1;
+			case "keyup": return Hn.indexOf(t.keyCode) !== -1;
 			case "keydown": return t.keyCode !== 229;
 			case "keypress":
 			case "mousedown":
@@ -1753,7 +1753,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		}
 	}
 	function Qn(e, t) {
-		if (Xn) return e === "compositionend" || !Hn && Jn(e, t) ? (e = pn(), fn = dn = un = null, Xn = !1, e) : null;
+		if (Xn) return e === "compositionend" || !Un && Jn(e, t) ? (e = pn(), fn = dn = un = null, Xn = !1, e) : null;
 		switch (e) {
 			case "paste": return null;
 			case "keypress":
@@ -5462,7 +5462,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		return e = $a.current, e !== null && (e.flags |= 32), Jl;
 	}
 	function hu(e, t, n) {
-		(e === q && (X === 2 || X === 9) || e.cancelPendingCommit !== null) && (Su(e, 0), yu(e, Y, Jl, !1)), B(e, n), (!(K & 2) || e !== q) && (e === q && (!(K & 2) && (Kl |= n), Wl === 4 && yu(e, Y, Jl, !1)), rd(e));
+		(e === q && (X === 2 || X === 9) || e.cancelPendingCommit !== null) && (Su(e, 0), yu(e, Y, Jl, !1)), Xe(e, n), (!(K & 2) || e !== q) && (e === q && (!(K & 2) && (Kl |= n), Wl === 4 && yu(e, Y, Jl, !1)), rd(e));
 	}
 	function gu(e, t, n) {
 		if (K & 6) throw Error(i(327));
@@ -5578,7 +5578,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 			var a = 31 - R(i), o = 1 << a;
 			r[a] = -1, i &= ~o;
 		}
-		n !== 0 && Xe(e, n, t);
+		n !== 0 && B(e, n, t);
 	}
 	function bu() {
 		return K & 6 ? !0 : (id(0, !1), !1);
@@ -5809,7 +5809,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		if (K & 6) throw Error(i(327));
 		if (t !== null) {
 			if (t === e.current) throw Error(i(177));
-			if (o = t.lanes | t.childLanes, o |= Yr, Ye(e, n, o, s, c, l), e === q && (J = q = null, Y = 0), ou = t, au = e, su = n, cu = o, lu = a, uu = r, t.subtreeFlags & 10256 || t.flags & 10256 ? (e.callbackNode = null, e.callbackPriority = 0, Xu(Ae, function() {
+			if (o = t.lanes | t.childLanes, o |= Yr, z(e, n, o, s, c, l), e === q && (J = q = null, Y = 0), ou = t, au = e, su = n, cu = o, lu = a, uu = r, t.subtreeFlags & 10256 || t.flags & 10256 ? (e.callbackNode = null, e.callbackPriority = 0, Xu(Ae, function() {
 				return Uu(), null;
 			})) : (e.callbackNode = null, e.callbackPriority = 0), r = (t.flags & 13878) != 0, t.subtreeFlags & 13878 || r) {
 				r = M.T, M.T = null, a = N.p, N.p = 2, s = K, K |= 4;
@@ -5937,7 +5937,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		}
 	}
 	function Wu(e, t, n) {
-		t = mi(n, t), t = Xs(e.stateNode, t, 2), e = Ba(e, t, 2), e !== null && (B(e, 2), rd(e));
+		t = mi(n, t), t = Xs(e.stateNode, t, 2), e = Ba(e, t, 2), e !== null && (Xe(e, 2), rd(e));
 	}
 	function Z(e, t, n) {
 		if (e.tag === 3) Wu(e, e, n);
@@ -5948,7 +5948,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 			} else if (t.tag === 1) {
 				var r = t.stateNode;
 				if (typeof t.type.getDerivedStateFromError == "function" || typeof r.componentDidCatch == "function" && (ru === null || !ru.has(r))) {
-					e = mi(n, e), n = Zs(2), r = Ba(t, n, 2), r !== null && (Qs(n, r, t, e), B(r, 2), rd(r));
+					e = mi(n, e), n = Zs(2), r = Ba(t, n, 2), r !== null && (Qs(n, r, t, e), Xe(r, 2), rd(r));
 					break;
 				}
 			}
@@ -5969,7 +5969,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		r !== null && r.delete(t), e.pingedLanes |= e.suspendedLanes & n, e.warmLanes &= ~n, q === e && (Y & n) === n && (Wl === 4 || Wl === 3 && (Y & 62914560) === Y && 300 > Ee() - $l ? !(K & 2) && Su(e, 0) : ql |= n, Yl === Y && (Yl = 0)), rd(e);
 	}
 	function qu(e, t) {
-		t === 0 && (t = Je()), e = $r(e, t), e !== null && (B(e, t), rd(e));
+		t === 0 && (t = Je()), e = $r(e, t), e !== null && (Xe(e, t), rd(e));
 	}
 	function Ju(e) {
 		var t = e.memoizedState, n = 0;
@@ -6373,7 +6373,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 					case "keyup": Ar(s, n, i);
 				}
 				var b;
-				if (Hn) b: {
+				if (Un) b: {
 					switch (e) {
 						case "compositionstart":
 							var x = "onCompositionStart";
@@ -6391,7 +6391,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 				x && (Gn && n.locale !== "ko" && (Xn || x !== "onCompositionStart" ? x === "onCompositionEnd" && Xn && (b = pn()) : (un = i, dn = "value" in un ? un.value : un.textContent, Xn = !0)), y = Ed(r, x), 0 < y.length && (x = new jn(x, e, null, n, i), s.push({
 					event: x,
 					listeners: y
-				}), b ? x.data = b : (b = Yn(n), b !== null && (x.data = b)))), (b = Wn ? Zn(e, n) : Qn(e, n)) && (x = Ed(r, "onBeforeInput"), 0 < x.length && (y = new jn("onBeforeInput", "beforeinput", null, n, i), s.push({
+				}), b ? x.data = b : (b = Yn(n), b !== null && (x.data = b)))), (b = H ? Zn(e, n) : Qn(e, n)) && (x = Ed(r, "onBeforeInput"), 0 < x.length && (y = new jn("onBeforeInput", "beforeinput", null, n, i), s.push({
 					event: y,
 					listeners: x
 				}), y.data = b)), md(s, e, r, n, i);
@@ -7570,7 +7570,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		_threadCount: 0
 	};
 	function $f(e, t, n, r, i, a, o, s, c) {
-		this.tag = 1, this.containerInfo = e, this.pingCache = this.current = this.pendingChildren = null, this.timeoutHandle = -1, this.callbackNode = this.next = this.pendingContext = this.context = this.cancelPendingCommit = null, this.callbackPriority = 0, this.expirationTimes = z(-1), this.entangledLanes = this.shellSuspendCounter = this.errorRecoveryDisabledLanes = this.expiredLanes = this.warmLanes = this.pingedLanes = this.suspendedLanes = this.pendingLanes = 0, this.entanglements = z(0), this.hiddenUpdates = z(null), this.identifierPrefix = r, this.onUncaughtError = i, this.onCaughtError = a, this.onRecoverableError = o, this.pooledCache = null, this.pooledCacheLanes = 0, this.formState = c, this.incompleteTransitions = /* @__PURE__ */ new Map();
+		this.tag = 1, this.containerInfo = e, this.pingCache = this.current = this.pendingChildren = null, this.timeoutHandle = -1, this.callbackNode = this.next = this.pendingContext = this.context = this.cancelPendingCommit = null, this.callbackPriority = 0, this.expirationTimes = Ye(-1), this.entangledLanes = this.shellSuspendCounter = this.errorRecoveryDisabledLanes = this.expiredLanes = this.warmLanes = this.pingedLanes = this.suspendedLanes = this.pendingLanes = 0, this.entanglements = Ye(0), this.hiddenUpdates = Ye(null), this.identifierPrefix = r, this.onUncaughtError = i, this.onCaughtError = a, this.onRecoverableError = o, this.pooledCache = null, this.pooledCacheLanes = 0, this.formState = c, this.incompleteTransitions = /* @__PURE__ */ new Map();
 	}
 	function ep(e, t, n, r, i, a, o, s, c, l, u, d) {
 		return e = new $f(e, t, n, o, c, l, u, d, s), t = 1, !0 === a && (t |= 24), a = ii(3, null, null, t), e.current = a, a.stateNode = e, t = ia(), t.refCount++, e.pooledCache = t, t.refCount++, a.memoizedState = {
@@ -11307,7 +11307,7 @@ function Je(e = {}) {
 	let t = e.evidence || e.sources || e.records || e.evidence_records || [];
 	return Array.isArray(t) ? t.slice(0, 5) : [];
 }
-function z() {
+function Ye() {
 	let [e, t] = (0, b.useState)(""), [n, r] = (0, b.useState)(Pe), [i, a] = (0, b.useState)(Fe), [o, s] = (0, b.useState)(Ie), [c, l] = (0, b.useState)({
 		crossWindowTrend: !1,
 		rootCauseHypotheses: !1,
@@ -11444,15 +11444,15 @@ function z() {
 				}), /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "riHeroStats",
 					children: [
-						/* @__PURE__ */ (0, x.jsx)(B, {
+						/* @__PURE__ */ (0, x.jsx)(Xe, {
 							label: "ריצות שמורות",
 							value: v.length || "0"
 						}),
-						/* @__PURE__ */ (0, x.jsx)(B, {
+						/* @__PURE__ */ (0, x.jsx)(Xe, {
 							label: "האשטגים פעילים",
 							value: g.length || "0"
 						}),
-						/* @__PURE__ */ (0, x.jsx)(B, {
+						/* @__PURE__ */ (0, x.jsx)(Xe, {
 							label: "מקורות בסריקה",
 							value: Number(o || 0).toLocaleString()
 						})
@@ -11519,22 +11519,22 @@ function z() {
 						className: "riEngineRow",
 						children: [
 							/* @__PURE__ */ (0, x.jsx)("span", { children: "מנועי עומק" }),
-							/* @__PURE__ */ (0, x.jsx)(Ye, {
+							/* @__PURE__ */ (0, x.jsx)(z, {
 								checked: c.crossWindowTrend,
 								onClick: () => ue("crossWindowTrend"),
 								label: "מגמות"
 							}),
-							/* @__PURE__ */ (0, x.jsx)(Ye, {
+							/* @__PURE__ */ (0, x.jsx)(z, {
 								checked: c.rootCauseHypotheses,
 								onClick: () => ue("rootCauseHypotheses"),
 								label: "סיבת שורש"
 							}),
-							/* @__PURE__ */ (0, x.jsx)(Ye, {
+							/* @__PURE__ */ (0, x.jsx)(z, {
 								checked: c.healthScore,
 								onClick: () => ue("healthScore"),
 								label: "ציון בריאות"
 							}),
-							/* @__PURE__ */ (0, x.jsx)(Ye, {
+							/* @__PURE__ */ (0, x.jsx)(z, {
 								checked: c.graphClustering,
 								onClick: () => ue("graphClustering"),
 								label: "גרף"
@@ -11587,7 +11587,7 @@ function z() {
 			}),
 			/* @__PURE__ */ (0, x.jsxs)("section", {
 				className: "riSplit",
-				children: [/* @__PURE__ */ (0, x.jsx)(Xe, {
+				children: [/* @__PURE__ */ (0, x.jsx)(B, {
 					hashtags: ae,
 					max: oe,
 					selected: g,
@@ -11633,13 +11633,13 @@ function z() {
 		]
 	});
 }
-function B({ label: e, value: t }) {
+function Xe({ label: e, value: t }) {
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "riMetric",
 		children: [/* @__PURE__ */ (0, x.jsx)("span", { children: e }), /* @__PURE__ */ (0, x.jsx)("strong", { children: t })]
 	});
 }
-function Ye({ checked: e, onClick: t, label: n }) {
+function z({ checked: e, onClick: t, label: n }) {
 	return /* @__PURE__ */ (0, x.jsxs)("button", {
 		type: "button",
 		className: "riToggle",
@@ -11648,7 +11648,7 @@ function Ye({ checked: e, onClick: t, label: n }) {
 		children: [/* @__PURE__ */ (0, x.jsx)("span", { "aria-hidden": "true" }), n]
 	});
 }
-function Xe({ hashtags: e, max: t, selected: n, source: r, sortAlpha: i, onToggleTag: a, onSource: o, onSort: s, onClear: c }) {
+function B({ hashtags: e, max: t, selected: n, source: r, sortAlpha: i, onToggleTag: a, onSource: o, onSort: s, onClear: c }) {
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "riPanel riHashtags",
 		children: [
@@ -13723,7 +13723,66 @@ var zn = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", Bn = "81b1cbac-8fcf-43c1-acdc-6
 	"termination_and_remedy",
 	"document_and_information_obligation",
 	"other"
-];
+], Hn = Object.freeze([
+	{
+		id: "clauses",
+		label: "תוכן החוזה",
+		description: "סעיפים וחילוץ"
+	},
+	{
+		id: "relationships",
+		label: "קשרים בין סעיפים",
+		description: "הפניות וקשרים סמנטיים"
+	},
+	{
+		id: "decisions",
+		label: "החלטות חוזיות",
+		description: "נרמול וסקירה"
+	},
+	{
+		id: "indicator",
+		label: "מסירה ל־Indicator",
+		description: "ערכת החלטות מאושרת"
+	}
+]);
+function Un({ activeTab: e, onChange: t }) {
+	function n(e, n) {
+		let r = null;
+		if (e.key === "ArrowLeft" && (r = (n + 1) % Hn.length), e.key === "ArrowRight" && (r = (n - 1 + Hn.length) % Hn.length), e.key === "Home" && (r = 0), e.key === "End" && (r = Hn.length - 1), r === null) return;
+		e.preventDefault();
+		let i = Hn[r];
+		t(i.id), requestAnimationFrame(() => document.getElementById(`contracts-workspace-tab-${i.id}`)?.focus());
+	}
+	return /* @__PURE__ */ (0, x.jsx)("nav", {
+		className: "contractsWorkspaceTabs",
+		role: "tablist",
+		"aria-label": "שלבי העבודה בחוזה הפתוח",
+		children: Hn.map((r, i) => /* @__PURE__ */ (0, x.jsxs)("button", {
+			id: `contracts-workspace-tab-${r.id}`,
+			type: "button",
+			role: "tab",
+			"aria-selected": e === r.id,
+			"aria-controls": `contracts-workspace-panel-${r.id}`,
+			className: e === r.id ? "is-active" : "",
+			tabIndex: e === r.id ? 0 : -1,
+			onClick: () => t(r.id),
+			onKeyDown: (e) => n(e, i),
+			children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: r.label }), /* @__PURE__ */ (0, x.jsx)("small", { children: r.description })]
+		}, r.id))
+	});
+}
+function Wn({ id: e, activeTab: t, children: n }) {
+	let r = t === e;
+	return /* @__PURE__ */ (0, x.jsx)("div", {
+		id: `contracts-workspace-panel-${e}`,
+		className: "contractsWorkspaceTabPanel",
+		role: "tabpanel",
+		"aria-labelledby": `contracts-workspace-tab-${e}`,
+		tabIndex: r ? 0 : -1,
+		hidden: !r,
+		children: n
+	});
+}
 async function H(e, { method: t = "GET", body: n = null, timeoutMs: r = 12e4 } = {}) {
 	let i = new AbortController(), a = setTimeout(() => i.abort(), r);
 	try {
@@ -13743,12 +13802,12 @@ async function H(e, { method: t = "GET", body: n = null, timeoutMs: r = 12e4 } =
 		clearTimeout(a);
 	}
 }
-async function Hn(e) {
+async function Gn(e) {
 	let t = new Uint8Array(await e.arrayBuffer()), n = "", r = 32768;
 	for (let e = 0; e < t.length; e += r) n += String.fromCharCode(...t.subarray(e, e + r));
 	return btoa(n);
 }
-function Un(e) {
+function Kn(e) {
 	return {
 		action: "reject",
 		reason: "",
@@ -13759,13 +13818,13 @@ function Un(e) {
 		conflictReason: ""
 	};
 }
-function Wn(e) {
+function qn(e) {
 	return e.fixedDate ? `מועד קבוע: ${e.fixedDate}` : e.offset ? `${e.offset.value} ${Mn(e.offset.unit)} ${Nn(e.offset.direction)}` : e.metadata?.extensionAmount ? `הארכה: ${e.metadata.extensionAmount} ${Mn(e.metadata.extensionUnit)}` : "ללא ערך זמן סופי";
 }
-function Gn(e) {
+function Jn(e) {
 	return [e.pdfPage ? `עמוד ${e.pdfPage}` : null, e.clause ? `סעיף ${e.clause}` : null].filter(Boolean).join(" · ") || "מיקום מקור לא צוין";
 }
-function Kn(e) {
+function Yn(e) {
 	return {
 		mappingRequirement: "required",
 		conditionStatus: e.type === "relative_condition" ? "pending" : "not_applicable",
@@ -13780,10 +13839,10 @@ function Kn(e) {
 		reviewRequestId: crypto.randomUUID()
 	};
 }
-function qn(e, t = null) {
+function Xn(e, t = null) {
 	return {
 		decisions: Object.fromEntries((e.candidates || []).map((e) => [e.candidateKey, {
-			...Un(e),
+			...Kn(e),
 			...t?.decisions?.[e.candidateKey] || {}
 		}])),
 		reviewReason: t?.reviewReason || "",
@@ -13792,7 +13851,7 @@ function qn(e, t = null) {
 		mappingDraft: t?.mappingDraft || null
 	};
 }
-function Jn({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingDraft: i }) {
+function Zn({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingDraft: i }) {
 	return {
 		decisions: e,
 		reviewReason: t,
@@ -13801,14 +13860,14 @@ function Jn({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingD
 		mappingDraft: i
 	};
 }
-function Yn(e) {
+function Qn(e) {
 	return JSON.stringify(e);
 }
-function Xn(e) {
+function $n(e) {
 	let t = Number(e?.revision ?? 0);
 	return Number.isSafeInteger(t) && t >= 0 ? t : 0;
 }
-function Zn(e, t, n) {
+function er(e, t, n) {
 	return {
 		documentVersionId: e.document.documentVersionId,
 		candidateKey: t.candidateKey,
@@ -13830,11 +13889,11 @@ function Zn(e, t, n) {
 		}))
 	};
 }
-function Qn({ extraction: e, sourceProjectId: t, status: n, statusError: r, savedState: i = null, savedStateKey: a = "", onDraftStateChange: o = null }) {
+function tr({ extraction: e, sourceProjectId: t, status: n, statusError: r, savedState: i = null, savedStateKey: a = "", onDraftStateChange: o = null }) {
 	let [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(null), [d, f] = (0, b.useState)(null), [p, m] = (0, b.useState)([]), [h, g] = (0, b.useState)(""), [_, v] = (0, b.useState)(""), [y, S] = (0, b.useState)(""), [C, w] = (0, b.useState)(null), T = (0, b.useRef)(null), E = (e.candidates || []).find((e) => e.candidateKey === s) || null, ee = p.filter((e) => e.selectedCanonicalKey);
 	(0, b.useEffect)(() => {
 		let t = (e.candidates || []).find((e) => e.candidateKey === i?.candidateKey) || null, n = t && i?.draft ? {
-			...Kn(t),
+			...Yn(t),
 			...i.draft
 		} : null;
 		c(t?.candidateKey || ""), u(n), f(null), m([]), g(""), S(""), w(null);
@@ -13878,7 +13937,7 @@ function Qn({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 		}
 	}
 	async function k(n) {
-		let r = Kn(n);
+		let r = Yn(n);
 		c(n.candidateKey), u(r), o?.({
 			candidateKey: n.candidateKey,
 			draft: r
@@ -13888,7 +13947,7 @@ function Qn({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 				method: "POST",
 				body: {
 					sourceProjectId: t,
-					obligation: Zn(e, n, r)
+					obligation: er(e, n, r)
 				}
 			})).candidateBundle, a = i?.candidates?.[0]?.activityKey || "";
 			f(i), u((e) => ({
@@ -13917,7 +13976,7 @@ function Qn({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 					method: "POST",
 					body: {
 						sourceProjectId: t,
-						obligation: Zn(e, E, l)
+						obligation: er(e, E, l)
 					}
 				})).candidateBundle, r = n.candidates.some((e) => e.activityKey === l.selectedActivityKey) ? l.selectedActivityKey : n.candidates[0]?.activityKey || "";
 				f(n), u((e) => ({
@@ -13959,7 +14018,7 @@ function Qn({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 				method: "POST",
 				body: {
 					sourceProjectId: t,
-					obligation: Zn(e, E, l),
+					obligation: er(e, E, l),
 					action: l.action,
 					selectedActivityKey: ["confirm", "correct"].includes(l.action) ? l.selectedActivityKey : null,
 					reason: l.reason.trim(),
@@ -14115,7 +14174,7 @@ function Qn({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsMappingEvidence",
-							children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "ראיה חוזית מדויקת — הציטוט נשמר בשפת המקור" }), (d.obligation.sourceEvidence || []).map((e) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Gn(e) }), /* @__PURE__ */ (0, x.jsx)("p", { children: e.sourceText })] }, e.evidenceId))]
+							children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "ראיה חוזית מדויקת — הציטוט נשמר בשפת המקור" }), (d.obligation.sourceEvidence || []).map((e) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Jn(e) }), /* @__PURE__ */ (0, x.jsx)("p", { children: e.sourceText })] }, e.evidenceId))]
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsAlternativeList",
@@ -14310,7 +14369,7 @@ function Qn({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 		]
 	});
 }
-function $n({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewedAt: i, sourceProjectId: a, scheduleProjectId: o }) {
+function nr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewedAt: i, sourceProjectId: a, scheduleProjectId: o }) {
 	return {
 		extraction: e,
 		reviewBatch: {
@@ -14320,7 +14379,7 @@ function $n({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewed
 			documentAuthority: "authoritative",
 			extractorVersion: e.extractorVersion || "contracts-agent.phase1.v1",
 			decisions: e.candidates.map((e) => {
-				let n = t[e.candidateKey] || Un(e), r = n.action === "approve";
+				let n = t[e.candidateKey] || Kn(e), r = n.action === "approve";
 				return {
 					candidateKey: e.candidateKey,
 					action: n.action,
@@ -14343,7 +14402,7 @@ function $n({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewed
 		}
 	};
 }
-function er({ candidate: e, decision: t, onChange: n }) {
+function rr({ candidate: e, decision: t, onChange: n }) {
 	let r = t.action === "approve", i = Dn(e.storageDisposition), a = e.storageDisposition === "candidate_for_schedule_contract_extensions", o = e.offset?.unit === "day";
 	return /* @__PURE__ */ (0, x.jsxs)("article", {
 		className: `contractsCandidate ${r ? "is-approved" : "is-rejected"}`,
@@ -14354,14 +14413,14 @@ function er({ candidate: e, decision: t, onChange: n }) {
 					children: bn(e.role)
 				}),
 				/* @__PURE__ */ (0, x.jsx)("h3", { children: xn(e) }),
-				/* @__PURE__ */ (0, x.jsx)("p", { children: Wn(e) })
+				/* @__PURE__ */ (0, x.jsx)("p", { children: qn(e) })
 			] }), /* @__PURE__ */ (0, x.jsx)("span", {
 				className: "contractsTarget",
 				children: i
 			})] }),
 			/* @__PURE__ */ (0, x.jsx)("div", {
 				className: "contractsEvidenceList",
-				children: (e.sourceEvidence || []).map((t, n) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Gn(t) }), /* @__PURE__ */ (0, x.jsx)("p", { children: t.sourceText })] }, `${e.candidateKey}-evidence-${n}`))
+				children: (e.sourceEvidence || []).map((t, n) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Jn(t) }), /* @__PURE__ */ (0, x.jsx)("p", { children: t.sourceText })] }, `${e.candidateKey}-evidence-${n}`))
 			}),
 			(e.gates || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
 				className: "contractsGateList",
@@ -14431,7 +14490,7 @@ function er({ candidate: e, decision: t, onChange: n }) {
 		]
 	});
 }
-function tr({ preview: e, classicDocumentVersionId: t = "" }) {
+function ir({ preview: e, classicDocumentVersionId: t = "" }) {
 	let [n, r] = (0, b.useState)(""), [i, a] = (0, b.useState)("operative"), [o, s] = (0, b.useState)("all"), [c, l] = (0, b.useState)("all"), [u, d] = (0, b.useState)(!1), f = (0, b.useMemo)(() => Jt(e), [e]), p = f.clauses || [], m = (0, b.useMemo)(() => [...new Set(p.map((e) => e.clauseType))].sort(), [p]), h = (0, b.useMemo)(() => [...new Set(p.flatMap((e) => e.hashtags || []))].sort(), [p]), g = (0, b.useMemo)(() => new Map(p.map((e) => [e.clauseKey, e])), [p]), _ = n.trim().toLocaleLowerCase("he"), v = (0, b.useMemo)(() => p.filter((e) => i !== "all" && e.structuralRole !== i || o !== "all" && e.clauseType !== o || c !== "all" && !(e.hashtags || []).includes(c) || u && !(e.crossReferences || []).length ? !1 : _ ? [
 		e.clauseKey,
 		e.parentClauseKey,
@@ -14722,11 +14781,11 @@ function tr({ preview: e, classicDocumentVersionId: t = "" }) {
 		]
 	});
 }
-function nr(e) {
+function ar(e) {
 	let t = Number(e || 0);
 	return t >= .97 ? "גבוה מאוד" : t >= .9 ? "גבוה" : "בינוני";
 }
-var rr = Object.freeze([
+var or = Object.freeze([
 	"supports_same_decision",
 	"depends_on",
 	"condition_of",
@@ -14735,7 +14794,7 @@ var rr = Object.freeze([
 	"duplicates",
 	"conflicts_with"
 ]);
-function ir({ item: e, busy: t = !1, onReview: n }) {
+function sr({ item: e, busy: t = !1, onReview: n }) {
 	let [r, i] = (0, b.useState)(""), [a, o] = (0, b.useState)(e.relationshipType), [s, c] = (0, b.useState)(!1), l = e.reviewStatus === "proposed", u = r.trim().length >= 10 && /[\u0590-\u05ff]/u.test(r), d = ["duplicates", "conflicts_with"].includes(a), f = a !== e.relationshipType || !d && s, p = s && !d ? e.targetClauseKey : e.sourceClauseKey, m = s && !d ? e.sourceClauseKey : e.targetClauseKey, h = Array.isArray(e.evidence?.excerpts) ? e.evidence.excerpts : [];
 	function g(t) {
 		let i = { reasonHe: r.trim() };
@@ -14782,7 +14841,7 @@ function ir({ item: e, busy: t = !1, onReview: n }) {
 					/* @__PURE__ */ (0, x.jsx)("i", { children: sn(e.reviewStatus) }),
 					e.confidence !== null && e.confidence !== void 0 && /* @__PURE__ */ (0, x.jsxs)("i", {
 						title: "ביטחון הסיווג של המודל; אינו ודאות משפטית",
-						children: ["ביטחון סיווג: ", nr(e.confidence)]
+						children: ["ביטחון סיווג: ", ar(e.confidence)]
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("span", { children: ["גרסה ", e.revision] })
 				]
@@ -14827,7 +14886,7 @@ function ir({ item: e, busy: t = !1, onReview: n }) {
 								value: a,
 								onChange: (e) => o(e.target.value),
 								disabled: t,
-								children: rr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+								children: or.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 									value: e,
 									children: an(e)
 								}, e))
@@ -14878,7 +14937,7 @@ function ir({ item: e, busy: t = !1, onReview: n }) {
 		]
 	});
 }
-function ar({ preview: e, workspaceId: t = "", persistenceStatus: n = null, persistenceResult: r = null, persistenceError: i = "", persistenceBusy: a = !1, onPersist: o, semanticStatus: s = null, semanticResult: c = null, semanticError: l = "", semanticBusy: u = !1, onRunSemantic: d, reviewStatus: f = null, reviewResult: p = null, reviewError: m = "", reviewBusyId: h = "", onReview: g }) {
+function cr({ preview: e, workspaceId: t = "", persistenceStatus: n = null, persistenceResult: r = null, persistenceError: i = "", persistenceBusy: a = !1, onPersist: o, semanticStatus: s = null, semanticResult: c = null, semanticError: l = "", semanticBusy: u = !1, onRunSemantic: d, reviewStatus: f = null, reviewResult: p = null, reviewError: m = "", reviewBusyId: h = "", onReview: g }) {
 	let _ = (0, b.useMemo)(() => cn(e), [e]), v = Number(r?.metrics?.explicitRelationshipCount || 0), y = Number(p?.metrics?.currentRelationshipCount || 0), S = Number(p?.metrics?.proposedCount || 0), C = !!(n?.ready && t && !a && !u), w = !!(s?.ready && t && !u && !a), T = v === _.metrics.explicitRelationshipCount && _.metrics.explicitRelationshipCount > 0, E = Number(c?.metrics?.classificationFailedPairCount || 0), ee = Number(c?.metrics?.verificationFailedPairCount || 0), D = c?.metrics?.classificationComplete !== !1 && c?.metrics?.verificationComplete !== !1;
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "contractsPanel contractsRelationshipsPanel",
@@ -15133,7 +15192,7 @@ function ar({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 											/* @__PURE__ */ (0, x.jsx)("i", { children: sn(e.reviewStatus) }),
 											/* @__PURE__ */ (0, x.jsxs)("i", {
 												title: "ביטחון סיווג של המודל לאחר בדיקה ספקנית; אינו ודאות משפטית",
-												children: ["ביטחון סיווג: ", nr(e.confidence)]
+												children: ["ביטחון סיווג: ", ar(e.confidence)]
 											})
 										]
 									}),
@@ -15196,7 +15255,7 @@ function ar({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 							}),
 							/* @__PURE__ */ (0, x.jsx)("div", {
 								className: "contractsRelationshipList",
-								children: (p.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(ir, {
+								children: (p.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(sr, {
 									item: e,
 									busy: h === e.relationshipId,
 									onReview: g
@@ -15214,7 +15273,7 @@ function ar({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 		]
 	});
 }
-function or(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: r = null, summaryHe: i = null, decisionTextHe: a = null, decisionCategory: o = null, scheduleImpact: s = null, responsibleParty: c = void 0, beneficiary: l = void 0 } = {}) {
+function lr(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: r = null, summaryHe: i = null, decisionTextHe: a = null, decisionCategory: o = null, scheduleImpact: s = null, responsibleParty: c = void 0, beneficiary: l = void 0 } = {}) {
 	let u = (t || e.sourceEvidence?.map((e) => e.clauseId) || []).filter(Boolean), d = [...new Set((Array.isArray(e.tags) ? e.tags : []).map((e) => String(e || "").trim()).filter(Boolean).map((e) => /[\u0590-\u05ff]/u.test(e) ? e : Wt(e)))].slice(0, 12);
 	return {
 		primaryClauseId: n || u[0],
@@ -15238,7 +15297,7 @@ function or(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: 
 		recurring: !!e.recurring
 	};
 }
-function sr(e, t) {
+function ur(e, t) {
 	let n = (e.sourceEvidence || []).map((e) => e.clauseId).filter(Boolean);
 	return {
 		id: `${e.decisionId}:split:${t}:${Date.now()}`,
@@ -15251,8 +15310,8 @@ function sr(e, t) {
 		primaryClauseId: n[0] || ""
 	};
 }
-function cr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
-	let [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(() => [sr(e, 0), sr(e, 1)]), c = Array.isArray(e.sourceEvidence) ? e.sourceEvidence : [], l = c.map((e) => e.clauseId).filter(Boolean);
+function dr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
+	let [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(() => [ur(e, 0), ur(e, 1)]), c = Array.isArray(e.sourceEvidence) ? e.sourceEvidence : [], l = c.map((e) => e.clauseId).filter(Boolean);
 	function u(e, t) {
 		s((n) => n.map((n, r) => r === e ? {
 			...n,
@@ -15271,7 +15330,7 @@ function cr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 		r(e, {
 			expectedRevision: e.revision,
 			reasonHe: i.trim(),
-			outputs: o.map((t) => or(e, t))
+			outputs: o.map((t) => lr(e, t))
 		});
 	}
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -15364,7 +15423,7 @@ function cr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 			}),
 			o.length < 10 && /* @__PURE__ */ (0, x.jsx)("button", {
 				type: "button",
-				onClick: () => s((t) => [...t, sr(e, t.length)]),
+				onClick: () => s((t) => [...t, ur(e, t.length)]),
 				disabled: t,
 				children: "הוסף החלטה לפיצול"
 			}),
@@ -15388,7 +15447,7 @@ function cr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 		]
 	});
 }
-function lr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
+function fr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 	let [i, a] = (0, b.useState)(e[0]?.decisionId || ""), o = e.find((e) => e.decisionId === i) || e[0], [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(o?.titleHe || ""), [d, f] = (0, b.useState)(o?.summaryHe || ""), [p, m] = (0, b.useState)(o?.decisionTextHe || ""), [h, g] = (0, b.useState)(o?.decisionCategory || "other"), [_, v] = (0, b.useState)(o?.scheduleImpact || "unknown"), y = /* @__PURE__ */ new Map();
 	for (let t of e) for (let e of t.sourceEvidence || []) y.set(e.clauseId, e);
 	let S = [...y.values()], C = [...new Set(e.flatMap((e) => Array.isArray(e.tags) ? e.tags : []))].slice(0, 12), w = e.some((e) => e.conflictStatus === "unresolved"), T = e.length >= 2 && s.trim().length >= 10 && /[א-ת]/u.test(s) && l.trim().length >= 5 && /[א-ת]/u.test(l) && d.trim().length >= 10 && /[א-ת]/u.test(d) && p.trim().length >= 10 && /[א-ת]/u.test(p) && S.length > 0;
@@ -15397,7 +15456,7 @@ function lr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 		a(t), u(n?.titleHe || ""), f(n?.summaryHe || ""), m(n?.decisionTextHe || ""), g(n?.decisionCategory || "other"), v(n?.scheduleImpact || "unknown");
 	}
 	function ee() {
-		let t = or({
+		let t = lr({
 			...o,
 			tags: C,
 			conflictStatus: w ? "unresolved" : o.conflictStatus
@@ -15524,7 +15583,7 @@ function lr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 		]
 	});
 }
-function ur({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r = !1, onToggleMerge: i, onSplit: a, onReview: o }) {
+function pr({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r = !1, onToggleMerge: i, onSplit: a, onReview: o }) {
 	let [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(!1), [d, f] = (0, b.useState)(!1), [p, m] = (0, b.useState)(() => ({
 		titleHe: e.titleHe || "",
 		summaryHe: e.summaryHe || "",
@@ -15634,7 +15693,7 @@ function ur({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 					disabled: t
 				}), "בחר למיזוג"] })]
 			}),
-			d && g && /* @__PURE__ */ (0, x.jsx)(cr, {
+			d && g && /* @__PURE__ */ (0, x.jsx)(dr, {
 				item: e,
 				busy: t,
 				onCancel: () => f(!1),
@@ -15787,7 +15846,7 @@ function ur({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 		]
 	});
 }
-function dr({ status: e, lineageStatus: t, result: n, relationshipPendingCount: r = 0, error: i = "", generationBusy: a = !1, reviewBusyId: o = "", onGenerate: s, onSplit: c, onMerge: l, onReview: u }) {
+function mr({ status: e, lineageStatus: t, result: n, relationshipPendingCount: r = 0, error: i = "", generationBusy: a = !1, reviewBusyId: o = "", onGenerate: s, onSplit: c, onMerge: l, onReview: u }) {
 	let [d, f] = (0, b.useState)([]), p = Number(n?.metrics?.pendingRelationshipCount ?? r ?? 0), m = Number(n?.metrics?.currentDecisionCount || 0), h = Number(n?.lineage?.metrics?.activeDecisionCount ?? m), g = Number(n?.metrics?.proposedCount || 0), _ = !!(t?.ready && n?.lineage?.gates?.splitEnabled && n?.lineage?.gates?.mergeEnabled), v = new Map((n?.items || []).map((e) => [e.decisionId, e])), y = d.map((e) => v.get(e)).filter(Boolean), S = !!(e?.ready && n?.workspace?.workspaceId && p === 0 && m === 0 && !a);
 	function C(e) {
 		f((t) => t.includes(e.decisionId) ? t.filter((t) => t !== e.decisionId) : t.length < 10 ? [...t, e.decisionId] : t);
@@ -15883,7 +15942,7 @@ function dr({ status: e, lineageStatus: t, result: n, relationshipPendingCount: 
 					role: "status",
 					children: "נבחרה החלטה אחת למיזוג. יש לבחור לפחות החלטה נוספת."
 				}),
-				_ && y.length >= 2 && /* @__PURE__ */ (0, x.jsx)(lr, {
+				_ && y.length >= 2 && /* @__PURE__ */ (0, x.jsx)(fr, {
 					items: y,
 					busy: o === "lineage:merge",
 					onCancel: () => f([]),
@@ -15891,7 +15950,7 @@ function dr({ status: e, lineageStatus: t, result: n, relationshipPendingCount: 
 				}, y.map((e) => e.decisionId).join(":")),
 				/* @__PURE__ */ (0, x.jsx)("div", {
 					className: "contractsDecisionList",
-					children: (n.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(ur, {
+					children: (n.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(pr, {
 						item: e,
 						busy: o === e.decisionId || o === `lineage:${e.decisionId}` || o === "lineage:merge",
 						lineageEnabled: _,
@@ -15941,7 +16000,7 @@ function dr({ status: e, lineageStatus: t, result: n, relationshipPendingCount: 
 		]
 	});
 }
-function fr({ item: e }) {
+function hr({ item: e }) {
 	return /* @__PURE__ */ (0, x.jsxs)("article", {
 		className: `contractsScheduleProjectionCard is-${e.handoffStatus}`,
 		children: [
@@ -15975,7 +16034,7 @@ function fr({ item: e }) {
 		]
 	});
 }
-function pr({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !1, onRun: a }) {
+function gr({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !1, onRun: a }) {
 	let o = t?.metrics || {}, s = (t?.items || []).filter((e) => e.handoffStatus === "suitable"), c = (t?.items || []).filter((e) => e.handoffStatus === "requires_review"), l = (t?.items || []).filter((e) => e.handoffStatus === "not_suitable"), u = !!(e?.ready && e?.mode === "indicator_handoff_read_only");
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "contractsPanel contractsScheduleProjectionPanel",
@@ -16062,7 +16121,7 @@ function pr({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						})]
 					}), /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: s.map((e) => /* @__PURE__ */ (0, x.jsx)(fr, { item: e }, e.decisionId))
+						children: s.map((e) => /* @__PURE__ */ (0, x.jsx)(hr, { item: e }, e.decisionId))
 					})]
 				}),
 				/* @__PURE__ */ (0, x.jsxs)("section", {
@@ -16079,7 +16138,7 @@ function pr({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						})]
 					}), c.length ? /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: c.map((e) => /* @__PURE__ */ (0, x.jsx)(fr, { item: e }, e.decisionId))
+						children: c.map((e) => /* @__PURE__ */ (0, x.jsx)(hr, { item: e }, e.decisionId))
 					}) : /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsMessage is-success",
 						role: "status",
@@ -16094,42 +16153,42 @@ function pr({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						" החלטות שאינן מתאימות למסירה"
 					] }), /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: l.map((e) => /* @__PURE__ */ (0, x.jsx)(fr, { item: e }, e.decisionId))
+						children: l.map((e) => /* @__PURE__ */ (0, x.jsx)(hr, { item: e }, e.decisionId))
 					})]
 				})
 			] })
 		]
 	});
 }
-function mr() {
-	let [e, t] = (0, b.useState)(null), [n, r] = (0, b.useState)(null), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(""), [u, d] = (0, b.useState)([]), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(""), [g, _] = (0, b.useState)([]), [v, y] = (0, b.useState)(null), [S, C] = (0, b.useState)(""), [w, T] = (0, b.useState)(null), [E, ee] = (0, b.useState)(null), [D, te] = (0, b.useState)(""), [ne, O] = (0, b.useState)(null), [k, A] = (0, b.useState)(null), [re, j] = (0, b.useState)(null), [M, N] = (0, b.useState)(""), [P, ie] = (0, b.useState)(null), [ae, oe] = (0, b.useState)(null), [se, F] = (0, b.useState)(null), [ce, I] = (0, b.useState)(""), [le, ue] = (0, b.useState)(null), [de, fe] = (0, b.useState)(null), [pe, me] = (0, b.useState)(""), [L, he] = (0, b.useState)(""), [ge, _e] = (0, b.useState)(null), [ve, ye] = (0, b.useState)(""), [be, xe] = (0, b.useState)("idle"), [Se, Ce] = (0, b.useState)(""), [we, Te] = (0, b.useState)(null), [Ee, De] = (0, b.useState)(null), [Oe, ke] = (0, b.useState)(zn), [Ae, je] = (0, b.useState)(Bn), [Me, Ne] = (0, b.useState)("אולם תצוגה הרצליה"), [Pe, Fe] = (0, b.useState)(null), [Ie, Le] = (0, b.useState)(null), [R, Re] = (0, b.useState)({}), [ze, Be] = (0, b.useState)(""), [Ve, He] = (0, b.useState)(""), [Ue, We] = (0, b.useState)(""), [Ge, Ke] = (0, b.useState)(null), [qe, Je] = (0, b.useState)(null), [z, B] = (0, b.useState)(""), [Ye, Xe] = (0, b.useState)(""), Ze = (0, b.useRef)(0), Qe = (0, b.useRef)(null), $e = (0, b.useRef)(null), et = (0, b.useRef)(null), tt = (0, b.useRef)(""), nt = (0, b.useRef)(0), rt = (0, b.useRef)(""), it = (0, b.useRef)(!1);
-	function at(e) {
-		return !!(e && e.epoch === Ze.current && e.workspaceId === tt.current);
-	}
-	function ot() {
-		Qe.current && clearTimeout(Qe.current), Qe.current = null;
-	}
+function _r() {
+	let [e, t] = (0, b.useState)(null), [n, r] = (0, b.useState)(null), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(""), [u, d] = (0, b.useState)([]), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(""), [g, _] = (0, b.useState)([]), [v, y] = (0, b.useState)(null), [S, C] = (0, b.useState)(""), [w, T] = (0, b.useState)(null), [E, ee] = (0, b.useState)(null), [D, te] = (0, b.useState)(""), [ne, O] = (0, b.useState)(null), [k, A] = (0, b.useState)(null), [re, j] = (0, b.useState)(null), [M, N] = (0, b.useState)(""), [P, ie] = (0, b.useState)(null), [ae, oe] = (0, b.useState)(null), [se, F] = (0, b.useState)(null), [ce, I] = (0, b.useState)(""), [le, ue] = (0, b.useState)(null), [de, fe] = (0, b.useState)(null), [pe, me] = (0, b.useState)(""), [L, he] = (0, b.useState)(""), [ge, _e] = (0, b.useState)(null), [ve, ye] = (0, b.useState)(""), [be, xe] = (0, b.useState)("idle"), [Se, Ce] = (0, b.useState)(""), [we, Te] = (0, b.useState)(null), [Ee, De] = (0, b.useState)(null), [Oe, ke] = (0, b.useState)(zn), [Ae, je] = (0, b.useState)(Bn), [Me, Ne] = (0, b.useState)("אולם תצוגה הרצליה"), [Pe, Fe] = (0, b.useState)(null), [Ie, Le] = (0, b.useState)(null), [R, Re] = (0, b.useState)("clauses"), [ze, Be] = (0, b.useState)({}), [Ve, He] = (0, b.useState)(""), [Ue, We] = (0, b.useState)(""), [Ge, Ke] = (0, b.useState)(""), [qe, Je] = (0, b.useState)(null), [Ye, Xe] = (0, b.useState)(null), [z, B] = (0, b.useState)(""), [Ze, Qe] = (0, b.useState)(""), $e = (0, b.useRef)(0), et = (0, b.useRef)(null), tt = (0, b.useRef)(null), nt = (0, b.useRef)(null), rt = (0, b.useRef)(""), it = (0, b.useRef)(0), at = (0, b.useRef)(""), ot = (0, b.useRef)(!1);
 	function st(e) {
-		if (!at(e) || it.current) return;
-		ot();
+		return !!(e && e.epoch === $e.current && e.workspaceId === rt.current);
+	}
+	function ct() {
+		et.current && clearTimeout(et.current), et.current = null;
+	}
+	function lt(e) {
+		if (!st(e) || ot.current) return;
+		ct();
 		let t = Math.max(0, e.readyAt - Date.now());
-		Qe.current = setTimeout(() => {
-			Qe.current = null, ct();
+		et.current = setTimeout(() => {
+			et.current = null, ut();
 		}, t);
 	}
-	async function ct() {
-		if ($e.current || it.current) return;
-		let e = et.current;
-		if (!at(e)) {
-			et.current = null;
+	async function ut() {
+		if (tt.current || ot.current) return;
+		let e = nt.current;
+		if (!st(e)) {
+			nt.current = null;
 			return;
 		}
-		if (et.current = null, e.snapshot === rt.current) {
+		if (nt.current = null, e.snapshot === at.current) {
 			xe("saved"), Ce("");
 			return;
 		}
-		let t = nt.current;
-		$e.current = e, xe("saving"), Ce("");
+		let t = it.current;
+		tt.current = e, xe("saving"), Ce("");
 		try {
 			let n = await H(`/api/contracts/workspaces/${e.workspaceId}/draft`, {
 				method: "PUT",
@@ -16142,8 +16201,8 @@ function mr() {
 				let e = /* @__PURE__ */ Error("The saved draft revision is invalid.");
 				throw e.code = "contracts_workspace_response_invalid", e;
 			}
-			if (at(e)) {
-				nt.current = r, rt.current = e.snapshot, _e((t) => t?.workspaceId === e.workspaceId ? {
+			if (st(e)) {
+				it.current = r, at.current = e.snapshot, _e((t) => t?.workspaceId === e.workspaceId ? {
 					...t,
 					draft: {
 						...t.draft || {},
@@ -16155,42 +16214,42 @@ function mr() {
 						rejectedCount: n.saved?.rejectedCount
 					}
 				} : t);
-				let t = et.current;
-				at(t) && t.snapshot !== e.snapshot ? xe("pending") : xe("saved"), mt();
+				let t = nt.current;
+				st(t) && t.snapshot !== e.snapshot ? xe("pending") : xe("saved"), gt();
 			}
 		} catch (t) {
-			if (at(e) && (t?.status === 409 || t?.code === "contracts_workspace_draft_stale")) {
-				it.current = !0, Ze.current += 1, et.current = null, ot();
+			if (st(e) && (t?.status === 409 || t?.code === "contracts_workspace_draft_stale")) {
+				ot.current = !0, $e.current += 1, nt.current = null, ct();
 				try {
-					Ot((await H(`/api/contracts/workspaces/${e.workspaceId}`)).workspace, "", { autosaveConflictMessage: "הטיוטה השתנתה בחלון אחר. נטענה הגרסה העדכנית מהשרת; השינויים המקומיים שלא נשמרו לא הוחלו ולא דרסו החלטות חדשות יותר." });
+					At((await H(`/api/contracts/workspaces/${e.workspaceId}`)).workspace, "", { autosaveConflictMessage: "הטיוטה השתנתה בחלון אחר. נטענה הגרסה העדכנית מהשרת; השינויים המקומיים שלא נשמרו לא הוחלו ולא דרסו החלטות חדשות יותר." });
 				} catch {
 					xe("conflict"), Ce("זוהתה טיוטה חדשה יותר ולא בוצעה דריסה. לא ניתן היה לטעון אותה כעת; יש לפתוח מחדש את החוזה השמור לפני עריכה נוספת.");
 				}
-			} else at(e) && (xe("error"), Ce(V(t)));
+			} else st(e) && (xe("error"), Ce(V(t)));
 		} finally {
-			$e.current === e && ($e.current = null);
-			let t = et.current;
-			at(t) && !it.current && st(t);
+			tt.current === e && (tt.current = null);
+			let t = nt.current;
+			st(t) && !ot.current && lt(t);
 		}
 	}
 	(0, b.useEffect)(() => {
-		H("/api/contracts/review/status").then(t).catch((e) => Xe(V(e))), H("/api/contracts/activity-mapping/status").then(r).catch((e) => a(V(e))), H("/api/contracts/workspaces/status").then((e) => {
-			s(e), e.ready && mt(e);
+		H("/api/contracts/review/status").then(t).catch((e) => Qe(V(e))), H("/api/contracts/activity-mapping/status").then(r).catch((e) => a(V(e))), H("/api/contracts/workspaces/status").then((e) => {
+			s(e), e.ready && gt(e);
 		}).catch((e) => l(V(e))), H("/api/contracts/clauses/status").then((e) => {
-			p(e), e.ready && ht(e);
+			p(e), e.ready && _t(e);
 		}).catch((e) => h(V(e))), H("/api/contracts/relationships/status").then(y).catch((e) => C(V(e))), H("/api/contracts/relationships/semantic/status").then(ee).catch((e) => te(V(e))), H("/api/contracts/relationships/review/status").then(A).catch((e) => N(V(e))), H("/api/contracts/decisions/status").then(ie).catch((e) => I(V(e))), H("/api/contracts/decisions/lineage/status").then(oe).catch((e) => I(V(e))), H("/api/contracts/decisions/indicator-handoff/status").then(ue).catch((e) => me(V(e)));
 	}, []), (0, b.useEffect)(() => {
 		if (!o?.ready || !/^[0-9a-f-]{36}$/iu.test(Oe.trim())) return;
-		let e = setTimeout(() => mt(), 350);
+		let e = setTimeout(() => gt(), 350);
 		return () => clearTimeout(e);
 	}, [Oe, o?.ready]), (0, b.useEffect)(() => {
 		if (!f?.ready || !/^[0-9a-f-]{36}$/iu.test(Oe.trim())) return;
-		let e = setTimeout(() => ht(), 350);
+		let e = setTimeout(() => _t(), 350);
 		return () => clearTimeout(e);
 	}, [Oe, f?.ready]), (0, b.useEffect)(() => {
-		!k?.ready || !L || yt(L);
+		!k?.ready || !L || xt(L);
 	}, [L, k?.ready]), (0, b.useEffect)(() => {
-		!P?.applyApproved || !L || bt(L);
+		!P?.applyApproved || !L || St(L);
 	}, [
 		L,
 		P?.applyApproved,
@@ -16198,40 +16257,40 @@ function mr() {
 	]), (0, b.useEffect)(() => {
 		fe(null), me("");
 	}, [L]), (0, b.useEffect)(() => {
-		if (!o?.ready || !ge?.workspaceId || !Pe || !Ve || !Ue || it.current) return;
-		let e = Jn({
-			decisions: R,
-			reviewReason: ze,
-			batchId: Ve,
-			reviewedAt: Ue,
+		if (!o?.ready || !ge?.workspaceId || !Pe || !Ue || !Ge || ot.current) return;
+		let e = Zn({
+			decisions: ze,
+			reviewReason: Ve,
+			batchId: Ue,
+			reviewedAt: Ge,
 			mappingDraft: we
-		}), t = Yn(e), n = $e.current;
-		if (t === rt.current && !at(n)) {
-			et.current = null, ot(), xe(ge.draft ? "saved" : "idle"), Ce("");
+		}), t = Qn(e), n = tt.current;
+		if (t === at.current && !st(n)) {
+			nt.current = null, ct(), xe(ge.draft ? "saved" : "idle"), Ce("");
 			return;
 		}
 		let r = {
-			epoch: Ze.current,
+			epoch: $e.current,
 			workspaceId: ge.workspaceId,
 			payload: e,
 			snapshot: t,
 			readyAt: Date.now() + 700
 		};
-		return et.current = r, xe("pending"), Ce(""), st(r), ot;
+		return nt.current = r, xe("pending"), Ce(""), lt(r), ct;
 	}, [
-		R,
 		ze,
 		Ve,
 		Ue,
+		Ge,
 		we,
 		Pe?.document?.documentVersionId,
 		ge?.workspaceId,
 		o?.ready
 	]), (0, b.useEffect)(() => () => {
-		Ze.current += 1, et.current = null, ot();
+		$e.current += 1, nt.current = null, ct();
 	}, []);
-	let lt = Pe?.candidates?.length || 0, ut = Pe?.document?.documentVersionId || "", dt = (0, b.useMemo)(() => Object.values(R).filter((e) => e.action === "approve").length, [R]), ft = lt - dt, pt = Ft(Ge?.plan);
-	async function mt(e = o) {
+	let dt = Pe?.candidates?.length || 0, ft = Pe?.document?.documentVersionId || "", pt = (0, b.useMemo)(() => Object.values(ze).filter((e) => e.action === "approve").length, [ze]), mt = dt - pt, ht = Ft(qe?.plan);
+	async function gt(e = o) {
 		if (!(!e?.ready || !/^[0-9a-f-]{36}$/iu.test(Oe.trim()))) try {
 			d((await H(`/api/contracts/workspaces?${new URLSearchParams({
 				sourceProjectId: Oe.trim(),
@@ -16241,7 +16300,7 @@ function mr() {
 			d([]), l(V(e));
 		}
 	}
-	async function ht(e = f) {
+	async function _t(e = f) {
 		if (!(!e?.ready || !/^[0-9a-f-]{36}$/iu.test(Oe.trim()))) try {
 			_((await H(`/api/contracts/clauses/workspaces?${new URLSearchParams({
 				sourceProjectId: Oe.trim(),
@@ -16251,25 +16310,25 @@ function mr() {
 			_([]), h(V(e));
 		}
 	}
-	async function gt(e) {
+	async function vt(e) {
 		B("open-clause-workspace"), h("");
 		try {
 			let t = await H(`/api/contracts/clauses/workspaces/${e}`, { timeoutMs: 6e4 });
-			Le(t.preview), he(t.workspace?.workspaceId || e), T(null), O(null), te(""), j(null), N(""), F(null), I(""), fe(null), me(""), De(null), Ne(t.workspace?.projectSite || ""), ye("תוצאת סוכן החוזים נטענה מהשמירה ללא קריאה חוזרת למודל וללא המתנה לחילוץ."), Xe(""), v?.ready && await _t(t.workspace?.workspaceId || e);
+			Le(t.preview), Re("clauses"), he(t.workspace?.workspaceId || e), T(null), O(null), te(""), j(null), N(""), F(null), I(""), fe(null), me(""), De(null), Ne(t.workspace?.projectSite || ""), ye("תוצאת סוכן החוזים נטענה מהשמירה ללא קריאה חוזרת למודל וללא המתנה לחילוץ."), Qe(""), v?.ready && await yt(t.workspace?.workspaceId || e);
 		} catch (e) {
 			h(V(e));
 		} finally {
 			B("");
 		}
 	}
-	async function _t(e) {
+	async function yt(e) {
 		if (!(!v?.ready || !e)) try {
 			T(await H(`/api/contracts/relationships/workspaces/${e}`, { timeoutMs: 6e4 })), C("");
 		} catch (e) {
 			T(null), C(V(e));
 		}
 	}
-	async function vt() {
+	async function bt() {
 		if (!L) return C("יש לפתוח תחילה חילוץ סעיפים שמור.");
 		if (!v?.ready) return C("שמירת קשרי R4.0 עדיין אינה מופעלת בשרת.");
 		B("relationships-persist"), C("");
@@ -16284,21 +16343,21 @@ function mr() {
 			B("");
 		}
 	}
-	async function yt(e) {
+	async function xt(e) {
 		if (!(!k?.ready || !e)) try {
 			j(await H(`/api/contracts/relationships/workspaces/${e}/semantic-review`, { timeoutMs: 6e4 })), N("");
 		} catch (e) {
 			j(null), N(V(e));
 		}
 	}
-	async function bt(e) {
+	async function St(e) {
 		if (!(!P?.applyApproved || !e)) try {
 			F(await H(ae?.ready ? `/api/contracts/decisions/workspaces/${e}/lineage` : `/api/contracts/decisions/workspaces/${e}`, { timeoutMs: 6e4 })), I(""), fe(null);
 		} catch (e) {
 			F(null), I(V(e));
 		}
 	}
-	async function xt() {
+	async function Ct() {
 		if (!L) return me("יש לפתוח תחילה חילוץ סעיפים שמור.");
 		if (!le?.ready) return me("ערכת המסירה ל־Indicator עדיין אינה מופעלת בתהליך השרת הנוכחי.");
 		B("indicator-handoff"), me(""), fe(null);
@@ -16310,7 +16369,7 @@ function mr() {
 			B("");
 		}
 	}
-	async function St() {
+	async function wt() {
 		if (!L) return te("יש לפתוח תחילה חילוץ סעיפים שמור.");
 		if (!E?.ready) return te("תצוגת קשרי R4.1 עדיין אינה מופעלת או שמפתח המודל אינו מוגדר בשרת.");
 		B("semantic-relationships"), te(""), O(null);
@@ -16320,14 +16379,14 @@ function mr() {
 				body: {},
 				timeoutMs: 21e4
 			});
-			e.analysis && e.review ? (O(e.analysis), j(e.review), N(""), P?.applyApproved && await bt(L)) : O(e);
+			e.analysis && e.review ? (O(e.analysis), j(e.review), N(""), P?.applyApproved && await St(L)) : O(e);
 		} catch (e) {
 			te(V(e));
 		} finally {
 			B("");
 		}
 	}
-	async function Ct(e, t, n) {
+	async function Tt(e, t, n) {
 		if (!L || !e?.relationshipId) return N("הצעת הקשר השמורה אינה זמינה לסקירה.");
 		B(`relationship-review:${e.relationshipId}`), N("");
 		try {
@@ -16340,14 +16399,14 @@ function mr() {
 					...n.correction ? { correction: n.correction } : {}
 				},
 				timeoutMs: 6e4
-			})), P?.applyApproved && await bt(L);
+			})), P?.applyApproved && await St(L);
 		} catch (e) {
-			N(V(e)), e?.status === 409 && await yt(L);
+			N(V(e)), e?.status === 409 && await xt(L);
 		} finally {
 			B("");
 		}
 	}
-	async function wt() {
+	async function Et() {
 		if (!L) return I("יש לפתוח תחילה חילוץ סעיפים שמור.");
 		if (!P?.ready) return I("R4.2B עדיין אינו מופעל או שמפתח המודל אינו מוגדר בשרת.");
 		if (Number(se?.metrics?.pendingRelationshipCount || 0) > 0) return I("יש לסיים תחילה את סקירת כל הקשרים השמורים.");
@@ -16359,12 +16418,12 @@ function mr() {
 				timeoutMs: 27e4
 			})).review), fe(null);
 		} catch (e) {
-			I(V(e)), e?.status === 409 && await bt(L);
+			I(V(e)), e?.status === 409 && await St(L);
 		} finally {
 			B("");
 		}
 	}
-	async function Tt(e, t, n) {
+	async function Dt(e, t, n) {
 		if (!L || !e?.decisionId) return I("הצעת ההחלטה השמורה אינה זמינה לסקירה.");
 		B(`decision-review:${e.decisionId}`), I("");
 		try {
@@ -16379,12 +16438,12 @@ function mr() {
 				timeoutMs: 6e4
 			})), fe(null);
 		} catch (e) {
-			I(V(e)), e?.status === 409 && await bt(L);
+			I(V(e)), e?.status === 409 && await St(L);
 		} finally {
 			B("");
 		}
 	}
-	async function Et(e, t) {
+	async function Ot(e, t) {
 		if (!L || !e?.decisionId || !ae?.ready) return I("פעולת הפיצול של R4.2C אינה זמינה כעת.");
 		B(`decision-lineage:${e.decisionId}`), I("");
 		try {
@@ -16394,12 +16453,12 @@ function mr() {
 				timeoutMs: 6e4
 			})), fe(null);
 		} catch (e) {
-			I(V(e)), e?.status === 409 && await bt(L);
+			I(V(e)), e?.status === 409 && await St(L);
 		} finally {
 			B("");
 		}
 	}
-	async function Dt(e) {
+	async function kt(e) {
 		if (!L || !ae?.ready) return I("פעולת המיזוג של R4.2C אינה זמינה כעת.");
 		B("decision-lineage:merge"), I("");
 		try {
@@ -16409,50 +16468,50 @@ function mr() {
 				timeoutMs: 6e4
 			})), fe(null);
 		} catch (e) {
-			I(V(e)), e?.status === 409 && await bt(L);
+			I(V(e)), e?.status === 409 && await St(L);
 		} finally {
 			B("");
 		}
 	}
-	function Ot(e, t = "", { autosaveConflictMessage: n = "", preserveClausePreview: r = !1, preserveFile: i = !1 } = {}) {
-		let a = e.extraction, o = qn(a, e.draft), s = Jn(o);
-		ot(), Ze.current += 1, et.current = null, it.current = !!n, tt.current = e.workspaceId, nt.current = Xn(e.draft), rt.current = Yn(s), xe(n ? "conflict" : e.draft ? "saved" : "idle"), Ce(n), Fe(a), Re(o.decisions), Be(o.reviewReason), He(o.batchId), We(o.reviewedAt), Te(o.mappingDraft), ke(e.sourceProjectId || a.projectBinding?.projectId || zn), je(e.scheduleProjectId || Bn), Ne(e.projectSite || a.projectBinding?.projectSite || ""), _e(e), ye(t), Ke(null), Je(null), Xe(""), r || Le(null), i || De(null);
+	function At(e, t = "", { autosaveConflictMessage: n = "", preserveClausePreview: r = !1, preserveFile: i = !1 } = {}) {
+		let a = e.extraction, o = Xn(a, e.draft), s = Zn(o);
+		ct(), $e.current += 1, nt.current = null, ot.current = !!n, rt.current = e.workspaceId, it.current = $n(e.draft), at.current = Qn(s), xe(n ? "conflict" : e.draft ? "saved" : "idle"), Ce(n), Fe(a), Be(o.decisions), He(o.reviewReason), We(o.batchId), Ke(o.reviewedAt), Te(o.mappingDraft), ke(e.sourceProjectId || a.projectBinding?.projectId || zn), je(e.scheduleProjectId || Bn), Ne(e.projectSite || a.projectBinding?.projectSite || ""), _e(e), ye(t), Je(null), Xe(null), Qe(""), r || Le(null), i || De(null);
 	}
-	async function kt(e) {
+	async function jt(e) {
 		B("open-workspace"), l("");
 		try {
-			Ot((await H(`/api/contracts/workspaces/${e}`)).workspace, "החוזה והחלטות הטיוטה נטענו ללא קריאה חדשה למודל.");
+			At((await H(`/api/contracts/workspaces/${e}`)).workspace, "החוזה והחלטות הטיוטה נטענו ללא קריאה חדשה למודל.");
 		} catch (e) {
 			l(V(e));
 		} finally {
 			B("");
 		}
 	}
-	function At(e, t) {
-		Re((n) => ({
+	function Mt(e, t) {
+		Be((n) => ({
 			...n,
 			[e]: {
 				...n[e],
 				...t
 			}
-		})), Ke(null), Je(null);
+		})), Je(null), Xe(null);
 	}
-	function jt() {
+	function Nt() {
 		if (!Pe) return "יש להריץ חילוץ לפני סקירה.";
-		if (ze.trim().length < 10) return "נדרש נימוק סקירה כללי של לפחות 10 תווים.";
+		if (Ve.trim().length < 10) return "נדרש נימוק סקירה כללי של לפחות 10 תווים.";
 		for (let e of Pe.candidates || []) {
-			let t = R[e.candidateKey];
+			let t = ze[e.candidateKey];
 			if (!t?.reason?.trim()) return "נדרש נימוק לכל החלטה.";
 			if (t.action === "approve" && !t.gatesReviewed) return "יש לאשר במפורש שהחסמים נבדקו לכל מועמד שמקודם.";
 			if (t.action === "approve" && e.conflictGroupId && !t.conflictReason.trim()) return "נדרש נימוק מפורש לפתרון סתירה.";
 		}
 		return "";
 	}
-	async function Mt() {
-		if (!Ee) return Xe("יש לבחור קובץ PDF.");
-		B("extract"), Xe(""), l(""), ye(""), Ke(null), Je(null);
+	async function It() {
+		if (!Ee) return Qe("יש לבחור קובץ PDF.");
+		B("extract"), Qe(""), l(""), ye(""), Je(null), Xe(null);
 		try {
-			let e = await Hn(Ee), t = {
+			let e = await Gn(Ee), t = {
 				filename: Ee.name,
 				mediaType: "application/pdf",
 				pdfBase64: e,
@@ -16473,30 +16532,30 @@ function mr() {
 				method: "POST",
 				timeoutMs: 3e5,
 				body: t
-			}), r = n.extraction || n, i = qn(r, n.draft);
+			}), r = n.extraction || n, i = Xn(r, n.draft);
 			if (o?.ready) {
 				let e = n.reused ? "החוזה כבר היה שמור: החילוץ והטיוטה נטענו ללא קריאת מודל וללא עלות טוקנים נוספת." : "החוזה, ה-PDF ותוצאת החילוץ נשמרו. השינויים בהחלטות יישמרו אוטומטית.";
-				Ot({
+				At({
 					...n.workspace,
 					extraction: r,
 					draft: n.draft || null
 				}, e, {
 					preserveClausePreview: !0,
 					preserveFile: !0
-				}), mt();
-			} else tt.current = "", nt.current = 0, rt.current = "", _e(null), Fe(r), Re(i.decisions), He(i.batchId), We(i.reviewedAt), Be(i.reviewReason), Te(i.mappingDraft), ye("השמירה הקבועה עדיין אינה מופעלת בשרת; החילוץ נשמר רק במסך הנוכחי.");
+				}), gt();
+			} else rt.current = "", it.current = 0, at.current = "", _e(null), Fe(r), Be(i.decisions), We(i.batchId), Ke(i.reviewedAt), He(i.reviewReason), Te(i.mappingDraft), ye("השמירה הקבועה עדיין אינה מופעלת בשרת; החילוץ נשמר רק במסך הנוכחי.");
 		} catch (e) {
-			Xe(V(e));
+			Qe(V(e));
 		} finally {
 			B("");
 		}
 	}
-	async function Nt() {
-		if (!Ee) return Xe("יש לבחור קובץ PDF.");
-		if (!f?.ready) return Xe("שמירת תוצאת סוכן החוזים עדיין אינה מופעלת בשרת.");
-		B("clause-persist"), Xe(""), ye("");
+	async function Lt() {
+		if (!Ee) return Qe("יש לבחור קובץ PDF.");
+		if (!f?.ready) return Qe("שמירת תוצאת סוכן החוזים עדיין אינה מופעלת בשרת.");
+		B("clause-persist"), Qe(""), ye("");
 		try {
-			let e = await Hn(Ee), t = await H("/api/contracts/clauses/workspaces/extract", {
+			let e = await Gn(Ee), t = await H("/api/contracts/clauses/workspaces/extract", {
 				method: "POST",
 				timeoutMs: 3e5,
 				body: {
@@ -16511,52 +16570,52 @@ function mr() {
 					}
 				}
 			});
-			Le(t), he(t.workspace?.workspaceId || ""), T(null), C(""), O(null), te(""), j(null), N(""), ye(t.modelAvoided ? "החילוץ הזה כבר היה שמור ונטען מיד, ללא קריאה חוזרת למודל." : "ה־PDF וכל תוצאת סוכן החוזים נשמרו. מעכשיו אפשר לפתוח אותם מחדש ללא חילוץ חוזר."), ht();
+			Le(t), Re("clauses"), he(t.workspace?.workspaceId || ""), T(null), C(""), O(null), te(""), j(null), N(""), ye(t.modelAvoided ? "החילוץ הזה כבר היה שמור ונטען מיד, ללא קריאה חוזרת למודל." : "ה־PDF וכל תוצאת סוכן החוזים נשמרו. מעכשיו אפשר לפתוח אותם מחדש ללא חילוץ חוזר."), _t();
 		} catch (e) {
-			Xe(V(e));
+			Qe(V(e));
 		} finally {
 			B("");
 		}
 	}
-	async function It() {
-		let e = jt();
-		if (e) return Xe(e);
-		B("plan"), Xe("");
+	async function Rt() {
+		let e = Nt();
+		if (e) return Qe(e);
+		B("plan"), Qe("");
 		try {
-			Ke(await H("/api/contracts/review/plan", {
+			Je(await H("/api/contracts/review/plan", {
 				method: "POST",
-				body: $n({
+				body: nr({
 					extraction: Pe,
-					decisions: R,
-					reviewReason: ze,
-					batchId: Ve,
-					reviewedAt: Ue,
+					decisions: ze,
+					reviewReason: Ve,
+					batchId: Ue,
+					reviewedAt: Ge,
 					sourceProjectId: Oe,
 					scheduleProjectId: Ae
 				})
-			})), Je(null);
+			})), Xe(null);
 		} catch (e) {
-			Xe(V(e));
+			Qe(V(e));
 		} finally {
 			B("");
 		}
 	}
-	async function Lt(e) {
-		if (!Ge) return Xe("יש להכין ולאמת את תוכנית הסקירה לפני השמירה או הקידום.");
-		if (e !== pt || e === Pt.blocked) return Xe("תוכנית הסקירה אינה מוכנה לפעולה בטוחה.");
+	async function zt(e) {
+		if (!qe) return Qe("יש להכין ולאמת את תוכנית הסקירה לפני השמירה או הקידום.");
+		if (e !== ht || e === Pt.blocked) return Qe("תוכנית הסקירה אינה מוכנה לפעולה בטוחה.");
 		let t = e === Pt.reviewOnly;
-		B(t ? "save-review" : "commit"), Xe("");
+		B(t ? "save-review" : "commit"), Qe("");
 		try {
-			let e = $n({
+			let e = nr({
 				extraction: Pe,
-				decisions: R,
-				reviewReason: ze,
-				batchId: Ve,
-				reviewedAt: Ue,
+				decisions: ze,
+				reviewReason: Ve,
+				batchId: Ue,
+				reviewedAt: Ge,
 				sourceProjectId: Oe,
 				scheduleProjectId: Ae
 			});
-			Je(await H(t ? "/api/contracts/review/save" : "/api/contracts/review/commit", {
+			Xe(await H(t ? "/api/contracts/review/save" : "/api/contracts/review/commit", {
 				method: "POST",
 				body: t ? {
 					...e,
@@ -16567,7 +16626,7 @@ function mr() {
 				}
 			}));
 		} catch (e) {
-			Xe(V(e));
+			Qe(V(e));
 		} finally {
 			B("");
 		}
@@ -16645,7 +16704,7 @@ function mr() {
 						] }), /* @__PURE__ */ (0, x.jsx)("button", {
 							type: "button",
 							disabled: !!z,
-							onClick: () => gt(e.workspaceId),
+							onClick: () => vt(e.workspaceId),
 							children: z === "open-clause-workspace" ? "פותח…" : "פתח ללא חילוץ חוזר"
 						})] }, e.workspaceId))
 					}),
@@ -16697,7 +16756,7 @@ function mr() {
 						] }), /* @__PURE__ */ (0, x.jsx)("button", {
 							type: "button",
 							disabled: !!z,
-							onClick: () => kt(e.workspaceId),
+							onClick: () => jt(e.workspaceId),
 							children: z === "open-workspace" ? "פותח…" : "פתח והמשך"
 						})] }, e.workspaceId))
 					}),
@@ -16719,7 +16778,7 @@ function mr() {
 								type: "file",
 								accept: "application/pdf,.pdf",
 								onChange: (e) => {
-									De(e.target.files?.[0] || null), Le(null), he(""), T(null), C(""), O(null), te(""), j(null), N(""), F(null), I(""), fe(null), me("");
+									De(e.target.files?.[0] || null), Le(null), Re("clauses"), he(""), T(null), C(""), O(null), te(""), j(null), N(""), F(null), I(""), fe(null), me("");
 								}
 							})] }),
 							/* @__PURE__ */ (0, x.jsxs)("label", { children: ["אתר / תיאור פרויקט", /* @__PURE__ */ (0, x.jsx)("input", {
@@ -16744,13 +16803,13 @@ function mr() {
 							type: "button",
 							className: "contractsPrimary",
 							disabled: !!z || !f?.ready,
-							onClick: Nt,
+							onClick: Lt,
 							children: z === "clause-persist" ? "מפרק, מעשיר ושומר את כל סעיפי החוזה…" : "חלץ ושמור את כל תוצאת סוכן החוזים"
 						}), /* @__PURE__ */ (0, x.jsx)("button", {
 							type: "button",
 							className: "contractsSecondary",
 							disabled: !!z,
-							onClick: Mt,
+							onClick: It,
 							children: z === "extract" ? "בודק אם החוזה שמור, ומחלץ רק אם נדרש…" : o?.ready ? "הרץ גם את החילוץ הקלאסי ושמור" : "הרץ גם את החילוץ הקלאסי"
 						})]
 					}),
@@ -16765,52 +16824,93 @@ function mr() {
 					})
 				]
 			}),
-			Ie && /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [
-				/* @__PURE__ */ (0, x.jsx)(tr, {
-					preview: Ie,
-					classicDocumentVersionId: ut
-				}),
-				/* @__PURE__ */ (0, x.jsx)(ar, {
-					preview: Ie,
-					workspaceId: L,
-					persistenceStatus: v,
-					persistenceResult: w,
-					persistenceError: S,
-					persistenceBusy: z === "relationships-persist",
-					onPersist: vt,
-					semanticStatus: E,
-					semanticResult: ne,
-					semanticError: D,
-					semanticBusy: z === "semantic-relationships",
-					onRunSemantic: St,
-					reviewStatus: k,
-					reviewResult: re,
-					reviewError: M,
-					reviewBusyId: z.startsWith("relationship-review:") ? z.slice(20) : "",
-					onReview: Ct
-				}),
-				/* @__PURE__ */ (0, x.jsx)(dr, {
-					status: P,
-					lineageStatus: ae,
-					result: se,
-					relationshipPendingCount: re?.metrics?.proposedCount || 0,
-					error: ce,
-					generationBusy: z === "decision-proposals",
-					reviewBusyId: z.startsWith("decision-review:") ? z.slice(16) : z === "decision-lineage:merge" ? "lineage:merge" : z.startsWith("decision-lineage:") ? `lineage:${z.slice(17)}` : "",
-					onGenerate: wt,
-					onSplit: Et,
-					onMerge: Dt,
-					onReview: Tt
-				}),
-				/* @__PURE__ */ (0, x.jsx)(pr, {
-					status: le,
-					result: de,
-					error: pe,
-					busy: z === "indicator-handoff",
-					disabled: !!z,
-					onRun: xt
-				})
-			] }),
+			Ie && /* @__PURE__ */ (0, x.jsxs)("section", {
+				className: "contractsWorkspaceTabsShell",
+				"aria-labelledby": "contracts-open-workspace-title",
+				children: [
+					/* @__PURE__ */ (0, x.jsxs)("div", {
+						className: "contractsWorkspaceTabsHeader",
+						children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [
+							/* @__PURE__ */ (0, x.jsx)("p", {
+								className: "contractsEyebrow",
+								children: "חוזה פתוח · סביבת עבודה שמורה"
+							}),
+							/* @__PURE__ */ (0, x.jsx)("h2", {
+								id: "contracts-open-workspace-title",
+								children: Me || Ie.document?.filename || "חוזה שמור"
+							}),
+							/* @__PURE__ */ (0, x.jsxs)("p", { children: [Ie.document?.filename || "", " · בחרו שלב כדי להציג רק את המידע הרלוונטי."] })
+						] }), /* @__PURE__ */ (0, x.jsx)("span", {
+							className: "contractsPlanReady",
+							children: "החילוץ השמור נשאר טעון בעת מעבר בין הכרטיסיות"
+						})]
+					}),
+					/* @__PURE__ */ (0, x.jsx)(Un, {
+						activeTab: R,
+						onChange: Re
+					}),
+					/* @__PURE__ */ (0, x.jsx)(Wn, {
+						id: "clauses",
+						activeTab: R,
+						children: /* @__PURE__ */ (0, x.jsx)(ir, {
+							preview: Ie,
+							classicDocumentVersionId: ft
+						})
+					}),
+					/* @__PURE__ */ (0, x.jsx)(Wn, {
+						id: "relationships",
+						activeTab: R,
+						children: /* @__PURE__ */ (0, x.jsx)(cr, {
+							preview: Ie,
+							workspaceId: L,
+							persistenceStatus: v,
+							persistenceResult: w,
+							persistenceError: S,
+							persistenceBusy: z === "relationships-persist",
+							onPersist: bt,
+							semanticStatus: E,
+							semanticResult: ne,
+							semanticError: D,
+							semanticBusy: z === "semantic-relationships",
+							onRunSemantic: wt,
+							reviewStatus: k,
+							reviewResult: re,
+							reviewError: M,
+							reviewBusyId: z.startsWith("relationship-review:") ? z.slice(20) : "",
+							onReview: Tt
+						})
+					}),
+					/* @__PURE__ */ (0, x.jsx)(Wn, {
+						id: "decisions",
+						activeTab: R,
+						children: /* @__PURE__ */ (0, x.jsx)(mr, {
+							status: P,
+							lineageStatus: ae,
+							result: se,
+							relationshipPendingCount: re?.metrics?.proposedCount || 0,
+							error: ce,
+							generationBusy: z === "decision-proposals",
+							reviewBusyId: z.startsWith("decision-review:") ? z.slice(16) : z === "decision-lineage:merge" ? "lineage:merge" : z.startsWith("decision-lineage:") ? `lineage:${z.slice(17)}` : "",
+							onGenerate: Et,
+							onSplit: Ot,
+							onMerge: kt,
+							onReview: Dt
+						})
+					}),
+					/* @__PURE__ */ (0, x.jsx)(Wn, {
+						id: "indicator",
+						activeTab: R,
+						children: /* @__PURE__ */ (0, x.jsx)(gr, {
+							status: le,
+							result: de,
+							error: pe,
+							busy: z === "indicator-handoff",
+							disabled: !!z,
+							onRun: Ct
+						})
+					})
+				]
+			}),
 			Pe && /* @__PURE__ */ (0, x.jsxs)("section", {
 				className: "contractsPanel",
 				children: [
@@ -16823,11 +16923,11 @@ function mr() {
 							}),
 							/* @__PURE__ */ (0, x.jsx)("h2", { children: "תוצאת הסוכן הקלאסי: סקירת מועמדים" }),
 							/* @__PURE__ */ (0, x.jsxs)("p", { children: [
-								lt,
-								" מועמדים · ",
 								dt,
+								" מועמדים · ",
+								pt,
 								" לאישור · ",
-								ft,
+								mt,
 								" לדחייה"
 							] })
 						] }), /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -16849,19 +16949,19 @@ function mr() {
 					}),
 					/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsCandidateList",
-						children: (Pe.candidates || []).map((e) => /* @__PURE__ */ (0, x.jsx)(er, {
+						children: (Pe.candidates || []).map((e) => /* @__PURE__ */ (0, x.jsx)(rr, {
 							candidate: e,
-							decision: R[e.candidateKey],
-							onChange: (t) => At(e.candidateKey, t)
+							decision: ze[e.candidateKey],
+							onChange: (t) => Mt(e.candidateKey, t)
 						}, e.candidateKey))
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("label", {
 						className: "contractsReviewReason",
 						children: ["נימוק סקירה כללי", /* @__PURE__ */ (0, x.jsx)("textarea", {
 							rows: "3",
-							value: ze,
+							value: Ve,
 							onChange: (e) => {
-								Be(e.target.value), Ke(null);
+								He(e.target.value), Je(null);
 							}
 						})]
 					}),
@@ -16869,39 +16969,39 @@ function mr() {
 						type: "button",
 						className: "contractsPrimary",
 						disabled: !!z,
-						onClick: It,
+						onClick: Rt,
 						children: z === "plan" ? "בודק תוכנית…" : "הכן ובדוק תוכנית קידום"
 					})
 				]
 			}),
-			Ge && /* @__PURE__ */ (0, x.jsxs)("section", {
+			qe && /* @__PURE__ */ (0, x.jsxs)("section", {
 				className: "contractsPanel contractsPlanPanel",
 				children: [
 					/* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsSectionHeader",
 						children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("h2", { children: "3. תוכנית טרנזקציה" }), /* @__PURE__ */ (0, x.jsxs)("p", { children: [
 							"מצב: ",
-							An(Ge.plan?.status),
+							An(qe.plan?.status),
 							" · פעולה בטוחה: ",
-							pt === Pt.promotion ? "קידום עובדות מאושרות" : pt === Pt.reviewOnly ? "שמירת סקירה בלבד" : "אין"
+							ht === Pt.promotion ? "קידום עובדות מאושרות" : ht === Pt.reviewOnly ? "שמירת סקירה בלבד" : "אין"
 						] })] }), /* @__PURE__ */ (0, x.jsx)("span", {
-							className: pt === Pt.blocked ? "contractsPlanBlocked" : "contractsPlanReady",
-							children: pt === Pt.promotion ? "מוכן לקידום" : pt === Pt.reviewOnly ? "מוכן לשמירת סקירה" : "חסום"
+							className: ht === Pt.blocked ? "contractsPlanBlocked" : "contractsPlanReady",
+							children: ht === Pt.promotion ? "מוכן לקידום" : ht === Pt.reviewOnly ? "מוכן לשמירת סקירה" : "חסום"
 						})]
 					}),
-					(Ge.plan?.globalBlockers || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("ul", {
+					(qe.plan?.globalBlockers || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("ul", {
 						className: "contractsBlockers",
-						children: Ge.plan.globalBlockers.map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: wn(e) }, e))
+						children: qe.plan.globalBlockers.map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: wn(e) }, e))
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsPlanCounts",
 						children: [
-							/* @__PURE__ */ (0, x.jsxs)("span", { children: ["אבני דרך ", /* @__PURE__ */ (0, x.jsx)("strong", { children: Ge.plan?.rowsByTable?.schedule_contract_milestones?.length || 0 })] }),
-							/* @__PURE__ */ (0, x.jsxs)("span", { children: ["הארכות ", /* @__PURE__ */ (0, x.jsx)("strong", { children: Ge.plan?.rowsByTable?.schedule_contract_extensions?.length || 0 })] }),
-							/* @__PURE__ */ (0, x.jsxs)("span", { children: ["תנאים ", /* @__PURE__ */ (0, x.jsx)("strong", { children: Ge.plan?.rowsByTable?.schedule_contract_conditions?.length || 0 })] })
+							/* @__PURE__ */ (0, x.jsxs)("span", { children: ["אבני דרך ", /* @__PURE__ */ (0, x.jsx)("strong", { children: qe.plan?.rowsByTable?.schedule_contract_milestones?.length || 0 })] }),
+							/* @__PURE__ */ (0, x.jsxs)("span", { children: ["הארכות ", /* @__PURE__ */ (0, x.jsx)("strong", { children: qe.plan?.rowsByTable?.schedule_contract_extensions?.length || 0 })] }),
+							/* @__PURE__ */ (0, x.jsxs)("span", { children: ["תנאים ", /* @__PURE__ */ (0, x.jsx)("strong", { children: qe.plan?.rowsByTable?.schedule_contract_conditions?.length || 0 })] })
 						]
 					}),
-					pt === Pt.reviewOnly && /* @__PURE__ */ (0, x.jsxs)("div", {
+					ht === Pt.reviewOnly && /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsActionBlock",
 						children: [
 							/* @__PURE__ */ (0, x.jsx)("p", { children: "כל המועמדים נדחו. הפעולה תשמור ביקורת בלתי־ניתנת לשינוי בלבד ותיצור אפס רשומות לו״ז." }),
@@ -16913,12 +17013,12 @@ function mr() {
 								type: "button",
 								className: "contractsCommit contractsReviewOnlyAction",
 								disabled: !!z || !e?.applyApproved,
-								onClick: () => Lt(Pt.reviewOnly),
+								onClick: () => zt(Pt.reviewOnly),
 								children: z === "save-review" ? "שומר סקירה ללא קידום…" : "שמור סקירה ללא קידום"
 							})
 						]
 					}),
-					pt === Pt.promotion && /* @__PURE__ */ (0, x.jsxs)("div", {
+					ht === Pt.promotion && /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsActionBlock",
 						children: [
 							/* @__PURE__ */ (0, x.jsx)("p", { children: "רק העובדות שאושרו ועמדו בכל החסמים ייכתבו אטומית לטבלאות הלו״ז הקיימות." }),
@@ -16930,12 +17030,12 @@ function mr() {
 								type: "button",
 								className: "contractsCommit",
 								disabled: !!z || !e?.applyApproved,
-								onClick: () => Lt(Pt.promotion),
+								onClick: () => zt(Pt.promotion),
 								children: z === "commit" ? "מבצע קידום אטומי…" : "קדם עובדות מאושרות"
 							})
 						]
 					}),
-					pt === Pt.blocked && /* @__PURE__ */ (0, x.jsxs)("div", {
+					ht === Pt.blocked && /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsActionBlock",
 						children: [/* @__PURE__ */ (0, x.jsx)("p", {
 							className: "contractsActivationNotice",
@@ -16949,7 +17049,7 @@ function mr() {
 					})
 				]
 			}),
-			Pe && /* @__PURE__ */ (0, x.jsx)(Qn, {
+			Pe && /* @__PURE__ */ (0, x.jsx)(tr, {
 				extraction: Pe,
 				sourceProjectId: Oe.trim(),
 				status: n,
@@ -16958,49 +17058,49 @@ function mr() {
 				savedStateKey: ge?.workspaceId || "",
 				onDraftStateChange: Te
 			}),
-			Ye && /* @__PURE__ */ (0, x.jsx)("div", {
+			Ze && /* @__PURE__ */ (0, x.jsx)("div", {
 				className: "contractsMessage is-error",
 				role: "alert",
-				children: Ye
+				children: Ze
 			}),
-			qe && /* @__PURE__ */ (0, x.jsx)("div", {
+			Ye && /* @__PURE__ */ (0, x.jsx)("div", {
 				className: "contractsMessage is-success",
-				children: qe.status === "reviewed_no_promotion" ? "הסקירה נשמרה ביומן הביקורת בלבד. לא קודמו ולא נוצרו רשומות לו״ז." : `הקידום הושלם. קודמו ${qe.promotedCount} רשומות.`
+				children: Ye.status === "reviewed_no_promotion" ? "הסקירה נשמרה ביומן הביקורת בלבד. לא קודמו ולא נוצרו רשומות לו״ז." : `הקידום הושלם. קודמו ${Ye.promotedCount} רשומות.`
 			})
 		]
 	});
 }
 //#endregion
 //#region src/react/main.jsx
-var hr = /* @__PURE__ */ new WeakMap();
-function gr({ label: e = "React bridge ready" }) {
+var vr = /* @__PURE__ */ new WeakMap();
+function yr({ label: e = "React bridge ready" }) {
 	return /* @__PURE__ */ (0, x.jsx)("span", {
 		className: "reactBridgeStatus",
 		"data-react-ready": "true",
 		children: e
 	});
 }
-var _r = {
-	status: gr,
+var br = {
+	status: yr,
 	settings: De,
 	workflow: Ne,
-	insights: z,
+	insights: Ye,
 	schedule: Nt,
-	contracts: mr
+	contracts: _r
 };
-function vr(e) {
-	let t = _r[e.dataset.reactIsland];
-	if (!t || hr.has(e)) return !1;
+function xr(e) {
+	let t = br[e.dataset.reactIsland];
+	if (!t || vr.has(e)) return !1;
 	let n = e.dataset.reactProps ? JSON.parse(e.dataset.reactProps) : {}, r = (0, y.createRoot)(e);
-	return r.render(/* @__PURE__ */ (0, x.jsx)(b.StrictMode, { children: /* @__PURE__ */ (0, x.jsx)(t, { ...n }) })), hr.set(e, r), !0;
+	return r.render(/* @__PURE__ */ (0, x.jsx)(b.StrictMode, { children: /* @__PURE__ */ (0, x.jsx)(t, { ...n }) })), vr.set(e, r), !0;
 }
-function yr(e = document) {
-	return Array.from(e.querySelectorAll("[data-react-island]")).reduce((e, t) => e + +!!vr(t), 0);
+function Sr(e = document) {
+	return Array.from(e.querySelectorAll("[data-react-island]")).reduce((e, t) => e + +!!xr(t), 0);
 }
 typeof window < "u" && (window.BiDocReact = {
-	islands: Object.keys(_r),
-	mountReactIslands: yr,
+	islands: Object.keys(br),
+	mountReactIslands: Sr,
 	version: "0.1.0"
-}, document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => yr(), { once: !0 }) : yr());
+}, document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => Sr(), { once: !0 }) : Sr());
 //#endregion
-export { yr as mountReactIslands };
+export { Sr as mountReactIslands };

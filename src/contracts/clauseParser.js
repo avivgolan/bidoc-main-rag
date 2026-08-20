@@ -7,10 +7,10 @@ import {
 import { CONTRACTS_MAX_PDF_BYTES } from "./constants.js";
 import { ContractsAgentError } from "./errors.js";
 
-export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v1";
+export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v2";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v1";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v2";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v2";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -32,6 +32,8 @@ const CONTEXT_BOUNDARIES = [
   /^ולראיה\s+באתי\s+על\s+החתום/u,
   /^בכבוד\s+רב[,،]?$/u
 ];
+const DURATION_REMAINDER_PATTERN = /^(?:יום|ימים?|ימי\s+עבודה|חודשים?|שנים?|שעות?|שבועות?|days?|working\s+days?|months?|years?|hours?|weeks?)(?:\s|[,.;:()/-]|$)/iu;
+const APPENDIX_INVENTORY_PATTERN = /(?:רשימת|פירוט)\s+נספחים/u;
 
 export function createContractsClauseParserGeneration({
   parserVersion = CONTRACTS_CLAUSE_PARSER_VERSION,
@@ -244,6 +246,7 @@ function createAssemblyState(pages) {
     assigned: new Map(lines.map((line) => [line.id, 0])),
     current: null,
     appendixKey: null,
+    appendixInventoryMode: false,
     contextCounters: new Map(),
     numberedSourceCount: 0,
     unparsedNumberedLines: []
@@ -260,6 +263,10 @@ function assembleLogicalRecords(state) {
 
       const appendix = parseAppendixHeading(line.text);
       if (appendix) {
+        if (state.appendixInventoryMode) {
+          addLine(state, line);
+          continue;
+        }
         flushCurrent(state);
         state.appendixKey = appendix;
         state.current = createRecordBuilder({
@@ -284,6 +291,7 @@ function assembleLogicalRecords(state) {
       const marker = parseClauseMarker(line.text);
       if (marker) {
         flushCurrent(state);
+        state.appendixInventoryMode = APPENDIX_INVENTORY_PATTERN.test(marker.remainder);
         state.numberedSourceCount += 1;
         const appendixKey = state.appendixKey;
         const clauseKey = appendixKey ? `appendix_${appendixKey}.${marker.number}` : marker.number;
@@ -565,12 +573,22 @@ function parseAppendixHeading(value) {
 }
 
 function parseClauseMarker(value) {
-  const match = String(value || "").match(/^\s*(\d{1,2}(?:\.\d{1,2}){0,4})(?:\.|\))?\s+(\S.*)$/u);
+  const text = String(value || "");
+  const match = text.match(/^\s*(\d{1,2}(?:\.\d{1,2}){0,4})([.)])?\s+(\S.*)$/u);
+  const compactMatch = match
+    ? null
+    : text.match(/^\s*(\d{1,2}(?:\.\d{1,2}){1,4})[.)](\p{L}.*)$/u);
+  if (compactMatch) return normalizeClauseMarker(compactMatch[1], compactMatch[2]);
   if (!match) return null;
-  const parts = match[1].split(".").map(Number);
+  if (!match[2] && DURATION_REMAINDER_PATTERN.test(match[3])) return null;
+  return normalizeClauseMarker(match[1], match[3]);
+}
+
+function normalizeClauseMarker(number, remainder) {
+  const parts = number.split(".").map(Number);
   if (parts.some((part) => !Number.isInteger(part) || part < 1)) return null;
-  if (/^(?:(?:לעיל|להלן)(?:\s|[,.;:])|(?:above|below)\b)/iu.test(match[2])) return null;
-  return { number: parts.join("."), remainder: match[2].trim() };
+  if (/^(?:(?:לעיל|להלן)(?:\s|[,.;:])|(?:above|below)\b)/iu.test(remainder)) return null;
+  return { number: parts.join("."), remainder: remainder.trim() };
 }
 
 function looksLikeUnsupportedNumberedLine(value) {

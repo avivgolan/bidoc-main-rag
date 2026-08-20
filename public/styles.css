@@ -10026,6 +10026,21 @@ body:has(#timeline.active) .sidebar {
 .contractsSavedList article button:disabled { cursor: wait; opacity: .6; }
 .contractsWorkspaceSaveState { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .contractsUploadActions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.contractsWorkspaceTabsShell { display: grid; gap: 12px; scroll-margin-top: 12px; }
+.contractsWorkspaceTabsHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px 20px; border: 1px solid #bfd6c7; border-radius: 15px; background: linear-gradient(135deg, #fff 0%, #f0f7f2 100%); box-shadow: 0 8px 20px rgba(43, 59, 49, .045); }
+.contractsWorkspaceTabsHeader h2 { margin: 3px 0 5px; color: #173e2b; font-size: 22px; }
+.contractsWorkspaceTabsHeader p { margin: 0; color: #66776d; font-size: 12px; line-height: 1.55; }
+.contractsWorkspaceTabs { position: sticky; top: 8px; z-index: 8; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 6px; border: 1px solid #c8d9ce; border-radius: 14px; background: rgba(247, 250, 247, .96); box-shadow: 0 8px 22px rgba(33, 69, 48, .08); backdrop-filter: blur(10px); }
+.contractsWorkspaceTabs button { display: grid; gap: 3px; min-width: 0; padding: 11px 13px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: #53665b; text-align: start; cursor: pointer; }
+.contractsWorkspaceTabs button strong { overflow-wrap: anywhere; font-size: 13px; }
+.contractsWorkspaceTabs button small { overflow-wrap: anywhere; color: #718078; font-size: 10px; line-height: 1.35; }
+.contractsWorkspaceTabs button:hover { border-color: #c5d9cc; background: #fff; color: #285d41; }
+.contractsWorkspaceTabs button:focus-visible { outline: 3px solid rgba(67, 132, 93, .2); outline-offset: 1px; }
+.contractsWorkspaceTabs button.is-active { border-color: #6fa183; background: #347a55; color: #fff; box-shadow: 0 5px 12px rgba(36, 92, 61, .18); }
+.contractsWorkspaceTabs button.is-active small { color: #e4f1e8; }
+.contractsWorkspaceTabPanel { min-width: 0; outline: none; }
+.contractsWorkspaceTabPanel:focus-visible { border-radius: 16px; outline: 3px solid rgba(67, 132, 93, .15); outline-offset: 3px; }
+.contractsWorkspaceTabPanel[hidden] { display: none; }
 .contractsClausePreviewPanel { border-color: #9fc8ae; background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%); }
 .contractsComparisonNotice { padding: 12px 14px; border: 1px solid; border-radius: 11px; font-size: 13px; font-weight: 750; line-height: 1.5; }
 .contractsComparisonNotice.is-same-document { color: #245f3e; border-color: #abd5b8; background: #edf8f0; }
@@ -10269,6 +10284,9 @@ body:has(#timeline.active) .sidebar {
   .contractsSavedList article { align-items: stretch; flex-direction: column; }
   .contractsSavedList article button { width: 100%; }
   .contractsWorkspaceSaveState { align-items: stretch; justify-content: flex-start; }
+  .contractsWorkspaceTabsHeader { flex-direction: column; padding: 16px; }
+  .contractsWorkspaceTabsHeader .contractsPlanReady { white-space: normal; }
+  .contractsWorkspaceTabs { grid-template-columns: repeat(4, minmax(145px, 1fr)); overflow-x: auto; overscroll-behavior-inline: contain; }
 }
 
 .contractsScheduleProjectionPanel { border-color: #a6c8b3; background: linear-gradient(180deg, #fcfefc 0%, #f7fbf8 100%); }

@@ -121,6 +121,107 @@ test.describe("Contracts review-only workflow", () => {
 
 const SAVED_WORKSPACE_ID = "88888888-8888-4888-8888-888888888888";
 const SAVED_SCHEDULE_PROJECT_ID = "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5";
+const SAVED_CLAUSE_WORKSPACE_ID = "99999999-9999-4999-8999-999999999999";
+
+const savedClausePreview = {
+  persisted: true,
+  document: {
+    documentVersionId: `sha256:${"b".repeat(64)}`,
+    filename: "saved-contract.pdf",
+    pageCount: 1
+  },
+  generations: {
+    parserGenerationId: "contracts-clause-parser.r2.v1:test",
+    enrichmentGenerationId: "contracts-clause-enrichment.r3.v1:test",
+    modelVersion: "test-model"
+  },
+  coverage: {
+    sourceLineCount: 1,
+    accountedSourceLineCount: 1,
+    numberedSourceCount: 1,
+    errorCount: 0
+  },
+  quality: { referenceCount: 0 },
+  clauses: [{
+    clauseKey: "1.1",
+    clauseOrder: 1,
+    parentClauseKey: null,
+    clauseType: "subclause",
+    clauseTitle: null,
+    rawText: "1.1 הקבלן יבצע את העבודות בהתאם להסכם.",
+    rawTextSha256: "source-hash",
+    contentSha256: "content-hash",
+    summaryHe: "הקבלן יבצע את העבודות בהתאם להסכם.",
+    hashtags: ["execution"],
+    crossReferences: [],
+    pageStart: 1,
+    pageEnd: 1,
+    processingStatus: "processed"
+  }]
+};
+
+async function openSavedClauseWorkspace(page) {
+  await addTestSuperadminSession(page);
+  await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
+  await page.route(/^https?:\/\/(?!localhost)/, (route) => route.abort("blockedbyclient"));
+  await page.route("**/api/contracts/clauses/status", (route) => route.fulfill({
+    json: { active: true, ready: true, applyApproved: true, migrationVersion: "20260815180207" }
+  }));
+  await page.route(/\/api\/contracts\/clauses\/workspaces\?.*$/u, (route) => route.fulfill({
+    json: {
+      items: [{
+        workspaceId: SAVED_CLAUSE_WORKSPACE_ID,
+        projectSite: "חוזה בדיקה שמור",
+        filename: savedClausePreview.document.filename,
+        clauseCount: 1,
+        pageCount: 1,
+        createdAt: "2026-08-19T08:00:00.000Z",
+        documentVersionId: savedClausePreview.document.documentVersionId
+      }]
+    }
+  }));
+  await page.route(`**/api/contracts/clauses/workspaces/${SAVED_CLAUSE_WORKSPACE_ID}`, (route) => route.fulfill({
+    json: {
+      workspace: { workspaceId: SAVED_CLAUSE_WORKSPACE_ID, projectSite: "חוזה בדיקה שמור" },
+      preview: savedClausePreview
+    }
+  }));
+
+  await page.goto("/#contracts");
+  await page.waitForSelector("#contracts.active", { timeout: 10_000 });
+  await page.getByRole("button", { name: "פתח ללא חילוץ חוזר" }).click();
+  await expect(page.getByRole("tablist", { name: "שלבי העבודה בחוזה הפתוח" })).toBeVisible();
+}
+
+test.describe("Contracts saved-clause workspace tabs", () => {
+  test("shows one stage at a time and preserves the stage state while switching", async ({ page }) => {
+    await openSavedClauseWorkspace(page);
+    const errors = collectPageErrors(page);
+    const clausesTab = page.getByRole("tab", { name: /תוכן החוזה/u });
+    const relationshipsTab = page.getByRole("tab", { name: /קשרים בין סעיפים/u });
+    const decisionsTab = page.getByRole("tab", { name: /החלטות חוזיות/u });
+    const indicatorTab = page.getByRole("tab", { name: /מסירה ל־Indicator/u });
+
+    await expect(clausesTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("heading", { name: "2. תוכן החוזה שחולץ" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "3. קשרים בין סעיפי החוזה" })).toBeHidden();
+
+    const search = page.getByRole("searchbox", { name: "חיפוש בכל הסעיפים" });
+    await search.fill("קבלן");
+    await relationshipsTab.click();
+    await expect(relationshipsTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("heading", { name: "3. קשרים בין סעיפי החוזה" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "2. תוכן החוזה שחולץ" })).toBeHidden();
+
+    await decisionsTab.click();
+    await expect(page.getByRole("heading", { name: "4. החלטות חוזיות מנורמלות" })).toBeVisible();
+    await indicatorTab.click();
+    await expect(page.getByRole("heading", { name: "5. ערכת החלטות ל־Indicator" })).toBeVisible();
+    await clausesTab.click();
+    await expect(search).toHaveValue("קבלן");
+    expect(errors).toHaveLength(0);
+  });
+});
 
 function savedReviewDraft(revision, reviewReason = "טיוטה שמורה מהשרת") {
   return {

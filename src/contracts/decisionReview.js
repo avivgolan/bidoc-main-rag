@@ -10,6 +10,13 @@ import {
   runContractsDecisionNormalization
 } from "./decisionNormalization.js";
 import { workspaceRpc } from "./workspacePersistence.js";
+import {
+  CONTRACTS_R6_PHASE3_DECISION_PERSISTENCE_RPC,
+  CONTRACTS_R6_PHASE3_DECISION_REVIEW_RPC,
+  contractsR6Phase3Approved,
+  loadContractsR6ActiveCatalog,
+  persistContractsR6Embeddings
+} from "./r6Preparation.js";
 
 export const CONTRACTS_DECISION_REVIEW_MIGRATION_VERSION = "20260817121000";
 export const CONTRACTS_DECISION_REVIEW_STATUS_RPC = "bidoc_contracts_decision_review_status_r4_2b";
@@ -287,6 +294,10 @@ export async function generateAndPersistContractsDecisions({
     );
   }
   const normalizedWorkspaceId = parseContractsClauseWorkspaceId(workspaceId);
+  const r6Enabled = contractsR6Phase3Approved(env);
+  const r6Catalog = r6Enabled
+    ? await loadContractsR6ActiveCatalog({ config, fetchImpl, timeoutMs: remainingMs(deadlineAt) })
+    : null;
   const current = await loadContractsDecisionReview({
     config,
     workspaceId: normalizedWorkspaceId,
@@ -321,6 +332,10 @@ export async function generateAndPersistContractsDecisions({
     preview: saved.preview,
     relationshipReview,
     config,
+    ...(r6Catalog ? { triggerCatalog: r6Catalog.triggers } : {}),
+    modelVersion: r6Enabled
+      ? config.models?.lite || config.models?.main || "openai/gpt-4o-mini"
+      : config.models?.main || config.models?.lite || "openai/gpt-4o",
     ...(chatComplete ? { chatComplete } : {}),
     deadlineAt,
     signal,
@@ -352,7 +367,9 @@ export async function persistContractsDecisionProposals({
   try {
     const projection = await workspaceRpc({
       config,
-      rpc: CONTRACTS_DECISION_REVIEW_PERSIST_RPC,
+      rpc: contractsR6Phase3Approved(env)
+        ? CONTRACTS_R6_PHASE3_DECISION_PERSISTENCE_RPC
+        : CONTRACTS_DECISION_REVIEW_PERSIST_RPC,
       payload: {
         p_workspace_id: parseContractsClauseWorkspaceId(workspaceId),
         p_decision_policy_version: normalizationResult.decisionPolicyVersion,
@@ -362,7 +379,16 @@ export async function persistContractsDecisionProposals({
       fetchImpl,
       timeoutMs
     });
-    return assertProjection(projection, { persistenceRequired: true });
+    const accepted = assertProjection(projection, { persistenceRequired: true });
+    if (contractsR6Phase3Approved(env)) {
+      await persistContractsR6Embeddings({
+        config,
+        workspaceId: parseContractsClauseWorkspaceId(workspaceId),
+        fetchImpl,
+        timeoutMs
+      });
+    }
+    return accepted;
   } catch (error) {
     throw mapWorkspaceError(error);
   }
@@ -385,7 +411,9 @@ export async function reviewContractsDecision({
   try {
     const projection = await workspaceRpc({
       config,
-      rpc: CONTRACTS_DECISION_REVIEW_APPLY_RPC,
+      rpc: contractsR6Phase3Approved(env)
+        ? CONTRACTS_R6_PHASE3_DECISION_REVIEW_RPC
+        : CONTRACTS_DECISION_REVIEW_APPLY_RPC,
       payload: {
         p_workspace_id: parseContractsClauseWorkspaceId(workspaceId),
         p_decision_id: uuid(decisionId, "decisionId"),
@@ -398,7 +426,16 @@ export async function reviewContractsDecision({
       fetchImpl,
       timeoutMs
     });
-    return assertProjection(projection, { reviewRequired: true });
+    const accepted = assertProjection(projection, { reviewRequired: true });
+    if (contractsR6Phase3Approved(env)) {
+      await persistContractsR6Embeddings({
+        config,
+        workspaceId: parseContractsClauseWorkspaceId(workspaceId),
+        fetchImpl,
+        timeoutMs
+      });
+    }
+    return accepted;
   } catch (error) {
     throw mapWorkspaceError(error);
   }
