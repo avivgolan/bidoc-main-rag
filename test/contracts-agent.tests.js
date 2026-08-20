@@ -113,6 +113,11 @@ import {
   runContractsClausePersistence
 } from "../src/contracts/clausePersistence.js";
 import {
+  contractsR6Phase3Approved,
+  loadContractsR6ActiveCatalog,
+  persistContractsR6Embeddings
+} from "../src/contracts/r6Preparation.js";
+import {
   CONTRACTS_RELATIONSHIPS_AGENT_VERSION,
   CONTRACTS_RELATIONSHIP_POLICY_VERSION,
   buildContractsExplicitReferencePreview,
@@ -2361,6 +2366,93 @@ export function registerContractsAgentTests(test) {
       reused.clauses.map((clause) => [clause.clauseKey, clause.contentSha256]),
       enriched.clauses.map((clause) => [clause.clauseKey, clause.contentSha256])
     );
+  });
+
+  test("contracts R6 uses the active Hebrew tag catalog and lite model for clause enrichment", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. ביצוע\n1.1. הקבלן יבצע את העבודה בהתאם להסכם." }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const result = await runContractsClauseEnrichment({
+      generation,
+      controlledTags: ["ביצוע", "אישור"],
+      config: {
+        openRouterApiKey: "configured",
+        models: { main: "fixture/main", lite: "fixture/lite" },
+        ai: { lite: { timeoutMs: 30_000 } }
+      },
+      chatComplete: async ({ model, messages }) => {
+        assert.equal(model, "fixture/lite");
+        const input = JSON.parse(messages[1].content);
+        assert.deepEqual(input.controlledTags, ["ביצוע", "אישור"]);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף קובע את חובת ביצוע העבודה לפי ההסכם.",
+            tags: ["ביצוע"]
+          }))
+        });
+      }
+    });
+    assert.equal(result.modelVersion, "fixture/lite");
+    assert.deepEqual(result.clauses.map((clause) => clause.hashtags), [["ביצוע"], ["ביצוע"]]);
+  });
+
+  test("contracts R6 reads only server-side Hebrew catalogs and writes 3072-dimension embeddings", async () => {
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    const documentId = "22222222-2222-4222-8222-222222222222";
+    const input = "מקור: contracts_documents\nתגיות: ביצוע";
+    const inputSha256 = crypto.createHash("sha256").update(input).digest("hex");
+    const requests = [];
+    const fetchImpl = async (url, options) => {
+      requests.push({ url, body: JSON.parse(options.body || "{}") });
+      if (url.includes("bidoc_contracts_r6_active_catalog_v1")) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({
+          schemaVersion: "contracts-r6-catalog.v1",
+          tags: ["ביצוע", "אישור"],
+          triggers: ["חתימת ההסכם"]
+        }) };
+      }
+      if (url.includes("bidoc_contracts_r6_embedding_work_v1")) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({
+          schemaVersion: "contracts-r6-embedding-work.v1",
+          items: [{ kind: "document", id: documentId, input, inputSha256 }]
+        }) };
+      }
+      if (url.includes("bidoc_contracts_r6_apply_embeddings_v1")) {
+        const record = JSON.parse(options.body).p_records[0];
+        assert.equal(record.inputSha256, inputSha256);
+        assert.equal(record.embedding.length, 3072);
+        return { ok: true, status: 200, text: async () => JSON.stringify({
+          schemaVersion: "contracts-r6-embedding-apply.v1", written: 1, reused: 0
+        }) };
+      }
+      throw new Error(`Unexpected R6 RPC: ${url}`);
+    };
+    assert.equal(contractsR6Phase3Approved({ CONTRACTS_R6_PHASE3_APPROVED: "TRUE" }), true);
+    assert.equal(contractsR6Phase3Approved({ CONTRACTS_R6_PHASE3_APPROVED: "true " }), true);
+    assert.equal(contractsR6Phase3Approved({}), false);
+    const config = {
+      ...activityMappingTestConfig(),
+      openRouterApiKey: "server-owned-test-key",
+      models: { embedding: "openai/text-embedding-3-large" }
+    };
+    const catalog = await loadContractsR6ActiveCatalog({ config, fetchImpl });
+    assert.deepEqual(catalog, { tags: ["אישור", "ביצוע"], triggers: ["חתימת ההסכם"] });
+    const result = await persistContractsR6Embeddings({
+      config,
+      workspaceId,
+      fetchImpl,
+      createEmbeddingImpl: async ({ model, input: embeddingInput }) => {
+        assert.equal(model, "openai/text-embedding-3-large");
+        assert.equal(embeddingInput, input);
+        return Array.from({ length: 3072 }, () => 0.125);
+      }
+    });
+    assert.deepEqual(result, { planned: 1, written: 1, reused: 0 });
+    assert.equal(requests.length, 3);
   });
 
   test("contracts R3 keeps a 189-clause contract inside its dedicated output-token budget", async () => {
@@ -5111,12 +5203,13 @@ export function registerContractsAgentTests(test) {
       relationshipReview,
       config: {
         openRouterApiKey: "server-owned-test-key",
-        models: { main: "test/contracts-r4.2b" },
-        ai: { main: { timeoutMs: 5_000 } },
+        models: { main: "test/contracts-r4.2b-main", lite: "test/contracts-r4.2b-lite" },
+        ai: { lite: { timeoutMs: 5_000 } },
         contracts: { r4_2b: { concurrency: 1, maxProviderRetries: 0, maxRepairBatches: 0 } }
       },
-      chatComplete: async ({ messages, responseFormat }) => {
+      chatComplete: async ({ model, messages, responseFormat }) => {
         calls += 1;
+        assert.equal(model, "test/contracts-r4.2b-lite");
         assert.equal(responseFormat.json_schema.name, "contracts_decision_normalization_batch");
         const request = JSON.parse(messages[1].content);
         return JSON.stringify({
@@ -6135,6 +6228,22 @@ export function registerContractsAgentTests(test) {
     assert.match(page, /ללא הכרעת סתירות · ללא כתיבה ללוח הזמנים/u);
   });
 
+  test("contracts R6 migration keeps catalogs and embeddings server-owned with no Schedule write", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260819202649_contracts_r6_phase3_pipeline.sql", import.meta.url),
+      "utf8"
+    );
+    assert.match(migration, /^begin;/mu);
+    assert.match(migration, /commit;\s*$/u);
+    assert.match(migration, /bidoc_contracts_r6_active_catalog_v1/u);
+    assert.match(migration, /private\.contract_tag_catalog/u);
+    assert.match(migration, /private\.contract_trigger_catalog/u);
+    assert.match(migration, /public\.vector_dims\(v_vector\) <> 3072/u);
+    assert.match(migration, /bidoc_contracts_r6_apply_embeddings_v1/u);
+    assert.match(migration, /current_user <> 'service_role'/u);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated/u);
+    assert.doesNotMatch(migration, /security definer|insert\s+into\s+public\.schedule|update\s+public\.schedule/iu);
+  });
   test("contracts R3.2 UI exposes saved clause generations and preserves the classic comparison", () => {
     const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
     const styles = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");

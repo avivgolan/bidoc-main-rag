@@ -29,6 +29,7 @@
     "test:contracts:r3-db": "node scripts/test-contracts-clause-enrichment-r3.mjs",
     "test:contracts:r3-2-db": "node scripts/test-contracts-clause-persistence-r3-2.mjs",
     "test:contracts:r4-db": "node scripts/test-contracts-relationships-r4-0.mjs",
+    "test:contracts:r6-phase2-db": "node scripts/test-contracts-r6-phase2-db.mjs",
     "contracts:r3-live": "node scripts/evaluate-contracts-clause-enrichment-r3-live.mjs",
     "contracts:r5-audit-live": "node scripts/audit-contracts-indicator-handoff-r5-live.mjs",
     "contracts:r5-handoff-live": "node scripts/audit-contracts-indicator-handoff-r5-live.mjs",

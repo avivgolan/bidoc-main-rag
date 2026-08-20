@@ -70,6 +70,7 @@ Rules:
 - do not use meetings, emails, notices, Schedule state, progress, actual trigger dates, or any operational fact;
 - contractDate is allowed only for a fixed date explicitly stated in the sources;
 - relative or recurring temporalKind requires an explicit source-grounded trigger, offset value, and unit;
+- when controlledTriggersHe is supplied, triggerKind must be empty or copied exactly from that Hebrew-only catalog;
 - scheduleImpact describes only whether the contractual rule may later matter to scheduling. It never maps a Schedule activity and never calculates a due date;
 - use an empty string for an unavailable optional string and null for an unavailable offsetValue;
 - confidence is not requested and legal certainty must not be claimed.
@@ -225,6 +226,7 @@ export async function runContractsDecisionNormalization({
   preview,
   relationshipReview,
   config,
+  triggerCatalog = null,
   chatComplete = chatCompletion,
   decisionPolicyVersion = CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
   promptVersion = CONTRACTS_DECISIONS_R4_2B_PROMPT_VERSION,
@@ -244,7 +246,8 @@ export async function runContractsDecisionNormalization({
   }
   const policyVersion = boundedText(decisionPolicyVersion, "decisionPolicyVersion", 1, 200);
   const normalizedPromptVersion = boundedText(promptVersion, "promptVersion", 1, 200);
-  const model = boundedText(modelVersion || config?.models?.main || "openai/gpt-4o", "modelVersion", 1, 200);
+  const triggers = normalizeTriggerCatalog(triggerCatalog);
+  const model = boundedText(modelVersion || config?.models?.lite || config?.models?.main || "openai/gpt-4o-mini", "modelVersion", 1, 200);
   const candidates = buildContractsDecisionCandidates({ preview, relationshipReview });
   const batches = chunk(candidates, MAX_BATCH_SIZE);
   const settings = config?.contracts?.r4_2b || {};
@@ -270,7 +273,7 @@ export async function runContractsDecisionNormalization({
       "decision.token_budget_exceeded"
     );
   }
-  const timeoutMs = boundedInteger(config?.ai?.main?.timeoutMs, 1_000, DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+  const timeoutMs = boundedInteger(config?.ai?.lite?.timeoutMs ?? config?.ai?.main?.timeoutMs, 1_000, DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
   const effectiveDeadline = deadlineAt !== null
     && deadlineAt !== undefined
     && Number.isFinite(Number(deadlineAt))
@@ -323,7 +326,7 @@ export async function runContractsDecisionNormalization({
           presencePenalty: 0,
           seed: 0,
           reasoning: { max_tokens: 128, exclude: true },
-          responseFormat: buildContractsDecisionResponseFormat({ batch }),
+          responseFormat: buildContractsDecisionResponseFormat({ batch, triggerCatalog: triggers }),
           signal: abortSignal,
           telemetry: {
             step: `contracts_decision_normalization_${stage}`,
@@ -382,7 +385,8 @@ export async function runContractsDecisionNormalization({
     const messages = buildContractsDecisionMessages({
       batch,
       decisionPolicyVersion: policyVersion,
-      promptVersion: normalizedPromptVersion
+      promptVersion: normalizedPromptVersion,
+      triggerCatalog: triggers
     });
     let raw;
     let finalError = null;
@@ -396,6 +400,7 @@ export async function runContractsDecisionNormalization({
       });
       raw = response.raw;
       return validateDecisionModelBatch(raw, batch, {
+        triggerCatalog: triggers,
         onSanitizedParty: () => { sanitizedPartyCount += 1; },
         onSanitizedTemporal: () => { sanitizedTemporalCount += 1; },
         onSanitizedNumericText: () => { sanitizedNumericTextCount += 1; }
@@ -433,6 +438,7 @@ export async function runContractsDecisionNormalization({
             ]
           });
           return validateDecisionModelBatch(repairedResponse.raw, batch, {
+            triggerCatalog: triggers,
             onSanitizedParty: () => { sanitizedPartyCount += 1; },
             onSanitizedTemporal: () => { sanitizedTemporalCount += 1; },
             onSanitizedNumericText: () => { sanitizedNumericTextCount += 1; }
@@ -523,7 +529,8 @@ export async function runContractsDecisionNormalization({
 export function buildContractsDecisionMessages({
   batch,
   decisionPolicyVersion = CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
-  promptVersion = CONTRACTS_DECISIONS_R4_2B_PROMPT_VERSION
+  promptVersion = CONTRACTS_DECISIONS_R4_2B_PROMPT_VERSION,
+  triggerCatalog = null
 } = {}) {
   assertCandidateBatch(batch);
   return [
@@ -535,6 +542,7 @@ export function buildContractsDecisionMessages({
         schemaVersion: CONTRACTS_DECISIONS_R4_2B_MODEL_SCHEMA_VERSION,
         decisionPolicyVersion,
         promptVersion,
+        controlledTriggersHe: normalizeTriggerCatalog(triggerCatalog),
         candidates: batch.map((candidate) => ({
           candidateId: candidate.candidateId,
           sourceClauseKeys: candidate.sourceClauseKeys,
@@ -547,7 +555,7 @@ export function buildContractsDecisionMessages({
   ];
 }
 
-export function buildContractsDecisionResponseFormat({ batch } = {}) {
+export function buildContractsDecisionResponseFormat({ batch, triggerCatalog = null } = {}) {
   assertCandidateBatch(batch);
   return {
     type: "json_schema",
@@ -577,7 +585,9 @@ export function buildContractsDecisionResponseFormat({ batch } = {}) {
                 scheduleImpact: { type: "string", enum: ["yes", "no", "unknown"] },
                 temporalKind: { type: "string", enum: [...TEMPORAL_KINDS] },
                 contractDate: { type: "string", maxLength: 10 },
-                triggerKind: { type: "string", maxLength: 120 },
+                triggerKind: Array.isArray(triggerCatalog) && triggerCatalog.length
+                  ? { type: "string", enum: ["", ...normalizeTriggerCatalog(triggerCatalog)] }
+                  : { type: "string", maxLength: 120 },
                 triggerDescriptionHe: { type: "string", maxLength: 700 },
                 offsetValue: { type: ["number", "null"], minimum: 0 },
                 offsetUnit: { type: "string", enum: ["", ...OFFSET_UNITS] },
@@ -600,6 +610,7 @@ export function buildContractsDecisionResponseFormat({ batch } = {}) {
 }
 
 function validateDecisionModelBatch(raw, batch, {
+  triggerCatalog = null,
   onSanitizedParty = null,
   onSanitizedTemporal = null,
   onSanitizedNumericText = null
@@ -720,6 +731,14 @@ function validateDecisionModelBatch(raw, batch, {
     if (beneficiary && !normalizedIncludes(sourceText, beneficiary)) {
       beneficiary = "";
       sanitizedParties.push({ candidateId, field: "beneficiary" });
+    }
+    if (triggerKind && !isAllowedTrigger(triggerKind, triggerCatalog)) {
+      throw decisionError(
+        "contracts_decision_normalization_output_invalid",
+        "A decision normalization item contains an unsupported contractual trigger.",
+        502,
+        "decision.trigger_invalid"
+      );
     }
     const temporal = normalizeTemporalShape({
       temporalKind,
@@ -937,6 +956,24 @@ function boundedSourceDecisionText(sourceClauses) {
   const bounded = source.slice(0, 2_000);
   const lastWhitespace = bounded.search(/\s+\S*$/u);
   return (lastWhitespace > 9 ? bounded.slice(0, lastWhitespace) : bounded).trim();
+}
+
+function normalizeTriggerCatalog(value) {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value) && value.length === 0) return [];
+  if (!Array.isArray(value) || value.length > 100) {
+    throw decisionError("contracts_decision_normalization_trigger_catalog_invalid", "The controlled trigger catalog is invalid.", 500, "decision.trigger_catalog_invalid");
+  }
+  const triggers = value.map((trigger) => String(trigger || "").trim());
+  if (triggers.some((trigger) => !trigger || trigger.length > 120 || !HEBREW_PATTERN.test(trigger) || /[A-Za-z]/u.test(trigger))
+      || new Set(triggers).size !== triggers.length) {
+    throw decisionError("contracts_decision_normalization_trigger_catalog_invalid", "The controlled trigger catalog contains an invalid value.", 500, "decision.trigger_catalog_invalid");
+  }
+  return triggers;
+}
+
+function isAllowedTrigger(trigger, triggerCatalog) {
+  return !Array.isArray(triggerCatalog) || triggerCatalog.length === 0 || triggerCatalog.includes(trigger);
 }
 
 function hasUngroundedNumericFacts(value, sourceText) {

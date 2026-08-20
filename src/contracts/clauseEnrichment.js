@@ -48,7 +48,6 @@ export const CONTRACTS_CONTROLLED_TAGS = Object.freeze([
   "warranty"
 ]);
 
-const CONTROLLED_TAG_SET = new Set(CONTRACTS_CONTROLLED_TAGS);
 const MAX_CLAUSES = 500;
 const MAX_BATCH_CLAUSES = 8;
 const MAX_BATCH_CHARACTERS = 20_000;
@@ -121,6 +120,7 @@ export function createContractsClauseEnrichmentGeneration({
 export async function runContractsClauseEnrichment({
   generation,
   config,
+  controlledTags = null,
   chatComplete = chatCompletion,
   enrichmentPolicyVersion = CONTRACTS_CLAUSE_ENRICHMENT_POLICY_VERSION,
   promptVersion = CONTRACTS_CLAUSE_ENRICHMENT_PROMPT_VERSION,
@@ -134,7 +134,8 @@ export async function runContractsClauseEnrichment({
   const source = normalizeGeneration(generation);
   const policyVersion = boundedVersion(enrichmentPolicyVersion, "enrichmentPolicyVersion");
   const normalizedPromptVersion = boundedVersion(promptVersion, "promptVersion");
-  const model = boundedVersion(modelVersion || config?.models?.main || "openai/gpt-4o", "modelVersion");
+  const tags = normalizeControlledTags(controlledTags);
+  const model = boundedVersion(modelVersion || config?.models?.lite || config?.models?.main || "openai/gpt-4o-mini", "modelVersion");
   const enrichmentGeneration = createContractsClauseEnrichmentGeneration({
     enrichmentPolicyVersion: policyVersion,
     promptVersion: normalizedPromptVersion,
@@ -143,14 +144,15 @@ export async function runContractsClauseEnrichment({
   const reusableItems = normalizeExistingEnrichments({
     existingEnrichments,
     source,
-    enrichmentGenerationId: enrichmentGeneration.enrichmentGenerationId
+    enrichmentGenerationId: enrichmentGeneration.enrichmentGenerationId,
+    controlledTags: tags
   });
   const pendingClauses = source.clauses.filter((clause) => !reusableItems.has(clause.clauseKey));
   if (pendingClauses.length && !config?.openRouterApiKey) {
     throw enrichmentError("contracts_clause_enrichment_unavailable", "The Contracts Agent requires a configured model key for R3 enrichment.", 503, "enrichment.model_key_missing");
   }
 
-  const mainSettings = config?.ai?.main || {};
+  const mainSettings = config?.ai?.lite || config?.ai?.main || {};
   const timeoutMs = boundedInteger(mainSettings.timeoutMs, 1_000, DEFAULT_MODEL_TIMEOUT_MS, DEFAULT_MODEL_TIMEOUT_MS);
   // R3 has its own total-output budget. Do not inherit the much larger global
   // main-agent generation limit, otherwise a normal full-contract batch plan
@@ -259,7 +261,7 @@ export async function runContractsClauseEnrichment({
     if (remainingMs < 1_000) {
       throw enrichmentError("contracts_clause_enrichment_time_budget_exceeded", "R3 clause enrichment exceeded its total time budget.", 504, "enrichment.time_budget_exceeded");
     }
-    const messages = buildContractsClauseEnrichmentMessages({ batch, policyVersion, promptVersion: normalizedPromptVersion });
+    const messages = buildContractsClauseEnrichmentMessages({ batch, policyVersion, promptVersion: normalizedPromptVersion, controlledTags: tags });
     let raw;
     try {
       raw = await callProvider({ batch, batchIndex, messages, abortSignal, stage: "enrichment" });
@@ -273,13 +275,14 @@ export async function runContractsClauseEnrichment({
       );
     }
     try {
-      return validateModelBatch(raw, batch);
+      return validateModelBatch(raw, batch, { controlledTags: tags });
     } catch (error) {
       let validationError = error;
       if (error?.code === "contracts_clause_enrichment_ungrounded_numeric_fact") {
         let sanitizedCount = 0;
         try {
           const sanitized = validateModelBatch(raw, batch, {
+            controlledTags: tags,
             sanitizeUnsupportedNumericFacts: true,
             onNumericSanitized: () => { sanitizedCount += 1; }
           });
@@ -320,7 +323,7 @@ export async function runContractsClauseEnrichment({
           { cause: repairError, issueCodes: ["enrichment.repair_provider_failed"] }
         );
       }
-      return validateModelBatch(repairedRaw, batch);
+      return validateModelBatch(repairedRaw, batch, { controlledTags: tags });
     }
   }, { signal, deadlineAt: effectiveDeadline, now });
 
@@ -337,7 +340,7 @@ export async function runContractsClauseEnrichment({
     }
     assertSummaryGrounding(modelItem.summaryHe, clause.rawText, clause.clauseKey);
     const crossReferences = extractExplicitCrossReferences({ clause, knownClauseKeys });
-    const content = buildContractsClauseSearchContent({ clause, summaryHe: modelItem.summaryHe, hashtags: modelItem.tags, crossReferences });
+    const content = buildContractsClauseSearchContent({ clause, summaryHe: modelItem.summaryHe, hashtags: modelItem.tags, crossReferences, controlledTags: tags });
     return {
       ...clause,
       summaryHe: modelItem.summaryHe,
@@ -398,7 +401,7 @@ export async function runContractsClauseEnrichment({
   };
 }
 
-export function buildContractsClauseEnrichmentMessages({ batch, policyVersion, promptVersion } = {}) {
+export function buildContractsClauseEnrichmentMessages({ batch, policyVersion, promptVersion, controlledTags = null } = {}) {
   if (!Array.isArray(batch) || batch.length < 1 || batch.length > MAX_BATCH_CLAUSES) {
     throw enrichmentError("contracts_clause_enrichment_batch_invalid", "R3 model batches must contain a bounded non-empty clause list.", 500, "enrichment.batch_invalid");
   }
@@ -411,7 +414,7 @@ export function buildContractsClauseEnrichmentMessages({ batch, policyVersion, p
         schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
         policyVersion,
         promptVersion,
-        controlledTags: CONTRACTS_CONTROLLED_TAGS,
+        controlledTags: normalizeControlledTags(controlledTags),
         clauses: batch.map((clause) => ({
           clauseKey: clause.clauseKey,
           clauseType: clause.clauseType,
@@ -516,10 +519,10 @@ export function extractExplicitCrossReferences({ clause, knownClauseKeys } = {})
   return [...unique.values()].slice(0, MAX_REFERENCES);
 }
 
-export function buildContractsClauseSearchContent({ clause, summaryHe, hashtags, crossReferences = [] } = {}) {
+export function buildContractsClauseSearchContent({ clause, summaryHe, hashtags, crossReferences = [], controlledTags = null } = {}) {
   const normalizedClause = normalizeClause(clause);
   const summary = validateSummary(summaryHe, normalizedClause.clauseKey);
-  const tags = validateTags(hashtags, normalizedClause.clauseKey);
+  const tags = validateTags(hashtags, normalizedClause.clauseKey, controlledTags);
   const references = validateCrossReferences(crossReferences, normalizedClause);
   const content = [
     "מקור: contracts_documents",
@@ -605,9 +608,10 @@ export function buildContractsClauseIndexRef({
 export function buildContractsClauseEnrichmentRpcPayload({
   clause,
   workspaceId,
-  indexRef = null
+  indexRef = null,
+  controlledTags = null
 } = {}) {
-  const normalizedClause = normalizeEnrichedClause(clause);
+  const normalizedClause = normalizeEnrichedClause(clause, controlledTags);
   return {
     workspaceId: requiredUuid(workspaceId, "workspaceId"),
     documentVersionId: normalizedClause.documentVersionId,
@@ -625,6 +629,7 @@ export function buildContractsClauseEnrichmentRpcPayload({
 }
 
 function validateModelBatch(raw, batch, {
+  controlledTags = null,
   sanitizeUnsupportedNumericFacts = false,
   onNumericSanitized = null
 } = {}) {
@@ -669,7 +674,7 @@ function validateModelBatch(raw, batch, {
     return {
       clauseKey,
       summaryHe,
-      tags: validateTags(item.tags, clauseKey)
+      tags: validateTags(item.tags, clauseKey, controlledTags)
     };
   });
   if (seen.size !== expected.size) {
@@ -694,14 +699,14 @@ function isRetryableEnrichmentProviderError(error) {
   return /(?:unexpected end of json|fetch failed|socket|connection reset|temporarily unavailable|response timed out after \d+ms)/iu.test(String(error?.message || ""));
 }
 
-function normalizeExistingEnrichments({ existingEnrichments, source, enrichmentGenerationId }) {
+function normalizeExistingEnrichments({ existingEnrichments, source, enrichmentGenerationId, controlledTags = null }) {
   if (!Array.isArray(existingEnrichments) || existingEnrichments.length > source.clauses.length) {
     throw enrichmentError("contracts_clause_existing_enrichment_invalid", "Existing R3 enrichment state is not a bounded array.", 422, "enrichment.existing_state_invalid");
   }
   const sourceByKey = new Map(source.clauses.map((clause) => [clause.clauseKey, clause]));
   const reusable = new Map();
   for (const value of existingEnrichments) {
-    const clause = normalizeEnrichedClause(value);
+    const clause = normalizeEnrichedClause(value, controlledTags);
     const sourceClause = sourceByKey.get(clause.clauseKey);
     if (!sourceClause
         || reusable.has(clause.clauseKey)
@@ -727,12 +732,22 @@ function validateSummary(value, clauseKey) {
   return summary;
 }
 
-function validateTags(value, clauseKey) {
+function normalizeControlledTags(controlledTags) {
+  const values = Array.isArray(controlledTags) && controlledTags.length ? controlledTags : CONTRACTS_CONTROLLED_TAGS;
+  const normalized = values.map((tag) => String(tag || "").trim()).filter(Boolean);
+  if (normalized.length < 1 || normalized.length > 500 || new Set(normalized).size !== normalized.length) {
+    throw enrichmentError("contracts_clause_enrichment_tags_invalid", "The Contracts controlled tag vocabulary is invalid.", 500, "enrichment.tags_invalid");
+  }
+  return normalized;
+}
+
+function validateTags(value, clauseKey, controlledTags = null) {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_TAGS) {
     throw enrichmentError("contracts_clause_enrichment_tags_invalid", `Clause ${clauseKey} requires 1-${MAX_TAGS} controlled tags.`, 502, "enrichment.tags_invalid");
   }
-  const tags = value.map((tag) => String(tag || "").trim().toLowerCase());
-  const unknownTags = [...new Set(tags.filter((tag) => !CONTROLLED_TAG_SET.has(tag)))];
+  const tags = value.map((tag) => String(tag || "").trim());
+  const tagSet = new Set(normalizeControlledTags(controlledTags));
+  const unknownTags = [...new Set(tags.filter((tag) => !tagSet.has(tag)))];
   if (unknownTags.length) {
     throw enrichmentError(
       "contracts_clause_enrichment_tags_invalid",
@@ -849,10 +864,10 @@ function normalizeClause(clause) {
   return structuredClone(clause);
 }
 
-function normalizeEnrichedClause(clause) {
+function normalizeEnrichedClause(clause, controlledTags = null) {
   const normalized = normalizeClause(clause);
   normalized.summaryHe = validateSummary(clause.summaryHe, normalized.clauseKey);
-  normalized.hashtags = validateTags(clause.hashtags, normalized.clauseKey);
+  normalized.hashtags = validateTags(clause.hashtags, normalized.clauseKey, controlledTags);
   normalized.crossReferences = validateCrossReferences(clause.crossReferences, normalized);
   normalized.content = requiredText(clause.content, MAX_CONTENT_CHARACTERS, "content");
   normalized.contentSha256 = String(clause.contentSha256 || "").toLowerCase();

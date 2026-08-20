@@ -24,6 +24,12 @@ import {
   workspaceRequest,
   workspaceRpc
 } from "./workspacePersistence.js";
+import {
+  CONTRACTS_R6_PHASE3_CLAUSE_PERSISTENCE_RPC,
+  contractsR6Phase3Approved,
+  loadContractsR6ActiveCatalog,
+  persistContractsR6Embeddings
+} from "./r6Preparation.js";
 
 export const CONTRACTS_CLAUSE_PERSISTENCE_VERSION = "contracts-clause-persistence.r3.2.v1";
 export const CONTRACTS_CLAUSE_PERSISTENCE_MIGRATION_VERSION = "20260815180207";
@@ -62,10 +68,14 @@ export function contractsClausePersistenceApproved(env = process.env) {
   return String(env.CONTRACTS_CLAUSE_PERSISTENCE_APPROVED || "").trim().toUpperCase() === "TRUE";
 }
 
-export function contractsClausePersistenceIdentity(config = {}) {
+export function contractsClausePersistenceIdentity(config = {}, { useLiteModel = false } = {}) {
   const parser = createContractsClauseParserGeneration();
   const enrichment = createContractsClauseEnrichmentGeneration({
-    modelVersion: String(config.models?.main || "openai/gpt-4o")
+    modelVersion: String(
+      useLiteModel
+        ? config.models?.lite || config.models?.main || "openai/gpt-4o-mini"
+        : config.models?.main || config.models?.lite || "openai/gpt-4o"
+    )
   });
   return { parser, enrichment };
 }
@@ -202,7 +212,11 @@ export async function runContractsClausePersistence({
   const sourceProjectId = normalizeUuid(request.projectSelection?.projectId, "projectSelection.projectId");
   const normalizedReviewerId = normalizeUuid(reviewerId, "reviewerId");
   const documentSha256 = crypto.createHash("sha256").update(request.pdfBytes).digest("hex");
-  const identity = contractsClausePersistenceIdentity(config);
+  const r6Enabled = contractsR6Phase3Approved(env);
+  const r6Catalog = r6Enabled
+    ? await loadContractsR6ActiveCatalog({ config, fetchImpl, timeoutMs: remainingMs(deadlineAt) })
+    : null;
+  const identity = contractsClausePersistenceIdentity(config, { useLiteModel: r6Enabled });
   progress("lookup_started");
   const existing = await findSavedContractsClauseWorkspace({
     config,
@@ -213,6 +227,14 @@ export async function runContractsClausePersistence({
     timeoutMs: remainingMs(deadlineAt)
   });
   if (existing) {
+    if (r6Enabled) {
+      await persistContractsR6Embeddings({
+        config,
+        workspaceId: existing.workspace.workspaceId,
+        fetchImpl,
+        timeoutMs: remainingMs(deadlineAt)
+      });
+    }
     progress("completed", { reused: true, modelAvoided: true });
     return projectPersistenceResponse(existing, { reused: true, modelAvoided: true });
   }
@@ -227,7 +249,16 @@ export async function runContractsClausePersistence({
   });
   progress("parser_completed", { clauseCount: generation.clauses.length });
   progress("enrichment_started", { clauseCount: generation.clauses.length });
-  const enrichment = await enrichClauses({ generation, config, deadlineAt, signal });
+  const enrichment = await enrichClauses({
+    generation,
+    config,
+    ...(r6Catalog ? { controlledTags: r6Catalog.tags } : {}),
+    modelVersion: r6Enabled
+      ? config.models?.lite || config.models?.main || "openai/gpt-4o-mini"
+      : config.models?.main || config.models?.lite || "openai/gpt-4o",
+    deadlineAt,
+    signal
+  });
   progress("enrichment_completed", {
     clauseCount: enrichment.clauses.length,
     modelCallCount: enrichment.qualityLedger?.modelCallCount ?? null
@@ -247,6 +278,14 @@ export async function runContractsClausePersistence({
     timeoutMs: remainingMs(deadlineAt)
   });
   if (afterModel) {
+    if (r6Enabled) {
+      await persistContractsR6Embeddings({
+        config,
+        workspaceId: afterModel.workspace.workspaceId,
+        fetchImpl,
+        timeoutMs: remainingMs(deadlineAt)
+      });
+    }
     progress("completed", { reused: true, modelAvoided: false, concurrentReuse: true });
     return projectPersistenceResponse(afterModel, { reused: true, modelAvoided: false, concurrentReuse: true });
   }
@@ -306,7 +345,8 @@ export async function runContractsClausePersistence({
     const payload = buildContractsClauseEnrichmentRpcPayload({
       clause,
       workspaceId: "00000000-0000-4000-8000-000000000000",
-      indexRef: null
+      indexRef: null,
+      ...(r6Catalog ? { controlledTags: r6Catalog.tags } : {})
     });
     delete payload.workspaceId;
     return payload;
@@ -320,7 +360,7 @@ export async function runContractsClausePersistence({
     progress("database_persist_started", { clauseCount: clauses.length });
     persisted = await workspaceRpc({
       config,
-      rpc: CONTRACTS_CLAUSE_PERSISTENCE_APPLY_RPC,
+      rpc: r6Enabled ? CONTRACTS_R6_PHASE3_CLAUSE_PERSISTENCE_RPC : CONTRACTS_CLAUSE_PERSISTENCE_APPLY_RPC,
       payload: {
         p_workspace: workspacePayload,
         p_clauses: clauses,
@@ -340,7 +380,17 @@ export async function runContractsClausePersistence({
       fetchImpl,
       timeoutMs: remainingMs(deadlineAt)
     }).catch(() => null);
-    if (raced) return projectPersistenceResponse(raced, { reused: true, modelAvoided: false, concurrentReuse: true });
+    if (raced) {
+      if (r6Enabled) {
+        await persistContractsR6Embeddings({
+          config,
+          workspaceId: raced.workspace.workspaceId,
+          fetchImpl,
+          timeoutMs: remainingMs(deadlineAt)
+        });
+      }
+      return projectPersistenceResponse(raced, { reused: true, modelAvoided: false, concurrentReuse: true });
+    }
     throw error;
   }
   const canonical = assertPersistedProjection(persisted);
@@ -348,6 +398,14 @@ export async function runContractsClausePersistence({
       || canonical.preview.generations.enrichmentGenerationId !== enrichment.enrichmentGenerationId
       || canonical.preview.clauses.length !== preview.clauses.length) {
     throw persistenceError("contracts_clause_persistence_response_invalid", "The saved clause generation does not match the accepted in-memory result.", 502);
+  }
+  if (r6Enabled) {
+    await persistContractsR6Embeddings({
+      config,
+      workspaceId: canonical.workspace.workspaceId,
+      fetchImpl,
+      timeoutMs: remainingMs(deadlineAt)
+    });
   }
   progress("completed", { reused: persisted.persistence?.workspaceReused === true, modelAvoided: false });
   return projectPersistenceResponse(canonical, {
