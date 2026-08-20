@@ -30,6 +30,7 @@ import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalR
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession } from "./auth.js";
+import { injectBuildVersion } from "./buildInfo.js";
 
 loadEnv();
 
@@ -2795,6 +2796,13 @@ function serveStatic(req, res, pathname) {
   const noCache = ext === ".html" || ext === ".js" || ext === ".css";
   const headers = { "Content-Type": contentType };
   if (noCache) headers["Cache-Control"] = "no-cache, must-revalidate";
+  if (safePath === "/index.html") {
+    const html = injectBuildVersion(fs.readFileSync(fullPath, "utf8"));
+    headers["Content-Length"] = Buffer.byteLength(html);
+    res.writeHead(200, headers);
+    res.end(html);
+    return;
+  }
   res.writeHead(200, headers);
   fs.createReadStream(fullPath).pipe(res);
 }

@@ -20,6 +20,7 @@ tags:
 - React 19, ReactDOM, Vite, and `@vitejs/plugin-react` are installed; `npm run react:build` builds the React bridge into `public/react/bidoc-react.js`.
 - `public/index.html` loads a tiny `public/react-loader.js` module that imports the React bridge only when `[data-react-island]` elements exist, so current screens do not pay the React bundle cost until migrated.
 - Deployment routes all requests through `src/server.js` using `vercel.json`.
+- The sidebar displays the active seven-character Git commit below the BiDoc logo. `src/server.js` injects `VERCEL_GIT_COMMIT_SHA` into the no-cache HTML shell at request time, with `local` as the development fallback.
 - Persistent mutable state is expected to live in Supabase, not local data files.
 - Runtime config separates App / MAIN Supabase from APP DATA (`contentSource`). App / MAIN stores settings, chat history, QA, timeline links, and graph tables; APP DATA is the KAPAIM Supabase project used by every project-information reader, including RAG, timeline events, alerts, Data Query, evidence agents, indexing, and Schedule.
 - The component-to-table Supabase inventory is maintained in `docs/db-table-callers-inventory.md`; it records App/MAIN, Content, and Meta/Auth routing plus configurable table overrides.
@@ -96,6 +97,7 @@ tags:
 - 2026-08-05 -- Fixed React Content DB field names (`supabaseUrl`/`supabaseServiceRoleKey`), made connection diagnostics refresh persisted MAIN settings before each run, and switched the live Content source from an invalid `smx...` key to the MAIN App project `pmd...`; both content tables and both search RPCs were verified with HTTP 200.
 - 2026-08-05 -- Standardized the user-facing name `APP DATA` for `contentSource` (Supabase project KAPAIM) and routed Schedule through that existing connection without separate credentials.
 - 2026-08-05 -- Added a component-to-Supabase-table inventory covering product agents, shared subsystems, logical database roles, and the current single-project fallback.
+- 2026-08-20 -- Added an automatic visible build identifier below the sidebar logo so production deployments can be matched directly to their Git commit.
 
 ## Recent Changes (continued)
 

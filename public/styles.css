@@ -234,6 +234,39 @@ select:focus-visible,
   text-transform: uppercase;
 }
 
+.brandVersion {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: max-content;
+  margin: 7px 0 0;
+  padding-inline-start: 53px;
+  color: rgba(82, 99, 87, 0.66);
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+}
+
+.brandVersion::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: 999px;
+  background: var(--brand-500);
+  box-shadow: 0 0 0 3px rgba(63, 141, 104, 0.1);
+}
+
+.brandVersionCode {
+  direction: ltr;
+  color: var(--brand-700);
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.045em;
+}
+
 nav {
   flex: 1;
   display: grid;

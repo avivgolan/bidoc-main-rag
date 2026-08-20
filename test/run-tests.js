@@ -47,6 +47,7 @@ import { buildTimelineSearchText, createTimelineSearchController, timelineEventM
 import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigateByMonths, calWeekBoundary } from "../public/calendarHelpers.js";
 import { cleanChatUrl, renderChatMarkdown } from "../public/chatMarkdown.js";
 import { registerContractsAgentTests } from "./contracts-agent.tests.js";
+import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -76,6 +77,34 @@ test("React bridge is installed for progressive frontend migration", () => {
   assert.match(reactLoader, /document\.querySelector\("\[data-react-island\]"\)/);
   assert.match(reactLoader, /\/react\/bidoc-react\.js\?v=20260705-internal-agents/);
   assert.match(indexHtml, /\/react-loader\.js\?v=20260705-internal-agents/);
+});
+
+test("build version renders the deployed commit below the brand", () => {
+  const info = buildVersionInfo({
+    VERCEL_ENV: "production",
+    VERCEL_GIT_COMMIT_SHA: "E027C91177F216AFAEFAA3934E667AC0B365177D"
+  });
+  assert.deepEqual(info, {
+    version: "e027c91",
+    fullSha: "e027c91177f216afaefaa3934e667ac0b365177d",
+    environment: "production"
+  });
+
+  const rendered = injectBuildVersion(
+    '<p data-build-version="__BIDOC_BUILD_VERSION__" title="__BIDOC_BUILD_TITLE__">__BIDOC_BUILD_VERSION__</p>',
+    info
+  );
+  assert.match(rendered, /data-build-version="e027c91"/u);
+  assert.match(rendered, /title="production · e027c91177f216afaefaa3934e667ac0b365177d"/u);
+  assert.doesNotMatch(rendered, /__BIDOC_BUILD_/u);
+});
+
+test("build version clearly identifies a local server", () => {
+  assert.deepEqual(buildVersionInfo({}), {
+    version: "local",
+    fullSha: "local",
+    environment: "local"
+  });
 });
 
 function withContentEnvCleared(fn) {
