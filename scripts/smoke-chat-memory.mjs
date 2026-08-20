@@ -9,6 +9,7 @@ const config = getConfig();
 const suffix = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 const userId = `memory_smoke_user_${suffix}`;
 const sessionId = `memory_smoke_session_${suffix}`;
+const nextSessionId = `${sessionId}_next`;
 
 try {
   const saved = await upsertChatSessionMemory({
@@ -33,6 +34,33 @@ try {
 
   const stats = await getChatMemoryStats({ config, userId });
   assert.equal(stats.sessions, 1);
+
+  const previousConversation = await loadAgentMemory({
+    config: { ...config, openRouterApiKey: "" },
+    sessionId: nextSessionId,
+    userId,
+    query: "אתה זוכר על מה דיברנו בשיחה האחרונה?",
+    agent: "lite"
+  });
+  assert.equal(previousConversation.previousSessionRecalled, true, JSON.stringify({
+    mode: previousConversation.mode,
+    summarySource: previousConversation.summarySource,
+    sessionRow: previousConversation.sessionRow,
+    errors: previousConversation.errors
+  }));
+  assert.equal(previousConversation.summarySource, "previous_session");
+  assert.equal(previousConversation.summary?.last_intent, "smoke test");
+  assert.equal(previousConversation.sessionRow, null);
+
+  const isolatedUser = await loadAgentMemory({
+    config: { ...config, openRouterApiKey: "" },
+    sessionId: nextSessionId,
+    userId: `${userId}_other`,
+    query: "על מה דיברנו בשיחה הקודמת?",
+    agent: "lite"
+  });
+  assert.equal(isolatedUser.previousSessionRecalled, false);
+  assert.equal(isolatedUser.summarySource, "none");
 
   const remembered = await applyExplicitMemoryCommand({
     config,

@@ -34,6 +34,7 @@ export function sanitizeMemoryLogEntry(entry = {}) {
     originalMessage: redactLogText(entry.originalMessage).slice(0, 600),
     standaloneQuery: redactLogText(entry.standaloneQuery).slice(0, 600),
     queryRewritten: Boolean(entry.queryRewritten),
+    previousSessionRecalled: Boolean(entry.previousSessionRecalled),
     recentTurns: boundedInteger(entry.recentTurns, 0, 100),
     recalledItems: boundedInteger(entry.recalledItems, 0, 100),
     recalledScores: recalledScores.slice(0, 30).map((item) => ({
@@ -121,4 +122,3 @@ function boundedScore(value) {
   if (!Number.isFinite(number)) return null;
   return Math.round(Math.min(1, Math.max(0, number)) * 10_000) / 10_000;
 }
-
