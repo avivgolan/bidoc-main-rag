@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: schedule
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 tags:
   - schedule
   - contract
@@ -21,7 +21,7 @@ tags:
 - Schedule has no separate URL, project ID, key, or Settings card. Direct KAPAIM introspection confirms that `gantt_files`/`gantt_tasks` exist there but are empty; the active upload source is therefore MAIN's populated `_test` tables.
 - The upload UI currently persists its schedule source in MAIN as `gantt_files_test` (1 row) and `gantt_tasks_test` (382 rows). Schedule source reads use those two MAIN tables; engine-owned `schedule_*` reads/writes remain on APP DATA/KAPAIM. The unsuffixed MAIN names return 404.
 - Contract dates live in `schedule_contract_milestones`; relative obligations waiting for a trigger live in `schedule_contract_conditions`.
-- Indicator-owned contract-condition synchronization is implemented behind `INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED=TRUE`. It accepts only current human-approved/corrected, conflict-free relative decisions with `scheduleImpact=yes` and an active project mapping; decision-revision IDs make the UPSERT idempotent, while superseded pending rows become `dismissed` and resolved history is preserved.
+- Indicator-owned contract-condition synchronization is always active once its migration exists and has no environment feature flag. It accepts only current human-approved/corrected, conflict-free relative decisions with `scheduleImpact=yes` and an active project mapping; decision-revision IDs make the UPSERT idempotent, while superseded pending rows become `dismissed` and resolved history is preserved.
 - Schedule sweeps reconcile contract conditions before operational resolution. Trigger lookup is structured-first (Gantt, then `schedule_observed_events`) and uses RAG only when no unambiguous structured source exists. Resolution is atomic through `bidoc_schedule_resolve_condition_v1`; the deterministic Schedule engine remains the only offset calculator.
 - Working-day conditions may retain a verified trigger while remaining `pending` with `calendar_coverage_missing`; they cannot resolve until `holidays_through` covers the computed range.
 - Contract source links are generated server-side as 60-second private Storage signed URLs after workspace/decision authorization. Schedule stores document identity and source metadata, never a public Storage URL.
@@ -45,6 +45,7 @@ tags:
 
 ## Recent Changes
 
+- 2026-08-20 -- Removed the `INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED` runtime feature flag. Project mapping reads and approved contract-condition synchronization now run consistently in every configured APP DATA environment; only a genuinely unconfigured APP DATA connection uses the source project identity fallback. Database service-role, review, mapping, and atomic RPC gates remain intact.
 - 2026-08-20 -- Fixed contract-condition milestone rendering on the Schedule chart: newly resolved contractual dates now remain in-range and visible as labeled flags under late-only filtering; added pure scale/subject helpers plus unit and Playwright regressions.
 - 2026-08-20 -- Added durable provisional Schedule flags for already-saved working-day triggers when holiday coverage is incomplete. The read side deterministically re-derives the provisional date, while the final milestone remains blocked until calendar coverage is valid.
 - 2026-08-20 -- Moved contractual marker labels from the bottom to a two-level rail above the Schedule chart and added a separate start-of-count marker at each saved trigger date. Added legend treatment, vertical guide lines, scale inclusion, and Playwright coverage for both start and target markers.

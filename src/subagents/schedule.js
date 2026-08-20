@@ -17,7 +17,6 @@ import { computeIndicator, sweep, deriveAlert, deriveSeverity, ENGINE_VERSION, C
 import { diffCalendarDays, toIsoDate } from "../scheduleCalendar.js";
 import { loadScheduleInputs, scheduleDataRequest, scheduleSettings } from "../scheduleIngestion.js";
 import {
-  indicatorContractConditionsApproved,
   reconcileProjectContractConditions,
   resolveIndicatorProjectContext
 } from "../indicator/contractConditions.js";
@@ -216,38 +215,36 @@ export async function runScheduleSweep({ projectId, asOf: asOfInput = null, filt
   });
   let contractConditionSync = null;
   let conditionResolution = null;
-  if (indicatorContractConditionsApproved()) {
-    contractConditionSync = await reconcileProjectContractConditions({
-      projectId,
-      commit: persist,
-      config: cfg,
-      settings
-    }).catch((error) => {
-      preflightWarnings.push(`Indicator contract sync: ${error.message}`);
-      return { ok: false, committed: false, reason: error.message };
-    });
-    step("contract_condition_sync", "Reviewed relative contract conditions reconciled", contractConditionSync,
-      contractConditionSync?.ok === false ? "error" : "done");
+  contractConditionSync = await reconcileProjectContractConditions({
+    projectId,
+    commit: persist,
+    config: cfg,
+    settings
+  }).catch((error) => {
+    preflightWarnings.push(`Indicator contract sync: ${error.message}`);
+    return { ok: false, committed: false, reason: error.message };
+  });
+  step("contract_condition_sync", "Reviewed relative contract conditions reconciled", contractConditionSync,
+    contractConditionSync?.ok === false ? "error" : "done");
 
-    if (persist) {
-      conditionResolution = await runScheduleConditionResolver({
-        projectId: projectContext.sourceProjectId,
-        limit: 25,
-        commit: true,
-        config: cfg,
-        settings,
-        projectContext,
-        contractOnly: true,
-        runId: runId ? `${runId}:conditions` : null
-      }).catch((error) => {
-        preflightWarnings.push(`Schedule condition resolver: ${error.message}`);
-        return { ok: false, processed: 0, reason: error.message };
-      });
-      step("contract_condition_resolution", "Pending contract triggers checked", {
-        processed: conditionResolution?.processed || 0,
-        summary: conditionResolution?.summary || null
-      }, conditionResolution?.ok === false ? "error" : "done");
-    }
+  if (persist) {
+    conditionResolution = await runScheduleConditionResolver({
+      projectId: projectContext.sourceProjectId,
+      limit: 25,
+      commit: true,
+      config: cfg,
+      settings,
+      projectContext,
+      contractOnly: true,
+      runId: runId ? `${runId}:conditions` : null
+    }).catch((error) => {
+      preflightWarnings.push(`Schedule condition resolver: ${error.message}`);
+      return { ok: false, processed: 0, reason: error.message };
+    });
+    step("contract_condition_resolution", "Pending contract triggers checked", {
+      processed: conditionResolution?.processed || 0,
+      summary: conditionResolution?.summary || null
+    }, conditionResolution?.ok === false ? "error" : "done");
   }
 
   const inputs = await loadScheduleInputs({

@@ -30,10 +30,6 @@ function trimSlash(value) {
   return String(value || "").replace(/\/+$/u, "");
 }
 
-export function indicatorContractConditionsApproved(env = process.env) {
-  return String(env.INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED || "").trim().toUpperCase() === "TRUE";
-}
-
 function assertSyncResult(value) {
   if (!value || value.ok !== true || typeof value.committed !== "boolean") {
     throw indicatorError(
@@ -50,16 +46,8 @@ export async function reconcileContractConditions({
   commit = false,
   config = null,
   settings = null,
-  env = process.env,
   fetchImpl = fetch
 } = {}) {
-  if (commit && !indicatorContractConditionsApproved(env)) {
-    throw indicatorError(
-      "indicator_contract_conditions_not_enabled",
-      "Indicator contract-condition writes are not enabled on this server.",
-      503
-    );
-  }
   const result = await scheduleRpcRequest({
     config: config || getConfig(),
     settings: settings || scheduleSettings(),
@@ -75,18 +63,8 @@ export async function reconcileProjectContractConditions({
   commit = false,
   config = null,
   settings = null,
-  env = process.env,
   fetchImpl = fetch
 } = {}) {
-  if (commit && !indicatorContractConditionsApproved(env)) {
-    return {
-      version: INDICATOR_CONTRACT_CONDITIONS_VERSION,
-      ok: true,
-      committed: false,
-      skipped: true,
-      reason: "activation_not_approved"
-    };
-  }
   const result = await scheduleRpcRequest({
     config: config || getConfig(),
     settings: settings || scheduleSettings(),
@@ -101,15 +79,16 @@ export async function resolveIndicatorProjectContext({
   projectId,
   config = null,
   settings = null,
-  env = process.env,
   fetchImpl = fetch
 } = {}) {
   const normalized = uuid(projectId, "projectId");
-  if (!indicatorContractConditionsApproved(env)) {
+  const cfg = config || getConfig();
+  const target = scheduleSupabaseConfig(cfg, "app_data");
+  if (!target.supabaseUrl || !target.supabaseServiceRoleKey) {
     return { mappingFound: false, sourceProjectId: normalized, scheduleProjectId: normalized };
   }
   const result = await scheduleRpcRequest({
-    config: config || getConfig(),
+    config: cfg,
     settings: settings || scheduleSettings(),
     rpc: INDICATOR_PROJECT_CONTEXT_RPC,
     payload: { p_project_id: normalized },

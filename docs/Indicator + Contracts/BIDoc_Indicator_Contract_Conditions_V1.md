@@ -21,12 +21,12 @@ deterministic calendar calculation.
 5. Contract corrections dismiss superseded pending rows; resolved history is
    retained.
 
-## Activation and rollout
+## Runtime availability
 
 - Migration: `20260819113955_indicator_contract_conditions_v1.sql`.
-- Activation flag: `INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED=TRUE`.
-- Keep the flag closed until the migration is applied and the dry-run endpoint
-  reports the expected eligible count.
+- The integration is active whenever the migration is installed; it does not
+  depend on an environment feature flag. Project mapping is required for reads
+  as well as writes so every runtime resolves the same `project_id`.
 - Dry run: `GET /api/indicator/contracts/workspaces/:workspaceId/status`.
 - Controlled apply/retry: `POST /api/indicator/contracts/workspaces/:workspaceId/reconcile`.
 - Source documents are opened through an authenticated server route that emits

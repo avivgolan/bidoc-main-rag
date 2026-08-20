@@ -53,12 +53,8 @@ function logContractsRouteFailure(scope, error) {
 
 async function reconcileIndicatorAfterContractMutation({ workspaceId }) {
   const {
-    bestEffortReconcileContractConditions,
-    indicatorContractConditionsApproved
+    bestEffortReconcileContractConditions
   } = await import("./indicator/contractConditions.js");
-  if (!indicatorContractConditionsApproved()) {
-    return { ok: true, committed: false, skipped: true, reason: "activation_not_approved" };
-  }
   return bestEffortReconcileContractConditions({
     workspaceId,
     config: config()

@@ -189,9 +189,10 @@ import {
 import {
   CONTRACT_SOURCE_OBJECT_RPC,
   INDICATOR_CONTRACT_SYNC_RPC,
+  INDICATOR_PROJECT_CONTEXT_RPC,
   createContractSourceSignedUrl,
-  indicatorContractConditionsApproved,
-  reconcileContractConditions
+  reconcileContractConditions,
+  resolveIndicatorProjectContext
 } from "../src/indicator/contractConditions.js";
 import {
   CONTRACTS_SCHEDULE_PROJECTION_AGENT_VERSION,
@@ -5979,24 +5980,11 @@ export function registerContractsAgentTests(test) {
     assert.equal(new Set(split.map((candidate) => candidate.proposalKey)).size, 2);
   });
 
-  test("contracts Indicator sync is feature-gated and calls only the atomic service-role RPC", async () => {
-    assert.equal(indicatorContractConditionsApproved({ INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED: "TRUE" }), true);
-    assert.equal(indicatorContractConditionsApproved({}), false);
-    await assert.rejects(
-      reconcileContractConditions({
-        workspaceId: MAPPING_PROJECT_LINK_ID,
-        commit: true,
-        env: {},
-        config: {}
-      }),
-      (error) => error.code === "indicator_contract_conditions_not_enabled" && error.status === 503
-    );
-
+  test("contracts Indicator sync always calls only the atomic service-role RPC", async () => {
     const requests = [];
     const result = await reconcileContractConditions({
       workspaceId: MAPPING_PROJECT_LINK_ID,
       commit: true,
-      env: { INDICATOR_CONTRACT_CONDITIONS_V1_APPROVED: "TRUE" },
       config: {
         contentSource: {
           supabaseUrl: "https://app-data.example",
@@ -6030,6 +6018,46 @@ export function registerContractsAgentTests(test) {
     assert.deepEqual(JSON.parse(requests[0].options.body), {
       p_workspace_id: MAPPING_PROJECT_LINK_ID,
       p_commit: true
+    });
+  });
+
+  test("contracts Indicator project mapping is read without an environment feature flag", async () => {
+    const sourceProjectId = "11111111-1111-4111-8111-111111111111";
+    const scheduleProjectId = "22222222-2222-4222-8222-222222222222";
+    const requests = [];
+    const result = await resolveIndicatorProjectContext({
+      projectId: sourceProjectId,
+      config: {
+        contentSource: {
+          supabaseUrl: "https://app-data.example",
+          supabaseServiceRoleKey: "service-role-test"
+        }
+      },
+      fetchImpl: async (url, options) => {
+        requests.push({ url, options });
+        return {
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          text: async () => JSON.stringify({
+            mappingFound: true,
+            sourceProjectId,
+            scheduleProjectId
+          })
+        };
+      }
+    });
+    assert.equal(result.scheduleProjectId, scheduleProjectId);
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, new RegExp(`/rpc/${INDICATOR_PROJECT_CONTEXT_RPC}$`));
+  });
+
+  test("contracts Indicator project mapping falls back only when APP DATA is not configured", async () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    assert.deepEqual(await resolveIndicatorProjectContext({ projectId, config: {} }), {
+      mappingFound: false,
+      sourceProjectId: projectId,
+      scheduleProjectId: projectId
     });
   });
 
