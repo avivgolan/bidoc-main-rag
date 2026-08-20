@@ -2213,6 +2213,67 @@ export function registerContractsAgentTests(test) {
     );
   });
 
+  test("contracts R2 accepts compact Word-export subclauses without treating durations as headings", () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{
+        pdfPage: 1,
+        text: [
+          "3. ביצוע",
+          "3.7. פיצוי מוסכם",
+          "3.7.1.בגין איחור ישולם פיצוי מוסכם.",
+          "8. השלמה ומסירה",
+          "8.2. תקופת האחריות תחול לאחר השלמת העבודה.",
+          "12 חודשים החל ממועד סיום העבודות בשלמות.",
+          "12. שירותי אתר"
+        ].join("\n")
+      }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+
+    assert.equal(generation.coverageLedger.accepted, true);
+    assert.deepEqual(generation.coverageLedger.errors, []);
+    assert.deepEqual(
+      generation.clauses.map((clause) => clause.clauseKey),
+      ["3", "3.7", "3.7.1", "8", "8.2", "12"]
+    );
+    assert.match(
+      generation.clauses.find((clause) => clause.clauseKey === "8.2").rawText,
+      /^8\.2\.[\s\S]*12 חודשים/u
+    );
+    assert.equal(
+      generation.clauses.filter((clause) => clause.clauseKey === "12").length,
+      1
+    );
+  });
+
+  test("contracts R2 keeps an appendix inventory inside its source clause", () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{
+        pdfPage: 1,
+        text: [
+          "1. רשימת נספחים מצורפים:",
+          "נספח א' - תוכניות",
+          "נספח ב' - מפרט מיוחד",
+          "2. הצהרת הקבלן",
+          "2.1. הקבלן יבצע את העבודות בהתאם להסכם."
+        ].join("\n")
+      }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+
+    assert.equal(generation.coverageLedger.accepted, true);
+    assert.deepEqual(
+      generation.clauses.map((clause) => [clause.clauseKey, clause.clauseType]),
+      [["1", "clause"], ["2", "clause"], ["2.1", "subclause"]]
+    );
+    assert.match(
+      generation.clauses.find((clause) => clause.clauseKey === "1").rawText,
+      /נספח א'[\s\S]*נספח ב'/u
+    );
+  });
+
   test("contracts R2 persistence payloads contain only clause source truth", () => {
     const generation = buildContractsClauseGeneration({
       pages: [{ pdfPage: 1, text: "1. General\n1.1. Exact source text" }],
@@ -2398,6 +2459,87 @@ export function registerContractsAgentTests(test) {
     });
     assert.equal(result.modelVersion, "fixture/lite");
     assert.deepEqual(result.clauses.map((clause) => clause.hashtags), [["ביצוע"], ["ביצוע"]]);
+  });
+
+  test("contracts R6 maps a known Hebrew variant only to an existing catalog tag", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{ pdfPage: 1, text: "1. פיצוי בגין עיכוב" }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    let calls = 0;
+    const result = await runContractsClauseEnrichment({
+      generation,
+      controlledTags: ["עיכוב", "תשלום"],
+      config: {
+        openRouterApiKey: "configured",
+        models: { lite: "fixture/lite" },
+        ai: { lite: { timeoutMs: 30_000 } }
+      },
+      chatComplete: async ({ messages }) => {
+        calls += 1;
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף עוסק בפיצוי בגין עיכוב.",
+            tags: ["פיצויים"]
+          }))
+        });
+      }
+    });
+
+    assert.equal(calls, 1);
+    assert.equal(result.qualityLedger.modelRepairCount, 0);
+    assert.equal(result.qualityLedger.correctedUnknownTagCount, 1);
+    assert.deepEqual(result.clauses[0].hashtags, ["תשלום"]);
+  });
+
+  test("contracts R6 replaces unknown-only model tags with source-grounded catalog tags", async () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{
+        pdfPage: 1,
+        text: [
+          "7. אחריות הקבלן",
+          "7.4. במהלך ביצוע העבודות יהיה הקבלן אחראי לנזק לאדם או לרכוש."
+        ].join("\n")
+      }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+    const controlledTags = ["חוזה", "ביצוע", "קבלן", "קבלן_ביצוע"];
+    let calls = 0;
+    const result = await runContractsClauseEnrichment({
+      generation,
+      controlledTags,
+      config: {
+        openRouterApiKey: "configured",
+        models: { lite: "fixture/lite" },
+        ai: { lite: { timeoutMs: 30_000 } }
+      },
+      chatComplete: async ({ messages }) => {
+        calls += 1;
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({
+            clauseKey: clause.clauseKey,
+            summaryHe: "הסעיף עוסק באחריות הקבלן לנזק במהלך ביצוע העבודות.",
+            tags: ["אחריות", "נזק"]
+          }))
+        });
+      }
+    });
+
+    assert.equal(calls, 1);
+    assert.equal(result.qualityLedger.modelRepairCount, 0);
+    assert.equal(result.qualityLedger.catalogFallbackClauseCount, 2);
+    assert.ok(result.clauses.every((clause) => clause.hashtags.every((tag) => controlledTags.includes(tag))));
+    assert.deepEqual(
+      result.clauses.find((clause) => clause.clauseKey === "7.4").hashtags,
+      ["קבלן_ביצוע", "ביצוע", "קבלן"]
+    );
   });
 
   test("contracts R6 reads only server-side Hebrew catalogs and writes 3072-dimension embeddings", async () => {
@@ -6244,6 +6386,7 @@ export function registerContractsAgentTests(test) {
     assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated/u);
     assert.doesNotMatch(migration, /security definer|insert\s+into\s+public\.schedule|update\s+public\.schedule/iu);
   });
+
   test("contracts R3.2 UI exposes saved clause generations and preserves the classic comparison", () => {
     const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
     const styles = fs.readFileSync(new URL("../public/styles.css", import.meta.url), "utf8");
@@ -6270,9 +6413,20 @@ export function registerContractsAgentTests(test) {
     assert.match(page, /presentedPreview\.coverage\.accountedSourceLineCount/u);
     assert.match(page, /row\.clause\.crossReferences/u);
     assert.match(page, /\/api\/contracts\/relationships\/status/u);
+    assert.match(page, /role="tablist"/u);
+    assert.match(page, /aria-selected=\{activeTab === tab\.id\}/u);
+    assert.match(page, /contracts-workspace-panel-\$\{id\}/u);
+    assert.match(page, /hidden=\{!active\}/u);
+    assert.match(page, /תוכן החוזה/u);
+    assert.match(page, /קשרים בין סעיפים/u);
+    assert.match(page, /החלטות חוזיות/u);
+    assert.match(page, /מסירה ל־Indicator/u);
     assert.match(styles, /\.contractsClausePreviewPanel/u);
     assert.match(styles, /\.contractsClauseCard/u);
     assert.match(styles, /\.contractsComparisonNotice\.is-same-document/u);
+    assert.match(styles, /\.contractsWorkspaceTabs/u);
+    assert.match(styles, /\.contractsWorkspaceTabs button\.is-active/u);
+    assert.match(styles, /\.contractsWorkspaceTabPanel\[hidden\]/u);
   });
 
   test("contracts Phase 2 routes require the reviewer session and server-owned APP DATA config", () => {

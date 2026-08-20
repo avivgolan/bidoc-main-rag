@@ -53,6 +53,66 @@ const CONTRACTS_DECISION_CATEGORY_OPTIONS = [
   "other"
 ];
 
+const CONTRACTS_WORKSPACE_TABS = Object.freeze([
+  { id: "clauses", label: "תוכן החוזה", description: "סעיפים וחילוץ" },
+  { id: "relationships", label: "קשרים בין סעיפים", description: "הפניות וקשרים סמנטיים" },
+  { id: "decisions", label: "החלטות חוזיות", description: "נרמול וסקירה" },
+  { id: "indicator", label: "מסירה ל־Indicator", description: "ערכת החלטות מאושרת" }
+]);
+
+function ContractsWorkspaceTabs({ activeTab, onChange }) {
+  function moveFocus(event, currentIndex) {
+    let nextIndex = null;
+    if (event.key === "ArrowLeft") nextIndex = (currentIndex + 1) % CONTRACTS_WORKSPACE_TABS.length;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex - 1 + CONTRACTS_WORKSPACE_TABS.length) % CONTRACTS_WORKSPACE_TABS.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = CONTRACTS_WORKSPACE_TABS.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextTab = CONTRACTS_WORKSPACE_TABS[nextIndex];
+    onChange(nextTab.id);
+    requestAnimationFrame(() => document.getElementById(`contracts-workspace-tab-${nextTab.id}`)?.focus());
+  }
+
+  return (
+    <nav className="contractsWorkspaceTabs" role="tablist" aria-label="שלבי העבודה בחוזה הפתוח">
+      {CONTRACTS_WORKSPACE_TABS.map((tab, index) => (
+        <button
+          id={`contracts-workspace-tab-${tab.id}`}
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === tab.id}
+          aria-controls={`contracts-workspace-panel-${tab.id}`}
+          className={activeTab === tab.id ? "is-active" : ""}
+          tabIndex={activeTab === tab.id ? 0 : -1}
+          onClick={() => onChange(tab.id)}
+          onKeyDown={(event) => moveFocus(event, index)}
+        >
+          <strong>{tab.label}</strong>
+          <small>{tab.description}</small>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function ContractsWorkspaceTabPanel({ id, activeTab, children }) {
+  const active = activeTab === id;
+  return (
+    <div
+      id={`contracts-workspace-panel-${id}`}
+      className="contractsWorkspaceTabPanel"
+      role="tabpanel"
+      aria-labelledby={`contracts-workspace-tab-${id}`}
+      tabIndex={active ? 0 : -1}
+      hidden={!active}
+    >
+      {children}
+    </div>
+  );
+}
+
 async function api(path, { method = "GET", body = null, timeoutMs = 120_000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -2133,6 +2193,7 @@ export function ContractsPage() {
   const [projectSite, setProjectSite] = useState("אולם תצוגה הרצליה");
   const [extraction, setExtraction] = useState(null);
   const [clausePreview, setClausePreview] = useState(null);
+  const [activeClauseWorkspaceTab, setActiveClauseWorkspaceTab] = useState("clauses");
   const [decisions, setDecisions] = useState({});
   const [reviewReason, setReviewReason] = useState("");
   const [batchId, setBatchId] = useState("");
@@ -2403,6 +2464,7 @@ export function ContractsPage() {
     try {
       const response = await api(`/api/contracts/clauses/workspaces/${workspaceId}`, { timeoutMs: 60_000 });
       setClausePreview(response.preview);
+      setActiveClauseWorkspaceTab("clauses");
       setCurrentClauseWorkspaceId(response.workspace?.workspaceId || workspaceId);
       setRelationshipsResult(null);
       setSemanticRelationshipsResult(null);
@@ -2836,6 +2898,7 @@ export function ContractsPage() {
         }
       });
       setClausePreview(response);
+      setActiveClauseWorkspaceTab("clauses");
       setCurrentClauseWorkspaceId(response.workspace?.workspaceId || "");
       setRelationshipsResult(null);
       setRelationshipsError("");
@@ -3023,6 +3086,7 @@ export function ContractsPage() {
               onChange={(event) => {
                 setFile(event.target.files?.[0] || null);
                 setClausePreview(null);
+                setActiveClauseWorkspaceTab("clauses");
                 setCurrentClauseWorkspaceId("");
                 setRelationshipsResult(null);
                 setRelationshipsError("");
@@ -3067,58 +3131,80 @@ export function ContractsPage() {
       </section>
 
       {clausePreview && (
-        <>
-          <ContractsClausePreviewPanel
-            preview={clausePreview}
-            classicDocumentVersionId={classicDocumentVersionId}
-          />
-          <ContractsRelationshipsPreviewPanel
-            preview={clausePreview}
-            workspaceId={currentClauseWorkspaceId}
-            persistenceStatus={relationshipsStatus}
-            persistenceResult={relationshipsResult}
-            persistenceError={relationshipsError}
-            persistenceBusy={busy === "relationships-persist"}
-            onPersist={persistExplicitRelationships}
-            semanticStatus={semanticRelationshipsStatus}
-            semanticResult={semanticRelationshipsResult}
-            semanticError={semanticRelationshipsError}
-            semanticBusy={busy === "semantic-relationships"}
-            onRunSemantic={runSemanticRelationships}
-            reviewStatus={relationshipReviewStatus}
-            reviewResult={relationshipReviewResult}
-            reviewError={relationshipReviewError}
-            reviewBusyId={busy.startsWith("relationship-review:") ? busy.slice("relationship-review:".length) : ""}
-            onReview={reviewSemanticRelationship}
-          />
-          <ContractsDecisionReviewPanel
-            status={decisionReviewStatus}
-            lineageStatus={decisionLineageStatus}
-            result={decisionReviewResult}
-            relationshipPendingCount={relationshipReviewResult?.metrics?.proposedCount || 0}
-            error={decisionReviewError}
-            generationBusy={busy === "decision-proposals"}
-            reviewBusyId={busy.startsWith("decision-review:")
-              ? busy.slice("decision-review:".length)
-              : busy === "decision-lineage:merge"
-                ? "lineage:merge"
-                : busy.startsWith("decision-lineage:")
-                  ? `lineage:${busy.slice("decision-lineage:".length)}`
-                  : ""}
-            onGenerate={runDecisionProposals}
-            onSplit={splitDecision}
-            onMerge={mergeDecisions}
-            onReview={reviewDecision}
-          />
-          <ContractsIndicatorHandoffPanel
-            status={indicatorHandoffStatus}
-            result={indicatorHandoffResult}
-            error={indicatorHandoffError}
-            busy={busy === "indicator-handoff"}
-            disabled={Boolean(busy)}
-            onRun={loadIndicatorHandoff}
-          />
-        </>
+        <section className="contractsWorkspaceTabsShell" aria-labelledby="contracts-open-workspace-title">
+          <div className="contractsWorkspaceTabsHeader">
+            <div>
+              <p className="contractsEyebrow">חוזה פתוח · סביבת עבודה שמורה</p>
+              <h2 id="contracts-open-workspace-title">{projectSite || clausePreview.document?.filename || "חוזה שמור"}</h2>
+              <p>{clausePreview.document?.filename || ""} · בחרו שלב כדי להציג רק את המידע הרלוונטי.</p>
+            </div>
+            <span className="contractsPlanReady">החילוץ השמור נשאר טעון בעת מעבר בין הכרטיסיות</span>
+          </div>
+
+          <ContractsWorkspaceTabs activeTab={activeClauseWorkspaceTab} onChange={setActiveClauseWorkspaceTab} />
+
+          <ContractsWorkspaceTabPanel id="clauses" activeTab={activeClauseWorkspaceTab}>
+            <ContractsClausePreviewPanel
+              preview={clausePreview}
+              classicDocumentVersionId={classicDocumentVersionId}
+            />
+          </ContractsWorkspaceTabPanel>
+
+          <ContractsWorkspaceTabPanel id="relationships" activeTab={activeClauseWorkspaceTab}>
+            <ContractsRelationshipsPreviewPanel
+              preview={clausePreview}
+              workspaceId={currentClauseWorkspaceId}
+              persistenceStatus={relationshipsStatus}
+              persistenceResult={relationshipsResult}
+              persistenceError={relationshipsError}
+              persistenceBusy={busy === "relationships-persist"}
+              onPersist={persistExplicitRelationships}
+              semanticStatus={semanticRelationshipsStatus}
+              semanticResult={semanticRelationshipsResult}
+              semanticError={semanticRelationshipsError}
+              semanticBusy={busy === "semantic-relationships"}
+              onRunSemantic={runSemanticRelationships}
+              reviewStatus={relationshipReviewStatus}
+              reviewResult={relationshipReviewResult}
+              reviewError={relationshipReviewError}
+              reviewBusyId={busy.startsWith("relationship-review:") ? busy.slice("relationship-review:".length) : ""}
+              onReview={reviewSemanticRelationship}
+            />
+          </ContractsWorkspaceTabPanel>
+
+          <ContractsWorkspaceTabPanel id="decisions" activeTab={activeClauseWorkspaceTab}>
+            <ContractsDecisionReviewPanel
+              status={decisionReviewStatus}
+              lineageStatus={decisionLineageStatus}
+              result={decisionReviewResult}
+              relationshipPendingCount={relationshipReviewResult?.metrics?.proposedCount || 0}
+              error={decisionReviewError}
+              generationBusy={busy === "decision-proposals"}
+              reviewBusyId={busy.startsWith("decision-review:")
+                ? busy.slice("decision-review:".length)
+                : busy === "decision-lineage:merge"
+                  ? "lineage:merge"
+                  : busy.startsWith("decision-lineage:")
+                    ? `lineage:${busy.slice("decision-lineage:".length)}`
+                    : ""}
+              onGenerate={runDecisionProposals}
+              onSplit={splitDecision}
+              onMerge={mergeDecisions}
+              onReview={reviewDecision}
+            />
+          </ContractsWorkspaceTabPanel>
+
+          <ContractsWorkspaceTabPanel id="indicator" activeTab={activeClauseWorkspaceTab}>
+            <ContractsIndicatorHandoffPanel
+              status={indicatorHandoffStatus}
+              result={indicatorHandoffResult}
+              error={indicatorHandoffError}
+              busy={busy === "indicator-handoff"}
+              disabled={Boolean(busy)}
+              onRun={loadIndicatorHandoff}
+            />
+          </ContractsWorkspaceTabPanel>
+        </section>
       )}
 
       {extraction && (
