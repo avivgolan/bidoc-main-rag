@@ -14,7 +14,7 @@ import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
 import { authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
-import { listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
+import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { runScheduleConditionResolver } from "./subagents/scheduleConditionResolver.js";
 import { CONTRACTS_AGENT_VERSION, CONTRACTS_EXTRACTION_BUDGET_MS, CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES, CONTRACTS_MAX_RESPONSE_BYTES, CONTRACTS_PDF_READER_VERSION } from "./contracts/constants.js";
 import { contractsErrorResponse } from "./contracts/errors.js";
@@ -2160,6 +2160,37 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === "GET" && url.pathname === "/api/schedule/activity-updates") {
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await listScheduleActivityUpdates({ projectId, config: buildRequestConfig(req) });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message, items: [] });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/schedule/activity-updates/assign") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const body = await readJson(req).catch(() => ({}));
+    const projectId = body.projectId || body.project_id || "";
+    if (!projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
+    try {
+      const item = await assignScheduleActivityUpdate({
+        projectId,
+        sourceId: body.sourceId,
+        activityKey: body.activityKey ?? null,
+        linkedBy: reviewer.sub,
+        config: buildRequestConfig(req, body)
+      });
+      return sendJson(res, 200, { ok: true, item });
+    } catch (error) {
+      return sendJson(res, /required|not found|does not belong|ללא data_date/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/api/schedule/conditions") {
     const projectId = url.searchParams.get("projectId") || "";
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
@@ -2799,6 +2830,7 @@ function serveStatic(req, res, pathname) {
     res.end(html);
     return;
   }
+
   res.writeHead(200, headers);
   fs.createReadStream(fullPath).pipe(res);
 }

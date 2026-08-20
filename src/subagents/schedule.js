@@ -12,6 +12,7 @@
 // by the migration runbook, never an application table.
 
 import { getConfig } from "../config.js";
+import { fetchAlertsTimelineEvents } from "../supabase.js";
 import { getProjectDateTime } from "../clock.js";
 import { computeIndicator, sweep, deriveAlert, deriveSeverity, ENGINE_VERSION, CONTRACT_VERSION } from "../scheduleEngine.js";
 import { diffCalendarDays, toIsoDate } from "../scheduleCalendar.js";
@@ -653,6 +654,136 @@ export async function listScheduleAlerts({ projectId, lifecycle = null, baseline
     config: cfg, settings,
     path: `/rest/v1/${settings.alertsTable}?select=*&${filters.join("&")}&order=severity_level.desc,days_late.desc.nullslast`
   });
+}
+
+const ACTIVITY_ALERT_LINKS_TABLE = "schedule_activity_alert_links";
+
+function contentAlertDate(value) {
+  const match = String(value || "").match(/^(\d{4}-\d{2}-\d{2})/u);
+  return match ? match[1] : null;
+}
+
+export function scheduleActivityUpdateItem(row = {}, activityKey = null) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  const rawId = String(row.id || "").replace(/^alert_/u, "");
+  const sourceEventId = String(row.source_event_id || (String(row.id || "").startsWith("alert_") ? row.id : `alert_${rawId}`));
+  const alertType = String(row.alert_type || metadata.alert_type || row.tags?.at(-1) || "עדכון").trim();
+  return {
+    id: rawId,
+    sourceEventId,
+    sourceTable: "alerts",
+    sourceKind: "timeline_alert",
+    kind: /עדכון|update/iu.test(alertType) ? "update" : "alert",
+    alertType,
+    title: String(row.content || row.summary || row.alert_description || metadata.summary || metadata.alert_description || "עדכון ללא כותרת").trim(),
+    date: contentAlertDate(row.data_date || metadata.data_date || row.date),
+    severity: row.severity == null && row.severity_level == null ? null : Number(row.severity ?? row.severity_level),
+    status: row.item_status || metadata.item_status || row.lifecycle_status || row.status || metadata.status || null,
+    href: row.data_link || metadata.data_link || metadata.url || null,
+    activityKey: activityKey || null
+  };
+}
+
+// Use the exact alert-event adapter that feeds the Timeline page. Only the
+// reviewed association is Schedule-owned and persisted in the link table.
+export async function listScheduleActivityUpdates({ projectId, config = null, settings: settingsInput = null } = {}) {
+  if (!projectId) throw new Error("listScheduleActivityUpdates: projectId is required");
+  const settings = settingsInput || scheduleSettings();
+  const cfg = config || getConfig();
+  const projectContext = await resolveIndicatorProjectContext({ projectId, config: cfg, settings });
+  const eventsPromise = fetchAlertsTimelineEvents({ config: cfg, limit: 2000 });
+  let linksWarning = null;
+  const linksPromise = scheduleDataRequest({
+      config: cfg,
+      settings,
+      path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?select=source_id,activity_key,event_date&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts`
+    }).catch((error) => {
+      linksWarning = `טעינת קשרי פעילות: ${error.message}`;
+      return [];
+    });
+  const [events, links] = await Promise.all([eventsPromise, linksPromise]);
+  const activityBySource = new Map(links.map((row) => [String(row.source_id), row.activity_key || null]));
+  return {
+    projectId: projectContext.sourceProjectId,
+    scheduleProjectId: projectContext.scheduleProjectId,
+    total: events.length,
+    items: events.map((event) => scheduleActivityUpdateItem(event, activityBySource.get(String(event.id).replace(/^alert_/u, "")))),
+    ...(linksWarning ? { warning: linksWarning } : {})
+  };
+}
+
+export async function assignScheduleActivityUpdate({ projectId, sourceId, activityKey, linkedBy = null, config = null, settings: settingsInput = null } = {}) {
+  if (!projectId) throw new Error("assignScheduleActivityUpdate: projectId is required");
+  const normalizedSourceId = String(sourceId || "").trim();
+  if (!normalizedSourceId || normalizedSourceId.length > 160) throw new Error("sourceId is required");
+  const normalizedActivityKey = activityKey == null || activityKey === "" ? null : String(activityKey).trim();
+  if (normalizedActivityKey && (normalizedActivityKey.length > 500 || !normalizedActivityKey.startsWith("gantt:"))) {
+    throw new Error("activityKey must identify a Gantt activity");
+  }
+  const settings = settingsInput || scheduleSettings();
+  const cfg = config || getConfig();
+  const projectContext = await resolveIndicatorProjectContext({ projectId, config: cfg, settings });
+  const alertsTable = "alerts";
+  const [sourceRows, inputs] = await Promise.all([
+    scheduleDataRequest({
+      config: cfg,
+      settings,
+      path: `/rest/v1/${alertsTable}?select=id,created_at,data_date,alert_type,severity_level,item_status,lifecycle_status,status,summary,alert_description,answer,question,content,data_link,metadata,hashtags&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&id=eq.${encodeURIComponent(normalizedSourceId)}&limit=1`
+    }),
+    normalizedActivityKey ? loadScheduleInputs({
+      config: cfg,
+      projectId: projectContext.sourceProjectId,
+      engineProjectId: projectContext.scheduleProjectId,
+      settings
+    }) : Promise.resolve(null)
+  ]);
+  const source = sourceRows[0];
+  if (!source) throw new Error("update or alert not found");
+  const eventDate = contentAlertDate(source.data_date || source.created_at);
+  if (!eventDate) throw new Error("לא ניתן לשייך התראה ללא תאריך לציר הזמן");
+  if (normalizedActivityKey && !inputs.tasks.some((task) => task.activityKey === normalizedActivityKey)) {
+    throw new Error("activityKey does not belong to the active schedule version");
+  }
+  const existing = await scheduleDataRequest({
+    config: cfg,
+    settings,
+    path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?select=id&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts&source_id=eq.${encodeURIComponent(normalizedSourceId)}&limit=1`
+  });
+  if (existing[0]?.id && !normalizedActivityKey) {
+    await scheduleDataRequest({
+      config: cfg,
+      settings,
+      path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?id=eq.${encodeURIComponent(existing[0].id)}`,
+      options: { method: "DELETE", headers: { Prefer: "return=minimal" } }
+    });
+  } else if (existing[0]?.id) {
+    await scheduleDataRequest({
+      config: cfg,
+      settings,
+      path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?id=eq.${encodeURIComponent(existing[0].id)}`,
+      options: { method: "PATCH", body: { activity_key: normalizedActivityKey, event_date: eventDate, linked_by: linkedBy }, headers: { Prefer: "return=minimal" } }
+    });
+  } else if (normalizedActivityKey) {
+    await scheduleDataRequest({
+      config: cfg,
+      settings,
+      path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}`,
+      options: {
+        method: "POST",
+        body: {
+          project_id: projectContext.scheduleProjectId,
+          source_event_id: `alert_${normalizedSourceId}`,
+          source_table: "alerts",
+          source_id: normalizedSourceId,
+          activity_key: normalizedActivityKey,
+          event_date: eventDate,
+          linked_by: linkedBy
+        },
+        headers: { Prefer: "return=minimal" }
+      }
+    });
+  }
+  return scheduleActivityUpdateItem({ ...source, id: `alert_${normalizedSourceId}` }, normalizedActivityKey);
 }
 
 // ─── Pending contractual conditions (spec 6.8א) ──────────────────────────────

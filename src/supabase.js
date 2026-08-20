@@ -1195,8 +1195,15 @@ function uniqueTimelineTags(value, extra = null) {
 export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig)) return [];
-  const query = `/rest/v1/${contentConfig.alertsTable}?select=id,created_at,question,answer,alert_description,alert_type,severity_level,input_data_type,input_data_id,analyzed_data,data_link,data_date,status,item_status,hashtags,summary,content,metadata,is_relevant&order=data_date.asc.nullslast,created_at.asc&limit=${limit}`;
-  const rows = await supabaseFetch(contentConfig, query);
+  const rows = [];
+  const pageSize = 500;
+  for (let offset = 0; offset < limit; offset += pageSize) {
+    const batchLimit = Math.min(pageSize, limit - offset);
+    const query = `/rest/v1/${contentConfig.alertsTable}?select=id,created_at,question,answer,alert_description,alert_type,severity_level,input_data_type,input_data_id,analyzed_data,data_link,data_date,status,item_status,hashtags,summary,content,metadata,is_relevant&order=data_date.asc.nullslast,created_at.asc,id.asc&limit=${batchLimit}&offset=${offset}`;
+    const batch = await supabaseFetch(contentConfig, query);
+    rows.push(...(batch || []));
+    if (!Array.isArray(batch) || batch.length < batchLimit) break;
+  }
   return (rows || []).map((row) => {
     const date = timelineRowDate(row);
     return {

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { makeScheduleScale, scheduleSubjectKey } from "./scheduleTimeline.js";
 
 // Schedule Intelligence tab (spec section 15, phases 1-2 screens).
@@ -157,11 +157,12 @@ const AxisLegend = () => (
     <span><i className="axisSwatch swContract">⚑</i> אבן דרך חוזית</span>
     <span><i className="axisSwatch swTrigger">▶</i> תחילת ספירה חוזית</span>
     <span><i className="axisSwatch swObserved" /> ביצוע נצפה (BIDoc)</span>
+    <span><i className="axisSwatch swActivityEvent">●</i> עדכון / התראה משויכים</span>
     <span><i className="axisSwatch swToday" /> קו "נכון ל-"</span>
   </div>
 );
 
-function AxisRow({ indicator, scale, asOf, selected, onSelect }) {
+function AxisRow({ indicator, scale, asOf, selected, onSelect, eventCount = 0, expanded = false, onToggleEvents }) {
   const t = indicator.timing ?? {};
   const l = indicator.lateness ?? {};
   const planStart = scale.pos(t.plannedStart);
@@ -217,8 +218,17 @@ function AxisRow({ indicator, scale, asOf, selected, onSelect }) {
         </div>
       </div>
       <div className="axisName">
-        <span className="axisNameText" title={indicator.subject.name}>
-          {indicator.subject.isMilestone ? "◆ " : ""}{indicator.subject.name}
+        <span className="axisNameTitleLine">
+          {eventCount ? (
+            <button type="button" className="axisExpandBtn" aria-expanded={expanded}
+              aria-label={`${expanded ? "סגור" : "פתח"} ${eventCount} עדכונים והתראות`}
+              onClick={(event) => { event.stopPropagation(); onToggleEvents(); }}>
+              {expanded ? "▾" : "◂"}<b>{eventCount}</b>
+            </button>
+          ) : null}
+          <span className="axisNameText" title={indicator.subject.name}>
+            {indicator.subject.isMilestone ? "◆ " : ""}{indicator.subject.name}
+          </span>
         </span>
         <span className="axisNameMeta">
           <StatusBadge status={indicator.status} />
@@ -229,7 +239,27 @@ function AxisRow({ indicator, scale, asOf, selected, onSelect }) {
   );
 }
 
-function ThreeAxesView({ indicators, allIndicators, pendingConditions, asOf, selected, onSelect }) {
+function AxisEventRow({ item, scale }) {
+  const left = scale.pos(item.date);
+  return (
+    <div className="axisEventRow">
+      <div className="axisTrack" dir="ltr">
+        {left != null ? (
+          <span className={`axisEventPoint is-${item.kind}`} style={{ left: `${left}%` }}
+            title={`${item.alertType} · ${item.date} · ${item.title}`}>●</span>
+        ) : null}
+      </div>
+      <div className="axisName axisEventName">
+        <span className={`activityUpdateKind is-${item.kind}`}>{item.kind === "update" ? "עדכון" : "התראה"}</span>
+        <span className="axisNameText" title={item.title}>{item.title}</span>
+        <time>{item.date || "ללא תאריך"}</time>
+      </div>
+    </div>
+  );
+}
+
+function ThreeAxesView({ indicators, allIndicators, pendingConditions, timelineItems, asOf, selected, onSelect }) {
+  const [expandedActivities, setExpandedActivities] = useState(() => new Set());
   const provisionalMarkers = useMemo(() => (pendingConditions ?? []).flatMap((condition) => {
     const date = condition?.metadata?.trigger_evidence?.provisionalDueDate;
     return date ? [{ date, name: condition.name || "אבן דרך חוזית", provisional: true }] : [];
@@ -253,8 +283,9 @@ function ThreeAxesView({ indicators, allIndicators, pendingConditions, asOf, sel
   const scaleIndicators = useMemo(() => [
     ...(allIndicators ?? indicators),
     ...provisionalMarkers.map((marker) => ({ timing: { contractFinish: marker.date } })),
-    ...triggerMarkers.map((marker) => ({ timing: { contractFinish: marker.date } }))
-  ], [allIndicators, indicators, provisionalMarkers, triggerMarkers]);
+    ...triggerMarkers.map((marker) => ({ timing: { contractFinish: marker.date } })),
+    ...(timelineItems ?? []).filter((item) => item.activityKey && item.date).map((item) => ({ timing: { contractFinish: item.date } }))
+  ], [allIndicators, indicators, provisionalMarkers, triggerMarkers, timelineItems]);
   const scale = useMemo(() => makeScheduleScale(indicators, asOf, scaleIndicators), [indicators, scaleIndicators, asOf]);
   // The contract axis, chart-wide: every contractual milestone date extracted
   // from the contract renders as a labeled vertical line across all rows —
@@ -277,6 +308,22 @@ function ThreeAxesView({ indicators, allIndicators, pendingConditions, asOf, sel
     }
     return [...byDate.values()];
   }, [indicators, allIndicators, provisionalMarkers]);
+  const eventsByActivity = useMemo(() => {
+    const grouped = new Map();
+    for (const item of timelineItems ?? []) {
+      if (!item.activityKey || !item.date) continue;
+      const list = grouped.get(item.activityKey) || [];
+      list.push(item);
+      grouped.set(item.activityKey, list);
+    }
+    for (const list of grouped.values()) list.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    return grouped;
+  }, [timelineItems]);
+  const toggleActivity = (key) => setExpandedActivities((current) => {
+    const next = new Set(current);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
   if (!scale) return <div className="schedEmpty">אין תאריכים להצגה</div>;
   const shown = indicators.slice(0, AXES_ROW_CAP);
   const asOfPos = scale.pos(asOf);
@@ -325,16 +372,101 @@ function ThreeAxesView({ indicators, allIndicators, pendingConditions, asOf, sel
           </div>
         </div>
         <div className="axesRows">
-          {shown.map((ind) => (
-            <AxisRow key={scheduleSubjectKey(ind)} indicator={ind} scale={scale} asOf={asOf}
-              selected={scheduleSubjectKey(selected) === scheduleSubjectKey(ind)} onSelect={onSelect} />
-          ))}
+          {shown.map((ind) => {
+            const key = scheduleSubjectKey(ind);
+            const events = eventsByActivity.get(key) || [];
+            const expanded = expandedActivities.has(key);
+            return (
+              <React.Fragment key={key}>
+                <AxisRow indicator={ind} scale={scale} asOf={asOf}
+                  selected={scheduleSubjectKey(selected) === key} onSelect={onSelect}
+                  eventCount={events.length} expanded={expanded} onToggleEvents={() => toggleActivity(key)} />
+                {expanded ? events.map((item) => <AxisEventRow key={`${item.sourceTable}:${item.id}`} item={item} scale={scale} />) : null}
+              </React.Fragment>
+            );
+          })}
         </div>
       </div>
       {indicators.length > AXES_ROW_CAP ? (
         <div className="axesCapNote">מוצגות {AXES_ROW_CAP} הפעילויות החמורות מתוך {indicators.length} — צמצם עם הפילטרים למעלה</div>
       ) : null}
     </div>
+  );
+}
+
+function ActivityPicker({ activities, value, disabled, busy, onChange }) {
+  const detailsRef = useRef(null);
+  const [query, setQuery] = useState("");
+  const selected = activities.find((activity) => activity.key === value);
+  const filtered = activities.filter((activity) => `${activity.name} ${activity.dateLabel}`.toLocaleLowerCase("he").includes(query.trim().toLocaleLowerCase("he"))).slice(0, 80);
+  const choose = (key) => {
+    onChange(key);
+    setQuery("");
+    if (detailsRef.current) detailsRef.current.open = false;
+  };
+  return (
+    <details ref={detailsRef} className="activityPicker">
+      <summary className={!value ? "is-empty" : ""} aria-disabled={disabled || busy} onClick={(event) => {
+        if (disabled || busy) event.preventDefault();
+      }}>{busy ? "שומר…" : selected ? `${selected.name} · ${selected.dateLabel}` : "בחר פעילות"}</summary>
+      <div className="activityPickerMenu">
+        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש פעילות…" autoFocus />
+        {value ? <button type="button" className="activityPickerClear" onClick={() => choose(null)}>נקה שיוך</button> : null}
+        <div className="activityPickerOptions">
+          {filtered.map((activity) => (
+            <button type="button" key={activity.key} className={activity.key === value ? "is-selected" : ""}
+              onClick={() => choose(activity.key)} title={activity.name}>
+              <span>{activity.name}</span><small>{activity.dateLabel}</small>
+            </button>
+          ))}
+          {!filtered.length ? <span className="activityPickerEmpty">לא נמצאה פעילות</span> : null}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ActivityUpdatesTable({ items, activities, busyId, onAssign }) {
+  const [query, setQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(100);
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase("he");
+    if (!needle) return items;
+    return items.filter((item) => `${item.title} ${item.alertType} ${item.date || ""}`.toLocaleLowerCase("he").includes(needle));
+  }, [items, query]);
+  const assigned = items.filter((item) => item.activityKey).length;
+  return (
+    <section className="activityUpdatesPanel" aria-labelledby="activity-updates-title">
+      <div className="activityUpdatesHead">
+        <div>
+          <h3 id="activity-updates-title">עדכונים והתראות על ציר הזמן</h3>
+          <p>{items.length} פריטים · {assigned} משויכים לפעילות</p>
+        </div>
+        <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(100); }}
+          placeholder="חיפוש בעדכונים והתראות…" />
+      </div>
+      <div className="activityUpdatesTableWrap">
+        <table className="activityUpdatesTable">
+          <thead><tr><th>סוג</th><th>תאריך</th><th>התראה / עדכון</th><th>חומרה</th><th>סטטוס</th><th>שיוך לפעילות בלוח</th></tr></thead>
+          <tbody>
+            {filtered.slice(0, visibleCount).map((item) => (
+              <tr key={`${item.sourceTable}:${item.id}`} className={item.activityKey ? "is-assigned" : ""}>
+                <td><span className={`activityUpdateKind is-${item.kind}`}>{item.kind === "update" ? "עדכון" : "התראה"}</span></td>
+                <td className="activityUpdateDate">{item.date || <span title="נדרש data_date אמיתי">ללא תאריך</span>}</td>
+                <td><div className="activityUpdateTitle" title={item.title}>{item.href ? <a href={item.href} target="_blank" rel="noreferrer">{item.title}</a> : item.title}</div><small>{item.alertType}</small></td>
+                <td>{item.severity ?? "—"}</td><td>{item.status || "—"}</td>
+                <td>
+                  <ActivityPicker activities={activities} value={item.activityKey} disabled={!item.date}
+                    busy={busyId === item.id} onChange={(activityKey) => onAssign(item, activityKey)} />
+                </td>
+              </tr>
+            ))}
+            {!filtered.length ? <tr><td colSpan={6} className="schedEmpty">אין פריטים תואמים לחיפוש</td></tr> : null}
+          </tbody>
+        </table>
+      </div>
+      {visibleCount < filtered.length ? <button type="button" className="activityUpdatesMore" onClick={() => setVisibleCount((count) => count + 100)}>טען עוד 100</button> : null}
+    </section>
   );
 }
 
@@ -609,6 +741,8 @@ export function SchedulePage() {
   const [health, setHealth] = useState(null);
   const [sweepResult, setSweepResult] = useState(null);
   const [alerts, setAlerts] = useState([]);
+  const [activityUpdates, setActivityUpdates] = useState({ total: 0, items: [] });
+  const [activityUpdateBusyId, setActivityUpdateBusyId] = useState(null);
   const [baselinedCount, setBaselinedCount] = useState(null);
   const [conditions, setConditions] = useState(null);
   const [conditionsOpen, setConditionsOpen] = useState(true);
@@ -641,7 +775,7 @@ export function SchedulePage() {
         ...fallback,
         warning: `${label}: ${err.message}`
       }));
-      const [healthResult, sweep, visibleAlerts, baselined, pendingConditions] = await Promise.all([
+      const [healthResult, sweep, visibleAlerts, baselined, pendingConditions, updates] = await Promise.all([
         api(`/api/schedule/health?projectId=${encodeURIComponent(pid)}${asOfQuery}`),
         api("/api/schedule/sweep", {
           method: "POST",
@@ -661,6 +795,11 @@ export function SchedulePage() {
           api(`/api/schedule/conditions?projectId=${encodeURIComponent(pid)}&status=pending,resolved`),
           { conditions: [] },
           "טעינת אבני דרך חוזיות"
+        ),
+        optional(
+          api(`/api/schedule/activity-updates?projectId=${encodeURIComponent(pid)}`, { timeoutMs: 240_000 }),
+          { total: 0, items: [] },
+          "טעינת עדכונים והתראות"
         )
       ]);
       setHealth(healthResult);
@@ -668,12 +807,17 @@ export function SchedulePage() {
       setAlerts(visibleAlerts.alerts ?? []);
       setBaselinedCount(baselined.count ?? 0);
       setConditions(pendingConditions);
+      setActivityUpdates({
+        total: Number(updates.total) || 0,
+        items: Array.isArray(updates.items) ? updates.items : []
+      });
       setWarnings([...new Set([
         ...(healthResult.warnings ?? []),
         ...(sweep.warnings ?? []),
         visibleAlerts.warning,
         baselined.warning,
-        pendingConditions.warning
+        pendingConditions.warning,
+        updates.warning
       ].filter(Boolean))]);
     } catch (err) {
       setError(err.message);
@@ -681,6 +825,26 @@ export function SchedulePage() {
       setLoading(false);
     }
   }, []);
+
+  const assignActivityUpdate = useCallback(async (item, activityKey) => {
+    if (!projectId || !item?.id) return;
+    setActivityUpdateBusyId(item.id);
+    setError("");
+    try {
+      const result = await api("/api/schedule/activity-updates/assign", {
+        method: "POST",
+        body: { projectId, sourceId: item.id, activityKey }
+      });
+      setActivityUpdates((current) => ({
+        ...current,
+        items: current.items.map((existing) => existing.id === item.id ? result.item : existing)
+      }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setActivityUpdateBusyId(null);
+    }
+  }, [projectId]);
 
   const runScan = useCallback(async () => {
     if (!projectId) return;
@@ -763,6 +927,27 @@ export function SchedulePage() {
   }, [sweepResult, onlyLate, minDaysLate]);
 
   const meta = sweepResult?.scheduleMeta;
+  const activityOptions = useMemo(() => {
+    const shortDate = (value) => {
+      const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/u);
+      return match ? `${match[3]}.${match[2]}.${match[1].slice(2)}` : "ללא תאריך";
+    };
+    const byKey = new Map();
+    for (const indicator of sweepResult?.indicators ?? []) {
+      const key = indicator.subject?.activityKey;
+      if (key && !byKey.has(key)) {
+        const start = indicator.timing?.plannedStart;
+        const finish = indicator.timing?.plannedFinish;
+        byKey.set(key, {
+          key,
+          name: indicator.subject?.name || key,
+          start: start || "",
+          dateLabel: start || finish ? `${shortDate(start)}–${shortDate(finish)}` : "ללא תאריכי תכנון"
+        });
+      }
+    }
+    return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, "he") || a.start.localeCompare(b.start));
+  }, [sweepResult]);
   // Project-level gates: the best state any indicator reached per gate —
   // one linked contract milestone means the contract axis EXISTS for the
   // project, even if most activities are not linked to it.
@@ -867,7 +1052,7 @@ export function SchedulePage() {
 
       {view === "axes" ? (
         <ThreeAxesView indicators={rows} allIndicators={sweepResult?.indicators} pendingConditions={conditions?.conditions}
-          asOf={sweepResult?.asOf} selected={selected} onSelect={setSelected} />
+          timelineItems={activityUpdates.items} asOf={sweepResult?.asOf} selected={selected} onSelect={setSelected} />
       ) : (
         <div className="schedTableWrap">
           <table className="schedTable">
@@ -898,6 +1083,8 @@ export function SchedulePage() {
       )}
 
       <IndicatorDetail indicator={selected} onClose={() => setSelected(null)} />
+      <ActivityUpdatesTable items={activityUpdates.items} activities={activityOptions}
+        busyId={activityUpdateBusyId} onAssign={assignActivityUpdate} />
     </div>
   );
 }

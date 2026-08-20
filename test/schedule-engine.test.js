@@ -19,7 +19,8 @@ import {
 import {
   buildScheduleHealth, scheduleDataVersion, snapshotRowFromIndicator,
   buildScheduleWorkflowLog, planScheduleAlerts, subjectKeyOf,
-  BOOTSTRAP_SUMMARY_KEY, enrichConditionProvisionalDueDates, SCHEDULE_HEALTH_VERSION
+  BOOTSTRAP_SUMMARY_KEY, enrichConditionProvisionalDueDates, scheduleActivityUpdateItem,
+  SCHEDULE_HEALTH_VERSION
 } from "../src/subagents/schedule.js";
 import {
   addWorkingDays, milestoneKeyForCondition, normalizeEvidenceResult,
@@ -49,6 +50,46 @@ test("schedule timeline: filtered future contract milestone remains positioned o
 
   assert.ok(markerPosition > 90 && markerPosition < 100, `expected an in-range milestone flag, got ${markerPosition}`);
   assert.equal(scheduleSubjectKey(futureMilestone), "milestone:condition:handover");
+});
+
+test("schedule activity updates: canonical business date and source assignment are preserved", () => {
+  const item = scheduleActivityUpdateItem({
+    id: 17,
+    source_table: "alerts",
+    data_date: "2026-08-19T20:45:00+03:00",
+    alert_type: "עדכון ביצוע",
+    severity_level: 2,
+    item_status: "open",
+    summary: "הושלמה יציקת הקומה",
+    created_at: "2099-01-01T00:00:00Z"
+  }, "gantt:file-a:9");
+  assert.deepEqual(item, {
+    id: "17",
+    sourceEventId: "alert_17",
+    sourceTable: "alerts",
+    sourceKind: "timeline_alert",
+    kind: "update",
+    alertType: "עדכון ביצוע",
+    title: "הושלמה יציקת הקומה",
+    date: "2026-08-19",
+    severity: 2,
+    status: "open",
+    href: null,
+    activityKey: "gantt:file-a:9"
+  });
+});
+
+test("schedule activity updates: ingestion time never replaces a missing business date", () => {
+  const item = scheduleActivityUpdateItem({
+    id: 18,
+    alert_type: "בטיחות",
+    alert_description: "נדרש תיקון",
+    data_date: null,
+    created_at: "2026-08-19T00:00:00Z"
+  });
+  assert.equal(item.kind, "alert");
+  assert.equal(item.date, null);
+  assert.equal(item.activityKey, null);
 });
 
 // Mirrors the real measured row: "אישור גופי תאורה" — the spec's flagship case.

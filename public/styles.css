@@ -10484,6 +10484,7 @@ body:has(#timeline.active) .sidebar {
 .swContract { color: var(--brand-700); background: none; font-size: 11px; }
 .swTrigger { color: var(--cobalt); background: none; font-size: 10px; }
 .swObserved { background: var(--cobalt-soft); border: 1px solid var(--cobalt); }
+.swActivityEvent { color: #7d57c2; background: none; font-size: 11px; }
 .swToday { background: var(--danger); width: 2px; height: 14px; }
 
 .axesBody { position: relative; direction: ltr; }
@@ -10510,6 +10511,10 @@ body:has(#timeline.active) .sidebar {
 .axisTrack { flex: 1; position: relative; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 5px 0; min-width: 0; }
 .axisName { order: -1; width: 240px; flex: none; padding: 4px 10px 4px 6px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--line); direction: rtl; text-align: right; }
 .axisNameText { font-size: 0.8rem; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.axisNameTitleLine { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.axisNameTitleLine .axisNameText { flex: 1; min-width: 0; }
+.axisExpandBtn { display: inline-flex; align-items: center; gap: 4px; flex: none; border: 1px solid color-mix(in srgb, #7d57c2 35%, var(--line)); border-radius: 999px; padding: 0 6px; background: color-mix(in srgb, #7d57c2 8%, var(--surface)); color: #6d48b3; font: inherit; font-size: 0.68rem; cursor: pointer; }
+.axisExpandBtn b { font-size: 0.64rem; }
 .axisNameMeta { display: flex; gap: 8px; align-items: center; }
 .axisNameMeta .schedBadge { font-size: 0.66rem; padding: 1px 7px; }
 .axisLateText { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; }
@@ -10525,7 +10530,55 @@ body:has(#timeline.active) .sidebar {
   border: 1px solid var(--danger); }
 .axisBarObserved { position: absolute; top: 0; height: 10px; background: var(--cobalt-soft); border: 1px solid var(--cobalt); border-radius: 3px; }
 .axisForecast { position: absolute; top: -2px; transform: translateX(-50%); color: var(--amber); font-size: 11px; }
+.axisEventRow { display: flex; flex-direction: row; min-height: 34px; background: color-mix(in srgb, #7d57c2 4%, var(--surface)); border-bottom: 1px solid var(--line); }
+.axisEventRow .axisTrack { min-height: 34px; border-top: 1px dashed color-mix(in srgb, #7d57c2 18%, transparent); }
+.axisEventPoint { position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 4; color: #7d57c2; font-size: 17px; line-height: 1; text-shadow: 0 0 0 3px var(--surface); }
+.axisEventPoint.is-alert { color: var(--danger); }
+.axisEventName { flex-direction: row; align-items: center; gap: 6px; padding-inline-start: 24px; }
+.axisEventName .axisNameText { font-size: 0.72rem; font-weight: 500; flex: 1; }
+.axisEventName time { color: var(--text-muted); font-size: 0.66rem; direction: ltr; }
 .axesCapNote { margin-top: 8px; font-size: 0.78rem; color: var(--text-muted); text-align: center; }
+
+/* ── Activity updates and alerts assignment ── */
+.activityUpdatesPanel { margin-top: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: visible; }
+.activityUpdatesHead { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, color-mix(in srgb, #7d57c2 7%, var(--surface)), var(--surface)); border-radius: 14px 14px 0 0; }
+.activityUpdatesHead h3 { margin: 0; color: var(--text-primary); font-size: 1rem; }
+.activityUpdatesHead p { margin: 3px 0 0; color: var(--text-muted); font-size: 0.76rem; }
+.activityUpdatesHead > input { width: min(330px, 42vw); min-height: 38px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--text-primary); font: inherit; }
+.activityUpdatesTableWrap { overflow: auto; max-height: 620px; }
+.activityUpdatesTable { width: 100%; min-width: 980px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 0.78rem; }
+.activityUpdatesTable th { position: sticky; top: 0; z-index: 5; padding: 8px 10px; background: var(--surface-2); color: var(--text-secondary); text-align: right; border-bottom: 1px solid var(--line-strong); }
+.activityUpdatesTable th:nth-child(1) { width: 82px; }.activityUpdatesTable th:nth-child(2) { width: 105px; }.activityUpdatesTable th:nth-child(3) { width: auto; }.activityUpdatesTable th:nth-child(4) { width: 68px; }.activityUpdatesTable th:nth-child(5) { width: 95px; }.activityUpdatesTable th:nth-child(6) { width: 285px; }
+.activityUpdatesTable td { padding: 8px 10px; vertical-align: middle; border-bottom: 1px solid var(--line); background: var(--surface); }
+.activityUpdatesTable tr.is-assigned td { background: color-mix(in srgb, #7d57c2 3%, var(--surface)); }
+.activityUpdateKind { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; background: color-mix(in srgb, #7d57c2 12%, var(--surface)); color: #6d48b3; font-size: 0.66rem; font-weight: 800; white-space: nowrap; }
+.activityUpdateKind.is-alert { background: var(--danger-soft); color: var(--danger); }
+.activityUpdateDate { direction: ltr; text-align: right; white-space: nowrap; color: var(--text-secondary); }
+.activityUpdateDate span { color: var(--amber); }
+.activityUpdateTitle { max-width: 560px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-primary); font-weight: 600; }
+.activityUpdateTitle a { color: var(--brand-700); text-decoration: none; }
+.activityUpdatesTable td small { color: var(--text-muted); }
+.activityPicker { position: relative; }
+.activityPicker summary { list-style: none; display: block; min-height: 34px; padding: 7px 30px 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.activityPicker summary::-webkit-details-marker { display: none; }
+.activityPicker summary::before { content: "⌕"; position: absolute; right: 10px; color: #6d48b3; font-size: 0.9rem; }
+.activityPicker summary.is-empty { color: var(--text-muted); }
+.activityPicker summary[aria-disabled="true"] { opacity: 0.5; cursor: not-allowed; }
+.activityPickerMenu { position: absolute; left: 0; bottom: calc(100% + 5px); z-index: 20; width: 360px; max-width: 70vw; padding: 8px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); box-shadow: 0 12px 32px rgba(24, 32, 27, 0.2); }
+.activityPickerMenu > input { width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-2); color: var(--text-primary); font: inherit; }
+.activityPickerClear { width: 100%; margin-top: 5px; padding: 5px 8px; border: none; border-radius: 6px; background: var(--danger-soft); color: var(--danger); font: inherit; font-size: 0.7rem; cursor: pointer; }
+.activityPickerOptions { max-height: 260px; overflow-y: auto; margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.activityPickerOptions button { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border: none; border-radius: 6px; background: transparent; color: var(--text-primary); font: inherit; font-size: 0.74rem; text-align: right; cursor: pointer; }
+.activityPickerOptions button:hover, .activityPickerOptions button.is-selected { background: var(--brand-50); }
+.activityPickerOptions button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activityPickerOptions button small { direction: ltr; flex: none; }
+.activityPickerEmpty { display: block; padding: 14px; color: var(--text-muted); text-align: center; }
+.activityUpdatesMore { display: block; margin: 10px auto; padding: 7px 18px; border: 1px solid var(--brand-300); border-radius: 8px; background: var(--brand-50); color: var(--brand-700); font: inherit; cursor: pointer; }
+
+@media (max-width: 700px) {
+  .activityUpdatesHead { align-items: stretch; flex-direction: column; }
+  .activityUpdatesHead > input { width: 100%; }
+}
 
 @media (max-width: 900px) {
   .axisName { width: 170px; }
