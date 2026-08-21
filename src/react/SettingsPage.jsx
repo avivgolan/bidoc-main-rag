@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 const SECTIONS = [
   { id: "connections", label: "חיבורים" },
   { id: "agents",      label: "סוכני AI" },
+  { id: "scheduleAgent", label: "סוכן שיוך ללו״ז" },
   { id: "retrieval",   label: "שליפה ו-RAG" },
   { id: "content",     label: "APP DATA" },
   { id: "tools",       label: "כלים n8n" },
@@ -137,6 +138,7 @@ function settingsToForm(s) {
     tools:         s.tools ? Object.fromEntries(Object.entries(s.tools).map(([k, v]) => [k, v?.url || ""])) : {},
     timezone:      s.timezone || "Asia/Jerusalem",
     presets:       s.presets || [],
+    scheduleAssignmentAgent: s.scheduleAssignmentAgent ? JSON.parse(JSON.stringify(s.scheduleAssignmentAgent)) : {},
   };
 }
 
@@ -157,6 +159,7 @@ function formToPayload(form) {
     n8nBaseUrl: form.n8nBaseUrl,
     tools:     Object.fromEntries(Object.entries(form.tools || {}).map(([k, v]) => [k, { url: v }])),
     timezone:  form.timezone,
+    scheduleAssignmentAgent: form.scheduleAssignmentAgent,
   };
 }
 
@@ -173,6 +176,7 @@ const icons = {
   info:        "M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-4.5 10-10 10zm0-11v5m0-8h.01",
   connections: "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
   agents:      "M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2zM3.5 22a8.5 8.5 0 0 1 17 0",
+  scheduleAgent: "M4 5h16M7 3v4m10-4v4M5 9h14v11H5zM9 13l2 2 4-4",
   retrieval:   "M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z",
   content:     "M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7zm0 5h16M8 3v4M16 3v4",
   tools:       "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3-3a1 1 0 0 0 0-1.4L19 3.3a1 1 0 0 0-1.4 0zM5 17l-1 4 4-1L20 8l-3-3zM16 5l3 3",
@@ -449,9 +453,11 @@ function StatusDot({ ok }) {
 }
 
 function ModelSelect({ value, onChange, models, includeEmbedding = false }) {
+  const valueExists = !value || models.some(model => model.id === value);
   return (
     <Select value={value} onChange={onChange}>
       <option value="">— ברירת מחדל —</option>
+      {!valueExists ? <option value={value}>{value} · מוגדר כעת</option> : null}
       {models.map(m => (
         <option key={m.id} value={m.id}>
           {m.name || m.id}{m.contextLength ? ` · ${Number(m.contextLength).toLocaleString()}` : ""}
@@ -1130,6 +1136,176 @@ function GeneralSection({ form, update }) {
   );
 }
 
+// ─── Section: Schedule Activity Assignment Agent ─────────────────────────────
+
+const SCHEDULE_ASSIGNMENT_ROLES = [
+  { key: "timeFilter", label: "מסנן קשר לזמן", desc: "שכבה מקדימה לריצת „אתר את כולם” בלבד; דילוג בטוח על התראות שאינן קשורות לזמן או ללו״ז." },
+  { key: "extractor", label: "חילוץ אירוע", desc: "ממיר את ההתראה למבנה עובדתי קשיח." },
+  { key: "matcher", label: "התאמה מקצועית", desc: "בודק התאמה לתחום, מיקום וסוג העבודה." },
+  { key: "validator", label: "בקרת לוח זמנים", desc: "בודק תאריכים, היררכיה וסתירות בלו״ז." },
+  { key: "judge", label: "שופט", desc: "מופעל רק בעמימות, מחלוקת או קרבה לסף." },
+  { key: "embedding", label: "Embeddings", desc: "מוסיף דירוג סמנטי למועמדים הראשונים." },
+];
+
+const SCHEDULE_ASSIGNMENT_TOOLS = [
+  ["lexical", "חיפוש מילולי"], ["semantic", "חיפוש סמנטי"], ["temporal", "התאמה בזמן"],
+  ["hierarchy", "היררכיית Gantt"], ["historical", "שיוכים מאושרים קודמים"], ["projectRag", "RAG פרויקטלי (ניסיוני)"],
+];
+
+const SCHEDULE_ASSIGNMENT_WEIGHTS = [
+  ["semantic", "סמנטיקה"], ["lexical", "מילים"], ["temporal", "זמן"],
+  ["hierarchy", "היררכיה"], ["historical", "היסטוריה"], ["modelConsensus", "הסכמת מודלים"],
+];
+
+function ScheduleAssignmentAgentSection({ form, update, models }) {
+  const value = form.scheduleAssignmentAgent || {};
+  const [validation, setValidation] = useState(null);
+  const [lab, setLab] = useState({ projectId: "", sourceId: "", busy: false, result: null, error: "" });
+  const weightTotal = Object.values(value.weights || {}).reduce((sum, item) => sum + (Number(item) || 0), 0);
+
+  const validateDraft = async () => {
+    try {
+      const result = await apiFetch("/api/settings/schedule-assignment-agent/validate", { method: "POST", body: { settings: value } });
+      setValidation(result);
+    } catch {
+      setValidation({ ok: false, errors: ["בדיקת ההגדרה נכשלה בשרת."], warnings: [] });
+    }
+  };
+  const runDryLab = async () => {
+    setLab(current => ({ ...current, busy: true, result: null, error: "" }));
+    try {
+      const result = await apiFetch("/api/settings/schedule-assignment-agent/dry-run", {
+        method: "POST", body: { projectId: lab.projectId.trim(), sourceId: lab.sourceId.trim() }
+      });
+      setLab(current => ({ ...current, busy: false, result }));
+    } catch {
+      setLab(current => ({ ...current, busy: false, error: "ה־dry-run נכשל. שמור קודם את ההגדרות ובדוק שהפרויקט וההתראה קיימים." }));
+    }
+  };
+
+  return (
+    <div style={s.section}>
+      <InfoHint>זהו מנגנון מבוקר לכל שורה. בריצה קבוצתית ניתן להפעיל מסנן זמן מקדים; לחיצה ידנית על שורה תמיד מריצה את התהליך המלא. המודלים מציעים ומנמקים בלבד ורכיב המדיניות בשרת הוא היחיד שרשאי לכתוב קשר.</InfoHint>
+
+      <div>
+        <p style={s.sectionTitle}>הפעלה והכרעה</p>
+        <div style={{ ...s.card, display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 22 }}>
+            <Toggle label="הפעל סוכן שיוך" checked={value.enabled !== false} onChange={v => update("scheduleAssignmentAgent.enabled", v)} />
+            <Toggle label="אפשר שיוך אוטומטי לאחר לחיצה" checked={value.autoAssignmentEnabled === true} onChange={v => update("scheduleAssignmentAgent.autoAssignmentEnabled", v)} />
+          </div>
+          <div style={s.grid3}>
+            <Field label="סף שיוך אוטומטי (%)" hint={Number(value.autoAssignmentThreshold) < 85 ? "אזהרה: סף נמוך מ־85% מגדיל סיכון לשיוך שגוי." : "ברירת המחדל: 90%."}>
+              <Input type="number" min={50} max={100} value={value.autoAssignmentThreshold ?? 90} onChange={v => update("scheduleAssignmentAgent.autoAssignmentThreshold", v)} />
+            </Field>
+            <Field label="פער מהמועמד השני" hint="ברירת המחדל: 12 נקודות.">
+              <Input type="number" min={0} max={100} value={value.minimumRunnerUpMargin ?? 12} onChange={v => update("scheduleAssignmentAgent.minimumRunnerUpMargin", v)} />
+            </Field>
+            <Field label="סף להצגת הצעה">
+              <Input type="number" min={0} max={100} value={value.suggestionThreshold ?? 45} onChange={v => update("scheduleAssignmentAgent.suggestionThreshold", v)} />
+            </Field>
+            <Field label="סף ביטחון לדילוג במסנן זמן (%)" hint="רק תשובת „לא קשור לזמן” מעל סף זה תדלג על ההתראה. כשל או ספק ממשיכים לבדיקה המלאה.">
+              <Input type="number" min={50} max={100} value={value.timeFilterConfidenceThreshold ?? 80} onChange={v => update("scheduleAssignmentAgent.timeFilterConfidenceThreshold", v)} />
+            </Field>
+            <Field label="טווח קרוב לסף להפעלת שופט">
+              <Input type="number" min={0} max={30} value={value.judgeNearThresholdRange ?? 8} onChange={v => update("scheduleAssignmentAgent.judgeNearThresholdRange", v)} />
+            </Field>
+            <Field label="מקסימום מועמדים">
+              <Input type="number" min={2} max={50} value={value.maxCandidates ?? 20} onChange={v => update("scheduleAssignmentAgent.maxCandidates", v)} />
+            </Field>
+            <Field label="מקסימום קריאות Chat">
+              <Input type="number" min={0} max={8} value={value.maxModelCalls ?? 4} onChange={v => update("scheduleAssignmentAgent.maxModelCalls", v)} />
+            </Field>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p style={s.sectionTitle}>מודלים ופרומפטים</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
+          {SCHEDULE_ASSIGNMENT_ROLES.map(role => {
+            const roleValue = value.roles?.[role.key] || {};
+            const isEmbedding = role.key === "embedding";
+            return (
+              <div key={role.key} style={{ ...s.card, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div>
+                  <Toggle label={role.label} checked={roleValue.enabled !== false} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.enabled`, v)} />
+                  <p style={{ ...s.hint, marginTop: 6 }}>{role.desc}</p>
+                </div>
+                <Field label="מודל">
+                  <ModelSelect value={roleValue.model || ""} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.model`, v)} models={models} includeEmbedding={isEmbedding} />
+                </Field>
+                {isEmbedding ? (
+                  <Field label="מספר מועמדים לחישוב embedding">
+                    <Input type="number" min={1} max={20} value={roleValue.candidateLimit ?? 8} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.candidateLimit`, v)} />
+                  </Field>
+                ) : (
+                  <>
+                    <div style={s.grid2}>
+                      <Field label="Temperature"><Input type="number" min={0} max={1} step={0.1} value={roleValue.temperature ?? 0} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.temperature`, v)} /></Field>
+                      <Field label="Max tokens"><Input type="number" min={100} max={8000} step={100} value={roleValue.maxTokens ?? 1200} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.maxTokens`, v)} /></Field>
+                    </div>
+                    <Accordion title="עריכת פרומפט">
+                      <Textarea rows={12} value={roleValue.prompt || ""} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.prompt`, v)} />
+                    </Accordion>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <p style={s.sectionTitle}>כלי חיפוש ומשקלי ציון</p>
+        <div style={{ ...s.card, display: "flex", flexDirection: "column", gap: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+            {SCHEDULE_ASSIGNMENT_TOOLS.map(([key, label]) => <Toggle key={key} label={label} checked={value.tools?.[key] === true} onChange={v => update(`scheduleAssignmentAgent.tools.${key}`, v)} />)}
+          </div>
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+              <strong style={{ fontSize: 13 }}>משקלים</strong>
+              <span style={{ fontSize: 12, color: weightTotal === 100 ? "var(--success-text)" : "var(--error-text)" }}>סה״כ {weightTotal}% {weightTotal === 100 ? "✓" : "— נדרש 100%"}</span>
+            </div>
+            <div style={s.grid3}>
+              {SCHEDULE_ASSIGNMENT_WEIGHTS.map(([key, label]) => (
+                <Field key={key} label={`${label} (%)`}><Input type="number" min={0} max={100} value={value.weights?.[key] ?? 0} onChange={v => update(`scheduleAssignmentAgent.weights.${key}`, v)} /></Field>
+              ))}
+            </div>
+          </div>
+          <Btn onClick={validateDraft}>בדוק הגדרה</Btn>
+          {validation ? (
+            <div role="status" style={{ fontSize: 12.5, lineHeight: 1.7, color: validation.ok ? "var(--success-text)" : "var(--error-text)" }}>
+              {validation.ok ? "ההגדרה תקינה." : (validation.errors || []).join(" ")}
+              {(validation.warnings || []).map(item => <div key={item} style={{ color: "var(--warning-text, #9a6700)" }}>⚠ {item}</div>)}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div>
+        <p style={s.sectionTitle}>מעבדת Dry-run</p>
+        <div style={{ ...s.card, display: "flex", flexDirection: "column", gap: 12 }}>
+          <InfoHint>המעבדה משתמשת רק בהגדרה השמורה בשרת ולעולם אינה כותבת שיוך. שמור את הטיוטה לפני הבדיקה.</InfoHint>
+          <div style={s.grid2}>
+            <Field label="Project ID"><Input value={lab.projectId} onChange={v => setLab(current => ({ ...current, projectId: v }))} /></Field>
+            <Field label="Alert source ID"><Input value={lab.sourceId} onChange={v => setLab(current => ({ ...current, sourceId: v }))} /></Field>
+          </div>
+          <Btn variant="primary" disabled={lab.busy || !lab.projectId.trim() || !lab.sourceId.trim()} onClick={runDryLab}>{lab.busy ? "מריץ…" : "הרץ ללא כתיבה"}</Btn>
+          {lab.error ? <div style={{ color: "var(--error-text)", fontSize: 12.5 }}>{lab.error}</div> : null}
+          {lab.result ? (
+            <div role="status" style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: 12, fontSize: 12.5, lineHeight: 1.7 }}>
+              <strong>{lab.result.decision?.selectedActivityName || "לא נמצאה פעילות חד־משמעית"}</strong>
+              <div>ציון: {lab.result.decision?.confidence ?? 0}% · פער: {lab.result.decision?.margin ?? 0} · החלטה: {lab.result.decision?.type}</div>
+              <div>{lab.result.decision?.reason}</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Button Styles ─────────────────────────────────────────────────────────────
 
 function btnStyle(variant = "secondary", disabled = false) {
@@ -1344,8 +1520,13 @@ export function SettingsPage() {
     Promise.all([
       apiFetch("/api/settings").catch(() => null),
       apiFetch("/api/openrouter/models").catch(() => ({ models: [] })),
-    ]).then(([settingsRes, modelsRes]) => {
-      const s = settingsRes?.settings ?? settingsRes;
+      apiFetch("/api/settings/schedule-assignment-agent").catch(() => null),
+    ]).then(([settingsRes, modelsRes, scheduleAgentRes]) => {
+      const baseSettings = settingsRes?.settings ?? settingsRes;
+      const s = baseSettings ? {
+        ...baseSettings,
+        ...(scheduleAgentRes?.settings ? { scheduleAssignmentAgent: scheduleAgentRes.settings } : {})
+      } : null;
       if (s) {
         setForm(settingsToForm(s));
         setConfigStatus({
@@ -1479,6 +1660,7 @@ export function SettingsPage() {
         <div key={activeSection} style={{ flex: 1, minWidth: 0, animation: "bidocFade .18s ease-out" }}>
           {activeSection === "connections" && <ConnectionsSection {...sectionProps} />}
           {activeSection === "agents"      && <AgentsSection {...sectionProps} onRefreshModels={handleRefreshModels} modelStatus={modelStatus} />}
+          {activeSection === "scheduleAgent" && <ScheduleAssignmentAgentSection {...sectionProps} />}
           {activeSection === "retrieval"   && <RetrievalSection {...sectionProps} />}
           {activeSection === "content"     && <ContentDbSection {...sectionProps} />}
           {activeSection === "tools"       && <ToolsSection {...sectionProps} />}

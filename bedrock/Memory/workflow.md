@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: workflow
-last_updated: 2026-06-23
+last_updated: 2026-08-21
 tags:
   - workflow
   - frontend
@@ -39,9 +39,11 @@ tags:
 - Preview text masks obvious sensitive keys, bearer tokens, secrets, passwords, and authorization values before rendering.
 - The side inspector still shows full Input/Output details and per-node OpenRouter call details for the selected node.
 - Expanded SVG workflow cards draw Log/Copy buttons inside each node; Cytoscape handles those as coordinate hitboxes, so Log opens that node's inspector log section and Copy copies only that node's masked input/output/metrics/log payload.
+- Schedule Activity Assignment runs use the same Workflow/run-history contract under kind `schedule_activity_assignment`. Their graph includes every agent/search/policy/audit/write component, safe configuration snapshots and candidate scores, plus per-call OpenRouter telemetry. Full prompts and secrets are omitted; prompt hashes preserve version identity. React Schedule results also set the shared last-workflow state so the latest run is ready when the user opens Workflow. When the assignment audit schema is available, its `workflow_log` and `run_events` columns provide durable history for `/api/run-history`; otherwise the existing process-local history remains a non-blocking fallback.
 
 ## Recent Changes
 
+- 2026-08-21 -- Added Schedule Activity Assignment runs to the shared Workflow inspector and local history, including success and failure graphs, full component routing, safe parameters, traces, candidate/scoring output, and OpenRouter telemetry. The history strip labels them `סוכן שיוך לו״ז`.
 - 2026-06-25 -- Captured QA Agent Phase 0 baseline in `docs/qa-agent-full-run-audit-plan.md` using disliked message `1255`; current QA report identifies incomplete Main output but lacks full per-agent audit, telemetry use, and pipeline timeline.
 - 2026-06-25 -- Approved QA Agent Phase 1 report contract: keep compact QA fields, add `agent_audit`, `pipeline_timeline`, retrieval/grounding/cost reviews, bounded evidence, internal-only telemetry, and per-agent decision quality.
 - 2026-06-25 -- Implemented QA Agent Phase 2 deterministic `qa_run_summary` builder in `src/qaSummary.js`, wired it into `runQaAgent()`, and added tests for node coverage, metrics, retrieval evidence, truncation, missing logs, and secret masking.

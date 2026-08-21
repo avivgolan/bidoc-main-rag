@@ -6,7 +6,7 @@
 // never sees a table name; switching source profiles is a settings change,
 // not a code change (acceptance criterion 25).
 //
-//   contractor upload source → MAIN, gantt_files_test + gantt_tasks_test
+//   contractor upload source → active project's database + projects.settings table names
 //   engine-owned tables      → APP DATA/KAPAIM, schedule_*
 //   "content" / "kapaim" are legacy aliases for the APP DATA production tables.
 //
@@ -28,6 +28,11 @@ export const MAIN_GANTT_SOURCE = {
   filesTable: "gantt_files_test",
   tasksTable: "gantt_tasks_test"
 };
+
+const TABLE_IDENTIFIER_PATTERN = /^[a-z_][a-z0-9_]{0,62}$/u;
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const PROJECT_COLUMNS = "id,name,settings,is_active";
+const PROJECT_END_DATE_SETTING = "schedule_project_end_date";
 
 export const DEFAULT_SCHEDULE_SETTINGS = {
   sourceProfile: "app_data",
@@ -54,6 +59,40 @@ export function scheduleSettings(saved = undefined) {
     if (raw[key] !== undefined && raw[key] !== null) explicit[key] = raw[key];
   }
   return { ...DEFAULT_SCHEDULE_SETTINGS, ...profile, sourceProfile: profileName, ...explicit };
+}
+
+function safeProjectTable(value, fallback) {
+  const candidate = String(value || "").trim();
+  return TABLE_IDENTIFIER_PATTERN.test(candidate) ? candidate : fallback;
+}
+
+export function scheduleSourceFromProject({ database = "app_data", project = null, settings: settingsInput = null } = {}) {
+  const settings = settingsInput || scheduleSettings();
+  const projectSettings = project?.settings && typeof project.settings === "object" ? project.settings : {};
+  const fallback = database === "main"
+    ? MAIN_GANTT_SOURCE
+    : { filesTable: settings.filesTable, tasksTable: settings.tasksTable };
+  return {
+    ...settings,
+    filesTable: safeProjectTable(projectSettings.gantt_files_table_name, fallback.filesTable),
+    tasksTable: safeProjectTable(projectSettings.gantt_tasks_table_name, fallback.tasksTable),
+    sourceProfile: `project_${database}`,
+    database,
+    projectId: project?.id || null,
+    projectName: project?.name || null
+  };
+}
+
+export function normalizeProjectEndDate(value) {
+  const candidate = String(value || "").trim();
+  if (!candidate) return null;
+  if (!ISO_DATE_PATTERN.test(candidate)) throw new Error("projectEndDate must be a valid ISO date (YYYY-MM-DD)");
+  const [year, month, day] = candidate.split("-").map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    throw new Error("projectEndDate must be a valid ISO date (YYYY-MM-DD)");
+  }
+  return candidate;
 }
 
 // ─── Normalization (spec 5.2) ────────────────────────────────────────────────
@@ -175,6 +214,74 @@ async function scheduleFetch({
   return rows;
 }
 
+async function findScheduleProject({ config, projectId, settings, fetchImpl = fetch }) {
+  const failures = [];
+  for (const database of ["app_data", "main"]) {
+    try {
+      const rows = await scheduleFetch({
+        config,
+        settings,
+        database,
+        path: `/rest/v1/projects?select=${PROJECT_COLUMNS}&id=eq.${encodeURIComponent(projectId)}&limit=1`,
+        fetchImpl
+      });
+      if (rows[0]) return { database, project: rows[0] };
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length === 2) throw failures[0];
+  return null;
+}
+
+async function resolveScheduleSource({ config, projectId, settings, fetchImpl = fetch }) {
+  const found = await findScheduleProject({ config, projectId, settings, fetchImpl });
+  if (found) {
+    return scheduleSourceFromProject({ database: found.database, project: found.project, settings });
+  }
+  const database = settings.sourceProfile === "dev" ? "main" : "app_data";
+  return scheduleSourceFromProject({ database, project: { id: projectId }, settings });
+}
+
+export async function saveScheduleProjectEndDate({
+  config = null,
+  projectId,
+  projectEndDate = null,
+  settings: settingsInput = null,
+  fetchImpl = fetch
+} = {}) {
+  if (!projectId) throw new Error("saveScheduleProjectEndDate: projectId is required");
+  const cfg = config || getConfig();
+  const settings = settingsInput || scheduleSettings();
+  const normalizedDate = normalizeProjectEndDate(projectEndDate);
+  const found = await findScheduleProject({ config: cfg, projectId, settings, fetchImpl });
+  if (!found?.project) throw new Error("Schedule project was not found");
+  const currentSettings = found.project.settings && typeof found.project.settings === "object"
+    ? found.project.settings
+    : {};
+  const nextSettings = { ...currentSettings };
+  if (normalizedDate) nextSettings[PROJECT_END_DATE_SETTING] = normalizedDate;
+  else delete nextSettings[PROJECT_END_DATE_SETTING];
+  const rows = await scheduleFetch({
+    config: cfg,
+    settings,
+    database: found.database,
+    path: `/rest/v1/projects?id=eq.${encodeURIComponent(projectId)}&select=${PROJECT_COLUMNS}`,
+    options: {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: { settings: nextSettings }
+    },
+    fetchImpl
+  });
+  if (!rows[0]) throw new Error("Schedule project end date was not saved");
+  return {
+    projectId,
+    projectEndDate: normalizedDate,
+    database: found.database
+  };
+}
+
 // Public data-access door for the orchestration layer (subagents/schedule.js).
 // The orchestrator decides WHAT to read or write (snapshots, engine alerts);
 // this module alone decides WHERE — keeping the profile switch a settings-only
@@ -221,10 +328,11 @@ export async function loadScheduleSource({
   if (!projectId) throw new Error("loadScheduleSource: projectId is required");
   const cfg = config || getConfig();
   const settings = settingsInput || scheduleSettings();
-  const sourceSettings = { ...settings, ...MAIN_GANTT_SOURCE, sourceProfile: "main_upload" };
+  const sourceSettings = await resolveScheduleSource({ config: cfg, projectId, settings, fetchImpl });
+  const sourceDatabase = sourceSettings.database;
 
   const fileResponse = await scheduleFetch({
-    config: cfg, settings: sourceSettings, database: "main",
+    config: cfg, settings: sourceSettings, database: sourceDatabase,
     path: `/rest/v1/${sourceSettings.filesTable}?select=${FILE_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&order=relevancy_date.desc,uploaded_at.desc`,
     options: includeExactCounts
       ? { headers: { Prefer: "count=exact" }, includeExactCount: true }
@@ -245,7 +353,7 @@ export async function loadScheduleSource({
   }
 
   const loadTasks = (fileId) => scheduleFetch({
-    config: cfg, settings: sourceSettings, database: "main",
+    config: cfg, settings: sourceSettings, database: sourceDatabase,
     path: `/rest/v1/${sourceSettings.tasksTable}?select=${TASK_COLUMNS}&project_id=eq.${encodeURIComponent(projectId)}&file_id=eq.${encodeURIComponent(fileId)}&order=task_uid.asc`,
     options: includeExactCounts
       ? { headers: { Prefer: "count=exact" }, includeExactCount: true }
@@ -344,22 +452,49 @@ export async function loadContractMilestones({ config = null, projectId, setting
 // contractor schedule in the active source profile.
 export async function listScheduleProjects({ config = null, settings: settingsInput = null } = {}) {
   const settings = settingsInput || scheduleSettings();
-  const sourceSettings = { ...settings, ...MAIN_GANTT_SOURCE, sourceProfile: "main_upload" };
-  const rows = await scheduleFetch({
-    config: config || getConfig(), settings: sourceSettings, database: "main",
-    path: `/rest/v1/${sourceSettings.filesTable}?select=project_id,relevancy_date&order=relevancy_date.desc`
-  });
-  const byProject = new Map();
-  for (const row of rows) {
-    if (!row?.project_id) continue;
-    const entry = byProject.get(row.project_id) || { projectId: row.project_id, files: 0, latestRelevancyDate: null };
-    entry.files += 1;
-    if (!entry.latestRelevancyDate || String(row.relevancy_date ?? "") > entry.latestRelevancyDate) {
-      entry.latestRelevancyDate = row.relevancy_date ?? null;
+  const cfg = config || getConfig();
+  const discovered = [];
+  for (const database of ["app_data", "main"]) {
+    let projects = [];
+    try {
+      projects = await scheduleFetch({
+        config: cfg,
+        settings,
+        database,
+        path: `/rest/v1/projects?select=${PROJECT_COLUMNS}&is_active=eq.true&order=created_at.asc`
+      });
+    } catch {
+      continue;
     }
-    byProject.set(row.project_id, entry);
+    for (const project of projects) {
+      const visiblePages = project?.settings?.visible_pages;
+      if (Array.isArray(visiblePages) && !visiblePages.includes("schedule")) continue;
+      const sourceSettings = scheduleSourceFromProject({ database, project, settings });
+      let files = [];
+      try {
+        files = await scheduleFetch({
+          config: cfg,
+          settings: sourceSettings,
+          database,
+          path: `/rest/v1/${sourceSettings.filesTable}?select=project_id,relevancy_date,uploaded_at&project_id=eq.${encodeURIComponent(project.id)}&order=relevancy_date.desc,uploaded_at.desc`
+        });
+      } catch (error) {
+        if (!error.missingTable) throw error;
+      }
+      const latest = pickCurrentVersion(files).current;
+      discovered.push({
+        projectId: project.id,
+        name: project.name || project.id,
+        files: files.length,
+        latestRelevancyDate: latest?.relevancy_date ?? latest?.uploaded_at?.slice?.(0, 10) ?? null,
+        projectEndDate: normalizeProjectEndDate(project?.settings?.[PROJECT_END_DATE_SETTING]),
+        database,
+        filesTable: sourceSettings.filesTable,
+        tasksTable: sourceSettings.tasksTable
+      });
+    }
   }
-  return [...byProject.values()];
+  return discovered;
 }
 
 // One-call convenience for the orchestrator: everything sweep()/computeIndicator()

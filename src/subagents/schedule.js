@@ -250,7 +250,7 @@ export async function runScheduleSweep({ projectId, asOf: asOfInput = null, filt
 
   const inputs = await loadScheduleInputs({
     config: cfg,
-    projectId: projectContext.sourceProjectId,
+    projectId,
     engineProjectId: projectContext.scheduleProjectId,
     settings
   });
@@ -330,7 +330,7 @@ export async function runScheduleIndicator({ projectId, activityKey = null, mile
   const projectContext = await resolveIndicatorProjectContext({ projectId, config: cfg, settings });
   const inputs = await loadScheduleInputs({
     config: cfg,
-    projectId: projectContext.sourceProjectId,
+    projectId,
     engineProjectId: projectContext.scheduleProjectId,
     settings
   });
@@ -712,7 +712,19 @@ export async function listScheduleActivityUpdates({ projectId, config = null, se
   };
 }
 
-export async function assignScheduleActivityUpdate({ projectId, sourceId, activityKey, linkedBy = null, config = null, settings: settingsInput = null } = {}) {
+export async function assignScheduleActivityUpdate({
+  projectId,
+  sourceId,
+  activityKey,
+  linkedBy = null,
+  assignmentMethod = "manual",
+  assignmentRunId = null,
+  confidence = null,
+  reviewNote = null,
+  preventOverwrite = false,
+  config = null,
+  settings: settingsInput = null
+} = {}) {
   if (!projectId) throw new Error("assignScheduleActivityUpdate: projectId is required");
   const normalizedSourceId = String(sourceId || "").trim();
   if (!normalizedSourceId || normalizedSourceId.length > 160) throw new Error("sourceId is required");
@@ -732,7 +744,7 @@ export async function assignScheduleActivityUpdate({ projectId, sourceId, activi
     }),
     normalizedActivityKey ? loadScheduleInputs({
       config: cfg,
-      projectId: projectContext.sourceProjectId,
+      projectId,
       engineProjectId: projectContext.scheduleProjectId,
       settings
     }) : Promise.resolve(null)
@@ -747,8 +759,22 @@ export async function assignScheduleActivityUpdate({ projectId, sourceId, activi
   const existing = await scheduleDataRequest({
     config: cfg,
     settings,
-    path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?select=id&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts&source_id=eq.${encodeURIComponent(normalizedSourceId)}&limit=1`
+    path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?select=id,activity_key&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts&source_id=eq.${encodeURIComponent(normalizedSourceId)}&limit=1`
   });
+  if (preventOverwrite && existing[0]?.activity_key) {
+    throw new Error("ההתראה כבר משויכת לפעילות; הסוכן אינו דורס שיוך קיים");
+  }
+  const auditValues = {
+    assignment_method: ["manual", "agent_auto", "agent_approved"].includes(assignmentMethod) ? assignmentMethod : "manual",
+    assignment_run_id: assignmentRunId || null,
+    confidence: confidence == null ? null : Math.max(0, Math.min(100, Number(confidence))),
+    review_note: reviewNote ? String(reviewNote).slice(0, 1000) : null
+  };
+  // Keep manual assignment compatible until the audit migration is deployed.
+  // The DB default records `manual`; agent writes always carry the full audit.
+  const audit = assignmentRunId || assignmentMethod !== "manual" || confidence != null || reviewNote
+    ? auditValues
+    : {};
   if (existing[0]?.id && !normalizedActivityKey) {
     await scheduleDataRequest({
       config: cfg,
@@ -761,7 +787,7 @@ export async function assignScheduleActivityUpdate({ projectId, sourceId, activi
       config: cfg,
       settings,
       path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?id=eq.${encodeURIComponent(existing[0].id)}`,
-      options: { method: "PATCH", body: { activity_key: normalizedActivityKey, event_date: eventDate, linked_by: linkedBy }, headers: { Prefer: "return=minimal" } }
+      options: { method: "PATCH", body: { activity_key: normalizedActivityKey, event_date: eventDate, linked_by: linkedBy, ...audit }, headers: { Prefer: "return=minimal" } }
     });
   } else if (normalizedActivityKey) {
     await scheduleDataRequest({
@@ -777,7 +803,8 @@ export async function assignScheduleActivityUpdate({ projectId, sourceId, activi
           source_id: normalizedSourceId,
           activity_key: normalizedActivityKey,
           event_date: eventDate,
-          linked_by: linkedBy
+          linked_by: linkedBy,
+          ...audit
         },
         headers: { Prefer: "return=minimal" }
       }

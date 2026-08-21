@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { makeScheduleScale, scheduleSubjectKey } from "./scheduleTimeline.js";
+import { DEFAULT_SCHEDULE_VIEW, formatIsraeliDate, makeScheduleScale, parseIsraeliDate, scheduleSubjectKey } from "./scheduleTimeline.js";
+import {
+  ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
+  activityAssignmentReviewCandidates,
+  activityAssignmentBatchStatusText,
+  applyActivityAssignmentBatchOutcome,
+  buildActivityAssignmentBatchQueue,
+  createActivityAssignmentBatch
+} from "./activityAssignmentBatch.js";
 
 // Schedule Intelligence tab (spec section 15, phases 1-2 screens).
 //
@@ -148,11 +156,11 @@ const GatesBlock = ({ gates, compact = false }) => {
 
 // ─── The three-axis timeline ─────────────────────────────────────────────────
 
-const AxisLegend = () => (
+const AxisLegend = ({ showLateLines = true }) => (
   <div className="axisLegend">
     <span><i className="axisSwatch swPlan" /> תכנון הקבלן</span>
     <span><i className="axisSwatch swFill" /> % ביצוע מדווח</span>
-    <span><i className="axisSwatch swLate" /> חריגה עד "נכון ל-"</span>
+    {showLateLines ? <span><i className="axisSwatch swLate" /> חריגה עד "נכון ל-"</span> : null}
     <span><i className="axisSwatch swForecast" >◆</i> תחזית סיום</span>
     <span><i className="axisSwatch swContract">⚑</i> אבן דרך חוזית</span>
     <span><i className="axisSwatch swTrigger">▶</i> תחילת ספירה חוזית</span>
@@ -162,7 +170,7 @@ const AxisLegend = () => (
   </div>
 );
 
-function AxisRow({ indicator, scale, asOf, selected, onSelect, eventCount = 0, expanded = false, onToggleEvents }) {
+function AxisRow({ indicator, scale, asOf, showLateLines = true, selected, onSelect, eventCount = 0, expanded = false, onToggleEvents }) {
   const t = indicator.timing ?? {};
   const l = indicator.lateness ?? {};
   const planStart = scale.pos(t.plannedStart);
@@ -199,7 +207,7 @@ function AxisRow({ indicator, scale, asOf, selected, onSelect, eventCount = 0, e
                 : null}
             </div>
           )}
-          {isLate && basisPos != null && asOfPos != null && asOfPos > basisPos && (
+          {showLateLines && isLate && basisPos != null && asOfPos != null && asOfPos > basisPos && (
             <div className="axisBarLate" style={{ left: `${basisPos}%`, width: `${asOfPos - basisPos}%` }}
               title={`${latenessText(l)} — ${basisText(l)}`} />
           )}
@@ -258,7 +266,7 @@ function AxisEventRow({ item, scale }) {
   );
 }
 
-function ThreeAxesView({ indicators, allIndicators, pendingConditions, timelineItems, asOf, selected, onSelect }) {
+function ThreeAxesView({ indicators, allIndicators, pendingConditions, timelineItems, asOf, showLateLines, showAsOfMarker, selected, onSelect }) {
   const [expandedActivities, setExpandedActivities] = useState(() => new Set());
   const provisionalMarkers = useMemo(() => (pendingConditions ?? []).flatMap((condition) => {
     const date = condition?.metadata?.trigger_evidence?.provisionalDueDate;
@@ -286,7 +294,11 @@ function ThreeAxesView({ indicators, allIndicators, pendingConditions, timelineI
     ...triggerMarkers.map((marker) => ({ timing: { contractFinish: marker.date } })),
     ...(timelineItems ?? []).filter((item) => item.activityKey && item.date).map((item) => ({ timing: { contractFinish: item.date } }))
   ], [allIndicators, indicators, provisionalMarkers, triggerMarkers, timelineItems]);
-  const scale = useMemo(() => makeScheduleScale(indicators, asOf, scaleIndicators), [indicators, scaleIndicators, asOf]);
+  const scaleRows = showAsOfMarker ? indicators : (allIndicators ?? indicators);
+  const scale = useMemo(
+    () => makeScheduleScale(scaleRows, showAsOfMarker ? asOf : null, scaleIndicators),
+    [scaleRows, scaleIndicators, asOf, showAsOfMarker]
+  );
   // The contract axis, chart-wide: every contractual milestone date extracted
   // from the contract renders as a labeled vertical line across all rows —
   // the supervisor sees plan and execution against the contract, not a glyph.
@@ -326,10 +338,11 @@ function ThreeAxesView({ indicators, allIndicators, pendingConditions, timelineI
   });
   if (!scale) return <div className="schedEmpty">אין תאריכים להצגה</div>;
   const shown = indicators.slice(0, AXES_ROW_CAP);
-  const asOfPos = scale.pos(asOf);
+  const asOfPos = showAsOfMarker ? scale.pos(asOf) : null;
+  const visibleLateLines = showLateLines && showAsOfMarker;
   return (
     <div className="axesView">
-      <AxisLegend />
+      <AxisLegend showLateLines={visibleLateLines} />
       <div className="axesBody">
         <div className="axesTimeArea" dir="ltr">
           <div className="axesMonths">
@@ -346,7 +359,7 @@ function ThreeAxesView({ indicators, allIndicators, pendingConditions, timelineI
             {triggerMarkers.map((marker) => {
               const left = scale.pos(marker.date);
               if (left == null) return null;
-              const label = `תחילת ספירה: ${marker.name} · ${marker.date}`;
+              const label = `תחילת ספירה: ${marker.name} · ${formatIsraeliDate(marker.date)}`;
               return (
                 <span key={`trigger:${marker.date}`} className="axesTriggerLine" style={{ left: `${left}%` }} title={label}>
                   <label>▶ {label}{marker.count > 1 ? ` (${marker.count})` : ""}</label>
@@ -378,7 +391,7 @@ function ThreeAxesView({ indicators, allIndicators, pendingConditions, timelineI
             const expanded = expandedActivities.has(key);
             return (
               <React.Fragment key={key}>
-                <AxisRow indicator={ind} scale={scale} asOf={asOf}
+                <AxisRow indicator={ind} scale={scale} asOf={asOf} showLateLines={visibleLateLines}
                   selected={scheduleSubjectKey(selected) === key} onSelect={onSelect}
                   eventCount={events.length} expanded={expanded} onToggleEvents={() => toggleActivity(key)} />
                 {expanded ? events.map((item) => <AxisEventRow key={`${item.sourceTable}:${item.id}`} item={item} scale={scale} />) : null}
@@ -426,7 +439,11 @@ function ActivityPicker({ activities, value, disabled, busy, onChange }) {
   );
 }
 
-function ActivityUpdatesTable({ items, activities, busyId, onAssign }) {
+function ActivityUpdatesTable({
+  items, activities, busyId, onAssign, agentBusyId, agentResults, onRunAgent, onConfirmAgent, onRejectAgent,
+  agentBatch, onStartAgentBatch, onStopAgentBatch, onResumeAgentBatch, onRestartAgentBatch,
+  timeFilterEnabled, onTimeFilterChange
+}) {
   const [query, setQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(100);
   const filtered = useMemo(() => {
@@ -435,6 +452,11 @@ function ActivityUpdatesTable({ items, activities, busyId, onAssign }) {
     return items.filter((item) => `${item.title} ${item.alertType} ${item.date || ""}`.toLocaleLowerCase("he").includes(needle));
   }, [items, query]);
   const assigned = items.filter((item) => item.activityKey).length;
+  const eligibleCount = useMemo(() => buildActivityAssignmentBatchQueue(items).length, [items]);
+  const batchActive = agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING
+    || agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING;
+  const anotherRowActionActive = Boolean(agentBusyId || busyId);
+  const batchStatusText = activityAssignmentBatchStatusText(agentBatch);
   return (
     <section className="activityUpdatesPanel" aria-labelledby="activity-updates-title">
       <div className="activityUpdatesHead">
@@ -442,25 +464,118 @@ function ActivityUpdatesTable({ items, activities, busyId, onAssign }) {
           <h3 id="activity-updates-title">עדכונים והתראות על ציר הזמן</h3>
           <p>{items.length} פריטים · {assigned} משויכים לפעילות</p>
         </div>
-        <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(100); }}
-          placeholder="חיפוש בעדכונים והתראות…" />
+        <div className="activityUpdatesHeadTools">
+          <div className="activityAgentBatchControls" aria-label="הרצת איתור אוטומטי לכל ההתראות">
+            <label className="activityAgentTimeFilter" title="בריצה קבוצתית בלבד: דלג על התראות שאינן קשורות לזמן, עיכוב, תאריך או לוח זמנים">
+              <input type="checkbox" checked={timeFilterEnabled} disabled={batchActive}
+                onChange={(event) => onTimeFilterChange(event.target.checked)} />
+              <span>סינון זמן</span>
+            </label>
+            {agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.PAUSED ? (
+              <>
+                <button type="button" className="activityAgentBatchButton is-primary" disabled={anotherRowActionActive}
+                  onClick={onResumeAgentBatch}>המשך מאותה נקודה</button>
+                <button type="button" className="activityAgentBatchButton" disabled={anotherRowActionActive || !eligibleCount}
+                  onClick={onRestartAgentBatch}>הרץ מחדש</button>
+              </>
+            ) : agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.COMPLETED ? (
+              <button type="button" className="activityAgentBatchButton" disabled={!eligibleCount} onClick={onRestartAgentBatch}>הרץ מחדש</button>
+            ) : (
+              <>
+                <button type="button" className="activityAgentBatchButton is-primary" disabled={batchActive || anotherRowActionActive || !eligibleCount}
+                  onClick={onStartAgentBatch}>{eligibleCount ? `אתר את כולם (${eligibleCount})` : "אין שורות לאיתור"}</button>
+                {batchActive ? (
+                  <button type="button" className="activityAgentBatchButton is-stop"
+                    disabled={agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING}
+                    onClick={onStopAgentBatch}>{agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING ? "עוצר…" : "עצור"}</button>
+                ) : null}
+              </>
+            )}
+          </div>
+          {batchStatusText ? (
+            <div className={`activityAgentBatchStatus is-${agentBatch.status}`} role="status" aria-live="polite">
+              <progress max={Math.max(agentBatch.total, 1)} value={agentBatch.processed} aria-label={batchStatusText} />
+              <span>{batchStatusText}</span>
+            </div>
+          ) : null}
+          <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(100); }}
+            placeholder="חיפוש בעדכונים והתראות…" aria-label="חיפוש בעדכונים והתראות" />
+        </div>
       </div>
       <div className="activityUpdatesTableWrap">
         <table className="activityUpdatesTable">
           <thead><tr><th>סוג</th><th>תאריך</th><th>התראה / עדכון</th><th>חומרה</th><th>סטטוס</th><th>שיוך לפעילות בלוח</th></tr></thead>
           <tbody>
-            {filtered.slice(0, visibleCount).map((item) => (
-              <tr key={`${item.sourceTable}:${item.id}`} className={item.activityKey ? "is-assigned" : ""}>
-                <td><span className={`activityUpdateKind is-${item.kind}`}>{item.kind === "update" ? "עדכון" : "התראה"}</span></td>
-                <td className="activityUpdateDate">{item.date || <span title="נדרש data_date אמיתי">ללא תאריך</span>}</td>
-                <td><div className="activityUpdateTitle" title={item.title}>{item.href ? <a href={item.href} target="_blank" rel="noreferrer">{item.title}</a> : item.title}</div><small>{item.alertType}</small></td>
-                <td>{item.severity ?? "—"}</td><td>{item.status || "—"}</td>
-                <td>
-                  <ActivityPicker activities={activities} value={item.activityKey} disabled={!item.date}
-                    busy={busyId === item.id} onChange={(activityKey) => onAssign(item, activityKey)} />
-                </td>
-              </tr>
-            ))}
+            {filtered.slice(0, visibleCount).map((item) => {
+              const agentResult = agentResults?.[item.id];
+              const isAgentBusy = agentBusyId === item.id;
+              const reviewCandidates = activityAssignmentReviewCandidates(agentResult);
+              const reviewChoiceBusy = isAgentBusy || busyId === item.id || batchActive;
+              const hasPersistedAuditRun = Boolean(agentResult?.runId && agentResult?.auditPersisted);
+              return (
+                <React.Fragment key={`${item.sourceTable}:${item.id}`}>
+                  <tr className={item.activityKey ? "is-assigned" : ""}>
+                    <td><span className={`activityUpdateKind is-${item.kind}`}>{item.kind === "update" ? "עדכון" : "התראה"}</span></td>
+                    <td className="activityUpdateDate">{item.date || <span title="נדרש data_date אמיתי">ללא תאריך</span>}</td>
+                    <td><div className="activityUpdateTitle" title={item.title}>{item.href ? <a href={item.href} target="_blank" rel="noreferrer">{item.title}</a> : item.title}</div><small>{item.alertType}</small></td>
+                    <td>{item.severity ?? "—"}</td><td>{item.status || "—"}</td>
+                    <td>
+                      <div className="activityAssignmentActions">
+                        <ActivityPicker activities={activities} value={item.activityKey} disabled={!item.date || batchActive}
+                          busy={busyId === item.id} onChange={(activityKey) => onAssign(item, activityKey)} />
+                        <button type="button" className="activityAgentButton" disabled={!item.date || Boolean(item.activityKey) || isAgentBusy || busyId === item.id || batchActive}
+                          onClick={() => onRunAgent(item)} title="הפעל סוכן חיפוש והכרעה מבוקר עבור שורה זו">
+                          {isAgentBusy ? "הסוכן בודק…" : "איתור אוטומטי"}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {agentResult ? (
+                    <tr className="activityAgentResultRow">
+                      <td colSpan={6}>
+                        {agentResult.error ? <div className="activityAgentResult is-error">{agentResult.error}</div> : agentResult.status === "filtered_out" ? (
+                          <div className="activityAgentResult is-filtered">
+                            <div className="activityAgentResultHead">
+                              <strong>דולג על ידי סינון זמן</strong>
+                              <span>ביטחון {agentResult.timeFilter?.confidence ?? 0}%</span>
+                            </div>
+                            <p>{agentResult.timeFilter?.reason || "ההתראה אינה קשורה לזמן, עיכוב, תאריך או לוח זמנים."}</p>
+                          </div>
+                        ) : (
+                          <div className={`activityAgentResult ${agentResult.decision?.autoAssigned ? "is-auto" : ""}`}>
+                            <div className="activityAgentResultHead">
+                              <strong>{agentResult.decision?.autoAssigned ? "שויך אוטומטית" : agentResult.decision?.selectedActivityName || "לא נמצאה התאמה חד־משמעית"}</strong>
+                              <span>ציון {agentResult.decision?.confidence ?? 0}% · פער {agentResult.decision?.margin ?? 0}</span>
+                            </div>
+                            <p>{agentResult.decision?.reason}</p>
+                            {reviewCandidates.length ? (
+                              <div className="activityAgentReview" aria-label="בחירת פעילות מתוך הצעות הסוכן">
+                                <strong className="activityAgentReviewPrompt">נדרשת החלטה שלך — בחר את הפעילות המתאימה:</strong>
+                                <div className="activityAgentCandidates" role="group" aria-label="פעילויות מוצעות">
+                                  {reviewCandidates.map(candidate => (
+                                    <button type="button" key={candidate.activityKey} disabled={reviewChoiceBusy}
+                                      onClick={() => hasPersistedAuditRun
+                                        ? onConfirmAgent(item, agentResult, candidate)
+                                        : onAssign(item, candidate.activityKey)}>
+                                      <span>{candidate.name}</span><small>{candidate.finalScore}% · {candidate.plannedStart || "?"}–{candidate.plannedFinish || "?"}</small>
+                                    </button>
+                                  ))}
+                                  {hasPersistedAuditRun ? (
+                                    <button type="button" className="is-reject" disabled={reviewChoiceBusy}
+                                      onClick={() => onRejectAgent(item, agentResult)}>אף אפשרות אינה מתאימה</button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ) : null}
+                            {(agentResult.warnings || []).map(warning => <small className="activityAgentWarning" key={warning}>⚠ {warning}</small>)}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ) : null}
+                </React.Fragment>
+              );
+            })}
             {!filtered.length ? <tr><td colSpan={6} className="schedEmpty">אין פריטים תואמים לחיפוש</td></tr> : null}
           </tbody>
         </table>
@@ -584,7 +699,8 @@ const PendingConditionsBox = ({
   );
   return (
     <div className="condBox">
-      <button type="button" className="condHead" onClick={onToggle}>
+      <button type="button" className="condHead" onClick={onToggle}
+        aria-expanded={expanded} aria-controls="schedule-conditions-body">
         <span className="condHeadTitle">
           ⏳ פנקס זמנים יחסיים מהחוזה
           <span className="condHeadCount">{conditions.length}</span>
@@ -595,7 +711,7 @@ const PendingConditionsBox = ({
         <span className="condChevron">{expanded ? "▲" : "▼"}</span>
       </button>
       {expanded ? (
-        <div className="condBody">
+        <div id="schedule-conditions-body" className="condBody">
           <div className="condResolverBar">
             <div>
               <strong>אותו שדה — הזנה ידנית היום, השלמה אוטומטית בהמשך</strong>
@@ -631,7 +747,12 @@ const PendingConditionsBox = ({
                       const isBusy = resolvingId === c.id;
                       const sourceHref = conditionSourceHref(c);
                       const pendingReason = c.metadata?.pending_reason;
-                      const selectedDate = manualDates?.[c.id] ?? c.trigger_event_date ?? "";
+                      const hasManualDraft = manualDates && Object.prototype.hasOwnProperty.call(manualDates, c.id);
+                      const selectedDateInput = hasManualDraft
+                        ? manualDates[c.id]
+                        : formatIsraeliDate(c.trigger_event_date ?? "");
+                      const selectedDate = parseIsraeliDate(selectedDateInput);
+                      const invalidDate = Boolean(selectedDateInput) && !selectedDate;
                       const isResolved = c.status === "resolved";
                       return (
                         <tr key={c.id} className={isResolved ? "is-resolved" : ""} title={c.source_excerpt}>
@@ -657,11 +778,21 @@ const PendingConditionsBox = ({
                           <td className="condDateCell">
                             <div className="condDateEntry">
                               <input
-                                type="date"
-                                value={selectedDate}
+                                type="text"
+                                inputMode="numeric"
+                                dir="ltr"
+                                lang="he-IL"
+                                placeholder="dd/mm/yyyy"
+                                pattern="[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}"
+                                value={selectedDateInput}
                                 disabled={isResolved || Boolean(resolvingId)}
                                 aria-label={`תאריך האירוע בפועל עבור ${c.name}`}
+                                aria-invalid={invalidDate}
+                                aria-describedby={`condition-date-hint-${c.id}`}
                                 onChange={(event) => onManualDateChange(c.id, event.target.value)}
+                                onBlur={() => {
+                                  if (selectedDate) onManualDateChange(c.id, formatIsraeliDate(selectedDate));
+                                }}
                               />
                               {!isResolved ? (
                                 <button
@@ -674,6 +805,9 @@ const PendingConditionsBox = ({
                                 </button>
                               ) : <span className="condVerifiedDate">תאריך מאומת</span>}
                             </div>
+                            <span id={`condition-date-hint-${c.id}`} className={`condDateHint ${invalidDate ? "is-error" : ""}`}>
+                              {invalidDate ? "יש להזין תאריך תקין בפורמט יום/חודש/שנה" : "פורמט: יום/חודש/שנה"}
+                            </span>
                             {!isResolved ? (
                               <button type="button" className="condResolveBtn" onClick={() => onResolve(c)} disabled={Boolean(resolvingId)}>
                                 {isBusy ? "מנוע הלו״ז מחפש…" : "איתור אוטומטי במנוע הלו״ז"}
@@ -681,7 +815,7 @@ const PendingConditionsBox = ({
                             ) : null}
                             {result ? (
                               <span className={`condRowResult is-${result.status}`} title={result.reason || result.evidence?.reason || ""}>
-                                {result.status === "not_found" ? "לא נמצא תאריך" : result.status === "needs_review" ? (result.provisionalDueDate ? `מועד משוער: ${result.provisionalDueDate}` : "נדרשת בדיקה") : result.status === "error" ? result.reason || "החיפוש נכשל" : result.dueDate || "הושלם"}
+                                {result.status === "not_found" ? "לא נמצא תאריך" : result.status === "needs_review" ? (result.provisionalDueDate ? `מועד משוער: ${formatIsraeliDate(result.provisionalDueDate)}` : "נדרשת בדיקה") : result.status === "error" ? result.reason || "החיפוש נכשל" : formatIsraeliDate(result.dueDate) || "הושלם"}
                                 {result.errorCode === "openrouter_auth" ? <a className="condSettingsLink" href="#settings">עדכון מפתח בהגדרות</a> : null}
                               </span>
                             ) : null}
@@ -697,6 +831,36 @@ const PendingConditionsBox = ({
         </div>
       ) : null}
     </div>
+  );
+};
+
+const ScheduleAlertsBox = ({ alerts, expanded, onToggle }) => {
+  const worstSeverity = alerts.reduce((highest, alert) => Math.max(highest, Number(alert.severity_level) || 0), 0);
+  return (
+    <section className="schedAlertsBox" aria-label="חריגות והתראות פעילות">
+      <button type="button" className="schedAlertsHead" onClick={onToggle}
+        aria-expanded={expanded} aria-controls="schedule-alerts-body">
+        <span className="schedAlertsHeadTitle">
+          חריגות והתראות פעילות
+          <span className="schedAlertsCount">{alerts.length}</span>
+        </span>
+        <span className="schedAlertsHeadHint">
+          {worstSeverity ? `החומרה הגבוהה ביותר: ${worstSeverity}` : "אין חומרה פעילה"}
+        </span>
+        <span className="schedAlertsChevron" aria-hidden="true">{expanded ? "▲" : "▼"}</span>
+      </button>
+      {expanded ? (
+        <div id="schedule-alerts-body" className="schedAlerts">
+          {alerts.map((alert) => (
+            <article key={alert.id} className="schedAlertRow">
+              <span className="schedBadge schedSeverity">חומרה {alert.severity_level}</span>
+              <b>{alert.title}</b>
+              <span className="schedAlertDesc">{alert.description}</span>
+            </article>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 };
 
@@ -738,21 +902,32 @@ export function SchedulePage() {
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState("");
   const [asOf, setAsOf] = useState("");
+  const [projectEndDate, setProjectEndDate] = useState("");
+  const [projectEndDateBusy, setProjectEndDateBusy] = useState(false);
+  const [projectEndDateNotice, setProjectEndDateNotice] = useState("");
   const [health, setHealth] = useState(null);
   const [sweepResult, setSweepResult] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [activityUpdates, setActivityUpdates] = useState({ total: 0, items: [] });
   const [activityUpdateBusyId, setActivityUpdateBusyId] = useState(null);
+  const [activityAgentBusyId, setActivityAgentBusyId] = useState(null);
+  const [activityAgentResults, setActivityAgentResults] = useState({});
+  const [activityAgentBatch, setActivityAgentBatch] = useState(() => createActivityAssignmentBatch());
+  const [activityAgentTimeFilter, setActivityAgentTimeFilter] = useState(false);
+  const activityAgentBatchControlRef = useRef({ token: 0, stopRequested: false, active: false });
   const [baselinedCount, setBaselinedCount] = useState(null);
   const [conditions, setConditions] = useState(null);
-  const [conditionsOpen, setConditionsOpen] = useState(true);
+  const [conditionsOpen, setConditionsOpen] = useState(DEFAULT_SCHEDULE_VIEW.conditionsOpen);
+  const [alertsOpen, setAlertsOpen] = useState(DEFAULT_SCHEDULE_VIEW.alertsOpen);
   const [resolverBusyId, setResolverBusyId] = useState(null);
   const [resolverResults, setResolverResults] = useState({});
   const [resolverNotice, setResolverNotice] = useState("");
   const [manualConditionDates, setManualConditionDates] = useState({});
-  const [view, setView] = useState("axes");
-  const [onlyLate, setOnlyLate] = useState(true);
+  const [view, setView] = useState(DEFAULT_SCHEDULE_VIEW.view);
+  const [onlyLate, setOnlyLate] = useState(DEFAULT_SCHEDULE_VIEW.onlyLate);
   const [minDaysLate, setMinDaysLate] = useState("");
+  const [showLateLines, setShowLateLines] = useState(DEFAULT_SCHEDULE_VIEW.showLateLines);
+  const [showAsOfMarker, setShowAsOfMarker] = useState(DEFAULT_SCHEDULE_VIEW.showAsOfMarker);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
@@ -765,12 +940,18 @@ export function SchedulePage() {
     return result.projects ?? [];
   }, []);
 
-  const loadData = useCallback(async (pid, asOfValue) => {
+  const loadData = useCallback(async (pid, asOfValue, projectEndDateValue = "") => {
     if (!pid) return;
+    activityAgentBatchControlRef.current.token += 1;
+    activityAgentBatchControlRef.current.stopRequested = false;
+    activityAgentBatchControlRef.current.active = false;
+    setActivityAgentBatch(createActivityAssignmentBatch());
     setLoading(true);
     setError("");
+    setActivityAgentResults({});
     try {
-      const asOfQuery = asOfValue ? `&asOf=${encodeURIComponent(asOfValue)}` : "";
+      const calculationDate = asOfValue || projectEndDateValue || "";
+      const asOfQuery = calculationDate ? `&asOf=${encodeURIComponent(calculationDate)}` : "";
       const optional = (promise, fallback, label) => promise.catch(err => ({
         ...fallback,
         warning: `${label}: ${err.message}`
@@ -779,7 +960,7 @@ export function SchedulePage() {
         api(`/api/schedule/health?projectId=${encodeURIComponent(pid)}${asOfQuery}`),
         api("/api/schedule/sweep", {
           method: "POST",
-          body: { projectId: pid, asOf: asOfValue || null, persist: false, filters: { excludeCompleted: false } }
+          body: { projectId: pid, asOf: calculationDate || null, persist: false, filters: { excludeCompleted: false } }
         }),
         optional(
           api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=false&lifecycle=open,updated`),
@@ -826,6 +1007,29 @@ export function SchedulePage() {
     }
   }, []);
 
+  const saveProjectEndDate = useCallback(async () => {
+    if (!projectId) return;
+    setProjectEndDateBusy(true);
+    setProjectEndDateNotice("");
+    setError("");
+    try {
+      const result = await api("/api/schedule/project-end-date", {
+        method: "POST",
+        body: { projectId, projectEndDate: projectEndDate || null }
+      });
+      const savedDate = result.projectEndDate || "";
+      setProjects((current) => current.map((project) => project.projectId === projectId
+        ? { ...project, projectEndDate: savedDate || null }
+        : project));
+      setProjectEndDateNotice(savedDate ? `תאריך סיום הפרויקט נשמר: ${savedDate}` : "תאריך סיום הפרויקט נוקה; הפרויקט מוגדר כפעיל.");
+      await loadData(projectId, asOf, savedDate);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setProjectEndDateBusy(false);
+    }
+  }, [projectId, projectEndDate, asOf, loadData]);
+
   const assignActivityUpdate = useCallback(async (item, activityKey) => {
     if (!projectId || !item?.id) return;
     setActivityUpdateBusyId(item.id);
@@ -839,10 +1043,201 @@ export function SchedulePage() {
         ...current,
         items: current.items.map((existing) => existing.id === item.id ? result.item : existing)
       }));
+      setActivityAgentResults((current) => {
+        if (!current[item.id]) return current;
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
     } catch (err) {
       setError(err.message);
     } finally {
       setActivityUpdateBusyId(null);
+    }
+  }, [projectId]);
+
+  const runActivityAssignmentAgent = useCallback(async (item, { timeFilter = false } = {}) => {
+    if (!projectId || !item?.id) return { ok: false, error: "חסרים פרויקט או מזהה התראה" };
+    setActivityAgentBusyId(item.id);
+    setError("");
+    setActivityAgentResults(current => ({ ...current, [item.id]: null }));
+    try {
+      const result = await api("/api/schedule/activity-updates/assignment-agent/run", {
+        method: "POST",
+        body: { projectId, sourceId: item.id, ...(timeFilter ? { timeFilter: true } : {}) },
+        timeoutMs: 900_000
+      });
+      setActivityAgentResults(current => ({ ...current, [item.id]: result }));
+      if (result.workflowLog && typeof window.__bidocSetWorkflowFromReact === "function") {
+        window.__bidocSetWorkflowFromReact(result);
+      }
+      if (result.assignment) {
+        setActivityUpdates(current => ({
+          ...current,
+          items: current.items.map(existing => existing.id === item.id ? result.assignment : existing)
+        }));
+      }
+      return { ok: true, result };
+    } catch (err) {
+      setActivityAgentResults(current => ({ ...current, [item.id]: { error: err.message } }));
+      return { ok: false, error: err.message };
+    } finally {
+      setActivityAgentBusyId(null);
+    }
+  }, [projectId]);
+
+  const runActivityAssignmentBatch = useCallback(async ({ queue, startIndex = 0, initialStats = null, timeFilter = false }) => {
+    if (activityAgentBatchControlRef.current.active) return;
+    if (!queue.length || startIndex >= queue.length) {
+      setActivityAgentBatch(createActivityAssignmentBatch({
+        status: ACTIVITY_ASSIGNMENT_BATCH_STATUSES.COMPLETED,
+        queue,
+        total: queue.length,
+        nextIndex: queue.length,
+        processed: Number(initialStats?.processed) || 0,
+        assigned: Number(initialStats?.assigned) || 0,
+        review: Number(initialStats?.review) || 0,
+        skipped: Number(initialStats?.skipped) || 0,
+        failed: Number(initialStats?.failed) || 0
+      }));
+      return;
+    }
+    const token = activityAgentBatchControlRef.current.token + 1;
+    activityAgentBatchControlRef.current = { token, stopRequested: false, active: true };
+    let stats = {
+      processed: Number(initialStats?.processed) || 0,
+      assigned: Number(initialStats?.assigned) || 0,
+      review: Number(initialStats?.review) || 0,
+      skipped: Number(initialStats?.skipped) || 0,
+      failed: Number(initialStats?.failed) || 0
+    };
+    const base = { queue, total: queue.length, timeFilter: timeFilter === true };
+    setActivityAgentBatch(createActivityAssignmentBatch({
+      ...base,
+      ...stats,
+      status: ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING,
+      nextIndex: startIndex,
+      currentId: queue[startIndex]?.id || null
+    }));
+
+    for (let index = startIndex; index < queue.length; index += 1) {
+      if (activityAgentBatchControlRef.current.token !== token) return;
+      if (activityAgentBatchControlRef.current.stopRequested) {
+        activityAgentBatchControlRef.current.active = false;
+        setActivityAgentBatch(createActivityAssignmentBatch({
+          ...base, ...stats, status: ACTIVITY_ASSIGNMENT_BATCH_STATUSES.PAUSED, nextIndex: index
+        }));
+        return;
+      }
+      setActivityAgentBatch(createActivityAssignmentBatch({
+        ...base,
+        ...stats,
+        status: ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING,
+        nextIndex: index,
+        currentId: queue[index].id
+      }));
+      const outcome = await runActivityAssignmentAgent(queue[index], { timeFilter });
+      if (activityAgentBatchControlRef.current.token !== token) return;
+      stats = applyActivityAssignmentBatchOutcome(stats, outcome);
+      const nextIndex = index + 1;
+      if (activityAgentBatchControlRef.current.stopRequested) {
+        activityAgentBatchControlRef.current.active = false;
+        setActivityAgentBatch(createActivityAssignmentBatch({
+          ...base,
+          ...stats,
+          status: nextIndex < queue.length ? ACTIVITY_ASSIGNMENT_BATCH_STATUSES.PAUSED : ACTIVITY_ASSIGNMENT_BATCH_STATUSES.COMPLETED,
+          nextIndex
+        }));
+        return;
+      }
+      if (nextIndex >= queue.length) activityAgentBatchControlRef.current.active = false;
+      setActivityAgentBatch(createActivityAssignmentBatch({
+        ...base,
+        ...stats,
+        status: nextIndex >= queue.length ? ACTIVITY_ASSIGNMENT_BATCH_STATUSES.COMPLETED : ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING,
+        nextIndex,
+        currentId: nextIndex < queue.length ? queue[nextIndex].id : null
+      }));
+    }
+  }, [runActivityAssignmentAgent]);
+
+  const clearActivityAgentBatchResults = useCallback((queue) => {
+    const ids = new Set(queue.map((item) => String(item.id)));
+    setActivityAgentResults(current => Object.fromEntries(
+      Object.entries(current).filter(([id]) => !ids.has(String(id)))
+    ));
+  }, []);
+
+  const startActivityAssignmentBatch = useCallback(() => {
+    const queue = buildActivityAssignmentBatchQueue(activityUpdates.items);
+    if (!queue.length) return;
+    clearActivityAgentBatchResults(queue);
+    void runActivityAssignmentBatch({ queue, timeFilter: activityAgentTimeFilter });
+  }, [activityUpdates.items, activityAgentTimeFilter, clearActivityAgentBatchResults, runActivityAssignmentBatch]);
+
+  const stopActivityAssignmentBatch = useCallback(() => {
+    if (activityAgentBatch.status !== ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING) return;
+    activityAgentBatchControlRef.current.stopRequested = true;
+    setActivityAgentBatch(current => ({ ...current, status: ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING }));
+  }, [activityAgentBatch.status]);
+
+  const resumeActivityAssignmentBatch = useCallback(() => {
+    if (activityAgentBatch.status !== ACTIVITY_ASSIGNMENT_BATCH_STATUSES.PAUSED) return;
+    void runActivityAssignmentBatch({
+      queue: activityAgentBatch.queue,
+      startIndex: activityAgentBatch.nextIndex,
+      initialStats: activityAgentBatch,
+      timeFilter: activityAgentBatch.timeFilter
+    });
+  }, [activityAgentBatch, runActivityAssignmentBatch]);
+
+  const restartActivityAssignmentBatch = useCallback(() => {
+    const queue = buildActivityAssignmentBatchQueue(activityUpdates.items);
+    if (!queue.length) return;
+    clearActivityAgentBatchResults(queue);
+    void runActivityAssignmentBatch({ queue, timeFilter: activityAgentTimeFilter });
+  }, [activityUpdates.items, activityAgentTimeFilter, clearActivityAgentBatchResults, runActivityAssignmentBatch]);
+
+  const confirmActivityAssignmentAgent = useCallback(async (item, run, candidate) => {
+    if (!projectId || !run?.runId || !candidate?.activityKey) return;
+    setActivityAgentBusyId(item.id);
+    setError("");
+    try {
+      const result = await api("/api/schedule/activity-updates/assignment-agent/confirm", {
+        method: "POST",
+        body: { projectId, runId: run.runId, activityKey: candidate.activityKey }
+      });
+      setActivityUpdates(current => ({
+        ...current,
+        items: current.items.map(existing => existing.id === item.id ? result.item : existing)
+      }));
+      setActivityAgentResults(current => ({
+        ...current,
+        [item.id]: { ...run, auditPersisted: false, decision: { ...run.decision, autoAssigned: false, selectedActivityName: candidate.name, confidence: candidate.finalScore, reason: "הצעת הסוכן אושרה ונשמרה." }, approved: true }
+      }));
+    } catch (err) {
+      setActivityAgentResults(current => ({ ...current, [item.id]: { ...run, error: err.message } }));
+    } finally {
+      setActivityAgentBusyId(null);
+    }
+  }, [projectId]);
+
+  const rejectActivityAssignmentAgent = useCallback(async (item, run) => {
+    if (!projectId || !run?.runId) return;
+    setActivityAgentBusyId(item.id);
+    setError("");
+    try {
+      await api("/api/schedule/activity-updates/assignment-agent/reject", {
+        method: "POST", body: { projectId, runId: run.runId, reason: "נדחה ידנית ממסך לוח הזמנים" }
+      });
+      setActivityAgentResults(current => ({
+        ...current,
+        [item.id]: { ...run, auditPersisted: false, decision: { ...run.decision, reason: "הצעת הסוכן נדחתה ולא נוצר שיוך." }, rejected: true }
+      }));
+    } catch (err) {
+      setActivityAgentResults(current => ({ ...current, [item.id]: { ...run, error: err.message } }));
+    } finally {
+      setActivityAgentBusyId(null);
     }
   }, [projectId]);
 
@@ -851,14 +1246,15 @@ export function SchedulePage() {
     setScanBusy(true);
     setError("");
     try {
-      await api("/api/schedule/alert-scan", { method: "POST", body: { projectId, asOf: asOf || null }, timeoutMs: 240_000 });
-      await loadData(projectId, asOf);
+      const calculationDate = asOf || projectEndDate || null;
+      await api("/api/schedule/alert-scan", { method: "POST", body: { projectId, asOf: calculationDate }, timeoutMs: 240_000 });
+      await loadData(projectId, asOf, projectEndDate);
     } catch (err) {
       setError(err.message);
     } finally {
       setScanBusy(false);
     }
-  }, [projectId, asOf, loadData]);
+  }, [projectId, asOf, projectEndDate, loadData]);
 
   const resolveCondition = useCallback(async (condition, manualTriggerDate = null) => {
     if (!projectId || !condition?.id) return;
@@ -881,11 +1277,11 @@ export function SchedulePage() {
       setResolverResults((current) => ({ ...current, [condition.id]: rowResult }));
       if (rowResult.status === "resolved") {
         setResolverNotice(`הושלם: ${condition.name} — האירוע ${rowResult.evidence?.triggerDate || manualTriggerDate || "אותר"}, והמועד החוזי ${rowResult.dueDate} נשמר.`);
-        await loadData(projectId, asOf);
+        await loadData(projectId, asOf, projectEndDate);
       } else if (rowResult.triggerSaved) {
         const provisional = rowResult.provisionalDueDate ? ` מועד משוער ${rowResult.provisionalDueDate} סומן בדגלון כתום על הציר.` : "";
         setResolverNotice(`תאריך האירוע ${rowResult.evidence?.triggerDate || manualTriggerDate} נשמר.${provisional} המועד החוזי הסופי ממתין להשלמת לוח ימי העבודה והחגים.`);
-        await loadData(projectId, asOf);
+        await loadData(projectId, asOf, projectEndDate);
       }
     } catch (err) {
       setResolverResults((current) => ({ ...current, [condition.id]: { status: "error", reason: err.message } }));
@@ -893,24 +1289,31 @@ export function SchedulePage() {
     } finally {
       setResolverBusyId(null);
     }
-  }, [projectId, asOf, loadData]);
+  }, [projectId, asOf, projectEndDate, loadData]);
 
   useEffect(() => {
     let cancelled = false;
     loadProjects().then((list) => {
       if (cancelled || !list.length) return;
       setProjectId((current) => current || list[0].projectId);
+      setProjectEndDate((current) => current || list[0].projectEndDate || "");
     }).catch((err) => setError(err.message));
     return () => { cancelled = true; };
   }, [loadProjects]);
 
+  useEffect(() => () => {
+    activityAgentBatchControlRef.current.token += 1;
+    activityAgentBatchControlRef.current.stopRequested = true;
+    activityAgentBatchControlRef.current.active = false;
+  }, []);
+
   useEffect(() => {
     if (!projectId) return;
-    if (location.hash === "#schedule") loadData(projectId, asOf);
-    const onActivate = () => loadData(projectId, asOf);
+    if (location.hash === "#schedule") loadData(projectId, asOf, projectEndDate);
+    const onActivate = () => loadData(projectId, asOf, projectEndDate);
     window.addEventListener("bidoc:schedule-activated", onActivate);
     return () => window.removeEventListener("bidoc:schedule-activated", onActivate);
-  }, [projectId, asOf, loadData]);
+  }, [projectId, asOf, projectEndDate, loadData]);
 
   const rows = useMemo(() => {
     const indicators = sweepResult?.indicators ?? [];
@@ -981,16 +1384,23 @@ export function SchedulePage() {
           ) : null}
         </div>
         <div className="schedControls">
-          <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="schedSelect">
+          <select value={projectId} aria-label="בחירת פרויקט" onChange={(e) => {
+            const nextId = e.target.value;
+            setProjectId(nextId);
+            setProjectEndDate(projects.find((project) => project.projectId === nextId)?.projectEndDate || "");
+            setProjectEndDateNotice("");
+          }} className="schedSelect">
             {!projects.length && <option value="">אין לוחות זמנים</option>}
             {projects.map((p) => (
               <option key={p.projectId} value={p.projectId}>
-                {p.projectId.slice(0, 8)}… ({p.files} קבצים, עדכני ל-{p.latestRelevancyDate ?? "?"})
+                {p.name || `${p.projectId.slice(0, 8)}…`} ({p.files} קבצים, עדכני ל-{p.latestRelevancyDate ?? "?"})
               </option>
             ))}
           </select>
-          <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="schedDate" title="נכון לתאריך (ריק = היום)" />
-          <button type="button" className="schedBtn" onClick={() => loadData(projectId, asOf)} disabled={loading || !projectId}>
+          <label className="schedDateField" htmlFor="schedule-as-of">נכון ל־
+            <input id="schedule-as-of" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} className="schedDate" title="ריק = תאריך סיום הפרויקט, או היום בפרויקט פעיל" />
+          </label>
+          <button type="button" className="schedBtn" onClick={() => loadData(projectId, asOf, projectEndDate)} disabled={loading || !projectId}>
             {loading ? "טוען…" : "רענן"}
           </button>
           <button type="button" className="schedBtn schedBtnPrimary" onClick={runScan} disabled={scanBusy || !projectId}
@@ -998,6 +1408,18 @@ export function SchedulePage() {
             {scanBusy ? "סורק…" : "סריקת התראות"}
           </button>
         </div>
+      </div>
+
+      <div className="schedProjectEndControl">
+        <label htmlFor="schedule-project-end">תאריך סיום הפרויקט</label>
+        <input id="schedule-project-end" type="date" value={projectEndDate}
+          onChange={(event) => { setProjectEndDate(event.target.value); setProjectEndDateNotice(""); }}
+          disabled={!projectId || projectEndDateBusy} />
+        <button type="button" className="schedBtn" onClick={saveProjectEndDate} disabled={!projectId || projectEndDateBusy}>
+          {projectEndDateBusy ? "שומר…" : "שמור תאריך סיום"}
+        </button>
+        <span>ריק = פרויקט פעיל. התאריך השמור עוצר את חישוב האיחור בפרויקטים שהסתיימו.</span>
+        {projectEndDateNotice ? <strong role="status">{projectEndDateNotice}</strong> : null}
       </div>
 
       {/* What the engine could and could not compare — project level, always visible */}
@@ -1011,15 +1433,7 @@ export function SchedulePage() {
       <HealthStrip health={health} />
 
       {alerts.length ? (
-        <div className="schedAlerts">
-          {alerts.map((alert) => (
-            <div key={alert.id} className="schedAlertRow">
-              <span className="schedBadge schedSeverity">חומרה {alert.severity_level}</span>
-              <b>{alert.title}</b>
-              <span className="schedAlertDesc">{alert.description}</span>
-            </div>
-          ))}
-        </div>
+        <ScheduleAlertsBox alerts={alerts} expanded={alertsOpen} onToggle={() => setAlertsOpen((current) => !current)} />
       ) : null}
       {baselinedCount ? (
         <div className="schedBaselinedNote">
@@ -1046,13 +1460,23 @@ export function SchedulePage() {
           <button type="button" className={view === "table" ? "is-active" : ""} onClick={() => setView("table")}>טבלה</button>
         </div>
         <label><input type="checkbox" checked={onlyLate} onChange={(e) => setOnlyLate(e.target.checked)} /> רק באיחור</label>
+        <button type="button" className={`schedLateLinesToggle ${showLateLines ? "is-active" : ""}`}
+          aria-pressed={showLateLines} disabled={!showAsOfMarker} onClick={() => setShowLateLines((current) => !current)}>
+          {showLateLines ? "הסתר קווי איחור אדומים" : "הצג קווי איחור אדומים"}
+        </button>
+        <button type="button" className={`schedAsOfToggle ${showAsOfMarker ? "is-active" : ""}`}
+          aria-pressed={showAsOfMarker} onClick={() => setShowAsOfMarker((current) => !current)}
+          title="בהסתרה, הציר מצטמצם מהפעילות הראשונה עד הסמן האחרון בלוח הזמנים">
+          {showAsOfMarker ? "הסתר נכון ל־ וצמצם ציר" : "הצג נכון ל־"}
+        </button>
         <label>מינימום ימי איחור: <input type="number" min="1" value={minDaysLate} onChange={(e) => setMinDaysLate(e.target.value)} className="schedNum" /></label>
         <span className="schedCount">{rows.length} פעילויות</span>
       </div>
 
       {view === "axes" ? (
         <ThreeAxesView indicators={rows} allIndicators={sweepResult?.indicators} pendingConditions={conditions?.conditions}
-          timelineItems={activityUpdates.items} asOf={sweepResult?.asOf} selected={selected} onSelect={setSelected} />
+          timelineItems={activityUpdates.items} asOf={sweepResult?.asOf} showLateLines={showLateLines}
+          showAsOfMarker={showAsOfMarker} selected={selected} onSelect={setSelected} />
       ) : (
         <div className="schedTableWrap">
           <table className="schedTable">
@@ -1084,7 +1508,13 @@ export function SchedulePage() {
 
       <IndicatorDetail indicator={selected} onClose={() => setSelected(null)} />
       <ActivityUpdatesTable items={activityUpdates.items} activities={activityOptions}
-        busyId={activityUpdateBusyId} onAssign={assignActivityUpdate} />
+        busyId={activityUpdateBusyId} onAssign={assignActivityUpdate}
+        agentBusyId={activityAgentBusyId} agentResults={activityAgentResults}
+        onRunAgent={runActivityAssignmentAgent} onConfirmAgent={confirmActivityAssignmentAgent}
+        onRejectAgent={rejectActivityAssignmentAgent} agentBatch={activityAgentBatch}
+        onStartAgentBatch={startActivityAssignmentBatch} onStopAgentBatch={stopActivityAssignmentBatch}
+        onResumeAgentBatch={resumeActivityAssignmentBatch} onRestartAgentBatch={restartActivityAssignmentBatch}
+        timeFilterEnabled={activityAgentTimeFilter} onTimeFilterChange={setActivityAgentTimeFilter} />
     </div>
   );
 }

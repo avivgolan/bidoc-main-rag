@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,11 +16,13 @@ import { callN8nTool } from "./tools.js";
 import { authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
+import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
+import { validateScheduleAssignmentAgentSettings } from "./scheduleActivityAssignmentEngine.js";
 import { runScheduleConditionResolver } from "./subagents/scheduleConditionResolver.js";
 import { CONTRACTS_AGENT_VERSION, CONTRACTS_EXTRACTION_BUDGET_MS, CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES, CONTRACTS_MAX_RESPONSE_BYTES, CONTRACTS_PDF_READER_VERSION } from "./contracts/constants.js";
 import { contractsErrorResponse } from "./contracts/errors.js";
 import { readJsonBounded } from "./contracts/request.js";
-import { listScheduleProjects, loadScheduleSource, scheduleSettings } from "./scheduleIngestion.js";
+import { listScheduleProjects, loadScheduleSource, saveScheduleProjectEndDate, scheduleSettings } from "./scheduleIngestion.js";
 import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
 import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
@@ -318,10 +321,15 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/run-history") {
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
-    const dbRuns = await listRunHistory({ config: config(), limit }).catch(() => []);
+    const [dbRuns, scheduleAssignmentRuns] = await Promise.all([
+      listRunHistory({ config: config(), limit }).catch(() => []),
+      listScheduleActivityAssignmentWorkflowRuns({ config: config(), limit }).catch(() => [])
+    ]);
     const localRuns = listLocalRunHistory({ limit });
-    const runs = [...localRuns, ...dbRuns]
+    const seen = new Set();
+    const runs = [...localRuns, ...scheduleAssignmentRuns, ...dbRuns]
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+      .filter((run) => run?.id && !seen.has(run.id) && seen.add(run.id))
       .slice(0, limit);
     return sendJson(res, 200, { runs });
   }
@@ -766,6 +774,48 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, previewImportedSettingsFile(body));
   }
 
+  if (req.method === "GET" && url.pathname === "/api/settings/schedule-assignment-agent") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    await reloadSettingsFromDb();
+    return sendJson(res, 200, { ok: true, settings: config().scheduleAssignmentAgent });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/settings/schedule-assignment-agent/validate") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const body = await readJson(req).catch(() => ({}));
+    const result = validateScheduleAssignmentAgentSettings(body.settings || {});
+    return sendJson(res, result.ok ? 200 : 400, {
+      ok: result.ok,
+      errors: result.errors,
+      warnings: result.warnings,
+      weightTotal: result.weightTotal
+    });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/settings/schedule-assignment-agent/dry-run") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const body = await readJson(req).catch(() => ({}));
+    if (!body.projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
+    try {
+      await reloadSettingsFromDb();
+      const requestConfig = getConfig();
+      const result = await runScheduleActivityAssignmentAgent({
+        projectId: body.projectId,
+        sourceId: body.sourceId,
+        requestedBy: reviewer.sub,
+        commit: false,
+        config: requestConfig,
+        apiKey: settingsOpenRouterApiKey()
+      });
+      return sendJson(res, 200, result);
+    } catch (error) {
+      return sendJson(res, /required|not found|אינה תקינה|ללא תאריך|לא נמצאו|כבוי/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/api/system/restart") {
     sendJson(res, 200, { ok: true, message: "Restarting server" });
     scheduleServerRestart();
@@ -832,6 +882,12 @@ async function handleApi(req, res, url) {
 
   if (req.method === "PUT" && url.pathname === "/api/settings") {
     const body = await readJson(req);
+    if (Object.prototype.hasOwnProperty.call(body || {}, "scheduleAssignmentAgent")) {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const validation = validateScheduleAssignmentAgentSettings(body.scheduleAssignmentAgent || {});
+      if (!validation.ok) return sendJson(res, 400, { error: validation.errors.join(" "), validation });
+    }
     await reloadSettingsFromDb();
     const saved = await writeLocalSettings(body, { source: "settings_save" });
     return sendJson(res, 200, { saved, settings: publicSettings(config()) });
@@ -2160,6 +2216,24 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === "POST" && url.pathname === "/api/schedule/project-end-date") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const body = await readJson(req).catch(() => ({}));
+    const projectId = body.projectId || body.project_id || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await saveScheduleProjectEndDate({
+        projectId,
+        projectEndDate: body.projectEndDate ?? body.project_end_date ?? null,
+        config: buildRequestConfig(req, body)
+      });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      return sendJson(res, /required|valid ISO date|not found|not saved/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/api/schedule/activity-updates") {
     const projectId = url.searchParams.get("projectId") || "";
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
@@ -2188,6 +2262,125 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { ok: true, item });
     } catch (error) {
       return sendJson(res, /required|not found|does not belong|ללא data_date/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/schedule/activity-updates/assignment-agent/run") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const body = await readJson(req).catch(() => ({}));
+    const projectId = body.projectId || body.project_id || "";
+    if (!projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
+    const runId = crypto.randomUUID();
+    createRun(runId);
+    try {
+      // The browser cannot supply a model, prompt, threshold or key. Refresh
+      // the SETTINGS-owned configuration and secret for every explicit click.
+      await reloadSettingsFromDb();
+      const result = await runScheduleActivityAssignmentAgent({
+        projectId,
+        sourceId: body.sourceId,
+        requestedBy: reviewer.sub,
+        commit: true,
+        timeFilter: body.timeFilter === true,
+        config: getConfig(),
+        apiKey: settingsOpenRouterApiKey(),
+        runId,
+        emit: emitRunEvent
+      });
+      completeRun(runId, {
+        status: result.status,
+        selectedActivityKey: result.decision?.selectedActivityKey || null,
+        confidence: result.decision?.confidence ?? null
+      });
+      const runEvents = getRunEvents(runId);
+      recordRunHistory({
+        id: runId,
+        title: `סוכן שיוך לו״ז · ${result.event?.title || body.sourceId}`,
+        workflowLog: result.workflowLog,
+        runEvents,
+        kind: "schedule_activity_assignment"
+      });
+      if (result.auditPersisted) {
+        await persistScheduleActivityAssignmentWorkflow({
+          scheduleProjectId: result.scheduleProjectId,
+          runId,
+          workflowLog: result.workflowLog,
+          runEvents,
+          config: getConfig()
+        }).catch((error) => {
+          emitRunEvent(runId, "workflow_persistence_warning", "Workflow persistence failed", { status: "warning", error: error.message });
+        });
+      }
+      return sendJson(res, 200, result);
+    } catch (error) {
+      failRun(runId, error);
+      const workflowLog = {
+        kind: "schedule_activity_assignment",
+        runId,
+        nodes: [
+          { id: "assignment_start", label: "Schedule Assignment Trigger", kind: "trigger", status: "done", input: { projectId, sourceId: body.sourceId, timeFilterEnabled: body.timeFilter === true }, output: { runId } },
+          { id: "assignment_error", label: "Assignment Run Error", kind: "output", status: "error", input: {}, output: { error: error.message } }
+        ],
+        edges: [{ from: "assignment_start", to: "assignment_error" }],
+        trace: [
+          ...getRunEvents(runId),
+          { step: "assignment_error", message: "Schedule activity assignment failed", status: "error", time: new Date().toISOString(), data: { error: error.message } }
+        ]
+      };
+      recordRunHistory({
+        id: runId,
+        title: `סוכן שיוך לו״ז · ${body.sourceId}`,
+        workflowLog,
+        kind: "schedule_activity_assignment"
+      });
+      return sendJson(res, /required|not found|אינה תקינה|ללא תאריך|לא נמצאו|כבוי|כבר משויכת/.test(error.message) ? 400 : 500, { ok: false, error: error.message, runId, workflowLog });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/schedule/activity-updates/assignment-agent/confirm") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const body = await readJson(req).catch(() => ({}));
+    if (!body.projectId || !body.runId || !body.activityKey) return sendJson(res, 400, { error: "projectId, runId and activityKey are required" });
+    try {
+      const result = await confirmScheduleActivityAssignment({
+        projectId: body.projectId,
+        runId: body.runId,
+        activityKey: body.activityKey,
+        requestedBy: reviewer.sub,
+        config: getConfig()
+      });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      return sendJson(res, /required|not found|not awaiting|not a candidate|כבר משויכת/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/schedule/activity-updates/assignment-agent/reject") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const body = await readJson(req).catch(() => ({}));
+    if (!body.projectId || !body.runId) return sendJson(res, 400, { error: "projectId and runId are required" });
+    try {
+      const result = await rejectScheduleActivityAssignment({ projectId: body.projectId, runId: body.runId, reason: body.reason, requestedBy: reviewer.sub, config: getConfig() });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      return sendJson(res, /required|not found|not awaiting/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
+    }
+  }
+
+  const assignmentRunMatch = url.pathname.match(/^\/api\/schedule\/activity-updates\/assignment-agent\/runs\/([^/]+)$/u);
+  if (req.method === "GET" && assignmentRunMatch) {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await getScheduleActivityAssignmentRun({ projectId, runId: decodeURIComponent(assignmentRunMatch[1]), config: getConfig() });
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      return sendJson(res, /required|not found/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
     }
   }
 

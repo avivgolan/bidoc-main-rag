@@ -10394,7 +10394,15 @@ body:has(#timeline.active) .sidebar {
 .schedCardAlarm .schedCardValue { color: var(--danger); }
 .schedCardAlarm .schedCardLabel { white-space: normal; }
 
-.schedAlerts { display: flex; flex-direction: column; gap: 8px; }
+.schedAlertsBox { background: var(--surface); border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line)); border-radius: 12px; overflow: hidden; }
+.schedAlertsHead { width: 100%; min-height: 44px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border: 0; background: var(--danger-soft); color: var(--text-primary); font: inherit; text-align: right; cursor: pointer; }
+.schedAlertsHead:hover { filter: brightness(0.98); }
+.schedAlertsHead:focus-visible, .condHead:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand-500) 35%, transparent); outline-offset: -3px; }
+.schedAlertsHeadTitle { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; }
+.schedAlertsCount { min-width: 26px; padding: 1px 8px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.76rem; text-align: center; }
+.schedAlertsHeadHint { flex: 1; color: var(--text-secondary); font-size: 0.78rem; font-weight: 400; }
+.schedAlertsChevron { color: var(--text-muted); font-size: 0.7rem; }
+.schedAlerts { display: flex; flex-direction: column; gap: 8px; padding: 10px; max-height: 420px; overflow-y: auto; }
 .schedAlertRow {
   display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
   background: var(--surface); border: 1px solid var(--line-strong); border-inline-start: 4px solid var(--danger);
@@ -10408,6 +10416,17 @@ body:has(#timeline.active) .sidebar {
 
 .schedFilters { display: flex; gap: 18px; align-items: center; font-size: 0.85rem; color: var(--text-secondary); flex-wrap: wrap; }
 .schedFilters label { display: flex; gap: 6px; align-items: center; }
+.schedProjectEndControl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; margin: 0 0 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle, #faf8f3); font-size: 0.82rem; color: var(--text-secondary); }
+.schedProjectEndControl label { font-weight: 700; color: var(--text-primary); }
+.schedProjectEndControl input { min-height: 36px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface, #fff); color: var(--text-primary); }
+.schedProjectEndControl strong { color: #287252; font-weight: 700; }
+.schedDateField { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-secondary); }
+.schedLateLinesToggle { min-height: 36px; padding: 6px 12px; border: 1px solid #dc776c; border-radius: 9px; background: #fff; color: #a53d33; cursor: pointer; font: inherit; }
+.schedLateLinesToggle.is-active { background: #fff1ef; }
+.schedLateLinesToggle:disabled { opacity: 0.48; cursor: not-allowed; }
+.schedAsOfToggle { min-height: 36px; padding: 6px 12px; border: 1px solid #6f91a8; border-radius: 9px; background: #fff; color: #315f79; cursor: pointer; font: inherit; }
+.schedAsOfToggle.is-active { background: #edf6fa; }
+.schedLateLinesToggle:focus-visible, .schedAsOfToggle:focus-visible, .schedProjectEndControl input:focus-visible { outline: 3px solid rgba(58, 137, 101, 0.25); outline-offset: 2px; }
 .schedCount { margin-inline-start: auto; color: var(--text-muted); }
 
 .schedTableWrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
@@ -10544,11 +10563,27 @@ body:has(#timeline.active) .sidebar {
 .activityUpdatesHead { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 14px 16px; border-bottom: 1px solid var(--line); background: linear-gradient(135deg, color-mix(in srgb, #7d57c2 7%, var(--surface)), var(--surface)); border-radius: 14px 14px 0 0; }
 .activityUpdatesHead h3 { margin: 0; color: var(--text-primary); font-size: 1rem; }
 .activityUpdatesHead p { margin: 3px 0 0; color: var(--text-muted); font-size: 0.76rem; }
-.activityUpdatesHead > input { width: min(330px, 42vw); min-height: 38px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--text-primary); font: inherit; }
+.activityUpdatesHeadTools { display: flex; flex-direction: column; align-items: flex-end; gap: 7px; min-width: min(520px, 52vw); }
+.activityUpdatesHeadTools > input { width: min(330px, 100%); min-height: 38px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--text-primary); font: inherit; }
+.activityAgentBatchControls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.activityAgentTimeFilter { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--text-secondary); font-size: 0.74rem; font-weight: 700; cursor: pointer; }
+.activityAgentTimeFilter input { width: 17px; height: 17px; margin: 0; accent-color: #6840ad; cursor: pointer; }
+.activityAgentTimeFilter:has(input:checked) { border-color: color-mix(in srgb, #7d57c2 55%, var(--line)); background: color-mix(in srgb, #7d57c2 8%, var(--surface)); color: #6840ad; }
+.activityAgentTimeFilter:focus-within { outline: 3px solid color-mix(in srgb, #7d57c2 18%, transparent); outline-offset: 1px; }
+.activityAgentTimeFilter:has(input:disabled) { opacity: 0.55; cursor: not-allowed; }
+.activityAgentBatchButton { min-height: 38px; padding: 7px 12px; border: 1px solid color-mix(in srgb, #7d57c2 40%, var(--line)); border-radius: 9px; background: var(--surface); color: #6840ad; font: inherit; font-size: 0.74rem; font-weight: 800; cursor: pointer; transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease; }
+.activityAgentBatchButton.is-primary { background: #6840ad; border-color: #6840ad; color: #fff; }
+.activityAgentBatchButton.is-stop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); background: var(--danger-soft); }
+.activityAgentBatchButton:hover:not(:disabled), .activityAgentBatchButton:focus-visible { outline: none; border-color: #7d57c2; box-shadow: 0 0 0 3px color-mix(in srgb, #7d57c2 18%, transparent); }
+.activityAgentBatchButton:disabled { opacity: 0.5; cursor: not-allowed; }
+.activityAgentBatchStatus { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; color: var(--text-secondary); font-size: 0.7rem; }
+.activityAgentBatchStatus progress { width: min(150px, 30vw); height: 7px; accent-color: #6840ad; }
+.activityAgentBatchStatus.is-paused { color: var(--amber); }
+.activityAgentBatchStatus.is-completed { color: var(--brand-700); }
 .activityUpdatesTableWrap { overflow: auto; max-height: 620px; }
-.activityUpdatesTable { width: 100%; min-width: 980px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 0.78rem; }
+.activityUpdatesTable { width: 100%; min-width: 1140px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 0.78rem; }
 .activityUpdatesTable th { position: sticky; top: 0; z-index: 5; padding: 8px 10px; background: var(--surface-2); color: var(--text-secondary); text-align: right; border-bottom: 1px solid var(--line-strong); }
-.activityUpdatesTable th:nth-child(1) { width: 82px; }.activityUpdatesTable th:nth-child(2) { width: 105px; }.activityUpdatesTable th:nth-child(3) { width: auto; }.activityUpdatesTable th:nth-child(4) { width: 68px; }.activityUpdatesTable th:nth-child(5) { width: 95px; }.activityUpdatesTable th:nth-child(6) { width: 285px; }
+.activityUpdatesTable th:nth-child(1) { width: 82px; }.activityUpdatesTable th:nth-child(2) { width: 105px; }.activityUpdatesTable th:nth-child(3) { width: auto; }.activityUpdatesTable th:nth-child(4) { width: 68px; }.activityUpdatesTable th:nth-child(5) { width: 95px; }.activityUpdatesTable th:nth-child(6) { width: 430px; }
 .activityUpdatesTable td { padding: 8px 10px; vertical-align: middle; border-bottom: 1px solid var(--line); background: var(--surface); }
 .activityUpdatesTable tr.is-assigned td { background: color-mix(in srgb, #7d57c2 3%, var(--surface)); }
 .activityUpdateKind { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 8px; background: color-mix(in srgb, #7d57c2 12%, var(--surface)); color: #6d48b3; font-size: 0.66rem; font-weight: 800; white-space: nowrap; }
@@ -10574,10 +10609,38 @@ body:has(#timeline.active) .sidebar {
 .activityPickerOptions button small { direction: ltr; flex: none; }
 .activityPickerEmpty { display: block; padding: 14px; color: var(--text-muted); text-align: center; }
 .activityUpdatesMore { display: block; margin: 10px auto; padding: 7px 18px; border: 1px solid var(--brand-300); border-radius: 8px; background: var(--brand-50); color: var(--brand-700); font: inherit; cursor: pointer; }
+.activityAssignmentActions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.activityAgentButton { min-height: 34px; padding: 6px 9px; border: 1px solid color-mix(in srgb, #7d57c2 55%, var(--line)); border-radius: 8px; background: color-mix(in srgb, #7d57c2 8%, var(--surface)); color: #6840ad; font: inherit; font-size: 0.7rem; font-weight: 800; cursor: pointer; white-space: nowrap; }
+.activityAgentButton:hover:not(:disabled), .activityAgentButton:focus-visible { border-color: #7d57c2; background: color-mix(in srgb, #7d57c2 14%, var(--surface)); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, #7d57c2 18%, transparent); }
+.activityAgentButton:disabled { opacity: 0.48; cursor: not-allowed; }
+.activityAgentResultRow td { padding: 0 10px 10px; background: color-mix(in srgb, #7d57c2 3%, var(--surface)); }
+.activityAgentResult { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #7d57c2 28%, var(--line)); border-radius: 10px; background: color-mix(in srgb, #7d57c2 5%, var(--surface)); }
+.activityAgentResult.is-auto { border-color: var(--brand-300); background: var(--brand-50); }
+.activityAgentResult.is-filtered { border-color: color-mix(in srgb, var(--text-muted) 45%, var(--line)); background: var(--surface-2); }
+.activityAgentResult.is-filtered .activityAgentResultHead strong { color: var(--text-secondary); }
+.activityAgentResult.is-error { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+.activityAgentResultHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.activityAgentResultHead strong { color: var(--text-primary); font-size: 0.8rem; }
+.activityAgentResultHead span { color: var(--text-muted); font-size: 0.7rem; white-space: nowrap; }
+.activityAgentResult p { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.activityAgentReview { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.activityAgentReviewPrompt { color: var(--text-primary); font-size: 0.74rem; }
+.activityAgentCandidates { display: flex; flex-wrap: wrap; gap: 6px; }
+.activityAgentCandidates button { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; min-height: 44px; max-width: 280px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--text-primary); font: inherit; font-size: 0.7rem; text-align: right; cursor: pointer; transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease; }
+.activityAgentCandidates button:hover:not(:disabled), .activityAgentCandidates button:focus-visible { border-color: var(--brand-500); background: var(--brand-50); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-500) 15%, transparent); }
+.activityAgentCandidates button:disabled { opacity: 0.5; cursor: not-allowed; }
+.activityAgentCandidates button span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.activityAgentCandidates button small { direction: ltr; }
+.activityAgentCandidates button.is-reject { justify-content: center; color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); }
+.activityAgentWarning { display: block; color: var(--amber) !important; }
 
 @media (max-width: 700px) {
   .activityUpdatesHead { align-items: stretch; flex-direction: column; }
-  .activityUpdatesHead > input { width: 100%; }
+  .activityUpdatesHeadTools { align-items: stretch; min-width: 0; width: 100%; }
+  .activityUpdatesHeadTools > input { width: 100%; }
+  .activityAgentBatchControls { justify-content: stretch; }
+  .activityAgentBatchButton { flex: 1 1 auto; }
+  .activityAgentBatchStatus { justify-content: flex-start; flex-wrap: wrap; }
 }
 
 @media (max-width: 900px) {
@@ -10662,12 +10725,15 @@ body:has(#timeline.active) .sidebar {
 .condActionCell { min-width: 170px; }
 .condDateCell { min-width: 250px; }
 .condDateEntry { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
-.condDateEntry input[type="date"] {
+.condDateEntry input {
   min-width: 138px; min-height: 36px; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 7px;
   background: var(--surface); color: var(--text-primary); font: inherit; font-size: 0.78rem; direction: ltr;
 }
-.condDateEntry input[type="date"]:focus { outline: 2px solid color-mix(in srgb, var(--brand-500) 34%, transparent); border-color: var(--brand-500); }
-.condDateEntry input[type="date"]:disabled { background: var(--surface-2); color: var(--text-secondary); }
+.condDateEntry input:focus { outline: 2px solid color-mix(in srgb, var(--brand-500) 34%, transparent); border-color: var(--brand-500); }
+.condDateEntry input:disabled { background: var(--surface-2); color: var(--text-secondary); }
+.condDateEntry input[aria-invalid="true"] { border-color: var(--danger); }
+.condDateHint { display: block; margin: -2px 0 6px; font-size: 0.68rem; color: var(--text-muted); }
+.condDateHint.is-error { color: var(--danger); font-weight: 700; }
 .condManualBtn {
   min-height: 36px; padding: 6px 10px; border: 1px solid var(--success-text); border-radius: 7px;
   color: var(--success-text); background: var(--success-bg); font: inherit; font-size: 0.73rem; font-weight: 800; cursor: pointer;
@@ -10699,5 +10765,5 @@ body:has(#timeline.active) .sidebar {
   .condTable td:first-child { border-top: none; }
   .condDateCell { min-width: 0; }
   .condDateEntry { align-items: stretch; flex-direction: column; }
-  .condDateEntry input[type="date"], .condManualBtn, .condResolveBtn { width: 100%; }
+  .condDateEntry input, .condManualBtn, .condResolveBtn { width: 100%; }
 }

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAgentList, defaultPrompts } from "./prompts.js";
+import { normalizeScheduleAssignmentAgentSettings, scheduleAssignmentConfigurationSnapshot } from "./scheduleActivityAssignmentEngine.js";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_FILES = [".env", ".env.local"];
@@ -638,6 +639,7 @@ export function getConfig(settingsOverride = null) {
       chunkSize: clampNumber(settings.knowledge?.chunkSize, 300, 6000, 1800)
     },
     timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks),
+    scheduleAssignmentAgent: normalizeScheduleAssignmentAgentSettings(settings.scheduleAssignmentAgent),
     meetingsEvidence: normalizeMeetingsEvidenceSettings(settings.subagents?.meetingsEvidence),
     dataQuery: normalizeDataQuerySettings(settings.subagents?.dataQuery),
     contentTools: normalizeContentToolsSettings(settings.subagents?.contentTools),
@@ -671,6 +673,7 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
     },
     knowledge: config.knowledge,
     timelineLinks: config.timelineLinks,
+    scheduleAssignmentAgent: scheduleAssignmentConfigurationSnapshot(config.scheduleAssignmentAgent),
     contentSource: {
       ...config.contentSource,
       supabaseServiceRoleKey: maskSecret(config.contentSource.supabaseServiceRoleKey),
@@ -881,6 +884,7 @@ export function exportFullSettings(config = getConfig()) {
       memory: config.memory,
       knowledge: config.knowledge,
       timelineLinks: config.timelineLinks,
+      scheduleAssignmentAgent: config.scheduleAssignmentAgent,
       contentSource: {
         supabaseUrl: config.contentSource.supabaseUrl,
         supabaseServiceRoleKey: config.contentSource.supabaseServiceRoleKey,
@@ -920,6 +924,7 @@ export function normalizeImportedSettingsFile(value = {}) {
   if (Object.prototype.hasOwnProperty.call(raw, "memory")) normalized.memory = raw.memory || {};
   if (Object.prototype.hasOwnProperty.call(raw, "knowledge")) normalized.knowledge = raw.knowledge || {};
   if (Object.prototype.hasOwnProperty.call(raw, "timelineLinks")) normalized.timelineLinks = raw.timelineLinks || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "scheduleAssignmentAgent")) normalized.scheduleAssignmentAgent = raw.scheduleAssignmentAgent || {};
   if (Object.prototype.hasOwnProperty.call(raw, "contentSource")) normalized.contentSource = raw.contentSource || {};
   if (Object.prototype.hasOwnProperty.call(raw, "secrets")) normalized.secrets = raw.secrets || {};
   if (Object.prototype.hasOwnProperty.call(raw, "n8nBaseUrl")) normalized.n8nBaseUrl = raw.n8nBaseUrl || "";
@@ -1119,6 +1124,7 @@ export async function writeLocalSettings(settings, options = {}) {
   const mergedMemory = mergeSection("memory", settings.memory || {}, existing.memory || {});
   const mergedKnowledge = mergeSection("knowledge", settings.knowledge || {}, existing.knowledge || {});
   const mergedTimelineLinks = mergeSection("timelineLinks", settings.timelineLinks || {}, existing.timelineLinks || {});
+  const mergedScheduleAssignmentAgent = mergeSection("scheduleAssignmentAgent", settings.scheduleAssignmentAgent || {}, existing.scheduleAssignmentAgent || {});
   const mergedContentSource = mergeSection("contentSource", incomingContentSource, existingContentSource);
   const mergedToolsRuntime = has("toolsRuntime") || has("toolRuntime")
     ? mergePlainObject(existing.toolsRuntime || existing.toolRuntime || {}, settings.toolsRuntime || settings.toolRuntime || {})
@@ -1186,6 +1192,7 @@ export async function writeLocalSettings(settings, options = {}) {
       chunkSize: clampNumber(mergedKnowledge.chunkSize, 300, 6000, 1800)
     },
     timelineLinks: normalizeTimelineLinkAgentSettings(mergedTimelineLinks),
+    scheduleAssignmentAgent: normalizeScheduleAssignmentAgentSettings(mergedScheduleAssignmentAgent),
     n8nBaseUrl: has("n8nBaseUrl") ? settings.n8nBaseUrl || "" : existing.n8nBaseUrl || "",
     secrets: {
       openRouterApiKey: mergeSecret(existing.secrets?.openRouterApiKey, has("secrets") ? incomingSecrets.openRouterApiKey : undefined),

@@ -14,7 +14,8 @@ import {
 } from "../src/scheduleCalendar.js";
 import {
   buildActivityKey, MAIN_GANTT_SOURCE, normalizeGanttTask, pickCurrentVersion,
-  scheduleSettings, scheduleSupabaseConfig, SCHEDULE_SOURCE_PROFILES
+  normalizeProjectEndDate, saveScheduleProjectEndDate, scheduleSettings,
+  scheduleSourceFromProject, scheduleSupabaseConfig, SCHEDULE_SOURCE_PROFILES
 } from "../src/scheduleIngestion.js";
 import {
   buildScheduleHealth, scheduleDataVersion, snapshotRowFromIndicator,
@@ -27,7 +28,26 @@ import {
   promotionRows, resolveConditionDueDate, runScheduleConditionResolver,
   scheduleResolverError, settingsOwnedAiConfig
 } from "../src/subagents/scheduleConditionResolver.js";
-import { makeScheduleScale, scheduleSubjectKey } from "../src/react/scheduleTimeline.js";
+import { DEFAULT_SCHEDULE_VIEW, formatIsraeliDate, makeScheduleScale, parseIsraeliDate, scheduleSubjectKey } from "../src/react/scheduleTimeline.js";
+import {
+  ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
+  activityAssignmentReviewCandidates,
+  activityAssignmentBatchStatusText,
+  applyActivityAssignmentBatchOutcome,
+  buildActivityAssignmentBatchQueue,
+  createActivityAssignmentBatch
+} from "../src/react/activityAssignmentBatch.js";
+import {
+  buildAssignmentCandidates,
+  evaluateTimeRelevance,
+  evaluateAssignmentDecision,
+  normalizeScheduleAssignmentAgentSettings,
+  sanitizeRoleResult,
+  temporalAssignmentScore,
+  timeRelevanceSignals,
+  validateScheduleAssignmentAgentSettings
+} from "../src/scheduleActivityAssignmentEngine.js";
+import { buildScheduleActivityAssignmentWorkflowLog } from "../src/scheduleActivityAssignmentWorkflow.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -50,6 +70,36 @@ test("schedule timeline: filtered future contract milestone remains positioned o
 
   assert.ok(markerPosition > 90 && markerPosition < 100, `expected an in-range milestone flag, got ${markerPosition}`);
   assert.equal(scheduleSubjectKey(futureMilestone), "milestone:condition:handover");
+});
+
+test("schedule timeline: removing the as-of marker compacts the scale to actual schedule dates", () => {
+  const activities = [
+    { timing: { plannedStart: "2024-11-17", plannedFinish: "2025-01-10" } },
+    { timing: { plannedStart: "2025-02-01", plannedFinish: "2025-04-23" } }
+  ];
+  const withAsOf = makeScheduleScale(activities, "2026-08-20", activities);
+  const compact = makeScheduleScale(activities, null, activities);
+  assert.ok(withAsOf.pos("2025-04-23") < 40, "today should extend the visible range when its marker is enabled");
+  assert.ok(compact.pos("2025-04-23") > 90, "the last schedule point should reach the end of the compact range");
+});
+
+test("schedule timeline: Israeli event-date input converts day/month without reversing it", () => {
+  assert.equal(parseIsraeliDate("11/12/2024"), "2024-12-11");
+  assert.equal(parseIsraeliDate("1/2/2025"), "2025-02-01");
+  assert.equal(formatIsraeliDate("2024-12-11"), "11/12/2024");
+  assert.equal(parseIsraeliDate("31/02/2025"), null);
+  assert.equal(parseIsraeliDate("2025-12-11"), null);
+});
+
+test("schedule timeline: default controls open the compact full schedule view", () => {
+  assert.deepEqual(DEFAULT_SCHEDULE_VIEW, {
+    view: "axes",
+    onlyLate: false,
+    showLateLines: false,
+    showAsOfMarker: false,
+    alertsOpen: false,
+    conditionsOpen: false
+  });
 });
 
 test("schedule activity updates: canonical business date and source assignment are preserved", () => {
@@ -77,6 +127,229 @@ test("schedule activity updates: canonical business date and source assignment a
     href: null,
     activityKey: "gantt:file-a:9"
   });
+});
+
+test("schedule assignment batch: queues every dated unassigned alert once in source order", () => {
+  const dated = { id: "a", date: "2026-08-20", activityKey: null };
+  const queue = buildActivityAssignmentBatchQueue([
+    dated,
+    { ...dated },
+    { id: "b", date: null, activityKey: null },
+    { id: "c", date: "2026-08-21", activityKey: "gantt:file:1" },
+    { id: "d", date: "2026-08-22", activityKey: null }
+  ]);
+  assert.deepEqual(queue.map((item) => item.id), ["a", "d"]);
+});
+
+test("schedule assignment review: exposes at most two valid choices without requiring audit persistence", () => {
+  const candidates = activityAssignmentReviewCandidates({
+    auditPersisted: false,
+    decision: { autoAssigned: false },
+    candidates: [
+      { activityKey: "gantt:file:1", name: "פעילות ראשונה" },
+      { activityKey: "gantt:file:2", name: "פעילות שנייה" },
+      { activityKey: "gantt:file:3", name: "פעילות שלישית" }
+    ]
+  });
+  assert.deepEqual(candidates.map((candidate) => candidate.activityKey), ["gantt:file:1", "gantt:file:2"]);
+  assert.deepEqual(activityAssignmentReviewCandidates({ decision: { autoAssigned: true }, candidates }), []);
+});
+
+test("schedule assignment workflow: exposes components, safe parameters, scores and telemetry", () => {
+  const workflow = buildScheduleActivityAssignmentWorkflowLog({
+    result: {
+      runId: "run-1",
+      projectId: PROJECT,
+      scheduleProjectId: PROJECT,
+      sourceId: "alert-9",
+      status: "review_required",
+      engineVersion: "schedule-assignment.v1.1",
+      event: { title: "עיכוב בריצוף", date: "2025-01-15" },
+      extractedEvent: { trades: ["ריצוף"], date: "2025-01-15" },
+      timeFilter: { enabled: true, skipped: false, confidence: 96 },
+      auditPersisted: true,
+      decision: { selectedActivityKey: "gantt:file:1", confidence: 84, margin: 7, gates: { threshold: false } },
+      candidates: [{ activityKey: "gantt:file:1", name: "ריצוף", finalScore: 84, signals: { temporal: 1 } }],
+      roles: { timeFilter: { ok: true }, extractor: { ok: true }, matcher: { bestActivityKey: "gantt:file:1" }, validator: { bestActivityKey: "gantt:file:1" }, judge: { error: "not_required" }, embedding: { ok: true } },
+      warnings: []
+    },
+    configuration: {
+      timeoutMs: 90000,
+      maxCandidates: 20,
+      maxModelCalls: 4,
+      autoAssignmentEnabled: true,
+      autoAssignmentThreshold: 90,
+      minimumRunnerUpMargin: 12,
+      suggestionThreshold: 45,
+      timeFilterConfidenceThreshold: 80,
+      tools: { semantic: true },
+      weights: { semantic: 30 },
+      roles: { matcher: { enabled: true, model: "openai/gpt-4o-mini", temperature: 0, maxTokens: 1800, promptHash: "hash-only", prompt: "secret prompt" } }
+    },
+    scheduleMeta: { sourceVersionId: "file", displayName: "baseline" },
+    taskCount: 102,
+    openRouterUsage: { calls: [{ step: "assignment_matcher", total_tokens: 321, duration_ms: 1200 }], totals: { total_tokens: 321 } },
+    trace: [{ step: "assignment_matcher", message: "done", status: "done" }]
+  });
+  const byId = new Map(workflow.nodes.map((node) => [node.id, node]));
+  assert.equal(byId.get("assignment_schedule").output.taskCount, 102);
+  assert.equal(byId.get("assignment_matcher").input.role.model, "openai/gpt-4o-mini");
+  assert.equal(byId.get("assignment_matcher").input.role.promptHash, "hash-only");
+  assert.equal(byId.get("assignment_matcher").input.role.prompt, undefined);
+  assert.equal(byId.get("assignment_matcher").input.role.responseFormat, "json_object");
+  assert.equal(byId.get("assignment_candidates").output.candidates[0].signals.temporal, 1);
+  assert.equal(byId.get("assignment_matcher").openrouter[0].total_tokens, 321);
+  assert.equal(workflow.openRouterUsage.totals.total_tokens, 321);
+});
+
+test("schedule assignment batch: outcomes retain restart and resume progress accurately", () => {
+  let stats = createActivityAssignmentBatch({ status: ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING, total: 4 });
+  stats = { ...stats, ...applyActivityAssignmentBatchOutcome(stats, { ok: true, result: { assignment: { activityKey: "gantt:file:1" } } }) };
+  stats = { ...stats, ...applyActivityAssignmentBatchOutcome(stats, { ok: true, result: { status: "filtered_out", timeFilter: { skipped: true } } }) };
+  stats = { ...stats, ...applyActivityAssignmentBatchOutcome(stats, { ok: true, result: { decision: { autoAssigned: false } } }) };
+  stats = { ...stats, ...applyActivityAssignmentBatchOutcome(stats, { ok: false, error: "network" }) };
+  assert.deepEqual({ processed: stats.processed, assigned: stats.assigned, review: stats.review, skipped: stats.skipped, failed: stats.failed }, {
+    processed: 4, assigned: 1, review: 1, skipped: 1, failed: 1
+  });
+  assert.match(activityAssignmentBatchStatusText({ ...stats, status: ACTIVITY_ASSIGNMENT_BATCH_STATUSES.PAUSED }), /4 מתוך 4/u);
+});
+
+test("schedule assignment batch: UI awaits each row and exposes controlled stop choices", () => {
+  const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
+  const start = page.indexOf("const runActivityAssignmentBatch");
+  const end = page.indexOf("const clearActivityAgentBatchResults", start);
+  const runner = page.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(runner, /for \(let index = startIndex; index < queue\.length; index \+= 1\)/u);
+  assert.match(runner, /const outcome = await runActivityAssignmentAgent\(queue\[index\], \{ timeFilter \}\)/u);
+  assert.match(runner, /stopRequested[\s\S]+PAUSED/u);
+  assert.match(page, />המשך מאותה נקודה</u);
+  assert.match(page, />הרץ מחדש</u);
+});
+
+test("schedule assignment agent: default configuration is publishable and weights total 100", () => {
+  const result = validateScheduleAssignmentAgentSettings({});
+  assert.equal(result.ok, true);
+  assert.equal(result.weightTotal, 100);
+  assert.equal(result.settings.autoAssignmentThreshold, 90);
+  assert.equal(result.settings.minimumRunnerUpMargin, 12);
+  assert.equal(result.settings.timeFilterConfidenceThreshold, 80);
+  assert.equal(result.settings.roles.timeFilter.enabled, true);
+});
+
+test("schedule assignment time filter: explicit schedule signals pass before a model call", () => {
+  const event = { title: "נדרש עדכון לוח זמנים עקב עיכוב במסירה", alertType: "חריגה" };
+  assert.ok(timeRelevanceSignals(event).length >= 2);
+  const decision = evaluateTimeRelevance({
+    event,
+    modelResult: { isTimeRelated: false, confidence: 99, reason: "ignored" },
+    confidenceThreshold: 80
+  });
+  assert.equal(decision.method, "deterministic");
+  assert.equal(decision.shouldSkip, false);
+});
+
+test("schedule assignment time filter: skips only a confident negative and otherwise fails open", () => {
+  const event = { title: "יש לעדכן את רשימת אנשי הקשר", alertType: "מידע" };
+  const skipped = evaluateTimeRelevance({ event, modelResult: { isTimeRelated: false, confidence: 92, reason: "אין רכיב זמן" }, confidenceThreshold: 80 });
+  const uncertain = evaluateTimeRelevance({ event, modelResult: { isTimeRelated: false, confidence: 62, reason: "לא בטוח" }, confidenceThreshold: 80 });
+  const failed = evaluateTimeRelevance({ event, modelResult: null, confidenceThreshold: 80 });
+  assert.equal(skipped.shouldSkip, true);
+  assert.equal(skipped.isTimeRelated, false);
+  assert.equal(uncertain.shouldSkip, false);
+  assert.equal(failed.shouldSkip, false);
+  assert.equal(failed.method, "undetermined");
+});
+
+test("schedule assignment agent: invalid weights block publication", () => {
+  const result = validateScheduleAssignmentAgentSettings({ weights: { semantic: 99 } });
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /100%/u);
+});
+
+test("schedule assignment agent: canonical event date favors an activity containing the date", () => {
+  assert.equal(temporalAssignmentScore("2025-01-15", "2025-01-01", "2025-01-31"), 1);
+  assert.ok(temporalAssignmentScore("2025-03-01", "2025-01-01", "2025-01-31") < 1);
+});
+
+test("schedule assignment agent: lexical, temporal and model evidence rank the relevant trade", () => {
+  const tasks = [
+    { activityKey: "gantt:file-a:1", stableKey: 1, name: "ריצוף חללים ציבוריים", plannedStart: "2025-01-01", plannedFinish: "2025-01-31", outlineLevel: 3 },
+    { activityKey: "gantt:file-a:2", stableKey: 2, name: "התקנת לוחות חשמל", plannedStart: "2025-01-01", plannedFinish: "2025-01-31", outlineLevel: 3 }
+  ];
+  const matcher = { bestActivityKey: tasks[0].activityKey, decision: "match", scores: [{ activityKey: tasks[0].activityKey, score: 96 }, { activityKey: tasks[1].activityKey, score: 8 }] };
+  const validator = { bestActivityKey: tasks[0].activityKey, decision: "match", scores: [{ activityKey: tasks[0].activityKey, score: 94, hardConflict: false }, { activityKey: tasks[1].activityKey, score: 5, hardConflict: false }] };
+  const candidates = buildAssignmentCandidates({
+    event: { title: "הסתיים ריצוף הקרמיקה בחללים הציבוריים", date: "2025-01-15", trades: ["ריצוף"] },
+    tasks,
+    settings: normalizeScheduleAssignmentAgentSettings({ tools: { semantic: false, historical: false } }),
+    matcher,
+    validator
+  });
+  assert.equal(candidates[0].activityKey, tasks[0].activityKey);
+  assert.ok(candidates[0].finalScore > candidates[1].finalScore);
+});
+
+test("schedule assignment agent: automatic write requires every safety gate and model agreement", () => {
+  const settings = normalizeScheduleAssignmentAgentSettings({
+    tools: { semantic: false, historical: false },
+    weights: { semantic: 0, lexical: 20, temporal: 20, hierarchy: 10, historical: 0, modelConsensus: 50 },
+    autoAssignmentThreshold: 80
+  });
+  const candidates = [
+    { activityKey: "gantt:file-a:1", name: "ריצוף", finalScore: 96, hardConflict: false },
+    { activityKey: "gantt:file-a:2", name: "חשמל", finalScore: 60, hardConflict: false }
+  ];
+  const matcher = { bestActivityKey: "gantt:file-a:1" };
+  const validator = { bestActivityKey: "gantt:file-a:1", decision: "match" };
+  const allowed = evaluateAssignmentDecision({ candidates, settings, matcher, validator, eventDate: "2025-01-15", scheduleVersionId: "file-a", aiCompleted: true });
+  const blocked = evaluateAssignmentDecision({ candidates, settings, matcher, validator, eventDate: "2025-01-15", scheduleVersionId: "file-a", aiCompleted: false });
+  assert.equal(allowed.autoAssigned, true);
+  assert.equal(blocked.autoAssigned, false);
+  assert.equal(blocked.gates.aiCompleted, false);
+});
+
+test("schedule assignment agent: model output cannot inject an unknown activity key", () => {
+  const result = sanitizeRoleResult({
+    bestActivityKey: "gantt:other:999",
+    decision: "match",
+    scores: [{ activityKey: "gantt:other:999", score: 100 }, { activityKey: "gantt:file-a:1", score: 70 }]
+  }, ["gantt:file-a:1"]);
+  assert.equal(result.bestActivityKey, "gantt:file-a:1");
+  assert.deepEqual(result.scores.map((row) => row.activityKey), ["gantt:file-a:1"]);
+});
+
+test("schedule assignment agent: migration keeps audit tables private and commits links atomically", () => {
+  const sql = fs.readFileSync(new URL("../supabase/migrations/20260820230447_schedule_activity_assignment_agent.sql", import.meta.url), "utf8");
+  assert.match(sql, /create table public\.schedule_activity_assignment_runs/iu);
+  assert.match(sql, /create table public\.schedule_activity_assignment_candidates/iu);
+  assert.match(sql, /workflow_log jsonb/iu);
+  assert.match(sql, /run_events jsonb not null/iu);
+  assert.match(sql, /create or replace function public\.bidoc_schedule_commit_activity_assignment_v1/iu);
+  assert.match(sql, /security invoker/iu);
+  assert.match(sql, /for update/iu);
+  assert.match(sql, /alter table public\.schedule_activity_assignment_runs enable row level security/iu);
+  assert.match(sql, /revoke all on table public\.schedule_activity_assignment_runs from public, anon, authenticated/iu);
+  assert.match(sql, /grant execute on function public\.bidoc_schedule_commit_activity_assignment_v1[\s\S]+to service_role/iu);
+});
+
+test("schedule assignment agent: runtime route accepts only project and source identity from the browser", () => {
+  const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  const start = server.indexOf('url.pathname === "/api/schedule/activity-updates/assignment-agent/run"');
+  const end = server.indexOf('url.pathname === "/api/schedule/activity-updates/assignment-agent/confirm"', start);
+  const route = server.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(route, /reloadSettingsFromDb\(\)/u);
+  assert.match(route, /settingsOpenRouterApiKey\(\)/u);
+  assert.match(route, /config: getConfig\(\)/u);
+  assert.match(route, /timeFilter: body\.timeFilter === true/u);
+  assert.match(route, /createRun\(runId\)/u);
+  assert.match(route, /const runId = crypto\.randomUUID\(\)/u);
+  assert.match(route, /recordRunHistory\(/u);
+  assert.match(route, /workflowLog: result\.workflowLog/u);
+  assert.match(route, /persistScheduleActivityAssignmentWorkflow\(/u);
+  assert.doesNotMatch(route, /body\.(?:prompt|model|threshold|apiKey)/u);
+  assert.doesNotMatch(route, /buildRequestConfig/u);
 });
 
 test("schedule activity updates: ingestion time never replaces a missing business date", () => {
@@ -566,6 +839,68 @@ test("schedule ingestion: source uploads use MAIN while engine tables use APP DA
     supabaseUrl: "https://main.example",
     supabaseServiceRoleKey: "main-key"
   });
+});
+
+test("schedule ingestion: Gantt source follows the active project's database settings", () => {
+  const kapaim = scheduleSourceFromProject({
+    database: "app_data",
+    project: {
+      id: PROJECT,
+      name: "סמל - החושלים 15 הרצליה",
+      settings: { gantt_files_table_name: "gantt_files", gantt_tasks_table_name: "gantt_tasks" }
+    }
+  });
+  assert.equal(kapaim.database, "app_data");
+  assert.equal(kapaim.filesTable, "gantt_files");
+  assert.equal(kapaim.tasksTable, "gantt_tasks");
+  assert.equal(kapaim.projectId, PROJECT);
+
+  const main = scheduleSourceFromProject({
+    database: "main",
+    project: {
+      id: "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7",
+      settings: { gantt_files_table_name: "gantt_files_test", gantt_tasks_table_name: "gantt_tasks_test" }
+    }
+  });
+  assert.equal(main.filesTable, "gantt_files_test");
+  assert.equal(main.tasksTable, "gantt_tasks_test");
+
+  const unsafe = scheduleSourceFromProject({
+    database: "app_data",
+    project: { id: PROJECT, settings: { gantt_files_table_name: "gantt_files?select=*" } }
+  });
+  assert.equal(unsafe.filesTable, "gantt_files");
+});
+
+test("schedule ingestion: project end date validates real ISO calendar dates", () => {
+  assert.equal(normalizeProjectEndDate("2025-04-23"), "2025-04-23");
+  assert.equal(normalizeProjectEndDate(""), null);
+  assert.equal(normalizeProjectEndDate(null), null);
+  assert.throws(() => normalizeProjectEndDate("23/04/2025"), /valid ISO date/);
+  assert.throws(() => normalizeProjectEndDate("2025-02-30"), /valid ISO date/);
+});
+
+test("schedule ingestion: saving project end date preserves the remaining project settings", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    const body = options.method === "PATCH"
+      ? [{ id: PROJECT, name: "כפיים", is_active: true, settings: JSON.parse(options.body).settings }]
+      : [{ id: PROJECT, name: "כפיים", is_active: true, settings: { visible_pages: ["schedule"], gantt_files_table_name: "gantt_files" } }];
+    return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const result = await saveScheduleProjectEndDate({
+    projectId: PROJECT,
+    projectEndDate: "2025-04-23",
+    config: { contentSource: { supabaseUrl: "https://app-data.example", supabaseServiceRoleKey: "service-key" } },
+    fetchImpl
+  });
+  assert.equal(result.projectEndDate, "2025-04-23");
+  const patchRequest = requests.find(({ options }) => options.method === "PATCH");
+  const savedSettings = JSON.parse(patchRequest.options.body).settings;
+  assert.deepEqual(savedSettings.visible_pages, ["schedule"]);
+  assert.equal(savedSettings.gantt_files_table_name, "gantt_files");
+  assert.equal(savedSettings.schedule_project_end_date, "2025-04-23");
 });
 
 // ─── orchestrator: pure parts only ───────────────────────────────────────────

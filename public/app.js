@@ -1115,7 +1115,7 @@ function activateTab(tabId, pushHistory = true, options = {}) {
 window.__bidocActivateTab = activateTab;
 window.__bidocSetWorkflowFromReact = (result = {}) => {
   state.lastWorkflow = result.workflowLog || null;
-  state.currentWorkflowMessageId = result.runId || null;
+  state.currentWorkflowMessageId = result.workflowRunId || result.runId || null;
   if (state.lastWorkflow) renderWorkflow(state.lastWorkflow);
   loadRunHistory().catch(() => {});
 };
@@ -6811,6 +6811,8 @@ function renderRunHistoryStrip(runs) {
     const msg = (run.user_message || "").slice(0, 60);
     const kindLabel = run.kind === "link_agent"
       ? "סוכן הקשרים"
+      : run.kind === "schedule_activity_assignment"
+        ? "סוכן שיוך לו״ז"
       : run.kind === "project_insights_analysis"
         ? "דוח תובנות"
         : run.kind === "data_query"
