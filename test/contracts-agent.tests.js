@@ -153,6 +153,15 @@ import {
   reviewContractsSemanticRelationship
 } from "../src/contracts/semanticRelationshipReview.js";
 import {
+  CONTRACTS_RELATIONSHIP_AUTO_REVIEW_AGENT_VERSION,
+  CONTRACTS_RELATIONSHIP_AUTO_REVIEW_MIGRATION_VERSION,
+  CONTRACTS_RELATIONSHIP_AUTO_REVIEW_POLICY_VERSION,
+  autoReviewContractsSemanticRelationships,
+  buildContractsSemanticAutoReviewPlan,
+  loadContractsRelationshipAutoReviewStatus,
+  parseContractsRelationshipAutoReviewRequest
+} from "../src/contracts/semanticRelationshipAutoReview.js";
+import {
   CONTRACTS_DECISIONS_R4_2B_AGENT_VERSION,
   CONTRACTS_DECISIONS_R4_2B_MODEL_SCHEMA_VERSION,
   CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
@@ -170,6 +179,15 @@ import {
   reviewContractsDecision
 } from "../src/contracts/decisionReview.js";
 import {
+  CONTRACTS_DECISION_AUTO_REVIEW_EVIDENCE_SCHEMA_VERSION,
+  CONTRACTS_DECISION_AUTO_REVIEW_MIGRATION_VERSION,
+  CONTRACTS_DECISION_AUTO_REVIEW_POLICY_VERSION,
+  CONTRACTS_DECISION_AUTO_REVIEW_VERIFIER_SCHEMA_VERSION,
+  analyzeContractsDecisionAutoReview,
+  buildContractsDecisionDeterministicReview,
+  parseContractsDecisionAutoReviewRequest
+} from "../src/contracts/decisionAutoReview.js";
+import {
   CONTRACTS_DECISION_LINEAGE_AGENT_VERSION,
   CONTRACTS_DECISION_LINEAGE_MIGRATION_VERSION,
   CONTRACTS_DECISION_LINEAGE_POLICY_VERSION,
@@ -182,9 +200,12 @@ import {
   CONTRACTS_INDICATOR_HANDOFF_AGENT_VERSION,
   CONTRACTS_INDICATOR_HANDOFF_MIGRATION_VERSION,
   CONTRACTS_INDICATOR_HANDOFF_POLICY_VERSION,
+  CONTRACTS_INDICATOR_HANDOFF_SOURCE_RPC,
+  CONTRACTS_INDICATOR_HANDOFF_SOURCE_SCHEMA_VERSION,
   buildContractsIndicatorHandoff,
   contractsIndicatorHandoffApproved,
-  loadContractsIndicatorHandoff
+  loadContractsIndicatorHandoff,
+  loadContractsIndicatorProductSource
 } from "../src/contracts/indicatorHandoff.js";
 import {
   CONTRACT_SOURCE_OBJECT_RPC,
@@ -5287,11 +5308,392 @@ export function registerContractsAgentTests(test) {
     assert.match(route, /getSuperadminSession\(req\)/u);
     assert.match(route, /reviewerId:\s*reviewer\.sub/u);
     assert.doesNotMatch(route, /runSchedule|submitContractPromotion|buildRequestConfig/u);
-    assert.match(page, /R4\.2A · סקירה אנושית שמורה/u);
+    assert.match(page, /R4\.2A \+ R4\.2A\.1 · סקירה שמורה ואישור אוטומטי בטוח/u);
     assert.match(page, /אשר קשר/u);
     assert.match(page, /דחה קשר/u);
     assert.match(page, /תקן סוג קשר או כיוון/u);
     assert.match(page, /ללא יצירת החלטות · ללא הכרעה בסתירות/u);
+  });
+
+  test("contracts R4.2A.1 plans only high-confidence model agreements and fails mismatches to human review", () => {
+    const relationship = ({
+      relationshipId,
+      relationshipType = "supports_same_decision",
+      confidence = 0.98,
+      classifierConfidence = 0.98,
+      verificationConfidence = 0.99,
+      sourceExcerpt = "הקבלן ישלים את העבודה בהתאם להוראות המפקח.",
+      targetExcerpt = "הקבלן יבצע את העבודה בהתאם להוראות המפקח."
+    }) => ({
+      relationshipId,
+      relationshipType,
+      confidence,
+      origin: "model",
+      reviewStatus: "proposed",
+      revision: 1,
+      sourceClauseKey: "3.1",
+      targetClauseKey: "3.2",
+      evidence: {
+        rationaleHe: "שני הסעיפים מתארים אותה חובת ביצוע חוזית.",
+        excerpts: [{ excerpt: sourceExcerpt }, { excerpt: targetExcerpt }],
+        signals: {
+          schemaVersion: "contracts-relationship-signals.r4.2a.v1",
+          classifierConfidence,
+          verificationConfidence,
+          verificationSchemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION,
+          retrieval: { sameSection: true, explicitReference: false }
+        }
+      }
+    });
+    const eligibleId = "10000000-0000-4000-8000-000000000001";
+    const mismatchId = "10000000-0000-4000-8000-000000000002";
+    const duplicateId = "10000000-0000-4000-8000-000000000003";
+    const lowConfidenceId = "10000000-0000-4000-8000-000000000004";
+    const plan = buildContractsSemanticAutoReviewPlan({
+      relationshipReview: {
+        metrics: { proposedCount: 4, decisionCount: 0, scheduleWriteCount: 0 },
+        items: [
+          relationship({ relationshipId: eligibleId }),
+          relationship({
+            relationshipId: mismatchId,
+            sourceExcerpt: "פגמים דחופים יתוקנו מידית.",
+            targetExcerpt: "פגמים אחרים יתוקנו במועד שיקבע המפקח, לא בהכרח מידית."
+          }),
+          relationship({ relationshipId: duplicateId, relationshipType: "duplicates" }),
+          relationship({ relationshipId: lowConfidenceId, confidence: 0.9, classifierConfidence: 0.9 })
+        ]
+      }
+    });
+
+    assert.equal(plan.agentVersion, CONTRACTS_RELATIONSHIP_AUTO_REVIEW_AGENT_VERSION);
+    assert.equal(plan.policyVersion, CONTRACTS_RELATIONSHIP_AUTO_REVIEW_POLICY_VERSION);
+    assert.equal(plan.metrics.eligibleCount, 1);
+    assert.equal(plan.metrics.humanReviewRequiredCount, 3);
+    assert.equal(plan.metrics.scheduleWriteCount, 0);
+    assert.equal(plan.candidates.find((item) => item.relationshipId === eligibleId).outcome, "auto_approve");
+    assert.deepEqual(
+      plan.candidates.find((item) => item.relationshipId === mismatchId).blockers,
+      ["trigger_mismatch"]
+    );
+    assert.match(
+      plan.candidates.find((item) => item.relationshipId === duplicateId).blockers.join(" "),
+      /relationship_type_requires_human_review/u
+    );
+    assert.match(
+      plan.candidates.find((item) => item.relationshipId === lowConfidenceId).blockers.join(" "),
+      /confidence_below_threshold/u
+    );
+    assert.throws(
+      () => parseContractsRelationshipAutoReviewRequest({ minimumConfidence: 0.5 }),
+      (error) => error.code === "contracts_relationship_auto_review_request_invalid"
+    );
+  });
+
+  test("contracts R4.2A.1 sends only server-planned eligible relationships to one atomic service-role RPC", async () => {
+    const eligibleId = "20000000-0000-4000-8000-000000000001";
+    const blockedId = "20000000-0000-4000-8000-000000000002";
+    const item = (relationshipId, relationshipType = "depends_on", reviewStatus = "proposed", revision = 1) => ({
+      relationshipId,
+      relationshipType,
+      confidence: 0.98,
+      origin: "model",
+      reviewStatus,
+      revision,
+      sourceClauseKey: "8.5",
+      targetClauseKey: "8.4",
+      evidence: {
+        rationaleHe: "הסעד תלוי בכך שהקבלן לא תיקן את הליקוי במועד.",
+        excerpts: [{ excerpt: "המזמין רשאי לתקן אם הקבלן לא תיקן." }, { excerpt: "הקבלן חייב לתקן את הליקוי." }],
+        signals: {
+          schemaVersion: "contracts-relationship-signals.r4.2a.v1",
+          classifierConfidence: 0.98,
+          verificationConfidence: 1,
+          verificationSchemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION,
+          retrieval: { sameSection: true, explicitReference: false }
+        }
+      }
+    });
+    const projection = ({ final = false } = {}) => ({
+      agentVersion: CONTRACTS_RELATIONSHIP_REVIEW_AGENT_VERSION,
+      relationshipPolicyVersion: "contracts-relationships-semantic.r4.1.v2",
+      migrationVersion: CONTRACTS_RELATIONSHIP_REVIEW_MIGRATION_VERSION,
+      scope: "verified_semantic_proposals_and_human_review",
+      workspace: { workspaceId: MAPPING_PROJECT_LINK_ID },
+      metrics: {
+        currentRelationshipCount: 2,
+        proposedCount: final ? 1 : 2,
+        approvedCount: final ? 1 : 0,
+        decisionCount: 0,
+        scheduleWriteCount: 0
+      },
+      items: final
+        ? [item(blockedId, "duplicates"), {
+            ...item(eligibleId, "depends_on", "approved", 2),
+            evidence: {
+              ...item(eligibleId).evidence,
+              signals: {
+                ...item(eligibleId).evidence.signals,
+                autoReview: { mode: "model_auto_approval", policyVersion: CONTRACTS_RELATIONSHIP_AUTO_REVIEW_POLICY_VERSION }
+              }
+            }
+          }]
+        : [item(eligibleId), item(blockedId, "duplicates")],
+      gates: {
+        proposalPersistenceEnabled: true,
+        humanReviewEnabled: true,
+        decisionCreationEnabled: false,
+        conflictResolutionEnabled: false,
+        scheduleWritesEnabled: false
+      }
+    });
+    const calls = [];
+    let reviewReads = 0;
+    const fetchImpl = async (url, options) => {
+      const body = options?.body ? JSON.parse(options.body) : {};
+      calls.push({ url, body });
+      if (url.endsWith("/bidoc_contracts_relationship_auto_review_status_r4_2a1")) {
+        return new Response(JSON.stringify({
+          agentVersion: CONTRACTS_RELATIONSHIP_AUTO_REVIEW_AGENT_VERSION,
+          policyVersion: CONTRACTS_RELATIONSHIP_AUTO_REVIEW_POLICY_VERSION,
+          migrationVersion: CONTRACTS_RELATIONSHIP_AUTO_REVIEW_MIGRATION_VERSION,
+          scope: "high_confidence_model_agreement_with_human_fallback",
+          minimumConfidence: 0.95,
+          autoApproveEnabled: true,
+          autoRejectEnabled: false,
+          correctionEnabled: false,
+          humanFallbackEnabled: true,
+          decisionCreationEnabled: false,
+          scheduleWritesEnabled: false
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.endsWith("/bidoc_contracts_get_relationship_review_r4_2a")) {
+        reviewReads += 1;
+        return new Response(JSON.stringify(projection({ final: reviewReads > 1 })), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify({
+        ...projection(),
+        autoReview: { approvedCount: 1, atomic: true },
+        metrics: { ...projection().metrics, scheduleWriteCount: 0 }
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const config = {
+      contentSource: {
+        supabaseUrl: "https://example.supabase.co",
+        supabaseServiceRoleKey: "server-owned-test-key"
+      }
+    };
+
+    const status = await loadContractsRelationshipAutoReviewStatus({
+      config,
+      env: { CONTRACTS_RELATIONSHIPS_R4_2A_APPROVED: "TRUE" },
+      fetchImpl
+    });
+    assert.equal(status.ready, true);
+    const result = await autoReviewContractsSemanticRelationships({
+      config,
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      reviewerId: MAPPING_REVIEWER_ID,
+      body: {},
+      env: { CONTRACTS_RELATIONSHIPS_R4_2A_APPROVED: "TRUE" },
+      fetchImpl
+    });
+    const applyCall = calls.find((call) => call.url.endsWith("/bidoc_contracts_auto_review_semantic_relationships_r4_2a1"));
+    assert.equal(result.autoReview.approvedCount, 1);
+    assert.equal(result.review.metrics.proposedCount, 1);
+    assert.equal(applyCall.body.p_requested_by_reviewer_id, MAPPING_REVIEWER_ID);
+    assert.equal(applyCall.body.p_items.length, 1);
+    assert.equal(applyCall.body.p_items[0].relationshipId, eligibleId);
+    assert.equal(Object.hasOwn(applyCall.body, "p_threshold"), false);
+    assert.equal(JSON.stringify(applyCall.body).includes(blockedId), false);
+  });
+
+  test("contracts R4.2A.1 migration and route preserve the three-table and Indicator boundaries", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260821193107_contracts_relationship_auto_review_r4_2a1.sql", import.meta.url),
+      "utf8"
+    );
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+
+    assert.match(migration, /security invoker/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.match(migration, /model_auto_approval/u);
+    assert.match(migration, /p_items/u);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+private\.contracts\s*\(/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+public\.schedule_/iu);
+    assert.match(server, /semantic-auto-review/u);
+    assert.match(server, /reviewerId:\s*reviewer\.sub/u);
+    assert.match(page, /אשר אוטומטית קשרים בטוחים/u);
+    assert.match(page, /אושר אוטומטית בידי המודל/u);
+  });
+
+  test("contracts R4.2B.1 accepts no browser policy overrides and approves only independent high-confidence agreement", async () => {
+    assert.deepEqual(parseContractsDecisionAutoReviewRequest({}), {});
+    assert.throws(
+      () => parseContractsDecisionAutoReviewRequest({ minimumConfidence: 0.5 }),
+      (error) => error.code === "contracts_decision_auto_review_request_invalid"
+    );
+    const safeId = "30000000-0000-4000-8000-000000000001";
+    const deadlineId = "30000000-0000-4000-8000-000000000002";
+    const decision = ({ decisionId, excerpt, scheduleImpact = "no", temporalKind = "none" }) => ({
+      decisionId,
+      decisionKey: `contract:test:${decisionId}:normalized`,
+      revision: 1,
+      reviewStatus: "proposed",
+      titleHe: "התחייבות חוזית",
+      summaryHe: "הקבלן יבצע את ההתחייבות בהתאם להוראות ההסכם.",
+      decisionTextHe: "הקבלן יבצע את ההתחייבות בהתאם להוראות ההסכם.",
+      tags: ["ביצוע"],
+      responsibleParty: "הקבלן",
+      beneficiary: null,
+      decisionCategory: "scope_and_execution",
+      conflictStatus: "none",
+      scheduleImpact,
+      temporalKind,
+      contractDate: null,
+      triggerKind: null,
+      triggerDescriptionHe: null,
+      offsetValue: null,
+      offsetUnit: null,
+      calendarSemantics: "not_applicable",
+      recurring: false,
+      sourceEvidence: [{
+        clauseId: "40000000-0000-4000-8000-000000000001",
+        excerpt
+      }]
+    });
+    const safe = decision({
+      decisionId: safeId,
+      excerpt: "הקבלן יבצע את ההתחייבות בהתאם להוראות ההסכם."
+    });
+    const missedDeadline = decision({
+      decisionId: deadlineId,
+      excerpt: "הקבלן יבצע את ההתחייבות בתוך 14 ימים ממועד צו התחלת העבודה.",
+      scheduleImpact: "unknown"
+    });
+    assert.match(
+      buildContractsDecisionDeterministicReview(missedDeadline).blockers.join(" "),
+      /temporal_classification_missing/u
+    );
+    const modelRequests = [];
+    const result = await analyzeContractsDecisionAutoReview({
+      decisionReview: {
+        metrics: { proposedCount: 2, scheduleWriteCount: 0 },
+        items: [safe, missedDeadline]
+      },
+      config: {
+        openRouterApiKey: "server-owned-test-key",
+        models: { main: "test/contracts-r4.2b1-main" },
+        ai: { main: { timeoutMs: 5_000 } }
+      },
+      chatComplete: async ({ model, messages, responseFormat }) => {
+        assert.equal(model, "test/contracts-r4.2b1-main");
+        assert.equal(responseFormat.json_schema.name, "contracts_decision_auto_review_batch");
+        const request = JSON.parse(messages[1].content);
+        modelRequests.push(request);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_DECISION_AUTO_REVIEW_VERIFIER_SCHEMA_VERSION,
+          items: request.candidates.map((candidate) => ({
+            decisionId: candidate.decisionId,
+            verdict: "approve",
+            confidence: 0.99,
+            reasonCode: "accepted",
+            rationaleHe: "ההחלטה נתמכת במלואה בראיית המקור ללא פערים."
+          }))
+        });
+      }
+    });
+    assert.deepEqual(modelRequests.flatMap((request) => request.candidates.map((item) => item.decisionId)), [safeId]);
+    assert.equal(result.metrics.inputPendingCount, 2);
+    assert.equal(result.metrics.eligibleCount, 1);
+    assert.equal(result.metrics.humanReviewRequiredCount, 1);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+    assert.equal(result.gates.autoRejectEnabled, false);
+    assert.equal(result.gates.correctionEnabled, false);
+    assert.equal(result.gates.indicatorHandoffEnabled, false);
+    assert.equal(result.candidates.find((item) => item.decisionId === safeId).outcome, "auto_approve");
+    assert.equal(result.candidates.find((item) => item.decisionId === safeId).policyEvidence.schemaVersion, CONTRACTS_DECISION_AUTO_REVIEW_EVIDENCE_SCHEMA_VERSION);
+    assert.equal(result.candidates.find((item) => item.decisionId === deadlineId).outcome, "human_review_required");
+  });
+
+  test("contracts R4.2B.1 verifier failures fail closed without rejecting or correcting decisions", async () => {
+    const decisionId = "30000000-0000-4000-8000-000000000003";
+    let calls = 0;
+    const result = await analyzeContractsDecisionAutoReview({
+      decisionReview: {
+        metrics: { proposedCount: 1, scheduleWriteCount: 0 },
+        items: [{
+          decisionId,
+          decisionKey: "contract:test:failure:normalized",
+          revision: 1,
+          reviewStatus: "proposed",
+          titleHe: "התחייבות חוזית",
+          summaryHe: "הקבלן יבצע את ההתחייבות בהתאם להוראות ההסכם.",
+          decisionTextHe: "הקבלן יבצע את ההתחייבות בהתאם להוראות ההסכם.",
+          tags: ["ביצוע"],
+          responsibleParty: "הקבלן",
+          beneficiary: null,
+          decisionCategory: "scope_and_execution",
+          conflictStatus: "none",
+          scheduleImpact: "no",
+          temporalKind: "none",
+          contractDate: null,
+          triggerKind: null,
+          triggerDescriptionHe: null,
+          offsetValue: null,
+          offsetUnit: null,
+          calendarSemantics: "not_applicable",
+          recurring: false,
+          sourceEvidence: [{ excerpt: "הקבלן יבצע את ההתחייבות בהתאם להוראות ההסכם." }]
+        }]
+      },
+      config: {
+        openRouterApiKey: "server-owned-test-key",
+        models: { main: "test/contracts-r4.2b1-main" }
+      },
+      logger: { warn() {} },
+      chatComplete: async () => {
+        calls += 1;
+        throw new Error("provider unavailable");
+      }
+    });
+    assert.equal(calls, 2, "one bounded retry is allowed");
+    assert.equal(result.metrics.failedBatchCount, 1);
+    assert.equal(result.metrics.eligibleCount, 0);
+    assert.equal(result.metrics.humanReviewRequiredCount, 1);
+    assert.match(result.candidates[0].blockers.join(" "), /verifier_batch_failed/u);
+    assert.equal(result.gates.autoRejectEnabled, false);
+    assert.equal(result.gates.correctionEnabled, false);
+    assert.equal(result.metrics.scheduleWriteCount, 0);
+  });
+
+  test("contracts R4.2B.1 migration and routes preserve append-only, Indicator, and Schedule boundaries", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260821223832_contracts_decision_auto_review_r4_2b1.sql", import.meta.url),
+      "utf8"
+    );
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+    assert.match(migration, /security invoker/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.match(migration, /grant execute[\s\S]*to service_role/iu);
+    assert.match(migration, /bidoc_contracts_append_decision_r1/u);
+    assert.match(migration, /r4\.2b1_automatic_decision_review/u);
+    assert.match(migration, /'origin', 'system'/u);
+    assert.doesNotMatch(migration, /bidoc_contracts_review_decision_r(?:4_2b|6)/u);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?schedule_/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+private\.contracts\b/iu);
+    assert.match(server, /contractsDecisionAutoReviewMatch/u);
+    assert.match(server, /\/auto-review\$\/iu/u);
+    assert.match(server, /reviewerId:\s*reviewer\.sub/u);
+    assert.match(page, /בדוק ואשר אוטומטית החלטות בטוחות/u);
+    assert.match(page, /98% ומעלה/u);
+    assert.equal(CONTRACTS_DECISION_AUTO_REVIEW_MIGRATION_VERSION, "20260821223832");
+    assert.equal(CONTRACTS_DECISION_AUTO_REVIEW_POLICY_VERSION, "contracts-decisions-auto-review.r4.2b1.v1");
   });
 
   test("contracts R4.2B groups only operative clauses after every relationship review is complete", () => {
@@ -6359,8 +6761,20 @@ export function registerContractsAgentTests(test) {
     );
     const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
     const route = server.slice(
-      server.indexOf("R5 exposes current reviewed contractual decisions"),
+      server.indexOf("R6 exposes the clean Contracts product view"),
       server.indexOf("const contractsDecisionLineageWorkspaceMatch")
+    );
+    const productHandoff = fs.readFileSync(
+      new URL("../supabase/migrations/20260822113820_contracts_r6_indicator_product_handoff.sql", import.meta.url),
+      "utf8"
+    );
+    const productHandoffAcceptance = fs.readFileSync(
+      new URL("../supabase/tests/contracts-r6-indicator-product-handoff.sql", import.meta.url),
+      "utf8"
+    );
+    const productHandoffRollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_r6_indicator_product_handoff.rollback.sql", import.meta.url),
+      "utf8"
     );
     const page = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
     assert.equal(CONTRACTS_SCHEDULE_PROJECTION_MIGRATION_VERSION, "20260817213000");
@@ -6386,6 +6800,17 @@ export function registerContractsAgentTests(test) {
     assert.doesNotMatch(correction, /v_source\.schedule_project_id/iu);
     assert.doesNotMatch(correction, /v_source\.projection_status/iu);
     assert.doesNotMatch(correction, /(?:insert\s+into|update|delete\s+from)\s+public\.schedule_/iu);
+    assert.match(productHandoff, /private\.contracts_product_r6_v1/iu);
+    assert.match(productHandoff, /bidoc_contracts_r6_indicator_product_handoff_source_v1/iu);
+    assert.match(productHandoff, /security invoker/iu);
+    assert.match(productHandoff, /current_user <> 'service_role'/iu);
+    assert.match(productHandoff, /grant execute[\s\S]*to service_role/iu);
+    assert.doesNotMatch(productHandoff, /security definer/iu);
+    assert.doesNotMatch(productHandoff, /(?:insert\s+into|update|delete\s+from)\s+(?:private|public)\./iu);
+    assert.doesNotMatch(productHandoff, /(?:private|public)\.schedule_/iu);
+    assert.match(productHandoffAcceptance, /productViewSource/iu);
+    assert.match(productHandoffAcceptance, /embeddingReadyCount/iu);
+    assert.match(productHandoffRollback, /drop function if exists public\.bidoc_contracts_r6_indicator_product_handoff_source_v1/iu);
     assert.match(route, /indicator-handoff\/status/u);
     assert.match(route, /indicator-handoff/u);
     assert.doesNotMatch(route, /req\.method === "POST"/u);
@@ -6465,42 +6890,62 @@ export function registerContractsAgentTests(test) {
     assert.equal(result.items.some((entry) => Object.hasOwn(entry, "shadowRow")), false);
     assert.equal(result.metrics.modelCallCount, 0);
     assert.equal(result.metrics.contractTruthWriteCount, 0);
+    assert.equal(result.metrics.indicatorWriteCount, 0);
     assert.equal(result.metrics.scheduleWriteCount, 0);
+    assert.equal(result.gates.productViewSource, true);
+    assert.equal(result.items.some((entry) => Object.hasOwn(entry, "scheduleImpact")), false);
+    assert.equal(result.items.some((entry) => Object.hasOwn(entry, "decisionCategory")), false);
+    assert.equal(result.items.some((entry) => Object.hasOwn(entry, "temporalKind")), false);
     assert.equal(result.operationalWritesPerformed, false);
   });
 
   test("contracts R5 handoff loader accepts the approved flag and the legacy R5 activation alias", async () => {
     const projection = {
+      schemaVersion: CONTRACTS_INDICATOR_HANDOFF_SOURCE_SCHEMA_VERSION,
+      migrationVersion: CONTRACTS_INDICATOR_HANDOFF_MIGRATION_VERSION,
+      sourceView: "private.contracts_product_r6_v1",
       workspace: {
         workspaceId: MAPPING_PROJECT_LINK_ID,
-        sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+        projectId: MAPPING_SOURCE_PROJECT_ID,
         documentVersionId: `sha256:${"b".repeat(64)}`,
         parserGenerationId: "contracts-parser.fixture"
       },
+      metrics: {
+        productDecisionCount: 1,
+        embeddingReadyCount: 1,
+        modelCallCount: 0,
+        contractTruthWriteCount: 0,
+        indicatorWriteCount: 0,
+        scheduleWriteCount: 0
+      },
+      gates: { productViewSource: true, readOnly: true },
       items: [{
         decisionId: "88888888-8888-4888-8888-888888888888",
+        projectId: MAPPING_SOURCE_PROJECT_ID,
+        sourceDocumentId: "99999999-9999-4999-8999-999999999999",
         decisionKey: "contract:fixture:handoff-loader",
         revision: 1,
         titleHe: "החלטה חוזית למסירה",
         summaryHe: "החלטה חוזית שנבדקה ומוכנה למסירה לסוכן Indicator.",
-        decisionTextHe: "החלטה חוזית שנבדקה מול ראיית המקור ונמצאה רלוונטית.",
-        tags: [],
+        content: "החלטה חוזית שנבדקה מול ראיית המקור ונמצאה רלוונטית.",
+        hashtags: [],
         sourceEvidence: [{
           clauseId: "99999999-9999-4999-8999-999999999999",
           clauseKey: "3.1",
           pageStart: 2,
           excerpt: "ראיית מקור חוזית."
         }],
-        decisionCategory: "other",
-        reviewStatus: "approved",
+        categoryHe: "אחר",
+        reviewStatus: "מאושר",
+        reviewStatusCode: "approved",
         conflictStatus: "none",
-        scheduleImpact: "yes",
-        temporalKind: "none",
-        calendarSemantics: "unknown",
-        recurring: false
+        indicatorSuitability: "מתאים",
+        timing: null,
+        embeddingReady: true,
+        embeddingDimensions: 3072
       }]
     };
-    const loadDecisionProjectionImpl = async ({ workspaceId }) => {
+    const loadProductSourceImpl = async ({ workspaceId }) => {
       assert.equal(workspaceId, MAPPING_PROJECT_LINK_ID);
       return projection;
     };
@@ -6508,19 +6953,110 @@ export function registerContractsAgentTests(test) {
       config: {},
       workspaceId: MAPPING_PROJECT_LINK_ID,
       env: { CONTRACTS_INDICATOR_HANDOFF_R5_APPROVED: "TRUE" },
-      loadDecisionProjectionImpl
+      loadProductSourceImpl
     });
     const legacyFlag = await loadContractsIndicatorHandoff({
       config: {},
       workspaceId: MAPPING_PROJECT_LINK_ID,
       env: { CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED: "TRUE" },
-      loadDecisionProjectionImpl
+      loadProductSourceImpl
     });
     assert.equal(currentFlag.metrics.suitableCount, 1);
     assert.equal(legacyFlag.metrics.suitableCount, 1);
     assert.equal(contractsIndicatorHandoffApproved({ CONTRACTS_INDICATOR_HANDOFF_R5_APPROVED: "TRUE" }), true);
     assert.equal(contractsIndicatorHandoffApproved({ CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED: "TRUE" }), true);
     assert.equal(contractsIndicatorHandoffApproved({}), false);
+  });
+
+  test("contracts R6 Indicator product source uses the service RPC and rejects legacy handoff fields", async () => {
+    const calls = [];
+    const source = {
+      schemaVersion: CONTRACTS_INDICATOR_HANDOFF_SOURCE_SCHEMA_VERSION,
+      migrationVersion: CONTRACTS_INDICATOR_HANDOFF_MIGRATION_VERSION,
+      sourceView: "private.contracts_product_r6_v1",
+      workspace: {
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        projectId: MAPPING_SOURCE_PROJECT_ID,
+        documentVersionId: `sha256:${"c".repeat(64)}`,
+        parserGenerationId: "contracts-parser.fixture"
+      },
+      metrics: {
+        productDecisionCount: 1,
+        embeddingReadyCount: 1,
+        modelCallCount: 0,
+        contractTruthWriteCount: 0,
+        indicatorWriteCount: 0,
+        scheduleWriteCount: 0
+      },
+      gates: { productViewSource: true, readOnly: true },
+      items: [{
+        decisionId: "88888888-8888-4888-8888-888888888888",
+        projectId: MAPPING_SOURCE_PROJECT_ID,
+        sourceDocumentId: "99999999-9999-4999-8999-999999999999",
+        decisionKey: "contract:fixture:product-source",
+        revision: 1,
+        titleHe: "החלטה חוזית למסירה",
+        summaryHe: "החלטה חוזית מלאה למסירה לסוכן Indicator.",
+        content: "הקבלן נדרש להשלים את החובה החוזית בהתאם לסעיף המקור.",
+        hashtags: ["לוח זמנים"],
+        sourceEvidence: [{
+          clauseId: "99999999-9999-4999-8999-999999999999",
+          clauseKey: "3.1",
+          pageStart: 2,
+          pageEnd: 2,
+          excerpt: "ראיית מקור חוזית מלאה."
+        }],
+        categoryHe: "תחילה והשלמה",
+        indicatorSuitability: "מתאים",
+        timing: null,
+        triggerHe: null,
+        triggerDescriptionHe: null,
+        reviewStatus: "מאושר",
+        reviewStatusCode: "approved",
+        conflictStatus: "none",
+        embeddingReady: true,
+        embeddingDimensions: 3072
+      }]
+    };
+    const fetchImpl = async (url, options) => {
+      calls.push({ url, method: options.method, body: JSON.parse(options.body) });
+      return new Response(JSON.stringify(source), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    };
+    const result = await loadContractsIndicatorProductSource({
+      config: {
+        contentSource: {
+          supabaseUrl: "https://example.supabase.co",
+          supabaseServiceRoleKey: "server-owned-test-key"
+        }
+      },
+      workspaceId: MAPPING_PROJECT_LINK_ID,
+      fetchImpl
+    });
+    assert.equal(result.items[0].indicatorSuitability, "מתאים");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    assert.match(calls[0].url, new RegExp(`${CONTRACTS_INDICATOR_HANDOFF_SOURCE_RPC}$`, "u"));
+    assert.deepEqual(calls[0].body, { p_workspace_id: MAPPING_PROJECT_LINK_ID });
+
+    await assert.rejects(
+      () => loadContractsIndicatorProductSource({
+        config: {
+          contentSource: {
+            supabaseUrl: "https://example.supabase.co",
+            supabaseServiceRoleKey: "server-owned-test-key"
+          }
+        },
+        workspaceId: MAPPING_PROJECT_LINK_ID,
+        fetchImpl: async () => new Response(JSON.stringify({
+          ...source,
+          items: [{ ...source.items[0], scheduleImpact: "yes" }]
+        }), { status: 200, headers: { "Content-Type": "application/json" } })
+      }),
+      (error) => error.code === "contracts_indicator_handoff_source_invalid"
+    );
   });
 
   test("contracts R4.2B migration, routes, and Hebrew UI are append-only and Schedule-independent", () => {
@@ -6576,6 +7112,75 @@ export function registerContractsAgentTests(test) {
     assert.match(migration, /current_user <> 'service_role'/u);
     assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated/u);
     assert.doesNotMatch(migration, /security definer|insert\s+into\s+public\.schedule|update\s+public\.schedule/iu);
+  });
+
+  test("contracts R6 corrective migration preserves append-only decisions and enables narrow embedding enrichment", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260821202336_contracts_decision_append_only_r6_fix.sql", import.meta.url),
+      "utf8"
+    );
+    const sqlTest = fs.readFileSync(
+      new URL("../supabase/tests/contracts-r6-decision-append-only-fix.sql", import.meta.url),
+      "utf8"
+    );
+    assert.match(migration, /^begin;/mu);
+    assert.match(migration, /commit;\s*$/u);
+    assert.match(migration, /indicator_suitability/iu);
+    assert.match(migration, /when 'yes' then 'מתאים'/u);
+    assert.match(migration, /when 'no' then 'לא_מתאים'/u);
+    assert.match(migration, /grant update \(embedding, embedding_input_sha256\)/iu);
+    assert.match(migration, /to_jsonb\(new\) - array\['embedding', 'embedding_input_sha256'\]/iu);
+    assert.match(migration, /public\.vector_dims\(new\.embedding\) = 3072/iu);
+    assert.match(migration, /businessFieldUpdatesEnabled', false/u);
+    assert.match(migration, /scheduleWritesEnabled', false/u);
+    assert.doesNotMatch(migration, /grant\s+update\s+on\s+(?:table\s+)?private\.contracts/iu);
+    assert.doesNotMatch(migration, /security definer|(?:insert\s+into|update|delete\s+from)\s+public\.schedule/iu);
+    assert.match(sqlTest, /has_table_privilege\('service_role', 'private\.contracts', 'UPDATE'\)/u);
+    assert.match(sqlTest, /has_column_privilege\('service_role', 'private\.contracts', 'embedding', 'UPDATE'\)/u);
+  });
+
+  test("contracts R6 Phase 4A projects the CTO-approved shape without deleting legacy data", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260822003639_contracts_r6_phase4a_target_projection.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_r6_phase4a_target_projection.rollback.sql", import.meta.url),
+      "utf8"
+    );
+    const acceptance = fs.readFileSync(
+      new URL("../supabase/tests/contracts-r6-phase4a-target-projection.sql", import.meta.url),
+      "utf8"
+    );
+
+    assert.match(migration, /add column if not exists project_id uuid[\s\S]*add column if not exists attachment_id text[\s\S]*add column if not exists chunk_total integer/iu);
+    assert.match(migration, /add column if not exists source_document_id uuid[\s\S]*add column if not exists content text[\s\S]*add column if not exists category_he text[\s\S]*add column if not exists trigger_he text/iu);
+    assert.match(migration, /when 'scope_and_execution' then 'היקף וביצוע'/u);
+    assert.match(migration, /when 'payment_and_commercial' then 'תשלום ומסחר'/u);
+    assert.match(migration, /when 'proposed' then 'מוצע'/u);
+    assert.match(migration, /when 'superseded' then 'הוחלף'/u);
+    assert.match(migration, /workspace\.storage_bucket \|\| '\/' \|\| workspace\.storage_object_key/u);
+    assert.match(migration, /private\.bidoc_contracts_approved_hashtags_r6_4a/u);
+    assert.match(migration, /private\.bidoc_contracts_approved_trigger_r6_4a/u);
+    assert.match(migration, /create temporary table bidoc_contracts_documents_r6_4a_baseline/iu);
+    assert.match(migration, /baseline\.legacy_row is distinct from current\.legacy_row/iu);
+    assert.match(migration, /create or replace view private\.contracts_documents_product_r6_v1[\s\S]*security_invoker = true/iu);
+    assert.match(migration, /create or replace view private\.contracts_product_r6_v1[\s\S]*security_invoker = true/iu);
+    assert.match(migration, /grant select on table private\.contracts_product_r6_v1 to service_role/iu);
+    assert.match(migration, /'embeddingInputsChanged', false/u);
+    assert.match(migration, /'scheduleWritesEnabled', false/u);
+    assert.match(migration, /'indicatorWritesEnabled', false/u);
+    assert.doesNotMatch(migration, /drop\s+(?:table|column)|delete\s+from|truncate|security\s+definer/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?(?:schedule_|indicator_)/iu);
+
+    assert.match(rollback, /additive target columns and their backfilled values are intentionally[\s\S]*retained/iu);
+    assert.doesNotMatch(rollback, /drop\s+column|delete\s+from|truncate/iu);
+    assert.match(acceptance, /historical_current_decisions_missing_embeddings/u);
+    assert.match(acceptance, /public\.vector_dims\(item\.embedding\) <> 3072/u);
+    assert.match(acceptance, /contracts_documents_embedding_hnsw_r6_idx/u);
+    assert.match(acceptance, /contracts_embedding_hnsw_r6_idx/u);
+    assert.match(acceptance, /has_table_privilege\('anon', 'private\.contracts_product_r6_v1', 'SELECT'\)/u);
+    assert.match(acceptance, /item\.review_status not in \('מוצע', 'מאושר', 'תוקן', 'נדחה', 'לא_פתור', 'הוחלף'\)/u);
   });
 
   test("contracts R3.2 UI exposes saved clause generations and preserves the classic comparison", () => {

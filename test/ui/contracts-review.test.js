@@ -86,7 +86,7 @@ async function openPreparedRejectionReview(page, { applyApproved }) {
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF-1.4\nreview-only-fixture", "utf8")
   });
-  await page.getByRole("button", { name: "הרץ חילוץ יבש" }).click();
+  await page.getByRole("button", { name: "הרץ גם את החילוץ הקלאסי" }).click();
   await expect(page.getByRole("heading", { name: "השלם ומסור את העבודות" })).toBeVisible();
   await page.getByLabel("נימוק החלטה").fill("נדחה זמנית עד לאימות מועד ההתחלה ולוח ימי העבודה.");
   await page.getByLabel("נימוק סקירה כללי").fill("כל המועמדים נדחו לאחר סקירה אנושית מלאה וללא קידום למנוע הלו״ז.");
@@ -122,6 +122,10 @@ test.describe("Contracts review-only workflow", () => {
 const SAVED_WORKSPACE_ID = "88888888-8888-4888-8888-888888888888";
 const SAVED_SCHEDULE_PROJECT_ID = "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5";
 const SAVED_CLAUSE_WORKSPACE_ID = "99999999-9999-4999-8999-999999999999";
+const AUTO_REVIEW_RELATIONSHIP_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const HUMAN_REVIEW_RELATIONSHIP_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const AUTO_REVIEW_DECISION_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const HUMAN_REVIEW_DECISION_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 
 const savedClausePreview = {
   persisted: true,
@@ -160,7 +164,154 @@ const savedClausePreview = {
   }]
 };
 
-async function openSavedClauseWorkspace(page) {
+function semanticReviewItem({
+  relationshipId,
+  relationshipType,
+  reviewStatus = "proposed",
+  revision = 1,
+  autoReview = null
+}) {
+  return {
+    relationshipId,
+    sourceClauseKey: "1.1",
+    targetClauseKey: "1.2",
+    sourcePageStart: 1,
+    sourcePageEnd: 1,
+    targetPageStart: 1,
+    targetPageEnd: 1,
+    sourceSummaryHe: "הקבלן יבצע את העבודות בהתאם להסכם.",
+    targetSummaryHe: "העבודה תבוצע לפי הוראות ההסכם.",
+    relationshipType,
+    origin: "model",
+    reviewStatus,
+    confidence: 0.99,
+    revision,
+    evidence: {
+      rationaleHe: "שני הסעיפים מתארים את אותה חובת ביצוע חוזית.",
+      excerpts: [
+        { clauseId: "clause-source", excerpt: "הקבלן יבצע את העבודות בהתאם להסכם." },
+        { clauseId: "clause-target", excerpt: "העבודה תבוצע לפי הוראות ההסכם." }
+      ],
+      signals: autoReview ? { autoReview } : {}
+    },
+    reviewReason: autoReview ? "המסווג והבודק העצמאי הסכימו והקשר עבר את כל כללי הבטיחות." : null,
+    reviewedAt: autoReview ? "2026-08-21T19:45:00.000Z" : null
+  };
+}
+
+const pendingSemanticReview = {
+  metrics: {
+    currentRelationshipCount: 2,
+    proposedCount: 2,
+    approvedCount: 0,
+    correctedCount: 0,
+    rejectedCount: 0,
+    supersededCount: 0,
+    decisionCount: 0,
+    scheduleWriteCount: 0
+  },
+  items: [
+    semanticReviewItem({
+      relationshipId: AUTO_REVIEW_RELATIONSHIP_ID,
+      relationshipType: "supports_same_decision"
+    }),
+    semanticReviewItem({
+      relationshipId: HUMAN_REVIEW_RELATIONSHIP_ID,
+      relationshipType: "duplicates"
+    })
+  ]
+};
+
+const completedSemanticReview = {
+  metrics: {
+    currentRelationshipCount: 2,
+    proposedCount: 1,
+    approvedCount: 1,
+    correctedCount: 0,
+    rejectedCount: 0,
+    supersededCount: 0,
+    decisionCount: 0,
+    scheduleWriteCount: 0
+  },
+  items: [
+    semanticReviewItem({
+      relationshipId: AUTO_REVIEW_RELATIONSHIP_ID,
+      relationshipType: "supports_same_decision",
+      reviewStatus: "approved",
+      revision: 2,
+      autoReview: {
+        mode: "model_auto_approval",
+        policyVersion: "contracts-relationships-auto-review.r4.2a1.v1"
+      }
+    }),
+    semanticReviewItem({
+      relationshipId: HUMAN_REVIEW_RELATIONSHIP_ID,
+      relationshipType: "duplicates"
+    })
+  ]
+};
+
+function decisionReviewItem(decisionId, reviewStatus = "proposed", revision = 1) {
+  return {
+    decisionId,
+    decisionKey: `contract:test:${decisionId}:normalized`,
+    revision,
+    reviewStatus,
+    titleHe: decisionId === AUTO_REVIEW_DECISION_ID ? "חובת ביצוע מאומתת" : "החלטה הדורשת סקירה",
+    summaryHe: "הקבלן יבצע את התחייבותו בהתאם להוראות ההסכם.",
+    decisionTextHe: "הקבלן יבצע את התחייבותו בהתאם להוראות ההסכם.",
+    tags: ["ביצוע"],
+    responsibleParty: "הקבלן",
+    beneficiary: null,
+    decisionCategory: "scope_and_execution",
+    conflictStatus: "none",
+    scheduleImpact: "no",
+    temporalKind: "none",
+    calendarSemantics: "not_applicable",
+    recurring: false,
+    sourceEvidence: [{
+      clauseId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      pageStart: 1,
+      pageEnd: 1,
+      excerpt: "הקבלן יבצע את התחייבותו בהתאם להוראות ההסכם."
+    }],
+    reviewReason: reviewStatus === "approved"
+      ? "בודק עצמאי אימת בביטחון גבוה שההחלטה מעוגנת במלואה בראיות המקור."
+      : null,
+    reviewedAt: reviewStatus === "approved" ? "2026-08-21T22:45:00.000Z" : null
+  };
+}
+
+function decisionReviewProjection({ completed = false } = {}) {
+  return {
+    workspace: { workspaceId: SAVED_CLAUSE_WORKSPACE_ID },
+    metrics: {
+      pendingRelationshipCount: 0,
+      currentDecisionCount: 2,
+      proposedCount: completed ? 1 : 2,
+      approvedCount: completed ? 1 : 0,
+      correctedCount: 0,
+      rejectedCount: 0,
+      unresolvedCount: 0,
+      scheduleWriteCount: 0
+    },
+    items: [
+      decisionReviewItem(AUTO_REVIEW_DECISION_ID, completed ? "approved" : "proposed", completed ? 2 : 1),
+      decisionReviewItem(HUMAN_REVIEW_DECISION_ID)
+    ],
+    gates: {
+      decisionPersistenceEnabled: true,
+      humanReviewEnabled: true,
+      relationshipReviewComplete: true,
+      conflictWinnerSelectionEnabled: false,
+      scheduleWritesEnabled: false
+    }
+  };
+}
+
+async function openSavedClauseWorkspace(page, { autoReview = false, decisionAutoReview = false } = {}) {
+  const autoReviewRequests = [];
+  const decisionAutoReviewRequests = [];
   await addTestSuperadminSession(page);
   await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
   await page.route(/^https?:\/\/(?!localhost)/, (route) => route.abort("blockedbyclient"));
@@ -186,11 +337,93 @@ async function openSavedClauseWorkspace(page) {
       preview: savedClausePreview
     }
   }));
+  if (autoReview) {
+    await page.route("**/api/contracts/relationships/review/status", (route) => route.fulfill({
+      json: { active: true, ready: true, applyApproved: true, migrationVersion: "20260817114000" }
+    }));
+    await page.route("**/api/contracts/relationships/auto-review/status", (route) => route.fulfill({
+      json: {
+        active: true,
+        ready: true,
+        applyApproved: true,
+        migrationVersion: "20260821193107",
+        policyVersion: "contracts-relationships-auto-review.r4.2a1.v1"
+      }
+    }));
+    await page.route(
+      `**/api/contracts/relationships/workspaces/${SAVED_CLAUSE_WORKSPACE_ID}/semantic-review`,
+      (route) => route.fulfill({ json: pendingSemanticReview })
+    );
+    await page.route(
+      `**/api/contracts/relationships/workspaces/${SAVED_CLAUSE_WORKSPACE_ID}/semantic-auto-review`,
+      async (route) => {
+        autoReviewRequests.push(JSON.parse(route.request().postData() || "{}"));
+        return route.fulfill({
+          json: {
+            autoReview: {
+              approvedCount: 1,
+              humanReviewRequiredCount: 1,
+              decisionCount: 0,
+              scheduleWriteCount: 0
+            },
+            review: completedSemanticReview
+          }
+        });
+      }
+    );
+  }
+  if (decisionAutoReview) {
+    let completed = false;
+    await page.route("**/api/contracts/decisions/status", (route) => route.fulfill({
+      json: { active: true, ready: true, applyApproved: true, modelConfigured: true }
+    }));
+    await page.route("**/api/contracts/decisions/lineage/status", (route) => route.fulfill({
+      json: { active: true, ready: false, applyApproved: false }
+    }));
+    await page.route("**/api/contracts/decisions/auto-review/status", (route) => route.fulfill({
+      json: {
+        active: true,
+        ready: true,
+        applyApproved: true,
+        modelConfigured: true,
+        policyVersion: "contracts-decisions-auto-review.r4.2b1.v1",
+        minimumConfidence: 0.98
+      }
+    }));
+    await page.route(
+      new RegExp(`/api/contracts/decisions/workspaces/${SAVED_CLAUSE_WORKSPACE_ID}$`, "u"),
+      (route) => route.fulfill({ json: decisionReviewProjection({ completed }) })
+    );
+    await page.route(
+      `**/api/contracts/decisions/workspaces/${SAVED_CLAUSE_WORKSPACE_ID}/auto-review`,
+      async (route) => {
+        decisionAutoReviewRequests.push(JSON.parse(route.request().postData() || "{}"));
+        completed = true;
+        return route.fulfill({
+          json: {
+            plan: {
+              metrics: {
+                inputPendingCount: 2,
+                eligibleCount: 1,
+                humanReviewRequiredCount: 1,
+                modelCallCount: 1,
+                failedBatchCount: 0,
+                scheduleWriteCount: 0
+              }
+            },
+            autoReview: { approvedCount: 1, humanReviewRequiredCount: 1, atomic: true },
+            review: decisionReviewProjection({ completed: true })
+          }
+        });
+      }
+    );
+  }
 
   await page.goto("/#contracts");
   await page.waitForSelector("#contracts.active", { timeout: 10_000 });
   await page.getByRole("button", { name: "פתח ללא חילוץ חוזר" }).click();
   await expect(page.getByRole("tablist", { name: "שלבי העבודה בחוזה הפתוח" })).toBeVisible();
+  return { autoReviewRequests, decisionAutoReviewRequests };
 }
 
 test.describe("Contracts saved-clause workspace tabs", () => {
@@ -219,6 +452,39 @@ test.describe("Contracts saved-clause workspace tabs", () => {
     await expect(page.getByRole("heading", { name: "5. ערכת החלטות ל־Indicator" })).toBeVisible();
     await clausesTab.click();
     await expect(search).toHaveValue("קבלן");
+    expect(errors).toHaveLength(0);
+  });
+
+  test("auto-approves only the safe relationship and leaves the duplicate for human review", async ({ page }) => {
+    const { autoReviewRequests } = await openSavedClauseWorkspace(page, { autoReview: true });
+    const errors = collectPageErrors(page);
+    await page.getByRole("tab", { name: /קשרים בין סעיפים/u }).click();
+
+    const autoReviewButton = page.getByRole("button", { name: "אשר אוטומטית קשרים בטוחים" });
+    await expect(autoReviewButton).toBeEnabled();
+    await autoReviewButton.click();
+
+    await expect(page.getByText("אושרו אוטומטית 1 קשרים; 1 נשארו לסקירה אנושית. לא נוצרו החלטות ולא בוצעו כתיבות ללוח הזמנים.")).toBeVisible();
+    await expect(page.getByText("אושר אוטומטית בידי המודל").first()).toBeVisible();
+    await expect(page.getByText("1 ממתינים להחלטה")).toBeVisible();
+    expect(autoReviewRequests).toEqual([{}]);
+    expect(errors).toHaveLength(0);
+  });
+
+  test("auto-approves only the independently verified decision and keeps the uncertain decision human", async ({ page }) => {
+    const { decisionAutoReviewRequests } = await openSavedClauseWorkspace(page, { decisionAutoReview: true });
+    const errors = collectPageErrors(page);
+    await page.getByRole("tab", { name: /החלטות חוזיות/u }).click();
+
+    const button = page.getByRole("button", { name: "בדוק ואשר אוטומטית החלטות בטוחות" });
+    await expect(button).toBeEnabled();
+    await button.click();
+
+    await expect(page.getByText("אושרו אוטומטית").locator("..").getByText("1", { exact: true })).toBeVisible();
+    await expect(page.getByText("נשארו לסקירה אנושית").locator("..").getByText("1", { exact: true })).toBeVisible();
+    await expect(page.getByText("קבוצות בדיקה שנכשלו בבטחה").locator("..").getByText("0", { exact: true })).toBeVisible();
+    await expect(page.getByText("אושרה", { exact: true }).first()).toBeVisible();
+    expect(decisionAutoReviewRequests).toEqual([{}]);
     expect(errors).toHaveLength(0);
   });
 });
@@ -305,13 +571,13 @@ async function openSavedWorkspaceReview(page, { initialDraft, onDraftSave, canon
 
   await page.goto("/#contracts");
   await page.waitForSelector("#contracts.active", { timeout: 10_000 });
-  await expect(page.getByRole("button", { name: "טען, חלץ ושמור חוזה" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "הרץ גם את החילוץ הקלאסי ושמור" })).toBeVisible();
   await page.locator('#contracts input[type="file"]').setInputFiles({
     name: "contract.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF-1.4\nsaved-workspace-fixture", "utf8")
   });
-  await page.getByRole("button", { name: "טען, חלץ ושמור חוזה" }).click();
+  await page.getByRole("button", { name: "הרץ גם את החילוץ הקלאסי ושמור" }).click();
   await expect(page.getByRole("heading", { name: "השלם ומסור את העבודות" })).toBeVisible();
 }
 

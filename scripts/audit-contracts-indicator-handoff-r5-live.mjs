@@ -27,15 +27,21 @@ assert.equal(result.metrics.currentDecisionCount, result.metrics.suitableCount
   + result.metrics.requiresReviewCount);
 assert.equal(result.metrics.modelCallCount, 0);
 assert.equal(result.metrics.contractTruthWriteCount, 0);
+assert.equal(result.metrics.indicatorWriteCount, 0);
 assert.equal(result.metrics.scheduleWriteCount, 0);
 assert.equal(result.metrics.activityMappingWriteCount, 0);
 assert.equal(result.metrics.runtimeDueDateWriteCount, 0);
 assert.equal(result.items.some((item) => Object.hasOwn(item, "targetTable")), false);
 assert.equal(result.items.some((item) => Object.hasOwn(item, "scheduleProjectId")), false);
 assert.equal(result.items.some((item) => Object.hasOwn(item, "shadowRow")), false);
+assert.equal(result.items.some((item) => Object.hasOwn(item, "scheduleImpact")), false);
+assert.equal(result.items.some((item) => Object.hasOwn(item, "decisionCategory")), false);
+assert.equal(result.items.some((item) => Object.hasOwn(item, "temporalKind")), false);
+assert.equal(result.gates.productViewSource, true);
+assert.equal(result.metrics.embeddingReadyCount, result.metrics.currentDecisionCount);
 
 const output = {
-  result: "Contracts R5 live read-only Indicator handoff audit passed",
+  result: "Contracts R6 product-view Indicator handoff audit passed",
   workspaceId: result.workspace.workspaceId,
   mode: result.mode,
   metrics: result.metrics,
@@ -43,6 +49,7 @@ const output = {
   zeroWriteProof: {
     modelCalls: result.metrics.modelCallCount,
     contractTruthWrites: result.metrics.contractTruthWriteCount,
+    indicatorWrites: result.metrics.indicatorWriteCount,
     scheduleWrites: result.metrics.scheduleWriteCount,
     activityMappingWrites: result.metrics.activityMappingWriteCount,
     runtimeDueDateWrites: result.metrics.runtimeDueDateWriteCount
@@ -54,8 +61,9 @@ const output = {
       revision: item.revision,
       titleHe: item.titleHe,
       reviewStatus: item.reviewStatus,
+      reviewStatusCode: item.reviewStatusCode,
       conflictStatus: item.conflictStatus,
-      scheduleImpact: item.scheduleImpact,
+      indicatorSuitability: item.indicatorSuitability,
       handoffStatus: item.handoffStatus,
       reasonCodes: item.reasonCodes
     })),
@@ -65,8 +73,9 @@ const output = {
       revision: item.revision,
       titleHe: item.titleHe,
       reviewStatus: item.reviewStatus,
+      reviewStatusCode: item.reviewStatusCode,
       conflictStatus: item.conflictStatus,
-      scheduleImpact: item.scheduleImpact,
+      indicatorSuitability: item.indicatorSuitability,
       handoffStatus: item.handoffStatus,
       reasonCodes: item.reasonCodes
     }))

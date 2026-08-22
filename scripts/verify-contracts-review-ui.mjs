@@ -114,7 +114,7 @@ async function prepareReview(page, baseUrl) {
     mimeType: "application/pdf",
     buffer: Buffer.from("%PDF-1.4\nreview-only-fixture", "utf8")
   });
-  await page.getByRole("button", { name: "הרץ חילוץ יבש" }).click();
+  await page.getByRole("button", { name: "הרץ גם את החילוץ הקלאסי" }).click();
   await page.getByLabel("נימוק החלטה").fill("נדחה זמנית עד לאימות מועד ההתחלה ולוח ימי העבודה.");
   await page.getByLabel("נימוק סקירה כללי").fill("כל המועמדים נדחו לאחר סקירה אנושית מלאה וללא קידום למנוע הלו״ז.");
   await page.getByRole("button", { name: "הכן ובדוק תוכנית קידום" }).click();

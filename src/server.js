@@ -1122,6 +1122,21 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // R4.2A.1 reuses the approved relationship-review gate and automatically
+  // approves only server-planned high-confidence proposals. It never rejects,
+  // corrects, creates decisions, or calls Schedule.
+  if (req.method === "GET" && url.pathname === "/api/contracts/relationships/auto-review/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsRelationshipAutoReviewStatus } = await import("./contracts/semanticRelationshipAutoReview.js");
+      return sendJson(res, 200, await loadContractsRelationshipAutoReviewStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
   const contractsRelationshipsWorkspaceMatch = url.pathname.match(
     /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)$/iu
   );
@@ -1312,6 +1327,38 @@ async function handleApi(req, res, url) {
     }
   }
 
+  const contractsSemanticRelationshipAutoReviewMatch = url.pathname.match(
+    /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)\/semantic-auto-review$/iu
+  );
+  if (req.method === "POST" && contractsSemanticRelationshipAutoReviewMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { autoReviewContractsSemanticRelationships } = await import("./contracts/semanticRelationshipAutoReview.js");
+      const result = await autoReviewContractsSemanticRelationships({
+        config: config(),
+        workspaceId: contractsSemanticRelationshipAutoReviewMatch[1],
+        reviewerId: reviewer.sub,
+        body,
+        timeoutMs: 60_000
+      });
+      console.info("[contracts-r4.2a1-auto-review]", JSON.stringify({
+        workspaceId: result.review.workspace.workspaceId,
+        eligible: result.plan.metrics.eligibleCount,
+        autoApproved: result.autoReview.approvedCount,
+        pendingHumanReview: result.review.metrics.proposedCount,
+        decisions: 0,
+        scheduleWrites: 0
+      }));
+      return sendJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.2a1-relationship-auto-review", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
   const contractsSemanticRelationshipReviewItemMatch = url.pathname.match(
     /^\/api\/contracts\/relationships\/workspaces\/([0-9a-f-]+)\/semantic-review\/([0-9a-f-]+)$/iu
   );
@@ -1371,6 +1418,22 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // R4.2B.1 uses a separate server-owned verifier and deterministic safety
+  // checks to auto-approve only high-confidence proposals. All uncertain
+  // decisions remain in human review; this path cannot reject, correct, hand
+  // off to Indicator, or write Schedule data.
+  if (req.method === "GET" && url.pathname === "/api/contracts/decisions/auto-review/status") {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const { loadContractsDecisionAutoReviewStatus } = await import("./contracts/decisionAutoReview.js");
+      return sendJson(res, 200, await loadContractsDecisionAutoReviewStatus({ config: config() }));
+    } catch (error) {
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
   // R4.2C adds authenticated split/merge actions over existing decision
   // proposals. Every action appends terminal/source and output revisions plus
   // explicit decision-to-decision lineage; it performs no model or Schedule call.
@@ -1386,7 +1449,7 @@ async function handleApi(req, res, url) {
     }
   }
 
-  // R5 exposes current reviewed contractual decisions as a read-only handoff
+  // R6 exposes the clean Contracts product view as a read-only handoff
   // to the future Indicator agent. Contracts decides suitability only;
   // Indicator owns project placement, target selection, calendars, and every
   // Schedule write. This route performs no model or database mutation.
@@ -1415,7 +1478,7 @@ async function handleApi(req, res, url) {
         workspaceId: contractsIndicatorHandoffWorkspaceMatch[1],
         timeoutMs: 60_000
       });
-      console.info("[contracts-r5-indicator-handoff]", JSON.stringify({
+      console.info("[contracts-r6-indicator-handoff]", JSON.stringify({
         workspaceId: result.workspace.workspaceId,
         suitable: result.metrics.suitableCount,
         notSuitable: result.metrics.notSuitableCount,
@@ -1584,6 +1647,42 @@ async function handleApi(req, res, url) {
       return sendContractsJson(res, 200, result);
     } catch (error) {
       logContractsRouteFailure("r4.2b-decision-proposals", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
+  const contractsDecisionAutoReviewMatch = url.pathname.match(
+    /^\/api\/contracts\/decisions\/workspaces\/([0-9a-f-]+)\/auto-review$/iu
+  );
+  if (req.method === "POST" && contractsDecisionAutoReviewMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { autoReviewContractsDecisions } = await import("./contracts/decisionAutoReview.js");
+      const result = await autoReviewContractsDecisions({
+        config: config(),
+        workspaceId: contractsDecisionAutoReviewMatch[1],
+        reviewerId: reviewer.sub,
+        body,
+        deadlineAt: Date.now() + 300_000
+      });
+      console.info("[contracts-r4.2b1-auto-review]", JSON.stringify({
+        workspaceId: result.review.workspace.workspaceId,
+        checked: result.plan.metrics.inputPendingCount,
+        eligible: result.plan.metrics.eligibleCount,
+        autoApproved: result.autoReview.approvedCount,
+        pendingHumanReview: result.review.metrics.proposedCount,
+        verifierCalls: result.plan.metrics.modelCallCount,
+        failedVerifierBatches: result.plan.metrics.failedBatchCount,
+        indicatorHandoffs: 0,
+        scheduleWrites: 0
+      }));
+      const { sendContractsJson } = await import("./contracts/response.js");
+      return sendContractsJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("r4.2b1-decision-auto-review", error);
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
     }

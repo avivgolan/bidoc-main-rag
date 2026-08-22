@@ -1026,6 +1026,8 @@ function SemanticRelationshipReviewCard({ item, busy = false, onReview }) {
   const sourceClauseKey = reverseDirection && !symmetric ? item.targetClauseKey : item.sourceClauseKey;
   const targetClauseKey = reverseDirection && !symmetric ? item.sourceClauseKey : item.targetClauseKey;
   const excerpts = Array.isArray(item.evidence?.excerpts) ? item.evidence.excerpts : [];
+  const automaticReview = item.evidence?.signals?.autoReview;
+  const automaticallyApproved = automaticReview?.mode === "model_auto_approval";
 
   function submit(action) {
     const body = { reasonHe: reasonHe.trim() };
@@ -1054,6 +1056,7 @@ function SemanticRelationshipReviewCard({ item, busy = false, onReview }) {
         <i>{contractsRelationshipTypeLabelHe(item.relationshipType)}</i>
         <i>{contractsRelationshipOriginLabelHe(item.origin)}</i>
         <i>{contractsRelationshipReviewLabelHe(item.reviewStatus)}</i>
+        {automaticallyApproved && <i title={`מדיניות: ${automaticReview.policyVersion}`}>אושר אוטומטית בידי המודל</i>}
         {item.confidence !== null && item.confidence !== undefined && (
           <i title="ביטחון הסיווג של המודל; אינו ודאות משפטית">
             ביטחון סיווג: {contractsModelConfidenceLabelHe(item.confidence)}
@@ -1122,6 +1125,7 @@ function SemanticRelationshipReviewCard({ item, busy = false, onReview }) {
       ) : (
         <div className="contractsRelationshipReviewedState" role="status">
           <strong>{contractsRelationshipReviewLabelHe(item.reviewStatus)}</strong>
+          {automaticallyApproved && <p>האישור בוצע אוטומטית לאחר הסכמה בין המסווג לבודק העצמאי ועמידה בכללי הבטיחות.</p>}
           {item.reviewReason && <p>{item.reviewReason}</p>}
           {item.reviewedAt && <time dateTime={item.reviewedAt}>{formatHebrewDateTime(item.reviewedAt)}</time>}
         </div>
@@ -1147,7 +1151,12 @@ function ContractsRelationshipsPreviewPanel({
   reviewResult = null,
   reviewError = "",
   reviewBusyId = "",
-  onReview
+  onReview,
+  autoReviewStatus = null,
+  autoReviewResult = null,
+  autoReviewError = "",
+  autoReviewBusy = false,
+  onAutoReview
 }) {
   const relationshipPreview = useMemo(() => buildContractsExplicitReferencePreview(preview), [preview]);
   const persistedCount = Number(persistenceResult?.metrics?.explicitRelationshipCount || 0);
@@ -1155,6 +1164,13 @@ function ContractsRelationshipsPreviewPanel({
   const pendingSemanticReviewCount = Number(reviewResult?.metrics?.proposedCount || 0);
   const canPersist = Boolean(persistenceStatus?.ready && workspaceId && !persistenceBusy && !semanticBusy);
   const canRunSemantic = Boolean(semanticStatus?.ready && workspaceId && !semanticBusy && !persistenceBusy);
+  const canAutoReview = Boolean(
+    autoReviewStatus?.ready
+    && pendingSemanticReviewCount > 0
+    && !autoReviewBusy
+    && !semanticBusy
+    && !persistenceBusy
+  );
   const fullyPersisted = persistedCount === relationshipPreview.metrics.explicitRelationshipCount
     && relationshipPreview.metrics.explicitRelationshipCount > 0;
   const semanticClassificationFailedPairCount = Number(semanticResult?.metrics?.classificationFailedPairCount || 0);
@@ -1267,7 +1283,7 @@ function ContractsRelationshipsPreviewPanel({
         </div>
 
         <div className="contractsRelationshipBoundary is-semantic" role="note">
-          דמיון בנושא בלבד אינו מספיק. כל הצעה עוברת כלל מקור קשיח ובדיקה ספקנית נפרדת של המודל. ביטחון הסיווג אינו ודאות משפטית, ורק החלטת סוקר מפורשת מאשרת, מתקנת או דוחה את הקשר.
+          דמיון בנושא בלבד אינו מספיק. כל הצעה עוברת כלל מקור קשיח ובדיקה ספקנית נפרדת של המודל. ביטחון הסיווג אינו ודאות משפטית. רק הצעות בביטחון גבוה שעוברות גם בדיקות פערים עשויות לקבל אישור אוטומטי; כל היתר נשארות לסקירה אנושית.
         </div>
 
         <div className="contractsRelationshipActions">
@@ -1375,7 +1391,7 @@ function ContractsRelationshipsPreviewPanel({
           <section className="contractsRelationshipReviewQueue" aria-labelledby="contracts-relationship-review-title">
             <div className="contractsSectionHeader">
               <div>
-                <p className="contractsEyebrow">R4.2A · סקירה אנושית שמורה</p>
+                <p className="contractsEyebrow">R4.2A + R4.2A.1 · סקירה שמורה ואישור אוטומטי בטוח</p>
                 <h4 id="contracts-relationship-review-title">הצעות קשר שנשמרו ב־KAPAIM</h4>
                 <p>כל פעולה יוצרת גרסה חדשה ביומן; שום הצעה קיימת אינה נדרסת או נמחקת.</p>
               </div>
@@ -1391,6 +1407,24 @@ function ContractsRelationshipsPreviewPanel({
               <span><small>החלטות חוזיות שנוצרו</small><strong>{reviewResult.metrics?.decisionCount || 0}</strong></span>
               <span><small>כתיבות ללוח הזמנים</small><strong>{reviewResult.metrics?.scheduleWriteCount || 0}</strong></span>
             </div>
+            <div className="contractsRelationshipActions">
+              <button type="button" className="contractsPrimary" disabled={!canAutoReview} onClick={onAutoReview}>
+                {autoReviewBusy ? "בודק ומאשר קשרים בטוחים…" : "אשר אוטומטית קשרים בטוחים"}
+              </button>
+              <p>
+                {!autoReviewStatus?.ready
+                  ? "מיגרציית R4.2A.1 נדרשת. אין צורך במשתנה סביבה חדש."
+                  : pendingSemanticReviewCount === 0
+                    ? "אין קשרים שממתינים לבדיקה אוטומטית."
+                    : "הפעולה מאשרת בלבד: סתירות, כפילויות, פערי סכומים או מועדים ומקרים לא ודאיים נשארים לסקירה אנושית."}
+              </p>
+            </div>
+            {autoReviewError && <div className="contractsMessage is-error" role="alert">{autoReviewError}</div>}
+            {autoReviewResult && (
+              <div className="contractsMessage is-success" role="status">
+                אושרו אוטומטית {autoReviewResult.autoReview?.approvedCount || 0} קשרים; {autoReviewResult.autoReview?.humanReviewRequiredCount || 0} נשארו לסקירה אנושית. לא נוצרו החלטות ולא בוצעו כתיבות ללוח הזמנים.
+              </div>
+            )}
             <div className="contractsRelationshipList">
               {(reviewResult.items || []).map((item) => (
                 <SemanticRelationshipReviewCard
@@ -1864,11 +1898,16 @@ function ContractsDecisionReviewPanel({
   status,
   lineageStatus,
   result,
+  autoReviewStatus,
+  autoReviewResult,
+  autoReviewError = "",
+  autoReviewBusy = false,
   relationshipPendingCount = 0,
   error = "",
   generationBusy = false,
   reviewBusyId = "",
   onGenerate,
+  onAutoReview,
   onSplit,
   onMerge,
   onReview
@@ -1888,6 +1927,14 @@ function ContractsDecisionReviewPanel({
     && currentDecisionCount === 0
     && !generationBusy
   );
+  const canAutoReview = Boolean(
+    autoReviewStatus?.ready
+    && pendingDecisionCount > 0
+    && !generationBusy
+    && !autoReviewBusy
+    && !reviewBusyId
+  );
+  const autoMetrics = autoReviewResult?.plan?.metrics;
 
   function toggleMerge(item) {
     setMergeSelectedIds((current) => current.includes(item.decisionId)
@@ -1951,6 +1998,37 @@ function ContractsDecisionReviewPanel({
                   : "היצירה אטומית: אם הצעה אחת אינה תקינה, לא תישמר תוצאה חלקית."}
         </p>
       </div>
+      {currentDecisionCount > 0 && (
+        <div className="contractsRelationshipActions contractsDecisionAutoReviewActions">
+          <button type="button" className="contractsPrimary" disabled={!canAutoReview} onClick={onAutoReview}>
+            {autoReviewBusy
+              ? "בודק כל החלטה בבדיקה עצמאית…"
+              : pendingDecisionCount > 0
+                ? "בדוק ואשר אוטומטית החלטות בטוחות"
+                : "אין החלטות שממתינות לסקירה"}
+          </button>
+          <p>
+            בודק עצמאי מאמת כל החלטה מול ראיות המקור. רק הסכמה בביטחון של 98% ומעלה עוברת אישור;
+            כל ספק, פער מספרי או סיווג זמן חסר נשאר לסקירה אנושית. אין דחייה, תיקון או מסירה אוטומטית ל־Indicator.
+          </p>
+        </div>
+      )}
+      {!autoReviewStatus?.applyApproved && currentDecisionCount > 0 && (
+        <div className="contractsMessage is-warning" role="status">
+          מסלול R4.2B.1 לאישור אוטומטי בטוח עדיין אינו זמין בתהליך השרת או ב־KAPAIM.
+        </div>
+      )}
+      {autoReviewError && <div className="contractsMessage is-error" role="alert">{autoReviewError}</div>}
+      {autoMetrics && (
+        <div className="contractsClauseMetrics" aria-label="מדדי אישור אוטומטי של החלטות">
+          <span><small>נבדקו</small><strong>{autoMetrics.inputPendingCount || 0}</strong></span>
+          <span><small>אושרו אוטומטית</small><strong>{autoReviewResult.autoReview?.approvedCount || 0}</strong></span>
+          <span><small>נשארו לסקירה אנושית</small><strong>{autoReviewResult.autoReview?.humanReviewRequiredCount || 0}</strong></span>
+          <span><small>קריאות לבודק</small><strong>{autoMetrics.modelCallCount || 0}</strong></span>
+          <span><small>קבוצות בדיקה שנכשלו בבטחה</small><strong>{autoMetrics.failedBatchCount || 0}</strong></span>
+          <span><small>כתיבות ללוח הזמנים</small><strong>{autoMetrics.scheduleWriteCount || 0}</strong></span>
+        </div>
+      )}
       {error && <div className="contractsMessage is-error" role="alert">{error}</div>}
 
       {result && currentDecisionCount > 0 && (
@@ -2031,13 +2109,13 @@ function ContractsIndicatorHandoffCard({ item }) {
           <small>{contractsIndicatorHandoffStatusLabelHe(item.handoffStatus)}</small>
           <h3>{item.titleHe}</h3>
         </div>
-        <span>{contractsDecisionReviewLabelHe(item.reviewStatus)}</span>
+        <span>{item.reviewStatus || contractsDecisionReviewLabelHe(item.reviewStatusCode)}</span>
       </header>
       <p>{item.summaryHe}</p>
       <div className="contractsRelationshipMeta">
-        <i>{contractsDecisionCategoryLabelHe(item.decisionCategory)}</i>
-        <i>{contractsScheduleImpactLabelHe(item.scheduleImpact)}</i>
-        <i>{contractsTemporalKindLabelHe(item.temporalKind)}</i>
+        <i>{item.categoryHe || contractsDecisionCategoryLabelHe("other")}</i>
+        <i>{item.indicatorSuitability || "נדרשת בדיקה"}</i>
+        <i>{contractsTemporalKindLabelHe(item.timing?.kind || "none")}</i>
       </div>
       <ul className="contractsScheduleProjectionBlockers">
         {(item.reasonCodes || []).map((code) => <li key={code}>{contractsIndicatorHandoffReasonLabelHe(code)}</li>)}
@@ -2174,10 +2252,16 @@ export function ContractsPage() {
   const [relationshipReviewStatus, setRelationshipReviewStatus] = useState(null);
   const [relationshipReviewResult, setRelationshipReviewResult] = useState(null);
   const [relationshipReviewError, setRelationshipReviewError] = useState("");
+  const [relationshipAutoReviewStatus, setRelationshipAutoReviewStatus] = useState(null);
+  const [relationshipAutoReviewResult, setRelationshipAutoReviewResult] = useState(null);
+  const [relationshipAutoReviewError, setRelationshipAutoReviewError] = useState("");
   const [decisionReviewStatus, setDecisionReviewStatus] = useState(null);
   const [decisionLineageStatus, setDecisionLineageStatus] = useState(null);
   const [decisionReviewResult, setDecisionReviewResult] = useState(null);
   const [decisionReviewError, setDecisionReviewError] = useState("");
+  const [decisionAutoReviewStatus, setDecisionAutoReviewStatus] = useState(null);
+  const [decisionAutoReviewResult, setDecisionAutoReviewResult] = useState(null);
+  const [decisionAutoReviewError, setDecisionAutoReviewError] = useState("");
   const [indicatorHandoffStatus, setIndicatorHandoffStatus] = useState(null);
   const [indicatorHandoffResult, setIndicatorHandoffResult] = useState(null);
   const [indicatorHandoffError, setIndicatorHandoffError] = useState("");
@@ -2340,9 +2424,15 @@ export function ContractsPage() {
     api("/api/contracts/relationships/review/status")
       .then(setRelationshipReviewStatus)
       .catch((nextError) => setRelationshipReviewError(contractsUiError(nextError)));
+    api("/api/contracts/relationships/auto-review/status")
+      .then(setRelationshipAutoReviewStatus)
+      .catch((nextError) => setRelationshipAutoReviewError(contractsUiError(nextError)));
     api("/api/contracts/decisions/status")
       .then(setDecisionReviewStatus)
       .catch((nextError) => setDecisionReviewError(contractsUiError(nextError)));
+    api("/api/contracts/decisions/auto-review/status")
+      .then(setDecisionAutoReviewStatus)
+      .catch((nextError) => setDecisionAutoReviewError(contractsUiError(nextError)));
     api("/api/contracts/decisions/lineage/status")
       .then(setDecisionLineageStatus)
       .catch((nextError) => setDecisionReviewError(contractsUiError(nextError)));
@@ -2376,6 +2466,10 @@ export function ContractsPage() {
   useEffect(() => {
     setIndicatorHandoffResult(null);
     setIndicatorHandoffError("");
+    setRelationshipAutoReviewResult(null);
+    setRelationshipAutoReviewError("");
+    setDecisionAutoReviewResult(null);
+    setDecisionAutoReviewError("");
   }, [currentClauseWorkspaceId]);
 
   useEffect(() => {
@@ -2473,6 +2567,8 @@ export function ContractsPage() {
       setRelationshipReviewError("");
       setDecisionReviewResult(null);
       setDecisionReviewError("");
+      setDecisionAutoReviewResult(null);
+      setDecisionAutoReviewError("");
       setIndicatorHandoffResult(null);
       setIndicatorHandoffError("");
       setFile(null);
@@ -2640,6 +2736,32 @@ export function ContractsPage() {
     }
   }
 
+  async function autoReviewSemanticRelationships() {
+    if (!currentClauseWorkspaceId) {
+      return setRelationshipAutoReviewError("יש לפתוח תחילה חילוץ סעיפים שמור.");
+    }
+    if (!relationshipAutoReviewStatus?.ready) {
+      return setRelationshipAutoReviewError("מיגרציית R4.2A.1 לאישור אוטומטי עדיין אינה זמינה ב־KAPAIM.");
+    }
+    setBusy("relationship-auto-review");
+    setRelationshipAutoReviewError("");
+    setRelationshipAutoReviewResult(null);
+    try {
+      const response = await api(
+        `/api/contracts/relationships/workspaces/${currentClauseWorkspaceId}/semantic-auto-review`,
+        { method: "POST", body: {}, timeoutMs: 60_000 }
+      );
+      setRelationshipAutoReviewResult(response);
+      setRelationshipReviewResult(response.review);
+      if (decisionReviewStatus?.applyApproved) await loadDecisionReview(currentClauseWorkspaceId);
+    } catch (nextError) {
+      setRelationshipAutoReviewError(contractsUiError(nextError));
+      if (nextError?.status === 409) await loadRelationshipReview(currentClauseWorkspaceId);
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function runDecisionProposals() {
     if (!currentClauseWorkspaceId) {
       return setDecisionReviewError("יש לפתוח תחילה חילוץ סעיפים שמור.");
@@ -2661,6 +2783,33 @@ export function ContractsPage() {
       setIndicatorHandoffResult(null);
     } catch (nextError) {
       setDecisionReviewError(contractsUiError(nextError));
+      if (nextError?.status === 409) await loadDecisionReview(currentClauseWorkspaceId);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function autoReviewDecisions() {
+    if (!currentClauseWorkspaceId) {
+      return setDecisionAutoReviewError("יש לפתוח תחילה חילוץ סעיפים שמור.");
+    }
+    if (!decisionAutoReviewStatus?.ready) {
+      return setDecisionAutoReviewError("R4.2B.1 עדיין אינו מופעל או שמפתח המודל אינו מוגדר בשרת.");
+    }
+    if (Number(decisionReviewResult?.metrics?.proposedCount || 0) < 1) return;
+    setBusy("decision-auto-review");
+    setDecisionAutoReviewError("");
+    setDecisionAutoReviewResult(null);
+    try {
+      const response = await api(
+        `/api/contracts/decisions/workspaces/${currentClauseWorkspaceId}/auto-review`,
+        { method: "POST", body: {}, timeoutMs: 300_000 }
+      );
+      setDecisionAutoReviewResult(response);
+      setIndicatorHandoffResult(null);
+      await loadDecisionReview(currentClauseWorkspaceId);
+    } catch (nextError) {
+      setDecisionAutoReviewError(contractsUiError(nextError));
       if (nextError?.status === 409) await loadDecisionReview(currentClauseWorkspaceId);
     } finally {
       setBusy("");
@@ -3096,6 +3245,8 @@ export function ContractsPage() {
                 setRelationshipReviewError("");
                 setDecisionReviewResult(null);
                 setDecisionReviewError("");
+                setDecisionAutoReviewResult(null);
+                setDecisionAutoReviewError("");
                 setIndicatorHandoffResult(null);
                 setIndicatorHandoffError("");
               }}
@@ -3169,6 +3320,11 @@ export function ContractsPage() {
               reviewError={relationshipReviewError}
               reviewBusyId={busy.startsWith("relationship-review:") ? busy.slice("relationship-review:".length) : ""}
               onReview={reviewSemanticRelationship}
+              autoReviewStatus={relationshipAutoReviewStatus}
+              autoReviewResult={relationshipAutoReviewResult}
+              autoReviewError={relationshipAutoReviewError}
+              autoReviewBusy={busy === "relationship-auto-review"}
+              onAutoReview={autoReviewSemanticRelationships}
             />
           </ContractsWorkspaceTabPanel>
 
@@ -3177,6 +3333,10 @@ export function ContractsPage() {
               status={decisionReviewStatus}
               lineageStatus={decisionLineageStatus}
               result={decisionReviewResult}
+              autoReviewStatus={decisionAutoReviewStatus}
+              autoReviewResult={decisionAutoReviewResult}
+              autoReviewError={decisionAutoReviewError}
+              autoReviewBusy={busy === "decision-auto-review"}
               relationshipPendingCount={relationshipReviewResult?.metrics?.proposedCount || 0}
               error={decisionReviewError}
               generationBusy={busy === "decision-proposals"}
@@ -3188,6 +3348,7 @@ export function ContractsPage() {
                     ? `lineage:${busy.slice("decision-lineage:".length)}`
                     : ""}
               onGenerate={runDecisionProposals}
+              onAutoReview={autoReviewDecisions}
               onSplit={splitDecision}
               onMerge={mergeDecisions}
               onReview={reviewDecision}
