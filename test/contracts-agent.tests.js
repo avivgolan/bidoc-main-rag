@@ -2575,9 +2575,11 @@ export function registerContractsAgentTests(test) {
   test("contracts R6 reads only server-side Hebrew catalogs and writes 3072-dimension embeddings", async () => {
     const workspaceId = "11111111-1111-4111-8111-111111111111";
     const documentId = "22222222-2222-4222-8222-222222222222";
+    const documentIds = Array.from({ length: 9 }, (_, index) => `${documentId.slice(0, -1)}${index}`);
     const input = "מקור: contracts_documents\nתגיות: ביצוע";
     const inputSha256 = crypto.createHash("sha256").update(input).digest("hex");
     const requests = [];
+    const applyBatchSizes = [];
     const fetchImpl = async (url, options) => {
       requests.push({ url, body: JSON.parse(options.body || "{}") });
       if (url.includes("bidoc_contracts_r6_active_catalog_v1")) {
@@ -2587,18 +2589,19 @@ export function registerContractsAgentTests(test) {
           triggers: ["חתימת ההסכם"]
         }) };
       }
-      if (url.includes("bidoc_contracts_r6_embedding_work_v1")) {
+      if (url.includes("bidoc_contracts_r6_embedding_work_v2")) {
         return { ok: true, status: 200, text: async () => JSON.stringify({
-          schemaVersion: "contracts-r6-embedding-work.v1",
-          items: [{ kind: "document", id: documentId, input, inputSha256 }]
+          schemaVersion: "contracts-r6-embedding-work.v2",
+          items: documentIds.map((id) => ({ kind: "document", id, input, inputSha256 }))
         }) };
       }
       if (url.includes("bidoc_contracts_r6_apply_embeddings_v1")) {
-        const record = JSON.parse(options.body).p_records[0];
-        assert.equal(record.inputSha256, inputSha256);
-        assert.equal(record.embedding.length, 3072);
+        const records = JSON.parse(options.body).p_records;
+        applyBatchSizes.push(records.length);
+        assert.ok(records.every((record) => record.inputSha256 === inputSha256));
+        assert.ok(records.every((record) => record.embedding.length === 3072));
         return { ok: true, status: 200, text: async () => JSON.stringify({
-          schemaVersion: "contracts-r6-embedding-apply.v1", written: 1, reused: 0
+          schemaVersion: "contracts-r6-embedding-apply.v1", written: records.length, reused: 0
         }) };
       }
       throw new Error(`Unexpected R6 RPC: ${url}`);
@@ -2623,8 +2626,9 @@ export function registerContractsAgentTests(test) {
         return Array.from({ length: 3072 }, () => 0.125);
       }
     });
-    assert.deepEqual(result, { planned: 1, written: 1, reused: 0 });
-    assert.equal(requests.length, 3);
+    assert.deepEqual(result, { planned: 9, written: 9, reused: 0 });
+    assert.deepEqual(applyBatchSizes, [8, 1]);
+    assert.equal(requests.length, 4);
   });
 
   test("contracts R3 keeps a 189-clause contract inside its dedicated output-token budget", async () => {
@@ -7181,6 +7185,51 @@ export function registerContractsAgentTests(test) {
     assert.match(acceptance, /contracts_embedding_hnsw_r6_idx/u);
     assert.match(acceptance, /has_table_privilege\('anon', 'private\.contracts_product_r6_v1', 'SELECT'\)/u);
     assert.match(acceptance, /item\.review_status not in \('מוצע', 'מאושר', 'תוקן', 'נדחה', 'לא_פתור', 'הוחלף'\)/u);
+  });
+
+  test("contracts R6 historical parity normalizes legacy tags and verifies every contract without operational writes", () => {
+    const migration = fs.readFileSync(
+      new URL("../supabase/migrations/20260822171900_contracts_r6_historical_parity.sql", import.meta.url),
+      "utf8"
+    );
+    const rollback = fs.readFileSync(
+      new URL("../supabase/rollbacks/contracts_r6_historical_parity.rollback.sql", import.meta.url),
+      "utf8"
+    );
+    const acceptance = fs.readFileSync(
+      new URL("../supabase/tests/contracts-r6-historical-parity.sql", import.meta.url),
+      "utf8"
+    );
+    const runner = fs.readFileSync(
+      new URL("../scripts/backfill-contracts-r6-historical-parity.mjs", import.meta.url),
+      "utf8"
+    );
+
+    assert.match(migration, /^begin;/mu);
+    assert.match(migration, /commit;\s*$/u);
+    assert.match(migration, /\('responsibility', 'ניהול'\)/u);
+    assert.match(migration, /\('payment', 'תשלום'\)/u);
+    assert.match(migration, /\('schedule', 'לוח_זמנים'\)/u);
+    assert.match(migration, /originalHashtags/u);
+    assert.match(migration, /create or replace function public\.bidoc_contracts_r6_embedding_work_v2/u);
+    assert.match(migration, /from private\.contracts item[\s\S]*where item\.workspace_id = p_workspace_id/u);
+    assert.match(migration, /public\.vector_dims\(item\.embedding\) is distinct from 3072/u);
+    assert.match(migration, /create or replace view private\.contracts_workspace_parity_r6_v1[\s\S]*security_invoker = true/iu);
+    assert.match(migration, /grant select on table private\.contracts_workspace_parity_r6_v1 to service_role/iu);
+    assert.match(migration, /revoke execute[\s\S]*from public, anon, authenticated, service_role/iu);
+    assert.doesNotMatch(migration, /security definer/iu);
+    assert.doesNotMatch(migration, /(?:insert\s+into|update|delete\s+from)\s+(?:public\.)?(?:schedule_|indicator_)/iu);
+    assert.doesNotMatch(migration, /drop\s+column|truncate/iu);
+
+    assert.match(runner, /--apply/u);
+    assert.match(runner, /--expected-documents/u);
+    assert.match(runner, /--expected-decisions/u);
+    assert.match(runner, /remaining\.length/u);
+    assert.match(rollback, /intentionally retained/u);
+    assert.doesNotMatch(rollback, /delete\s+from|truncate|drop\s+column/iu);
+    assert.match(acceptance, /82345c75-c6f4-468d-b899-1f8407d9a9c1/u);
+    assert.match(acceptance, /4ff258bd-29ac-4aa9-a148-ac1bfcc7b8aa/u);
+    assert.match(acceptance, /parity_ready/u);
   });
 
   test("contracts R3.2 UI exposes saved clause generations and preserves the classic comparison", () => {

@@ -287,3 +287,18 @@ The three-table design itself is sound:
 3. `contract_relationships` preserves the relationship graph between clauses and decisions.
 
 The confusing part is not the architecture. The confusing part is that several old or future-facing fields are visible next to core product fields. The highest-value cleanup is to add comments/views first, then separately decide whether to remove `schedule_project_id`, `projection_status`, `people`, `index_ref`, and possibly `recurring`.
+
+## 2026-08-22 R6 Implementation Addendum
+
+The CTO-facing product shapes are now implemented as:
+
+- `private.contracts_documents_product_r6_v1`
+- `private.contracts_product_r6_v1`
+
+The per-contract verification surface is:
+
+- `private.contracts_workspace_parity_r6_v1`
+
+The verification view checks required product fields, active Hebrew tag-catalog compliance, current 3072-dimension embeddings, and append-only decision-revision embeddings. Both retained production contracts pass this view with `parity_ready = true`.
+
+The base tables intentionally remain broader than the product views. Legacy fields were documented as internal compatibility or lineage fields instead of being dropped because current review, lineage, and Indicator-handoff code still references several of them. Physical column deletion therefore requires a separate dependency-removal migration and is not part of the safe R6 product-shape rollout.

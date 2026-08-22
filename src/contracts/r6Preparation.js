@@ -3,7 +3,7 @@ import { ContractsAgentError } from "./errors.js";
 import { workspaceRpc } from "./workspacePersistence.js";
 
 export const CONTRACTS_R6_PHASE3_CATALOG_RPC = "bidoc_contracts_r6_active_catalog_v1";
-export const CONTRACTS_R6_PHASE3_EMBEDDING_WORK_RPC = "bidoc_contracts_r6_embedding_work_v1";
+export const CONTRACTS_R6_PHASE3_EMBEDDING_WORK_RPC = "bidoc_contracts_r6_embedding_work_v2";
 export const CONTRACTS_R6_PHASE3_EMBEDDING_APPLY_RPC = "bidoc_contracts_r6_apply_embeddings_v1";
 export const CONTRACTS_R6_PHASE3_CLAUSE_PERSISTENCE_RPC = "bidoc_contracts_persist_clause_generation_r6";
 export const CONTRACTS_R6_PHASE3_DECISION_PERSISTENCE_RPC = "bidoc_contracts_persist_decisions_r6";
@@ -14,6 +14,7 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const HEBREW_PATTERN = /[\u0590-\u05ff]/u;
 const EMBEDDING_DIMENSIONS = 3072;
 const EMBEDDING_CONCURRENCY = 2;
+const EMBEDDING_APPLY_BATCH_SIZE = 8;
 
 function r6Error(code, message, status = 502, cause = null) {
   return new ContractsAgentError(code, message, status, cause ? { cause } : {});
@@ -64,28 +65,11 @@ export async function loadContractsR6ActiveCatalog({ config, fetchImpl = fetch, 
   };
 }
 
-export async function persistContractsR6Embeddings({
-  config,
-  workspaceId,
-  fetchImpl = fetch,
-  timeoutMs,
-  createEmbeddingImpl = createEmbedding
-} = {}) {
-  if (!config?.openRouterApiKey) {
-    throw r6Error("contracts_r6_embeddings_unavailable", "Contracts R6 embeddings require the configured server-side model key.", 503);
-  }
-  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
-  const work = await workspaceRpc({
-    config,
-    rpc: CONTRACTS_R6_PHASE3_EMBEDDING_WORK_RPC,
-    payload: { p_workspace_id: normalizedWorkspaceId },
-    fetchImpl,
-    timeoutMs
-  });
-  if (!work || work.schemaVersion !== "contracts-r6-embedding-work.v1" || !Array.isArray(work.items)) {
+function normalizeEmbeddingWorkItems(work) {
+  if (!work || work.schemaVersion !== "contracts-r6-embedding-work.v2" || !Array.isArray(work.items)) {
     throw r6Error("contracts_r6_embedding_work_invalid", "The Contracts R6 embedding work response is invalid.");
   }
-  const items = work.items.map((item) => {
+  return work.items.map((item) => {
     const id = String(item?.id || "").trim().toLowerCase();
     const kind = String(item?.kind || "").trim();
     const input = String(item?.input || "").trim();
@@ -99,36 +83,80 @@ export async function persistContractsR6Embeddings({
     }
     return { id, kind, input, inputSha256 };
   });
-  if (!items.length) return { planned: 0, written: 0, reused: 0 };
+}
 
-  const records = [];
-  for (const group of chunk(items, EMBEDDING_CONCURRENCY)) {
-    const embeddings = await Promise.all(group.map(async (item) => {
-      const embedding = await createEmbeddingImpl({
-        apiKey: config.openRouterApiKey,
-        model: config.models?.embedding,
-        input: item.input
-      });
-      if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSIONS
-          || embedding.some((value) => !Number.isFinite(Number(value)))) {
-        throw r6Error("contracts_r6_embedding_dimensions_invalid", `Contracts R6 requires ${EMBEDDING_DIMENSIONS}-dimension embeddings.`);
-      }
-      return { kind: item.kind, id: item.id, inputSha256: item.inputSha256, embedding };
-    }));
-    records.push(...embeddings);
-  }
-
-  const result = await workspaceRpc({
+export async function loadContractsR6EmbeddingWork({
+  config,
+  workspaceId,
+  fetchImpl = fetch,
+  timeoutMs
+} = {}) {
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+  const work = await workspaceRpc({
     config,
-    rpc: CONTRACTS_R6_PHASE3_EMBEDDING_APPLY_RPC,
-    payload: { p_workspace_id: normalizedWorkspaceId, p_records: records },
+    rpc: CONTRACTS_R6_PHASE3_EMBEDDING_WORK_RPC,
+    payload: { p_workspace_id: normalizedWorkspaceId },
     fetchImpl,
     timeoutMs
   });
-  if (!result || result.schemaVersion !== "contracts-r6-embedding-apply.v1"
-      || !Number.isSafeInteger(Number(result.written))
-      || !Number.isSafeInteger(Number(result.reused))) {
-    throw r6Error("contracts_r6_embedding_apply_invalid", "The Contracts R6 embedding write response is invalid.");
+  return normalizeEmbeddingWorkItems(work);
+}
+
+export async function persistContractsR6EmbeddingItems({
+  config,
+  workspaceId,
+  items,
+  fetchImpl = fetch,
+  timeoutMs,
+  createEmbeddingImpl = createEmbedding
+} = {}) {
+  if (!config?.openRouterApiKey) {
+    throw r6Error("contracts_r6_embeddings_unavailable", "Contracts R6 embeddings require the configured server-side model key.", 503);
   }
-  return { planned: items.length, written: Number(result.written), reused: Number(result.reused) };
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+  if (!Array.isArray(items)) {
+    throw r6Error("contracts_r6_embedding_work_invalid", "Contracts R6 embedding items must be an array.", 400);
+  }
+  if (!items.length) return { planned: 0, written: 0, reused: 0 };
+
+  let written = 0;
+  let reused = 0;
+  for (const itemBatch of chunk(items, EMBEDDING_APPLY_BATCH_SIZE)) {
+    const records = [];
+    for (const group of chunk(itemBatch, EMBEDDING_CONCURRENCY)) {
+      const generated = await Promise.all(group.map(async (item) => {
+        const embedding = await createEmbeddingImpl({
+          apiKey: config.openRouterApiKey,
+          model: config.models?.embedding,
+          input: item.input
+        });
+        if (!Array.isArray(embedding) || embedding.length !== EMBEDDING_DIMENSIONS
+            || embedding.some((value) => !Number.isFinite(Number(value)))) {
+          throw r6Error("contracts_r6_embedding_dimensions_invalid", `Contracts R6 requires ${EMBEDDING_DIMENSIONS}-dimension embeddings.`);
+        }
+        return { kind: item.kind, id: item.id, inputSha256: item.inputSha256, embedding };
+      }));
+      records.push(...generated);
+    }
+    const result = await workspaceRpc({
+      config,
+      rpc: CONTRACTS_R6_PHASE3_EMBEDDING_APPLY_RPC,
+      payload: { p_workspace_id: normalizedWorkspaceId, p_records: records },
+      fetchImpl,
+      timeoutMs
+    });
+    if (!result || result.schemaVersion !== "contracts-r6-embedding-apply.v1"
+        || !Number.isSafeInteger(Number(result.written))
+        || !Number.isSafeInteger(Number(result.reused))) {
+      throw r6Error("contracts_r6_embedding_apply_invalid", "The Contracts R6 embedding write response is invalid.");
+    }
+    written += Number(result.written);
+    reused += Number(result.reused);
+  }
+  return { planned: items.length, written, reused };
+}
+
+export async function persistContractsR6Embeddings(options = {}) {
+  const items = await loadContractsR6EmbeddingWork(options);
+  return persistContractsR6EmbeddingItems({ ...options, items });
 }
