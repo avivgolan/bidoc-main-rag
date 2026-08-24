@@ -13,7 +13,7 @@ import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventT
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
-import { authorizeDataQueryRequest } from "./apiSecurity.js";
+import { authorizeContractsExtractionRequest, authorizeDataQueryRequest } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
@@ -191,6 +191,12 @@ async function handleApi(req, res, url) {
   // secret — merely sending the content-supabase-url header is not enough to
   // bypass the login wall. Same-origin calls (the standalone UI) need a session.
   if (!url.pathname.startsWith("/api/auth/")) {
+    const isContractsExtractionRoute = req.method === "POST"
+      && ["/api/contracts/extract"].includes(url.pathname);
+    const hasContractsIngestionSecret = Object.prototype.hasOwnProperty.call(
+      req.headers,
+      "x-contracts-ingestion-secret"
+    );
     const isContractsActivityMappingRoute = url.pathname.startsWith("/api/contracts/activity-mapping/");
     const isContractsWorkspaceRoute = url.pathname.startsWith("/api/contracts/workspaces");
     const isContractsClausePreviewRoute = url.pathname === "/api/contracts/clauses/preview";
@@ -213,7 +219,10 @@ async function handleApi(req, res, url) {
       "x-index-table",
       "x-alerts-table"
     ].some((header) => Object.prototype.hasOwnProperty.call(req.headers, header));
-    if (isContractsServerOwnedRoute) {
+    if (isContractsExtractionRoute && hasContractsIngestionSecret) {
+      const auth = authorizeContractsExtractionRequest(req);
+      if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+    } else if (isContractsServerOwnedRoute) {
       if (!getSuperadminSession(req)) {
         return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
       }

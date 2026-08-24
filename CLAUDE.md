@@ -79,6 +79,7 @@ All configuration is read from environment variables. For local development, pla
 | `HYBRID_KEYWORD_WEIGHT` | Default: 0.35 |
 | `N8N_BASE_URL` | Base URL for n8n webhooks |
 | `N8N_TOOL_<NAME>_URL` | Override URL for a specific tool webhook |
+| `CONTRACTS_INGESTION_SECRET` | Dedicated secret accepted in `X-Contracts-Ingestion-Secret` when n8n calls the dry-run Contracts extraction API |
 | `PORT` | Server port (default: 4000) |
 
 > **Never commit `.env.local` or `data/settings.json`** — both are in `.gitignore`.

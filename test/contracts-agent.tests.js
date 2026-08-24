@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { Readable } from "node:stream";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { authorizeContractsExtractionRequest } from "../src/apiSecurity.js";
 import {
   ACTIVITY_MAPPING_BLOCKER,
   ACTIVITY_MAPPING_METHOD,
@@ -1666,6 +1667,22 @@ export function registerContractsAgentTests(test) {
       () => readJsonBounded(request, 5),
       (error) => error.code === "contracts_request_too_large" && error.status === 413
     );
+  });
+
+  test("contracts extraction API supports only its dedicated machine secret", () => {
+    const request = (value) => ({
+      headers: value ? { "x-contracts-ingestion-secret": value } : {}
+    });
+    assert.equal(authorizeContractsExtractionRequest(request(), { secret: "" }).status, 503);
+    assert.equal(authorizeContractsExtractionRequest(request("wrong"), { secret: "expected" }).status, 401);
+    assert.deepEqual(
+      authorizeContractsExtractionRequest(request("expected"), { secret: "expected" }),
+      { ok: true, status: 200, error: null }
+    );
+
+    const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    assert.match(server, /x-contracts-ingestion-secret/);
+    assert.match(server, /authorizeContractsExtractionRequest\(req\)/);
   });
 
   test("contracts response cap measures the exact pretty UTF-8 bytes sent on the wire", () => {
