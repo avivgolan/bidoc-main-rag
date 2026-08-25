@@ -5,7 +5,7 @@ import { decorateContractsClauseRecords } from "./clausePresentation.js";
 
 export const CONTRACTS_DECISIONS_R4_2B_AGENT_VERSION = "contracts-decisions-agent.r4.2b.v1";
 export const CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION = "contracts-decisions-normalization.r4.2b.v1";
-export const CONTRACTS_DECISIONS_R4_2B_PROMPT_VERSION = "contracts-decisions-normalization-prompt.r4.2b.v1";
+export const CONTRACTS_DECISIONS_R4_2B_PROMPT_VERSION = "contracts-decisions-normalization-prompt.r4.2b.v2";
 export const CONTRACTS_DECISIONS_R4_2B_MODEL_SCHEMA_VERSION = "contracts-decisions-normalization-model.r4.2b.v1";
 export const CONTRACTS_DECISION_SUPPORT_POLICY_VERSION = "contracts-decision-support.r4.2b.v1";
 
@@ -73,6 +73,9 @@ Rules:
 - contractDate is allowed only for a fixed date explicitly stated in the sources;
 - relative or recurring temporalKind requires an explicit source-grounded trigger, offset value, and unit;
 - when controlledTriggersHe is supplied, triggerKind must be empty or copied exactly from that Hebrew-only catalog;
+- for a source phrase about signing, commencement, receiving a notice/demand, delivery/acceptance, or an end of a period, use the exact matching controlled trigger respectively: "חתימת ההסכם", "תחילת העבודה", "קבלת הודעה", "בדיקה או מסירה", or "סיום תקופה";
+- triggerDescriptionHe must be the direct Hebrew event phrase from the source, not a sentence fragment such as "לאחר סיומה" or a calculated date;
+- when the exact temporalFocus says only "ימים" without explicitly saying working/business days, use offsetUnit "calendar_days" and calendarSemantics "unknown". This is a review proposal, not a legal conclusion that calendar semantics are explicit;
 - scheduleImpact describes only whether the contractual rule may later matter to scheduling. It never maps a Schedule activity and never calculates a due date;
 - use an empty string for an unavailable optional string and null for an unavailable offsetValue;
 - confidence is not requested and legal certainty must not be claimed.
@@ -87,7 +90,7 @@ function decisionError(code, message, status = 400, issueCode = "decision.invali
   });
 }
 
-export function buildContractsDecisionCandidates({ preview, relationshipReview } = {}) {
+export function buildContractsDecisionCandidates({ preview, relationshipReview, targetClauseKeys = null } = {}) {
   const source = Array.isArray(preview?.clauses) ? preview.clauses : [];
   if (source.length < 1 || source.length > MAX_CLAUSES) {
     throw decisionError(
@@ -138,6 +141,25 @@ export function buildContractsDecisionCandidates({ preview, relationshipReview }
     }
     clauseByKey.set(clause.clauseKey, clause);
   }
+  const targetKeys = targetClauseKeys === null || targetClauseKeys === undefined
+    ? null
+    : new Set(uniqueStrings(targetClauseKeys, MAX_CLAUSES, 300));
+  if (targetKeys && targetKeys.size < 1) {
+    throw decisionError(
+      "contracts_decision_normalization_input_invalid",
+      "Targeted decision normalization requires at least one saved clause key.",
+      422,
+      "decision.target_clause_keys_invalid"
+    );
+  }
+  if (targetKeys && [...targetKeys].some((key) => !clauseByKey.has(key))) {
+    throw decisionError(
+      "contracts_decision_normalization_input_invalid",
+      "Targeted decision normalization contains a clause outside the saved generation.",
+      422,
+      "decision.target_clause_key_unknown"
+    );
+  }
 
   const parent = new Map(clauses.map((clause) => [clause.clauseKey, clause.clauseKey]));
   const find = (key) => {
@@ -182,7 +204,7 @@ export function buildContractsDecisionCandidates({ preview, relationshipReview }
     groups.get(root).push(clause);
   }
   const documentSha256 = normalizeDocumentSha(preview);
-  const candidates = [...groups.values()]
+  const allCandidates = [...groups.values()]
     .map((group) => group.sort(compareClauses))
     .sort((left, right) => compareClauses(left[0], right[0]))
     .flatMap((group, index) => {
@@ -201,7 +223,8 @@ export function buildContractsDecisionCandidates({ preview, relationshipReview }
       ));
       const primary = group[0];
       const mentions = relativeTemporalMentions(group);
-      const focuses = mentions.length > 1 ? mentions : [null];
+      const targetIncludesGroup = targetKeys && sourceKeys.some((key) => targetKeys.has(key));
+      const focuses = mentions.length > 1 || targetIncludesGroup ? mentions : [null];
       return focuses.map((temporalFocus, focusIndex) => {
         const focusIdentity = temporalFocus
           ? `${temporalFocus.clauseKey}\u001f${temporalFocus.offset}\u001f${temporalFocus.text}`
@@ -223,6 +246,9 @@ export function buildContractsDecisionCandidates({ preview, relationshipReview }
         };
       });
     });
+  const candidates = targetKeys
+    ? allCandidates.filter((candidate) => candidate.sourceClauseKeys.some((key) => targetKeys.has(key)))
+    : allCandidates;
   if (candidates.length < 1 || candidates.length > MAX_DECISION_CANDIDATES) {
     throw decisionError(
       "contracts_decision_normalization_input_invalid",
@@ -231,7 +257,9 @@ export function buildContractsDecisionCandidates({ preview, relationshipReview }
       "decision.candidate_count_invalid"
     );
   }
-  return candidates;
+  return targetKeys
+    ? candidates.map((candidate) => ({ ...candidate, requiresTemporalFocus: Boolean(candidate.temporalFocus) }))
+    : candidates;
 }
 
 export async function runContractsDecisionNormalization({
@@ -243,6 +271,7 @@ export async function runContractsDecisionNormalization({
   decisionPolicyVersion = CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
   promptVersion = CONTRACTS_DECISIONS_R4_2B_PROMPT_VERSION,
   modelVersion = null,
+  targetClauseKeys = null,
   deadlineAt = null,
   signal = null,
   now = () => Date.now(),
@@ -260,7 +289,7 @@ export async function runContractsDecisionNormalization({
   const normalizedPromptVersion = boundedText(promptVersion, "promptVersion", 1, 200);
   const triggers = normalizeTriggerCatalog(triggerCatalog);
   const model = boundedText(modelVersion || config?.models?.lite || config?.models?.main || "openai/gpt-4o-mini", "modelVersion", 1, 200);
-  const candidates = buildContractsDecisionCandidates({ preview, relationshipReview });
+  const candidates = buildContractsDecisionCandidates({ preview, relationshipReview, targetClauseKeys });
   const batches = chunk(candidates, MAX_BATCH_SIZE);
   const settings = config?.contracts?.r4_2b || {};
   const maxTokens = boundedInteger(settings.maxTokensPerCall, 700, 2_200, DEFAULT_MAX_TOKENS_PER_CALL);
@@ -802,6 +831,20 @@ function validateDecisionModelBatch(raw, batch, {
       normalizedRecurring = neutral.recurring;
       if (!temporal.sanitized) sanitizedTemporals.push({ candidateId });
     }
+    if (candidate.requiresTemporalFocus === true
+        && !matchesRequiredTemporalFocus(candidate.temporalFocus, {
+          temporalKind,
+          offsetValue,
+          offsetUnit,
+          triggerDescriptionHe
+        })) {
+      throw decisionError(
+        "contracts_decision_normalization_output_invalid",
+        "A targeted temporal candidate did not retain its exact source-grounded timing rule and anchor.",
+        502,
+        "decision.temporal_focus_mismatch"
+      );
+    }
     return {
       candidateId,
       titleHe,
@@ -955,6 +998,30 @@ function neutralTemporalShape() {
   };
 }
 
+function matchesRequiredTemporalFocus(focus, { temporalKind, offsetValue, offsetUnit, triggerDescriptionHe } = {}) {
+  const raw = String(focus?.text || "").trim();
+  const numberMatch = raw.match(/\d+(?:[.,]\d+)?/u);
+  if (!raw || !numberMatch || temporalKind !== "relative" || !HEBREW_PATTERN.test(String(triggerDescriptionHe || ""))) {
+    return false;
+  }
+  const expectedOffset = Number(numberMatch[0].replace(",", "."));
+  const expectedUnit = /ימי\s+עבודה|יום\s+עבודה/u.test(raw)
+    ? "working_days"
+    : /שעות?/u.test(raw)
+      ? "hours"
+      : /שבועות?|שבוע/u.test(raw)
+        ? "weeks"
+        : /חודשים?|חודש/u.test(raw)
+          ? "months"
+          : /ימים?|יום/u.test(raw)
+            ? "calendar_days"
+            : null;
+  return Number.isFinite(expectedOffset)
+    && offsetValue === expectedOffset
+    && offsetUnit === expectedUnit
+    && !normalizedIncludes(triggerDescriptionHe, raw);
+}
+
 function sanitizeNumericText({
   value,
   field,
@@ -1035,7 +1102,7 @@ function numberUnitPairAppears(sourceText, value, unit) {
   const number = String(value).replace(/\./gu, "\\.");
   const aliases = {
     hours: "(?:שעות?|hours?)",
-    calendar_days: "(?:(?:ימים?|ימי)\\s+(?:קלנדריים|לוח)|calendar\\s+days?)",
+    calendar_days: "(?:(?:ימים?)(?:\\s+(?:קלנדריים|לוח))?|calendar\\s+days?)",
     working_days: "(?:(?:ימי|ימים?)\\s+(?:עבודה|עסקים)|working\\s+days?|business\\s+days?)",
     weeks: "(?:שבועות?|weeks?)",
     months: "(?:חודשים?|months?)"

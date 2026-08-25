@@ -63,7 +63,7 @@ export async function findStructuredTriggerEvidence({
     ? condition?.metadata?.trigger_kind || condition?.trigger_kind || "commencement_of_works"
     : condition?.metadata?.trigger_kind || condition?.trigger_kind || "");
 
-  if (triggerKind === "commencement_of_works") {
+  if (triggerKind === "commencement_of_works" || triggerKind === "תחילת העבודה") {
     const source = await loadScheduleSource({ config, projectId: sourceProjectId, settings });
     const candidates = source.tasks
       .filter((task) => task.isSummary !== true && COMMENCEMENT_TASK_ALIASES.has(normalizedLabel(task.name)))

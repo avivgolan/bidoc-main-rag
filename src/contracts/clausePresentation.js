@@ -86,7 +86,12 @@ export function contractsStructuralRoleLabelHe(value) {
 }
 
 export function contractsTagLabelHe(value) {
-  return CONTRACTS_TAG_LABELS_HE[value] || "תגית חוזית";
+  const tag = String(value || "").trim();
+  if (CONTRACTS_TAG_LABELS_HE[tag]) return CONTRACTS_TAG_LABELS_HE[tag];
+  // R6 persists the canonical shared Hebrew vocabulary. Show that value directly
+  // instead of replacing a valid tag with the generic legacy-key fallback.
+  if (/[\u0590-\u05ff]/u.test(tag)) return tag;
+  return "תגית חוזית";
 }
 
 export function contractsClauseDisplayLabelHe(clauseKey, clauseTitle = null) {

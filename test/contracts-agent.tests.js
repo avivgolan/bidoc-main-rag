@@ -209,6 +209,14 @@ import {
   loadContractsIndicatorProductSource
 } from "../src/contracts/indicatorHandoff.js";
 import {
+  CONTRACTS_TEMPORAL_COVERAGE_AUDIT_VERSION,
+  auditContractsTemporalCoverage
+} from "../src/contracts/temporalCoverageAudit.js";
+import {
+  CONTRACTS_TEMPORAL_REEXTRACTION_PLAN_VERSION,
+  buildContractsTemporalReextractionPlan
+} from "../src/contracts/temporalReextractionPlan.js";
+import {
   CONTRACT_SOURCE_OBJECT_RPC,
   INDICATOR_CONTRACT_SYNC_RPC,
   INDICATOR_PROJECT_CONTEXT_RPC,
@@ -3042,6 +3050,8 @@ export function registerContractsAgentTests(test) {
     assert.doesNotMatch(records[2].displayContentHe, /scope|responsibility/u);
     assert.deepEqual(selectContractsRelationshipEligibleClauses(records).map((record) => record.clauseKey), ["1.1", "3.1"]);
     assert.equal(contractsTagLabelHe("other"), "אחר");
+    assert.equal(contractsTagLabelHe("לוח זמנים"), "לוח זמנים");
+    assert.equal(contractsTagLabelHe("unmapped_legacy_tag"), "תגית חוזית");
     assert.equal(contractsReferenceTargetLabelHe("appendix_a.2"), "נספח א׳, סעיף 2");
   });
 
@@ -6401,6 +6411,20 @@ export function registerContractsAgentTests(test) {
     assert.deepEqual(split.map((candidate) => candidate.temporalFocus.text), ["15 ימים", "30 ימי עבודה"]);
     assert.equal(new Set(split.map((candidate) => candidate.decisionKey)).size, 2);
     assert.equal(new Set(split.map((candidate) => candidate.proposalKey)).size, 2);
+    const targeted = buildContractsDecisionCandidates({
+      preview,
+      relationshipReview: { metrics: { proposedCount: 0 }, items: [] },
+      targetClauseKeys: ["6.7"]
+    });
+    assert.deepEqual(targeted.map((candidate) => candidate.temporalFocus.text), ["15 ימים", "30 ימי עבודה"]);
+    assert.throws(
+      () => buildContractsDecisionCandidates({
+        preview,
+        relationshipReview: { metrics: { proposedCount: 0 }, items: [] },
+        targetClauseKeys: ["not-in-saved-generation"]
+      }),
+      (error) => error.code === "contracts_decision_normalization_input_invalid"
+    );
   });
 
   test("contracts Indicator sync always calls only the atomic service-role RPC", async () => {
@@ -6561,6 +6585,28 @@ export function registerContractsAgentTests(test) {
     assert.match(guardFixSql, /mapping\.status = 'active'/iu);
     assert.match(guardFixSql, /mapping\.schedule_project_id = new\.project_id/iu);
     assert.match(guardFixSql, /v_source\.projection_status not in \('ready', 'projected'\)/iu);
+  });
+
+  test("contracts R6 Indicator anchor migration keeps the existing writer and maps Hebrew commencement safely", () => {
+    const sql = fs.readFileSync(
+      new URL("../supabase/migrations/20260825113815_contracts_r6_indicator_anchor_contract.sql", import.meta.url),
+      "utf8"
+    );
+    const resolver = fs.readFileSync(
+      new URL("../src/subagents/scheduleConditionResolver.js", import.meta.url),
+      "utf8"
+    );
+    assert.match(sql, /^begin;/mu);
+    assert.match(sql, /commit;\s*$/u);
+    assert.match(sql, /security invoker/iu);
+    assert.doesNotMatch(sql, /security definer/iu);
+    assert.match(sql, /'commencement_of_works', 'תחילת העבודה'/u);
+    assert.match(sql, /new\.anchor_kind := 'schedule_task'/u);
+    assert.match(sql, /before insert or update of anchor_kind, metadata/iu);
+    assert.match(sql, /condition\.status = 'pending'/u);
+    assert.match(sql, /revoke execute[\s\S]+from public, anon, authenticated, service_role/iu);
+    assert.match(sql, /grant execute[\s\S]+to service_role/iu);
+    assert.match(resolver, /triggerKind === "commencement_of_works" \|\| triggerKind === "תחילת העבודה"/u);
   });
 
   test("contracts R5 fails closed for unreviewed, conflicted, unmapped, and incomplete extension decisions", async () => {
@@ -7078,6 +7124,102 @@ export function registerContractsAgentTests(test) {
       }),
       (error) => error.code === "contracts_indicator_handoff_source_invalid"
     );
+  });
+
+  test("contracts R6 temporal coverage audit identifies source clauses missing a decision or structured timing", () => {
+    const audit = auditContractsTemporalCoverage({
+      clauses: [
+        {
+          clauseKey: "3.6",
+          pageStart: 2,
+          pageEnd: 2,
+          hashtags: ["לוח זמנים"],
+          rawText: "הקבלן ישלים את העבודות בתוך 45 ימי עבודה ממועד תחילת העבודות."
+        },
+        {
+          clauseKey: "8.5",
+          pageStart: 4,
+          pageEnd: 4,
+          hashtags: ["תיקון ליקויים"],
+          rawText: "הקבלן ישלים את תיקון הליקויים תוך 7 ימים ממועד ההודעה."
+        },
+        {
+          clauseKey: "13.4",
+          pageStart: 6,
+          pageEnd: 6,
+          hashtags: ["מסמך"],
+          rawText: "הדוח יוגש בכל חודש עד היום החמישי."
+        }
+      ],
+      decisions: [
+        {
+          decisionId: "decision-missing-timing",
+          decisionKey: "contract:3.6",
+          reviewStatusCode: "approved",
+          indicatorSuitability: "נדרשת_בדיקה",
+          timing: { kind: "none" },
+          sourceEvidence: [{ clauseKey: "3.6" }]
+        },
+        {
+          decisionId: "decision-represented",
+          decisionKey: "contract:13.4",
+          reviewStatusCode: "approved",
+          indicatorSuitability: "מתאים",
+          timing: { kind: "recurring" },
+          sourceEvidence: [{ clauseKey: "13.4" }]
+        }
+      ]
+    });
+
+    assert.equal(audit.auditVersion, CONTRACTS_TEMPORAL_COVERAGE_AUDIT_VERSION);
+    assert.deepEqual(audit.metrics, {
+      sourceClauseCount: 3,
+      temporalClauseCount: 3,
+      representedCount: 1,
+      missingDecisionCount: 1,
+      missingStructuredTimingCount: 1,
+      unresolvedCount: 2
+    });
+    assert.deepEqual(audit.items.map((item) => [item.clauseKey, item.status]), [
+      ["3.6", "missing_structured_timing"],
+      ["8.5", "missing_decision"],
+      ["13.4", "represented"]
+    ]);
+    assert.deepEqual(audit.items[0].detectedRuleKinds, ["relative_duration"]);
+    assert.deepEqual(audit.items[2].detectedRuleKinds, ["recurring"]);
+  });
+
+  test("contracts R6 temporal re-extraction plan isolates uncovered mentions without changing decisions", () => {
+    const clauses = [
+      { clauseKey: "3.6", rawText: "הקבלן ישלים את העבודות בתוך 45 ימי עבודה ממועד תחילת העבודות." },
+      { clauseKey: "8.5", rawText: "הקבלן ישלים את תיקון הליקויים תוך 7 ימים ממועד ההודעה." },
+      { clauseKey: "13.4", rawText: "הדוח יוגש בכל חודש עד היום החמישי." }
+    ];
+    const plan = buildContractsTemporalReextractionPlan({
+      coverageAudit: auditContractsTemporalCoverage({
+        clauses,
+        decisions: [{
+          decisionId: "represented",
+          timing: { kind: "recurring" },
+          sourceEvidence: [{ clauseKey: "13.4" }]
+        }]
+      }),
+      clauses
+    });
+
+    assert.equal(plan.planVersion, CONTRACTS_TEMPORAL_REEXTRACTION_PLAN_VERSION);
+    assert.deepEqual(plan.metrics, {
+      unresolvedClauseCount: 2,
+      candidateCount: 2,
+      normalizeForHumanReviewCount: 2,
+      manualTemporalReviewCount: 0,
+      blockedMissingSourceClauseCount: 0
+    });
+    assert.deepEqual(plan.candidates.map((item) => [item.clauseKey, item.temporalFocus?.text, item.disposition]), [
+      ["3.6", "45 ימי עבודה", "normalize_for_human_review"],
+      ["8.5", "7 ימים", "normalize_for_human_review"]
+    ]);
+    assert.equal(new Set(plan.candidates.map((item) => item.candidateKey)).size, 2);
   });
 
   test("contracts R4.2B migration, routes, and Hebrew UI are append-only and Schedule-independent", () => {

@@ -10701,7 +10701,9 @@ body:has(#timeline.active) .sidebar {
 .condTable td { padding: 8px 9px; border-top: 1px solid var(--line); vertical-align: middle; }
 .condTable tbody tr:hover { background: var(--brand-50); }
 .condTable tbody tr.is-resolved { background: color-mix(in srgb, var(--success-bg) 58%, var(--surface)); }
-.condName { font-weight: 600; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; }
+.condName { font-weight: 700; color: var(--text-primary); line-height: 1.35; }
+.condActionDescription { color: var(--text-secondary); line-height: 1.55; }
+.condActionDescription b { color: var(--text-primary); font-weight: 700; }
 .condContractPoint, .condTriggerCell, .condDateCell { min-width: 0; }
 .condContractPoint { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
 .condOffsetLine { display: flex; align-items: center; gap: 8px; }
@@ -10718,6 +10720,9 @@ body:has(#timeline.active) .sidebar {
 .condAnchor { font-size: 0.72rem; border-radius: 999px; padding: 1px 9px; white-space: nowrap; background: var(--surface-3); color: var(--text-secondary); }
 .condAnchor.is-event { background: var(--cobalt-soft); color: var(--cobalt); }
 .condAnchor.is-schedule_task { background: var(--brand-100); color: var(--brand-700); }
+.condSourceExcerpt { margin-top: 8px; color: var(--text-secondary); font-size: 0.74rem; line-height: 1.5; }
+.condSourceExcerpt summary { color: var(--cobalt); cursor: pointer; font-weight: 700; }
+.condSourceExcerpt p { margin: 6px 0 0; padding: 7px 9px; border-right: 2px solid var(--line-strong); background: var(--surface-2); white-space: pre-line; }
 .condAnchor.is-milestone { background: var(--success-bg); color: var(--success-text); }
 .condPage { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
 .condPage a { color: var(--brand-700); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }

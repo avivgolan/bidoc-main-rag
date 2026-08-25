@@ -13466,8 +13466,8 @@ var Jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 					children: /* @__PURE__ */ (0, x.jsxs)("table", {
 						className: "condTable",
 						children: [/* @__PURE__ */ (0, x.jsx)("thead", { children: /* @__PURE__ */ (0, x.jsxs)("tr", { children: [
-							/* @__PURE__ */ (0, x.jsx)("th", { children: "הזמן שנמשך מהחוזה" }),
-							/* @__PURE__ */ (0, x.jsx)("th", { children: "תיאור הפעולה בסעיף" }),
+							/* @__PURE__ */ (0, x.jsx)("th", { children: "ההתחייבות החוזית והזמן" }),
+							/* @__PURE__ */ (0, x.jsx)("th", { children: "האירוע שמפעיל את הספירה" }),
 							/* @__PURE__ */ (0, x.jsx)("th", { children: "תאריך האירוע בפועל" })
 						] }) }), /* @__PURE__ */ (0, x.jsx)("tbody", { children: t.map((e) => {
 							let t = c?.[e.id], n = r === e.id, l = qt(e), u = e.metadata?.pending_reason, d = o && Object.prototype.hasOwnProperty.call(o, e.id) ? o[e.id] : V(e.trigger_event_date ?? ""), f = gt(d), p = !!d && !f, m = e.status === "resolved";
@@ -13489,6 +13489,14 @@ var Jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 												className: "condName",
 												children: e.name
 											}),
+											e.metadata?.action_description_he ? /* @__PURE__ */ (0, x.jsxs)("span", {
+												className: "condActionDescription",
+												children: [
+													/* @__PURE__ */ (0, x.jsx)("b", { children: "מה החוזה מחייב:" }),
+													" ",
+													e.metadata.action_description_he
+												]
+											}) : null,
 											/* @__PURE__ */ (0, x.jsx)("span", {
 												className: "condPage",
 												children: l ? /* @__PURE__ */ (0, x.jsxs)("a", {
@@ -13512,6 +13520,10 @@ var Jt = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 											u ? /* @__PURE__ */ (0, x.jsx)("span", {
 												className: "condPendingReason",
 												children: u
+											}) : null,
+											e.source_excerpt ? /* @__PURE__ */ (0, x.jsxs)("details", {
+												className: "condSourceExcerpt",
+												children: [/* @__PURE__ */ (0, x.jsx)("summary", { children: "הצג ציטוט מהחוזה" }), /* @__PURE__ */ (0, x.jsx)("p", { children: e.source_excerpt })]
 											}) : null
 										]
 									}),
@@ -14531,7 +14543,8 @@ function cn(e) {
 	return rn[e] || "רשומת חוזה";
 }
 function ln(e) {
-	return an[e] || "תגית חוזית";
+	let t = String(e || "").trim();
+	return an[t] ? an[t] : /[\u0590-\u05ff]/u.test(t) ? t : "תגית חוזית";
 }
 function un(e, t = null) {
 	let n = String(e || "").trim(), r = n.match(/^appendix_([a-v])(?:\.(heading|.+))?$/u);

@@ -736,8 +736,8 @@ const PendingConditionsBox = ({
                 <table className="condTable">
                   <thead>
                     <tr>
-                      <th>הזמן שנמשך מהחוזה</th>
-                      <th>תיאור הפעולה בסעיף</th>
+                      <th>ההתחייבות החוזית והזמן</th>
+                      <th>האירוע שמפעיל את הספירה</th>
                       <th>תאריך האירוע בפועל</th>
                     </tr>
                   </thead>
@@ -762,6 +762,11 @@ const PendingConditionsBox = ({
                               <span className={`condState is-${c.status}`}>{isResolved ? "הושלם" : "ממתין"}</span>
                             </div>
                             <strong className="condName">{c.name}</strong>
+                            {c.metadata?.action_description_he ? (
+                              <span className="condActionDescription">
+                                <b>מה החוזה מחייב:</b> {c.metadata.action_description_he}
+                              </span>
+                            ) : null}
                             <span className="condPage">
                               {sourceHref ? (
                                 <a href={sourceHref} target="_blank" rel="noreferrer" title="פתיחת מסמך החוזה בקישור מאובטח קצר־חיים">
@@ -774,6 +779,12 @@ const PendingConditionsBox = ({
                             <strong>{c.anchor_description || "האירוע המפעיל טרם תואר"}</strong>
                             <span className={`condAnchor is-${c.anchor_kind}`}>{ANCHOR_KIND_LABELS[c.anchor_kind] ?? c.anchor_kind}</span>
                             {pendingReason ? <span className="condPendingReason">{pendingReason}</span> : null}
+                            {c.source_excerpt ? (
+                              <details className="condSourceExcerpt">
+                                <summary>הצג ציטוט מהחוזה</summary>
+                                <p>{c.source_excerpt}</p>
+                              </details>
+                            ) : null}
                           </td>
                           <td className="condDateCell">
                             <div className="condDateEntry">
