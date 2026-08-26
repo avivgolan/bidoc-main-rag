@@ -6,6 +6,65 @@ export const ACTIVITY_ASSIGNMENT_BATCH_STATUSES = Object.freeze({
   COMPLETED: "completed"
 });
 
+export const DEFAULT_ACTIVITY_UPDATE_FILTERS = Object.freeze({
+  query: "",
+  kind: "",
+  dateFrom: "",
+  dateTo: "",
+  text: "",
+  severity: "",
+  status: "",
+  assignmentState: "",
+  activity: ""
+});
+
+function normalizedSearchValue(value) {
+  return String(value ?? "").trim().toLocaleLowerCase("he");
+}
+
+export function hasActiveActivityUpdateFilters(filters = {}) {
+  return Object.keys(DEFAULT_ACTIVITY_UPDATE_FILTERS)
+    .some((key) => normalizedSearchValue(filters[key]));
+}
+
+export function filterActivityUpdates(items = [], activities = [], filters = {}) {
+  const normalizedFilters = { ...DEFAULT_ACTIVITY_UPDATE_FILTERS, ...filters };
+  const activityNameByKey = new Map(
+    (Array.isArray(activities) ? activities : []).map((activity) => [String(activity?.key || ""), activity?.name || ""])
+  );
+  const query = normalizedSearchValue(normalizedFilters.query);
+  const text = normalizedSearchValue(normalizedFilters.text);
+  const activityQuery = normalizedSearchValue(normalizedFilters.activity);
+
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const activityKey = String(item?.activityKey || "");
+    const activityName = activityNameByKey.get(activityKey) || "";
+    const date = String(item?.date || "");
+    const itemText = normalizedSearchValue(`${item?.title || ""} ${item?.alertType || ""}`);
+    const globalText = normalizedSearchValue([
+      item?.kind === "update" ? "עדכון" : "התראה",
+      date,
+      item?.title,
+      item?.alertType,
+      item?.severity,
+      item?.status,
+      activityName
+    ].join(" "));
+
+    if (query && !globalText.includes(query)) return false;
+    if (normalizedFilters.kind && item?.kind !== normalizedFilters.kind) return false;
+    if (normalizedFilters.dateFrom && (!date || date < normalizedFilters.dateFrom)) return false;
+    if (normalizedFilters.dateTo && (!date || date > normalizedFilters.dateTo)) return false;
+    if (text && !itemText.includes(text)) return false;
+    if (normalizedFilters.severity !== "" && String(item?.severity ?? "") !== String(normalizedFilters.severity)) return false;
+    if (normalizedFilters.status !== "" && String(item?.status || "") !== String(normalizedFilters.status)) return false;
+    if (normalizedFilters.assignmentState === "assigned" && !activityKey) return false;
+    if (normalizedFilters.assignmentState === "unassigned" && activityKey) return false;
+    if (activityQuery && !normalizedSearchValue(activityName).includes(activityQuery)) return false;
+    return true;
+  });
+}
+
 export function createActivityAssignmentBatch(overrides = {}) {
   return {
     status: ACTIVITY_ASSIGNMENT_BATCH_STATUSES.IDLE,

@@ -156,6 +156,14 @@ export async function runContractsDryRun({
   signal = null,
   chunkResumeCache = null
 } = {}) {
+  const extractionSettings = config?.contractsAgent?.extraction || {};
+  if (config?.contractsAgent?.enabled === false || extractionSettings.enabled === false) {
+    throw new ContractsAgentError(
+      "contracts_agent_disabled",
+      "The Contracts Agent is disabled in Settings.",
+      503
+    );
+  }
   if (!config?.openRouterApiKey) {
     throw new ContractsAgentError(
       "contracts_ai_unavailable",
@@ -177,7 +185,7 @@ export async function runContractsDryRun({
   });
   const extractionDeadline = deadlineAt !== null && deadlineAt !== undefined && Number.isFinite(Number(deadlineAt))
     ? Number(deadlineAt)
-    : Date.now() + CONTRACTS_EXTRACTION_BUDGET_MS;
+    : Date.now() + (Number(extractionSettings.totalBudgetMs) || CONTRACTS_EXTRACTION_BUDGET_MS);
 
   const parsedPdf = await readPdf({ pdfBytes, deadlineAt: extractionDeadline, signal });
   const segments = segmentContractPages(parsedPdf.pages);
@@ -238,26 +246,33 @@ export async function extractContractsModelDraft({
   chunkResumeCache = null
 } = {}) {
   const selectedSegments = selectContractExtractionSegments(segments);
-  const model = config.models?.main || "openai/gpt-4o";
-  const configuredRetryModel = String(config.models?.lite || "").trim();
+  const extractionSettings = config?.contractsAgent?.extraction || {};
+  const model = extractionSettings.primaryModel || config.models?.main || "openai/gpt-4o";
+  const configuredRetryModel = String(extractionSettings.retryModel || config.models?.lite || "").trim();
   const retryModel = configuredRetryModel && configuredRetryModel !== model ? configuredRetryModel : model;
   const mainSettings = config.ai?.main || {};
   const extractionDeadline = deadlineAt !== null && deadlineAt !== undefined && Number.isFinite(Number(deadlineAt))
     ? Number(deadlineAt)
-    : Date.now() + CONTRACTS_EXTRACTION_BUDGET_MS;
-  const configuredTimeoutMs = Number(mainSettings.timeoutMs);
+    : Date.now() + (Number(extractionSettings.totalBudgetMs) || CONTRACTS_EXTRACTION_BUDGET_MS);
+  const configuredTimeoutMs = Number(extractionSettings.timeoutMs ?? mainSettings.timeoutMs);
   const primaryModelTimeoutMs = Math.min(
     180_000,
     Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0 ? configuredTimeoutMs : 120_000
   );
-  const configuredMaxTokens = Number(mainSettings.maxTokens);
+  const configuredMaxTokens = Number(extractionSettings.maxTokens ?? mainSettings.maxTokens);
   const primaryModelMaxTokens = Math.min(
     16_000,
     Math.max(1, Math.trunc(Number.isFinite(configuredMaxTokens) && configuredMaxTokens > 0 ? configuredMaxTokens : 4_096))
   );
   const chunks = chunkContractSegments(selectedSegments, {
-    maxCharacters: contractsModelChunkCharacterBudget(primaryModelMaxTokens),
-    maxPages: primaryModelMaxTokens <= 4_096 ? 3 : MAX_MODEL_CHUNK_PAGES,
+    maxCharacters: Math.min(
+      Number(extractionSettings.maxChunkCharacters) || MAX_MODEL_CHUNK_CHARACTERS,
+      contractsModelChunkCharacterBudget(primaryModelMaxTokens)
+    ),
+    maxPages: Math.min(
+      Number(extractionSettings.maxChunkPages) || MAX_MODEL_CHUNK_PAGES,
+      primaryModelMaxTokens <= 4_096 ? 3 : MAX_MODEL_CHUNK_PAGES
+    ),
     maxSegments: primaryModelMaxTokens <= 8_192 ? 3 : Number.POSITIVE_INFINITY
   });
   if (!chunks.length) {
@@ -270,7 +285,7 @@ export async function extractContractsModelDraft({
   const outline = segments
     .filter((segment) => segment.clauseKey.endsWith(".heading"))
     .map((segment) => ({ pdfPage: segment.pdfPage, clauseLabel: segment.clauseLabel, text: segment.text.slice(0, 500) }));
-  const drafts = await mapWithConcurrency(chunks, MAX_PARALLEL_MODEL_CHUNKS, async (chunk, index, abortSignal) => {
+  const drafts = await mapWithConcurrency(chunks, Number(extractionSettings.concurrency) || MAX_PARALLEL_MODEL_CHUNKS, async (chunk, index, abortSignal) => {
     const chunkNumber = index + 1;
     const modelTelemetry = modelTelemetryRecorder(emit, chunkNumber);
     const call = async (messages, callId, preferredTimeoutMs = primaryModelTimeoutMs) => {
@@ -290,7 +305,7 @@ export async function extractContractsModelDraft({
           const raw = await chatComplete({
             apiKey: config.openRouterApiKey,
             model: attemptModel,
-            temperature: 0,
+            temperature: Number(extractionSettings.temperature) || 0,
             maxTokens: primaryModelMaxTokens,
             timeoutMs: Math.max(1, Math.min(preferredTimeoutMs, remainingMs)),
             topP: 1,
@@ -346,7 +361,8 @@ export async function extractContractsModelDraft({
       unreadablePages,
       outline,
       chunkNumber,
-      chunkCount: chunks.length
+      chunkCount: chunks.length,
+      systemPrompt: extractionSettings.systemPrompt
     });
     const chunkResumeKey = contractsModelChunkResumeKey({
       messages,
@@ -397,12 +413,13 @@ export async function extractContractsModelDraft({
             unreadablePages,
             outline,
             chunkNumber: fallbackNumber,
-            chunkCount: chunks.length
+            chunkCount: chunks.length,
+            systemPrompt: extractionSettings.systemPrompt
           });
           let fallbackRaw = await call(
             fallbackMessages,
             `contracts_extract_${chunkNumber}_fallback_${fallbackIndex + 1}`,
-            Math.min(primaryModelTimeoutMs, REPAIR_MODEL_TIMEOUT_MS)
+            Math.min(primaryModelTimeoutMs, Number(extractionSettings.repairTimeoutMs) || REPAIR_MODEL_TIMEOUT_MS)
           );
           ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, fallbackRaw);
           try {
@@ -415,7 +432,9 @@ export async function extractContractsModelDraft({
               sourceSegments: fallbackChunk,
               call,
               callId: `contracts_repair_${chunkNumber}_fallback_${fallbackIndex + 1}`,
-              modelTelemetry
+              modelTelemetry,
+              repairPrompt: extractionSettings.repairPrompt,
+              repairTimeoutMs: extractionSettings.repairTimeoutMs
             });
             fallbackDrafts.push(parseAndValidateDraft(fallbackRaw, fallbackChunk));
           }
@@ -428,7 +447,9 @@ export async function extractContractsModelDraft({
           sourceSegments: chunk,
           call,
           callId: `contracts_repair_${chunkNumber}`,
-          modelTelemetry
+          modelTelemetry,
+          repairPrompt: extractionSettings.repairPrompt,
+          repairTimeoutMs: extractionSettings.repairTimeoutMs
         });
         draft = parseAndValidateDraft(raw, chunk);
       }
@@ -446,9 +467,9 @@ export async function extractContractsModelDraft({
   return mergeContractsModelDrafts(drafts, selectedSegments);
 }
 
-export function buildContractsModelMessages({ segments, pageCount, unreadablePages, outline = [], chunkNumber = 1, chunkCount = 1 }) {
+export function buildContractsModelMessages({ segments, pageCount, unreadablePages, outline = [], chunkNumber = 1, chunkCount = 1, systemPrompt = "" }) {
   return [
-    { role: "system", content: CONTRACTS_SYSTEM_PROMPT },
+    { role: "system", content: String(systemPrompt || "").trim() || CONTRACTS_SYSTEM_PROMPT },
     {
       role: "user",
       content: JSON.stringify({
@@ -871,12 +892,12 @@ function collectIssuedSegmentIds(value, segmentTextById, depth = 0) {
   return [...new Set(children.flatMap((item) => collectIssuedSegmentIds(item, segmentTextById, depth + 1)))];
 }
 
-async function repairContractsDraft({ raw, error, sourceSegments, call, callId, modelTelemetry }) {
+async function repairContractsDraft({ raw, error, sourceSegments, call, callId, modelTelemetry, repairPrompt = "", repairTimeoutMs = REPAIR_MODEL_TIMEOUT_MS }) {
   const issueCodes = error?.issueCodes?.length ? error.issueCodes : ["model_draft.invalid_json"];
   const repairMessages = [
     {
       role: "system",
-      content: "Repair one contract-extraction draft. Return JSON only. Preserve source facts and exact evidence; change only structure needed by the issue codes. Every evidence object must contain exactly one key in this shape: {\"segmentId\":\"exact supplied ID\"}. Do not add operational, computed, project, hash, identity, approval, or conflict-winner fields."
+      content: String(repairPrompt || "").trim() || "Repair one contract-extraction draft. Return JSON only. Preserve source facts and exact evidence; change only structure needed by the issue codes. Every evidence object must contain exactly one key in this shape: {\"segmentId\":\"exact supplied ID\"}. Do not add operational, computed, project, hash, identity, approval, or conflict-winner fields."
     },
     {
       role: "user",
@@ -886,7 +907,7 @@ async function repairContractsDraft({ raw, error, sourceSegments, call, callId, 
       })
     }
   ];
-  const repaired = await call(repairMessages, callId, REPAIR_MODEL_TIMEOUT_MS);
+  const repaired = await call(repairMessages, callId, Number(repairTimeoutMs) || REPAIR_MODEL_TIMEOUT_MS);
   ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, repaired);
   parseAndValidateDraft(repaired, sourceSegments);
   return repaired;

@@ -34,12 +34,16 @@ import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, r
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession } from "./auth.js";
 import { injectBuildVersion } from "./buildInfo.js";
+import { QaHarnessService } from "./qa/qaHarnessService.js";
+import { handleQaHttpRequest } from "./qa/httpApi.js";
+import { createHttpQaContext } from "./mcp/context.js";
 
 loadEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const config = () => getConfig();
+const qaHarnessService = new QaHarnessService();
 
 function logContractsRouteFailure(scope, error) {
   const cause = error?.cause;
@@ -250,6 +254,17 @@ async function handleApi(req, res, url) {
         return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
       }
     }
+  }
+
+  if (url.pathname.startsWith("/api/qa/")) {
+    const qaResponse = await handleQaHttpRequest({
+      req,
+      url,
+      service: qaHarnessService,
+      context: createHttpQaContext(req, { session: getSuperadminSession(req) }),
+      readJson
+    });
+    return sendJson(res, qaResponse.status, qaResponse.body);
   }
 
   if (req.method === "POST" && url.pathname === "/api/chat") {
@@ -3941,17 +3956,20 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
   });
 
   add("subagent_contracts", "Contracts Agent", "subagents", async () => {
+    if (cfg.contractsAgent?.enabled === false) inactive("Contracts Agent is disabled in Settings");
     if (!cfg.openRouterApiKey) inactive("Contracts Agent is inactive: OpenRouter API Key is missing");
-    if (!cfg.models?.main) inactive("Contracts Agent is inactive: main model is missing");
+    const contractsModel = cfg.contractsAgent?.extraction?.primaryModel || cfg.models?.main;
+    if (!contractsModel) inactive("Contracts Agent is inactive: extraction model is missing");
     return {
       active: true,
       mode: "dry_run",
+      model: contractsModel,
       agentVersion: CONTRACTS_AGENT_VERSION,
       pdfReaderVersion: CONTRACTS_PDF_READER_VERSION,
       maxJsonBytes: CONTRACTS_MAX_JSON_BYTES,
       maxPdfBytes: CONTRACTS_MAX_PDF_BYTES,
       maxResponseBytes: CONTRACTS_MAX_RESPONSE_BYTES,
-      extractionBudgetMs: CONTRACTS_EXTRACTION_BUDGET_MS
+      extractionBudgetMs: cfg.contractsAgent?.extraction?.totalBudgetMs || CONTRACTS_EXTRACTION_BUDGET_MS
     };
   });
 

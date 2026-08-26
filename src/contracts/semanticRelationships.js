@@ -213,6 +213,16 @@ export async function runContractsSemanticRelationshipPreview({
   now = () => Date.now(),
   logger = console
 } = {}) {
+  const agentSettings = config?.contractsAgent;
+  const r4Settings = { ...(config?.contracts?.r4_1 || {}), ...(agentSettings?.relationships || {}) };
+  if (agentSettings?.enabled === false || r4Settings.enabled === false) {
+    throw semanticError(
+      "contracts_semantic_relationships_disabled",
+      "The Contracts Relationships Agent is disabled in Settings.",
+      503,
+      "semantic.disabled"
+    );
+  }
   if (!config?.openRouterApiKey) {
     throw semanticError(
       "contracts_semantic_relationships_unavailable",
@@ -223,8 +233,8 @@ export async function runContractsSemanticRelationshipPreview({
   }
   const policyVersion = boundedVersion(relationshipPolicyVersion, "relationshipPolicyVersion");
   const normalizedPromptVersion = boundedVersion(promptVersion, "promptVersion");
-  const model = boundedVersion(modelVersion || config?.models?.main || "openai/gpt-4o", "modelVersion");
-  const r4Settings = config?.contracts?.r4_1 || {};
+  const model = boundedVersion(modelVersion || r4Settings.model || config?.models?.main || "openai/gpt-4o", "modelVersion");
+  const verifierModel = boundedVersion(r4Settings.verifierModel || model, "verifierModel");
   const maxCandidates = boundedInteger(r4Settings.maxCandidates, 1, MAX_CANDIDATES, DEFAULT_MAX_CANDIDATES);
   const candidates = buildContractsSemanticRelationshipCandidates({ preview, maxCandidates });
   const batches = chunk(candidates, MAX_PAIRS_PER_BATCH);
@@ -274,9 +284,9 @@ export async function runContractsSemanticRelationshipPreview({
     );
   }
   const timeoutMs = boundedInteger(
-    config?.ai?.main?.timeoutMs,
+    r4Settings.timeoutMs ?? config?.ai?.main?.timeoutMs,
     1_000,
-    DEFAULT_MODEL_TIMEOUT_MS,
+    180_000,
     DEFAULT_MODEL_TIMEOUT_MS
   );
   const concurrency = boundedInteger(r4Settings.concurrency, 1, DEFAULT_CONCURRENCY, DEFAULT_CONCURRENCY);
@@ -294,14 +304,14 @@ export async function runContractsSemanticRelationshipPreview({
   );
   const effectiveDeadline = deadlineAt !== null && deadlineAt !== undefined && Number.isFinite(Number(deadlineAt))
     ? Number(deadlineAt)
-    : now() + DEFAULT_DEADLINE_MS;
+    : now() + (Number(r4Settings.totalBudgetMs) || DEFAULT_DEADLINE_MS);
   let providerRetryCount = 0;
   let repairBatchCount = 0;
   let verificationRepairBatchCount = 0;
   const classificationFailures = [];
   const verificationFailures = [];
 
-  const callProvider = async ({ batch, batchIndex, messages, abortSignal, stage, responseFormat, callMaxTokens }) => {
+  const callProvider = async ({ batch, batchIndex, messages, abortSignal, stage, responseFormat, callMaxTokens, callModel = model }) => {
     let attempt = 0;
     while (true) {
       throwIfAborted(abortSignal);
@@ -317,8 +327,8 @@ export async function runContractsSemanticRelationshipPreview({
       try {
         return await chatComplete({
           apiKey: config.openRouterApiKey,
-          model,
-          temperature: 0,
+          model: callModel,
+          temperature: Number(r4Settings.temperature) || 0,
           maxTokens: callMaxTokens,
           timeoutMs: Math.max(1, Math.min(timeoutMs, remainingMs)),
           topP: 1,
@@ -363,7 +373,8 @@ export async function runContractsSemanticRelationshipPreview({
     const messages = buildContractsSemanticRelationshipMessages({
       batch,
       relationshipPolicyVersion: policyVersion,
-      promptVersion: normalizedPromptVersion
+      promptVersion: normalizedPromptVersion,
+      systemPrompt: r4Settings.systemPrompt
     });
     let raw;
     try {
@@ -479,7 +490,10 @@ export async function runContractsSemanticRelationshipPreview({
     concurrency,
     async (batch, batchIndex, abortSignal) => {
       try {
-        const messages = buildContractsSemanticRelationshipVerificationMessages({ batch });
+        const messages = buildContractsSemanticRelationshipVerificationMessages({
+          batch,
+          systemPrompt: r4Settings.verifierPrompt
+        });
         let raw;
         try {
           raw = await callProvider({
@@ -489,7 +503,8 @@ export async function runContractsSemanticRelationshipPreview({
             abortSignal,
             stage: "verification",
             responseFormat: buildContractsSemanticRelationshipVerificationResponseFormat({ batch }),
-            callMaxTokens: verifierMaxTokens
+            callMaxTokens: verifierMaxTokens,
+            callModel: verifierModel
           });
         } catch (error) {
           throw semanticError(
@@ -636,11 +651,12 @@ export async function runContractsSemanticRelationshipPreview({
 export function buildContractsSemanticRelationshipMessages({
   batch,
   relationshipPolicyVersion = CONTRACTS_RELATIONSHIPS_R4_1_POLICY_VERSION,
-  promptVersion = CONTRACTS_RELATIONSHIPS_R4_1_PROMPT_VERSION
+  promptVersion = CONTRACTS_RELATIONSHIPS_R4_1_PROMPT_VERSION,
+  systemPrompt = ""
 } = {}) {
   assertBatch(batch);
   return [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: String(systemPrompt || "").trim() || SYSTEM_PROMPT },
     {
       role: "user",
       content: JSON.stringify({
@@ -702,10 +718,10 @@ export function buildContractsSemanticRelationshipResponseFormat({ batch } = {})
   };
 }
 
-export function buildContractsSemanticRelationshipVerificationMessages({ batch } = {}) {
+export function buildContractsSemanticRelationshipVerificationMessages({ batch, systemPrompt = "" } = {}) {
   assertVerificationBatch(batch);
   return [
-    { role: "system", content: VERIFIER_SYSTEM_PROMPT },
+    { role: "system", content: String(systemPrompt || "").trim() || VERIFIER_SYSTEM_PROMPT },
     {
       role: "user",
       content: JSON.stringify({

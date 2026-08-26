@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_SCHEDULE_VIEW, formatIsraeliDate, makeScheduleScale, parseIsraeliDate, scheduleSubjectKey } from "./scheduleTimeline.js";
 import {
   ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
@@ -6,7 +6,10 @@ import {
   activityAssignmentBatchStatusText,
   applyActivityAssignmentBatchOutcome,
   buildActivityAssignmentBatchQueue,
-  createActivityAssignmentBatch
+  createActivityAssignmentBatch,
+  DEFAULT_ACTIVITY_UPDATE_FILTERS,
+  filterActivityUpdates,
+  hasActiveActivityUpdateFilters
 } from "./activityAssignmentBatch.js";
 
 // Schedule Intelligence tab (spec section 15, phases 1-2 screens).
@@ -444,15 +447,36 @@ function ActivityUpdatesTable({
   agentBatch, onStartAgentBatch, onStopAgentBatch, onResumeAgentBatch, onRestartAgentBatch,
   timeFilterEnabled, onTimeFilterChange
 }) {
-  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState(() => ({ ...DEFAULT_ACTIVITY_UPDATE_FILTERS }));
   const [visibleCount, setVisibleCount] = useState(100);
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase("he");
-    if (!needle) return items;
-    return items.filter((item) => `${item.title} ${item.alertType} ${item.date || ""}`.toLocaleLowerCase("he").includes(needle));
-  }, [items, query]);
-  const assigned = items.filter((item) => item.activityKey).length;
-  const eligibleCount = useMemo(() => buildActivityAssignmentBatchQueue(items).length, [items]);
+  const deferredQuery = useDeferredValue(filters.query);
+  const deferredText = useDeferredValue(filters.text);
+  const deferredActivity = useDeferredValue(filters.activity);
+  const effectiveFilters = useMemo(() => ({
+    ...filters,
+    query: deferredQuery,
+    text: deferredText,
+    activity: deferredActivity
+  }), [filters, deferredQuery, deferredText, deferredActivity]);
+  const filtered = useMemo(
+    () => filterActivityUpdates(items, activities, effectiveFilters),
+    [items, activities, effectiveFilters]
+  );
+  const assigned = filtered.filter((item) => item.activityKey).length;
+  const eligibleCount = useMemo(() => buildActivityAssignmentBatchQueue(filtered).length, [filtered]);
+  const severityOptions = useMemo(() => [...new Set(items.map((item) => item.severity).filter((value) => value !== null && value !== undefined))]
+    .sort((a, b) => Number(a) - Number(b)), [items]);
+  const statusOptions = useMemo(() => [...new Set(items.map((item) => String(item.status || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "he")), [items]);
+  const filtersActive = hasActiveActivityUpdateFilters(filters);
+  const updateFilter = useCallback((key, value) => {
+    setFilters((current) => ({ ...current, [key]: value }));
+    setVisibleCount(100);
+  }, []);
+  const clearFilters = useCallback(() => {
+    setFilters({ ...DEFAULT_ACTIVITY_UPDATE_FILTERS });
+    setVisibleCount(100);
+  }, []);
   const batchActive = agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING
     || agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING;
   const anotherRowActionActive = Boolean(agentBusyId || busyId);
@@ -462,7 +486,7 @@ function ActivityUpdatesTable({
       <div className="activityUpdatesHead">
         <div>
           <h3 id="activity-updates-title">עדכונים והתראות על ציר הזמן</h3>
-          <p>{items.length} פריטים · {assigned} משויכים לפעילות</p>
+          <p aria-live="polite">{filtersActive ? `${filtered.length} מתוך ${items.length}` : items.length} פריטים · {assigned} משויכים לפעילות</p>
         </div>
         <div className="activityUpdatesHeadTools">
           <div className="activityAgentBatchControls" aria-label="הרצת איתור אוטומטי לכל ההתראות">
@@ -476,14 +500,14 @@ function ActivityUpdatesTable({
                 <button type="button" className="activityAgentBatchButton is-primary" disabled={anotherRowActionActive}
                   onClick={onResumeAgentBatch}>המשך מאותה נקודה</button>
                 <button type="button" className="activityAgentBatchButton" disabled={anotherRowActionActive || !eligibleCount}
-                  onClick={onRestartAgentBatch}>הרץ מחדש</button>
+                  onClick={() => onRestartAgentBatch(filtered)}>הרץ מחדש</button>
               </>
             ) : agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.COMPLETED ? (
-              <button type="button" className="activityAgentBatchButton" disabled={!eligibleCount} onClick={onRestartAgentBatch}>הרץ מחדש</button>
+              <button type="button" className="activityAgentBatchButton" disabled={!eligibleCount} onClick={() => onRestartAgentBatch(filtered)}>הרץ מחדש</button>
             ) : (
               <>
                 <button type="button" className="activityAgentBatchButton is-primary" disabled={batchActive || anotherRowActionActive || !eligibleCount}
-                  onClick={onStartAgentBatch}>{eligibleCount ? `אתר את כולם (${eligibleCount})` : "אין שורות לאיתור"}</button>
+                  onClick={() => onStartAgentBatch(filtered)}>{eligibleCount ? `אתר את כולם (${eligibleCount})` : "אין שורות לאיתור"}</button>
                 {batchActive ? (
                   <button type="button" className="activityAgentBatchButton is-stop"
                     disabled={agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING}
@@ -498,13 +522,54 @@ function ActivityUpdatesTable({
               <span>{batchStatusText}</span>
             </div>
           ) : null}
-          <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setVisibleCount(100); }}
-            placeholder="חיפוש בעדכונים והתראות…" aria-label="חיפוש בעדכונים והתראות" />
+          <div className="activityUpdatesGlobalFilter">
+            <input type="search" value={filters.query} onChange={(event) => updateFilter("query", event.target.value)}
+              placeholder="חיפוש כללי בעדכונים והתראות…" aria-label="חיפוש כללי בעדכונים והתראות" />
+            <button type="button" onClick={clearFilters} disabled={!filtersActive}>נקה מסננים</button>
+          </div>
         </div>
       </div>
       <div className="activityUpdatesTableWrap">
         <table className="activityUpdatesTable">
-          <thead><tr><th>סוג</th><th>תאריך</th><th>התראה / עדכון</th><th>חומרה</th><th>סטטוס</th><th>שיוך לפעילות בלוח</th></tr></thead>
+          <thead>
+            <tr className="activityUpdatesHeaderRow"><th>סוג</th><th>תאריך</th><th>התראה / עדכון</th><th>חומרה</th><th>סטטוס</th><th>שיוך לפעילות בלוח</th></tr>
+            <tr className="activityUpdatesFilterRow">
+              <th>
+                <select value={filters.kind} onChange={(event) => updateFilter("kind", event.target.value)} aria-label="סינון לפי סוג">
+                  <option value="">כל הסוגים</option><option value="alert">התראות</option><option value="update">עדכונים</option>
+                </select>
+              </th>
+              <th>
+                <div className="activityUpdatesDateFilter">
+                  <label><span>מ־</span><input type="date" value={filters.dateFrom} max={filters.dateTo || undefined}
+                    onChange={(event) => updateFilter("dateFrom", event.target.value)} aria-label="סינון מתאריך" /></label>
+                  <label><span>עד</span><input type="date" value={filters.dateTo} min={filters.dateFrom || undefined}
+                    onChange={(event) => updateFilter("dateTo", event.target.value)} aria-label="סינון עד תאריך" /></label>
+                </div>
+              </th>
+              <th><input type="search" value={filters.text} onChange={(event) => updateFilter("text", event.target.value)}
+                placeholder="חיפוש בתוכן…" aria-label="סינון לפי תוכן ההתראה או העדכון" /></th>
+              <th>
+                <select value={filters.severity} onChange={(event) => updateFilter("severity", event.target.value)} aria-label="סינון לפי חומרה">
+                  <option value="">הכול</option>{severityOptions.map((severity) => <option key={severity} value={severity}>{severity}</option>)}
+                </select>
+              </th>
+              <th>
+                <select value={filters.status} onChange={(event) => updateFilter("status", event.target.value)} aria-label="סינון לפי סטטוס">
+                  <option value="">כל הסטטוסים</option>{statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
+                </select>
+              </th>
+              <th>
+                <div className="activityUpdatesAssignmentFilter">
+                  <select value={filters.assignmentState} onChange={(event) => updateFilter("assignmentState", event.target.value)} aria-label="סינון לפי מצב שיוך">
+                    <option value="">כל השיוכים</option><option value="assigned">משויכים בלבד</option><option value="unassigned">לא משויכים</option>
+                  </select>
+                  <input type="search" value={filters.activity} onChange={(event) => updateFilter("activity", event.target.value)}
+                    placeholder="שם פעילות…" aria-label="סינון לפי שם הפעילות המשויכת" />
+                </div>
+              </th>
+            </tr>
+          </thead>
           <tbody>
             {filtered.slice(0, visibleCount).map((item) => {
               const agentResult = agentResults?.[item.id];
@@ -576,7 +641,7 @@ function ActivityUpdatesTable({
                 </React.Fragment>
               );
             })}
-            {!filtered.length ? <tr><td colSpan={6} className="schedEmpty">אין פריטים תואמים לחיפוש</td></tr> : null}
+            {!filtered.length ? <tr><td colSpan={6} className="schedEmpty">אין פריטים התואמים למסננים שנבחרו</td></tr> : null}
           </tbody>
         </table>
       </div>
@@ -1179,8 +1244,8 @@ export function SchedulePage() {
     ));
   }, []);
 
-  const startActivityAssignmentBatch = useCallback(() => {
-    const queue = buildActivityAssignmentBatchQueue(activityUpdates.items);
+  const startActivityAssignmentBatch = useCallback((scopedItems = activityUpdates.items) => {
+    const queue = buildActivityAssignmentBatchQueue(scopedItems);
     if (!queue.length) return;
     clearActivityAgentBatchResults(queue);
     void runActivityAssignmentBatch({ queue, timeFilter: activityAgentTimeFilter });
@@ -1202,8 +1267,8 @@ export function SchedulePage() {
     });
   }, [activityAgentBatch, runActivityAssignmentBatch]);
 
-  const restartActivityAssignmentBatch = useCallback(() => {
-    const queue = buildActivityAssignmentBatchQueue(activityUpdates.items);
+  const restartActivityAssignmentBatch = useCallback((scopedItems = activityUpdates.items) => {
+    const queue = buildActivityAssignmentBatchQueue(scopedItems);
     if (!queue.length) return;
     clearActivityAgentBatchResults(queue);
     void runActivityAssignmentBatch({ queue, timeFilter: activityAgentTimeFilter });

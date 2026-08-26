@@ -136,11 +136,16 @@ export async function runContractsClauseEnrichment({
   now = () => Date.now(),
   logger = console
 } = {}) {
+  const agentSettings = config?.contractsAgent;
+  const stageSettings = { ...(config?.contracts?.r3 || {}), ...(agentSettings?.enrichment || {}) };
+  if (agentSettings?.enabled === false || stageSettings.enabled === false) {
+    throw enrichmentError("contracts_clause_enrichment_disabled", "Contracts clause enrichment is disabled in Settings.", 503, "enrichment.disabled");
+  }
   const source = normalizeGeneration(generation);
   const policyVersion = boundedVersion(enrichmentPolicyVersion, "enrichmentPolicyVersion");
   const normalizedPromptVersion = boundedVersion(promptVersion, "promptVersion");
   const tags = normalizeControlledTags(controlledTags);
-  const model = boundedVersion(modelVersion || config?.models?.lite || config?.models?.main || "openai/gpt-4o-mini", "modelVersion");
+  const model = boundedVersion(modelVersion || stageSettings.model || config?.models?.lite || config?.models?.main || "openai/gpt-4o-mini", "modelVersion");
   const enrichmentGeneration = createContractsClauseEnrichmentGeneration({
     enrichmentPolicyVersion: policyVersion,
     promptVersion: normalizedPromptVersion,
@@ -158,31 +163,31 @@ export async function runContractsClauseEnrichment({
   }
 
   const mainSettings = config?.ai?.lite || config?.ai?.main || {};
-  const timeoutMs = boundedInteger(mainSettings.timeoutMs, 1_000, DEFAULT_MODEL_TIMEOUT_MS, DEFAULT_MODEL_TIMEOUT_MS);
+  const timeoutMs = boundedInteger(stageSettings.timeoutMs ?? mainSettings.timeoutMs, 1_000, 180_000, DEFAULT_MODEL_TIMEOUT_MS);
   // R3 has its own total-output budget. Do not inherit the much larger global
   // main-agent generation limit, otherwise a normal full-contract batch plan
   // can be rejected before the first model call.
   const maxTokens = boundedInteger(
-    config?.contracts?.r3?.maxTokensPerCall,
+    stageSettings.maxTokensPerCall,
     256,
     DEFAULT_MODEL_MAX_TOKENS,
     DEFAULT_MODEL_MAX_TOKENS
   );
   const maxTotalTokens = boundedInteger(
-    config?.contracts?.r3?.maxTotalModelTokens,
+    stageSettings.maxTotalModelTokens,
     maxTokens,
     DEFAULT_MAX_TOTAL_MODEL_TOKENS,
     DEFAULT_MAX_TOTAL_MODEL_TOKENS
   );
-  const concurrency = boundedInteger(config?.contracts?.r3?.concurrency, 1, DEFAULT_CONCURRENCY, DEFAULT_CONCURRENCY);
+  const concurrency = boundedInteger(stageSettings.concurrency, 1, 4, DEFAULT_CONCURRENCY);
   const maxRepairBatches = boundedInteger(
-    config?.contracts?.r3?.maxRepairBatches,
+    stageSettings.maxRepairBatches,
     0,
     DEFAULT_MAX_REPAIR_BATCHES,
     DEFAULT_MAX_REPAIR_BATCHES
   );
   const maxProviderRetries = boundedInteger(
-    config?.contracts?.r3?.maxProviderRetries,
+    stageSettings.maxProviderRetries,
     0,
     DEFAULT_MAX_PROVIDER_RETRIES,
     DEFAULT_MAX_PROVIDER_RETRIES
@@ -203,7 +208,7 @@ export async function runContractsClauseEnrichment({
     && deadlineAt !== undefined
     && Number.isFinite(Number(deadlineAt))
     ? Number(deadlineAt)
-    : now() + DEFAULT_DEADLINE_MS;
+    : now() + (Number(stageSettings.totalBudgetMs) || DEFAULT_DEADLINE_MS);
   let repairBatchCount = 0;
   let providerRetryCount = 0;
   let groundingSanitizationCount = 0;
@@ -221,7 +226,7 @@ export async function runContractsClauseEnrichment({
         return await chatComplete({
           apiKey: config.openRouterApiKey,
           model,
-          temperature: 0,
+          temperature: Number(stageSettings.temperature) || 0,
           maxTokens,
           timeoutMs: Math.max(1, Math.min(timeoutMs, remainingMs)),
           topP: 1,
@@ -268,7 +273,13 @@ export async function runContractsClauseEnrichment({
     if (remainingMs < 1_000) {
       throw enrichmentError("contracts_clause_enrichment_time_budget_exceeded", "R3 clause enrichment exceeded its total time budget.", 504, "enrichment.time_budget_exceeded");
     }
-    const messages = buildContractsClauseEnrichmentMessages({ batch, policyVersion, promptVersion: normalizedPromptVersion, controlledTags: tags });
+    const messages = buildContractsClauseEnrichmentMessages({
+      batch,
+      policyVersion,
+      promptVersion: normalizedPromptVersion,
+      controlledTags: tags,
+      systemPrompt: stageSettings.systemPrompt
+    });
     let raw;
     try {
       raw = await callProvider({ batch, batchIndex, messages, abortSignal, stage: "enrichment" });
@@ -420,12 +431,12 @@ export async function runContractsClauseEnrichment({
   };
 }
 
-export function buildContractsClauseEnrichmentMessages({ batch, policyVersion, promptVersion, controlledTags = null } = {}) {
+export function buildContractsClauseEnrichmentMessages({ batch, policyVersion, promptVersion, controlledTags = null, systemPrompt = "" } = {}) {
   if (!Array.isArray(batch) || batch.length < 1 || batch.length > MAX_BATCH_CLAUSES) {
     throw enrichmentError("contracts_clause_enrichment_batch_invalid", "R3 model batches must contain a bounded non-empty clause list.", 500, "enrichment.batch_invalid");
   }
   return [
-    { role: "system", content: ENRICHMENT_SYSTEM_PROMPT },
+    { role: "system", content: String(systemPrompt || "").trim() || ENRICHMENT_SYSTEM_PROMPT },
     {
       role: "user",
       content: JSON.stringify({

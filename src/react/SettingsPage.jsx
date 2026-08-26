@@ -5,6 +5,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 const SECTIONS = [
   { id: "connections", label: "חיבורים" },
   { id: "agents",      label: "סוכני AI" },
+  { id: "contractsAgent", label: "סוכן חוזים" },
   { id: "scheduleAgent", label: "סוכן שיוך ללו״ז" },
   { id: "retrieval",   label: "שליפה ו-RAG" },
   { id: "content",     label: "APP DATA" },
@@ -139,6 +140,7 @@ function settingsToForm(s) {
     timezone:      s.timezone || "Asia/Jerusalem",
     presets:       s.presets || [],
     scheduleAssignmentAgent: s.scheduleAssignmentAgent ? JSON.parse(JSON.stringify(s.scheduleAssignmentAgent)) : {},
+    contractsAgent: s.contractsAgent ? JSON.parse(JSON.stringify(s.contractsAgent)) : {},
   };
 }
 
@@ -160,6 +162,7 @@ function formToPayload(form) {
     tools:     Object.fromEntries(Object.entries(form.tools || {}).map(([k, v]) => [k, { url: v }])),
     timezone:  form.timezone,
     scheduleAssignmentAgent: form.scheduleAssignmentAgent,
+    contractsAgent: form.contractsAgent,
   };
 }
 
@@ -176,6 +179,7 @@ const icons = {
   info:        "M12 22C6.5 22 2 17.5 2 12S6.5 2 12 2s10 4.5 10 10-4.5 10-10 10zm0-11v5m0-8h.01",
   connections: "M13 2L3 14h9l-1 8 10-12h-9l1-8z",
   agents:      "M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2zM3.5 22a8.5 8.5 0 0 1 17 0",
+  contractsAgent: "M6 2h9l4 4v16H6zM14 2v5h5M9 12h7M9 16h7M9 8h2",
   scheduleAgent: "M4 5h16M7 3v4m10-4v4M5 9h14v11H5zM9 13l2 2 4-4",
   retrieval:   "M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z",
   content:     "M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7zm0 5h16M8 3v4M16 3v4",
@@ -584,6 +588,195 @@ function AgentsSection({ models, form, update, onRefreshModels, modelStatus }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         {AGENTS.map(agent => (
           <AgentCard key={agent.key} agent={agent} models={models} form={form} update={update} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Section: Contracts Agent ────────────────────────────────────────────────
+
+const CONTRACTS_STAGES = [
+  {
+    key: "extraction",
+    index: "01",
+    title: "חילוץ חוזה",
+    desc: "קורא את ה־PDF ומחלץ עובדות זמן, אבני דרך, תנאים והשלכות לעיון אנושי.",
+    models: [["primaryModel", "מודל ראשי"], ["retryModel", "מודל חלופי"]],
+    numbers: [
+      ["temperature", "Temperature", 0, 1, .05, 0],
+      ["maxTokens", "Max tokens", 512, 16000, 256, 4096],
+      ["timeoutMs", "Timeout לקריאה (ms)", 5000, 180000, 5000, 120000],
+      ["totalBudgetMs", "תקציב כולל (ms)", 30000, 600000, 10000, 270000],
+      ["concurrency", "מקביליות chunks", 1, 6, 1, 3],
+      ["maxChunkCharacters", "מקסימום תווים ל־chunk", 1200, 10000, 100, 10000],
+      ["maxChunkPages", "מקסימום עמודים ל־chunk", 1, 10, 1, 5],
+      ["repairTimeoutMs", "Timeout לתיקון (ms)", 5000, 180000, 5000, 60000],
+    ],
+    prompts: [["systemPrompt", "פרומפט חילוץ ראשי"], ["repairPrompt", "פרומפט תיקון JSON"]]
+  },
+  {
+    key: "enrichment",
+    index: "02",
+    title: "העשרת סעיפים",
+    desc: "מסכם סעיפים מאומתים ומוסיף תגיות מבוקרות לצורך אחזור וחיפוש.",
+    models: [["model", "מודל העשרה"]],
+    numbers: [
+      ["temperature", "Temperature", 0, 1, .05, 0],
+      ["maxTokensPerCall", "Tokens לקריאה", 256, 1600, 100, 1600],
+      ["maxTotalModelTokens", "תקציב tokens כולל", 1600, 96000, 1000, 48000],
+      ["timeoutMs", "Timeout לקריאה (ms)", 5000, 180000, 5000, 75000],
+      ["totalBudgetMs", "תקציב זמן כולל (ms)", 30000, 600000, 10000, 180000],
+      ["concurrency", "מקביליות", 1, 4, 1, 2],
+      ["maxRepairBatches", "מקסימום תיקוני batch", 0, 10, 1, 5],
+      ["maxProviderRetries", "ניסיונות ספק נוספים", 0, 3, 1, 1],
+    ],
+    prompts: [["systemPrompt", "פרומפט העשרת סעיפים"]]
+  },
+  {
+    key: "relationships",
+    index: "03",
+    title: "קשרים סמנטיים",
+    desc: "מסווג קשרים בין סעיפים ומעביר כל הצעה דרך בודק ספקני נפרד.",
+    models: [["model", "מודל מסווג"], ["verifierModel", "מודל בודק"]],
+    numbers: [
+      ["temperature", "Temperature", 0, 1, .05, 0],
+      ["maxCandidates", "מקסימום זוגות", 1, 96, 1, 48],
+      ["maxTokensPerCall", "Tokens למסווג", 512, 600, 10, 600],
+      ["verifierMaxTokensPerCall", "Tokens לבודק", 350, 700, 10, 700],
+      ["maxTotalModelTokens", "תקציב tokens כולל", 1000, 60000, 1000, 20000],
+      ["timeoutMs", "Timeout לקריאה (ms)", 5000, 180000, 5000, 75000],
+      ["totalBudgetMs", "תקציב זמן כולל (ms)", 30000, 600000, 10000, 180000],
+      ["concurrency", "מקביליות", 1, 4, 1, 2],
+      ["confidenceThreshold", "סף ביטחון", .5, .95, .01, .9],
+      ["conflictConfidenceThreshold", "סף ביטחון לסתירה", .5, .98, .01, .9],
+      ["maxProviderRetries", "ניסיונות ספק נוספים", 0, 3, 1, 1],
+      ["maxRepairBatches", "תיקוני סיווג", 0, 5, 1, 1],
+      ["maxVerificationRepairBatches", "תיקוני בדיקה", 0, 5, 1, 1],
+    ],
+    prompts: [["systemPrompt", "פרומפט סיווג קשרים"], ["verifierPrompt", "פרומפט בודק קשרים"]]
+  },
+  {
+    key: "decisions",
+    index: "04",
+    title: "נרמול החלטות",
+    desc: "הופך קבוצות מועמדים שנבדקו להצעות החלטה חוזיות עקביות בעברית.",
+    models: [["model", "מודל החלטות"]],
+    numbers: [
+      ["temperature", "Temperature", 0, 1, .05, 0],
+      ["maxTokensPerCall", "Tokens לקריאה", 700, 2200, 100, 1600],
+      ["maxTotalModelTokens", "תקציב tokens כולל", 2200, 200000, 1000, 180000],
+      ["timeoutMs", "Timeout לקריאה (ms)", 5000, 180000, 5000, 75000],
+      ["totalBudgetMs", "תקציב זמן כולל (ms)", 30000, 600000, 10000, 300000],
+      ["concurrency", "מקביליות", 1, 3, 1, 3],
+      ["maxProviderRetries", "ניסיונות ספק נוספים", 0, 1, 1, 1],
+      ["maxRepairBatches", "מקסימום תיקוני batch", 0, 5, 1, 3],
+      ["maxSplitFallbackCalls", "פיצולי fallback", 0, 20, 1, 8],
+    ],
+    prompts: [["systemPrompt", "פרומפט נרמול החלטות"]]
+  },
+  {
+    key: "autoReview",
+    index: "05",
+    title: "בדיקה אוטומטית",
+    desc: "בודק עצמאי שמאשר רק החלטות העומדות גם במדיניות הדטרמיניסטית.",
+    models: [["model", "מודל בודק החלטות"]],
+    numbers: [
+      ["temperature", "Temperature", 0, 1, .05, 0],
+      ["maxTokens", "Max tokens", 512, 8000, 100, 3200],
+      ["timeoutMs", "Timeout לקריאה (ms)", 5000, 180000, 5000, 75000],
+      ["totalBudgetMs", "תקציב זמן כולל (ms)", 30000, 600000, 10000, 300000],
+      ["batchSize", "החלטות בכל batch", 1, 12, 1, 4],
+      ["concurrency", "מקביליות", 1, 4, 1, 2],
+      ["maxRetries", "ניסיונות חוזרים", 0, 3, 1, 1],
+    ],
+    prompts: [["systemPrompt", "פרומפט בודק החלטות"]]
+  }
+];
+
+function ContractsStageCard({ stage, value, update, models }) {
+  const base = `contractsAgent.${stage.key}`;
+  return (
+    <article style={{
+      ...s.card,
+      display: "flex", flexDirection: "column", gap: 14,
+      borderTop: "3px solid var(--brand-500)",
+      background: "linear-gradient(180deg, color-mix(in srgb, var(--brand-50) 45%, var(--surface)) 0, var(--surface) 92px)"
+    }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+        <div style={{ display: "flex", gap: 11, alignItems: "flex-start" }}>
+          <span aria-hidden="true" style={{
+            fontSize: 11, fontWeight: 800, letterSpacing: 1.2, color: "var(--brand-600, var(--brand-500))",
+            border: "1px solid var(--brand-200, var(--line-strong))", borderRadius: 999, padding: "3px 7px"
+          }}>{stage.index}</span>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 780 }}>{stage.title}</h3>
+            <p style={{ ...s.hint, marginTop: 5 }}>{stage.desc}</p>
+          </div>
+        </div>
+        <Toggle label="פעיל" checked={value.enabled !== false} onChange={v => update(`${base}.enabled`, v)} />
+      </div>
+
+      <div style={stage.models.length > 1 ? s.grid2 : undefined}>
+        {stage.models.map(([key, label]) => (
+          <Field key={key} label={label}>
+            <ModelSelect value={value[key] || ""} onChange={v => update(`${base}.${key}`, v)} models={models} />
+          </Field>
+        ))}
+      </div>
+
+      <Accordion title="הגדרות מודל ותקציבים" defaultOpen={stage.key === "extraction"}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+          {stage.numbers.map(([key, label, min, max, step, fallback]) => (
+            <Field key={key} label={label}>
+              <Input type="number" min={min} max={max} step={step} value={value[key] ?? fallback}
+                onChange={v => update(`${base}.${key}`, v)} />
+            </Field>
+          ))}
+        </div>
+      </Accordion>
+
+      {stage.prompts.map(([key, label]) => (
+        <Accordion key={key} title={label}>
+          <Textarea rows={12} value={value[key] || ""} onChange={v => update(`${base}.${key}`, v)}
+            placeholder="ריק = פרומפט ברירת המחדל המאובטח שבקוד" />
+          <p style={{ ...s.hint, marginTop: 6 }}>הפרומפט נשמר בשרת. השאר ריק כדי לקבל עדכוני ברירת מחדל עתידיים.</p>
+        </Accordion>
+      ))}
+    </article>
+  );
+}
+
+function ContractsAgentSection({ models, form, update, configStatus }) {
+  const value = form.contractsAgent || {};
+  return (
+    <div style={s.section}>
+      <div style={{
+        ...s.card,
+        padding: "22px 24px",
+        display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 20, alignItems: "center",
+        borderInlineStart: "5px solid var(--brand-500)",
+        background: "linear-gradient(115deg, color-mix(in srgb, var(--brand-50) 70%, var(--surface)) 0%, var(--surface) 58%)"
+      }}>
+        <div>
+          <p style={{ margin: 0, fontSize: 11, fontWeight: 800, letterSpacing: 1.3, color: "var(--brand-600, var(--brand-500))" }}>CONTRACTS PIPELINE</p>
+          <h2 style={{ margin: "5px 0 7px", fontSize: 21, lineHeight: 1.25 }}>הגדרות סוכן החוזים</h2>
+          <p style={{ ...s.hint, maxWidth: 720 }}>
+            שליטה מרכזית במודלים, פרומפטים, זמני המתנה ותקציבי הריצה של כל שלבי ניתוח החוזה. מודל ריק יורש את מודל Main או Lite המתאים.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5, color: "var(--text-secondary)" }}>
+            <StatusDot ok={configStatus?.openRouter} />
+            {configStatus?.openRouter ? "OpenRouter מוגדר" : "נדרש מפתח OpenRouter בכרטיסיית חיבורים"}
+          </div>
+        </div>
+        <Toggle label="הפעל סוכן חוזים" checked={value.enabled !== false} onChange={v => update("contractsAgent.enabled", v)} />
+      </div>
+
+      <InfoHint>הגדרות אלה משפיעות רק על קריאות המודל. הרשאות כתיבה, שערי rollout, אימות ראיות והצורך בסקירה אנושית נשארים נעולים ומאומתים בצד השרת.</InfoHint>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14 }}>
+        {CONTRACTS_STAGES.map(stage => (
+          <ContractsStageCard key={stage.key} stage={stage} value={value[stage.key] || {}} update={update} models={models} />
         ))}
       </div>
     </div>
@@ -1660,6 +1853,7 @@ export function SettingsPage() {
         <div key={activeSection} style={{ flex: 1, minWidth: 0, animation: "bidocFade .18s ease-out" }}>
           {activeSection === "connections" && <ConnectionsSection {...sectionProps} />}
           {activeSection === "agents"      && <AgentsSection {...sectionProps} onRefreshModels={handleRefreshModels} modelStatus={modelStatus} />}
+          {activeSection === "contractsAgent" && <ContractsAgentSection {...sectionProps} />}
           {activeSection === "scheduleAgent" && <ScheduleAssignmentAgentSection {...sectionProps} />}
           {activeSection === "retrieval"   && <RetrievalSection {...sectionProps} />}
           {activeSection === "content"     && <ContentDbSection {...sectionProps} />}

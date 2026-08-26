@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAgentList, defaultPrompts } from "./prompts.js";
 import { normalizeScheduleAssignmentAgentSettings, scheduleAssignmentConfigurationSnapshot } from "./scheduleActivityAssignmentEngine.js";
+import { normalizeContractsAgentSettings } from "./contracts/agentSettings.js";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_FILES = [".env", ".env.local"];
@@ -640,6 +641,7 @@ export function getConfig(settingsOverride = null) {
     },
     timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks),
     scheduleAssignmentAgent: normalizeScheduleAssignmentAgentSettings(settings.scheduleAssignmentAgent),
+    contractsAgent: normalizeContractsAgentSettings(settings.contractsAgent),
     meetingsEvidence: normalizeMeetingsEvidenceSettings(settings.subagents?.meetingsEvidence),
     dataQuery: normalizeDataQuerySettings(settings.subagents?.dataQuery),
     contentTools: normalizeContentToolsSettings(settings.subagents?.contentTools),
@@ -674,6 +676,7 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
     knowledge: config.knowledge,
     timelineLinks: config.timelineLinks,
     scheduleAssignmentAgent: scheduleAssignmentConfigurationSnapshot(config.scheduleAssignmentAgent),
+    contractsAgent: config.contractsAgent,
     contentSource: {
       ...config.contentSource,
       supabaseServiceRoleKey: maskSecret(config.contentSource.supabaseServiceRoleKey),
@@ -885,6 +888,7 @@ export function exportFullSettings(config = getConfig()) {
       knowledge: config.knowledge,
       timelineLinks: config.timelineLinks,
       scheduleAssignmentAgent: config.scheduleAssignmentAgent,
+      contractsAgent: config.contractsAgent,
       contentSource: {
         supabaseUrl: config.contentSource.supabaseUrl,
         supabaseServiceRoleKey: config.contentSource.supabaseServiceRoleKey,
@@ -925,6 +929,7 @@ export function normalizeImportedSettingsFile(value = {}) {
   if (Object.prototype.hasOwnProperty.call(raw, "knowledge")) normalized.knowledge = raw.knowledge || {};
   if (Object.prototype.hasOwnProperty.call(raw, "timelineLinks")) normalized.timelineLinks = raw.timelineLinks || {};
   if (Object.prototype.hasOwnProperty.call(raw, "scheduleAssignmentAgent")) normalized.scheduleAssignmentAgent = raw.scheduleAssignmentAgent || {};
+  if (Object.prototype.hasOwnProperty.call(raw, "contractsAgent")) normalized.contractsAgent = raw.contractsAgent || {};
   if (Object.prototype.hasOwnProperty.call(raw, "contentSource")) normalized.contentSource = raw.contentSource || {};
   if (Object.prototype.hasOwnProperty.call(raw, "secrets")) normalized.secrets = raw.secrets || {};
   if (Object.prototype.hasOwnProperty.call(raw, "n8nBaseUrl")) normalized.n8nBaseUrl = raw.n8nBaseUrl || "";
@@ -1125,6 +1130,7 @@ export async function writeLocalSettings(settings, options = {}) {
   const mergedKnowledge = mergeSection("knowledge", settings.knowledge || {}, existing.knowledge || {});
   const mergedTimelineLinks = mergeSection("timelineLinks", settings.timelineLinks || {}, existing.timelineLinks || {});
   const mergedScheduleAssignmentAgent = mergeSection("scheduleAssignmentAgent", settings.scheduleAssignmentAgent || {}, existing.scheduleAssignmentAgent || {});
+  const mergedContractsAgent = mergeSection("contractsAgent", settings.contractsAgent || {}, existing.contractsAgent || {});
   const mergedContentSource = mergeSection("contentSource", incomingContentSource, existingContentSource);
   const mergedToolsRuntime = has("toolsRuntime") || has("toolRuntime")
     ? mergePlainObject(existing.toolsRuntime || existing.toolRuntime || {}, settings.toolsRuntime || settings.toolRuntime || {})
@@ -1193,6 +1199,7 @@ export async function writeLocalSettings(settings, options = {}) {
     },
     timelineLinks: normalizeTimelineLinkAgentSettings(mergedTimelineLinks),
     scheduleAssignmentAgent: normalizeScheduleAssignmentAgentSettings(mergedScheduleAssignmentAgent),
+    contractsAgent: normalizeContractsAgentSettings(mergedContractsAgent),
     n8nBaseUrl: has("n8nBaseUrl") ? settings.n8nBaseUrl || "" : existing.n8nBaseUrl || "",
     secrets: {
       openRouterApiKey: mergeSecret(existing.secrets?.openRouterApiKey, has("secrets") ? incomingSecrets.openRouterApiKey : undefined),
@@ -1356,6 +1363,7 @@ function normalizePresetSettingsPatch(value = {}) {
     memory: raw.memory && typeof raw.memory === "object" ? cloneJson(raw.memory) : {},
     knowledge: raw.knowledge && typeof raw.knowledge === "object" ? cloneJson(raw.knowledge) : {},
     timelineLinks: raw.timelineLinks && typeof raw.timelineLinks === "object" ? cloneJson(raw.timelineLinks) : {},
+    contractsAgent: raw.contractsAgent && typeof raw.contractsAgent === "object" ? cloneJson(raw.contractsAgent) : {},
     timezone: typeof raw.timezone === "string" ? raw.timezone : "",
     toolsRuntime: raw.toolsRuntime && typeof raw.toolsRuntime === "object" ? cloneJson(raw.toolsRuntime) : {},
     subagents: raw.subagents && typeof raw.subagents === "object" ? cloneJson(raw.subagents) : {}
