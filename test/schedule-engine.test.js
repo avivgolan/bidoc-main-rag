@@ -281,6 +281,23 @@ test("schedule assignment batch: UI awaits each row and exposes controlled stop 
   assert.match(page, />הרץ מחדש</u);
 });
 
+test("schedule UI: APP DATA failures preserve partial results and expose a bounded retry", () => {
+  const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
+  const loadStart = page.indexOf("const loadData = useCallback");
+  const loadEnd = page.indexOf("const saveProjectEndDate", loadStart);
+  const loader = page.slice(loadStart, loadEnd);
+  assert.ok(loadStart >= 0 && loadEnd > loadStart);
+  assert.match(page, /function scheduleLoadFailureMessage/u);
+  assert.match(page, /APP DATA אינו זמין כרגע \(522\/timeout\)/u);
+  assert.match(loader, /const loadPart = async/u);
+  assert.match(loader, /failedRequiredLoads/u);
+  assert.match(loader, /setHealth\(healthResult\)/u);
+  assert.match(loader, /setSweepResult\(sweep\)/u);
+  assert.match(loader, /timeoutMs: 45_000/u);
+  assert.match(page, /role="alert"/u);
+  assert.match(page, /"נסה שוב"/u);
+});
+
 test("schedule assignment agent: default configuration is publishable and weights total 100", () => {
   const result = validateScheduleAssignmentAgentSettings({});
   assert.equal(result.ok, true);
@@ -319,6 +336,7 @@ test("schedule assignment prompt pack: preserves approved model family and separ
 
 test("schedule assignment settings UI: identifies the active publication and reloads full prompt text", () => {
   const uiSource = fs.readFileSync(new URL("../src/react/SettingsPage.jsx", import.meta.url), "utf8");
+  const builtUiSource = fs.readFileSync(new URL("../public/react/bidoc-react.js", import.meta.url), "utf8");
   const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   const reloadHandler = uiSource.slice(uiSource.indexOf("const handleReload = async"), uiSource.indexOf("const handleExport ="));
   assert.match(uiSource, /data-schedule-agent-publication/u);
@@ -330,6 +348,11 @@ test("schedule assignment settings UI: identifies the active publication and rel
   assert.match(reloadHandler, /scheduleAssignmentAgent:\s*scheduleAgentRes\.settings/u);
   assert.match(serverSource, /snapshotId:\s*snapshot\.snapshotId/u);
   assert.match(serverSource, /persisted:\s*Boolean\(readLocalSettings\(\)\?\.scheduleAssignmentAgent\)/u);
+  assert.doesNotMatch(builtUiSource, /^(?:<<<<<<<|=======|>>>>>>>)/mu);
+  assert.match(builtUiSource, /data-schedule-agent-publication/u);
+  assert.match(builtUiSource, /גרסת פרומפטים/u);
+  assert.match(builtUiSource, /Configuration snapshot/u);
+  assert.match(builtUiSource, /scheduleAgentMeta/u);
 });
 
 test("schedule assignment prompt pack: runtime requests strict Structured Outputs", () => {

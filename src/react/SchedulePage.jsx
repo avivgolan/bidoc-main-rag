@@ -99,6 +99,16 @@ async function api(path, { method = "GET", body = null, timeoutMs = 120_000 } = 
   }
 }
 
+function scheduleLoadFailureMessage(failures = []) {
+  const details = failures.map(({ label, error }) => `${label}: ${error?.message || "שגיאה לא ידועה"}`);
+  const outagePattern = /(?:522|connection terminated|connection timeout|failed to fetch|abort|timeout)/iu;
+  const appDataUnavailable = details.some((detail) => outagePattern.test(detail));
+  const headline = appDataUnavailable
+    ? "APP DATA אינו זמין כרגע (522/timeout). נתוני לוח הזמנים המוצגים חלקיים או אינם זמינים."
+    : "לא ניתן היה להשלים את טעינת נתוני לוח הזמנים. הנתונים המוצגים עשויים להיות חלקיים.";
+  return `${headline} לא בוצע שינוי בנתונים. אפשר לנסות שוב לאחר שחיבור Supabase יתאושש.`;
+}
+
 // Rule 1: null is "on time", never 0.
 function latenessText(lateness) {
   if (!lateness) return "—";
@@ -1011,7 +1021,7 @@ export function SchedulePage() {
   const [warnings, setWarnings] = useState([]);
 
   const loadProjects = useCallback(async () => {
-    const result = await api("/api/schedule/projects");
+    const result = await api("/api/schedule/projects", { timeoutMs: 45_000 });
     setProjects(result.projects ?? []);
     return result.projects ?? [];
   }, []);
@@ -1028,37 +1038,53 @@ export function SchedulePage() {
     try {
       const calculationDate = asOfValue || projectEndDateValue || "";
       const asOfQuery = calculationDate ? `&asOf=${encodeURIComponent(calculationDate)}` : "";
-      const optional = (promise, fallback, label) => promise.catch(err => ({
-        ...fallback,
-        warning: `${label}: ${err.message}`
-      }));
-      const [healthResult, sweep, visibleAlerts, baselined, pendingConditions, updates] = await Promise.all([
-        api(`/api/schedule/health?projectId=${encodeURIComponent(pid)}${asOfQuery}`),
-        api("/api/schedule/sweep", {
+      const loadPart = async (promise, fallback, label) => {
+        try {
+          return { value: await promise, warning: "", error: null, label };
+        } catch (error) {
+          return { value: fallback, warning: `${label}: ${error.message}`, error, label };
+        }
+      };
+      const [healthLoad, sweepLoad, alertsLoad, baselinedLoad, conditionsLoad, updatesLoad] = await Promise.all([
+        loadPart(
+          api(`/api/schedule/health?projectId=${encodeURIComponent(pid)}${asOfQuery}`, { timeoutMs: 45_000 }),
+          null,
+          "טעינת מדדי מצב"
+        ),
+        loadPart(api("/api/schedule/sweep", {
           method: "POST",
-          body: { projectId: pid, asOf: calculationDate || null, persist: false, filters: { excludeCompleted: false } }
-        }),
-        optional(
-          api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=false&lifecycle=open,updated`),
+          body: { projectId: pid, asOf: calculationDate || null, persist: false, filters: { excludeCompleted: false } },
+          timeoutMs: 45_000
+        }), { indicators: [], warnings: [] }, "חישוב לוח הזמנים"),
+        loadPart(
+          api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=false&lifecycle=open,updated`, { timeoutMs: 45_000 }),
           { alerts: [] },
           "טעינת התראות"
         ),
-        optional(
-          api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=true`),
+        loadPart(
+          api(`/api/schedule/alerts?projectId=${encodeURIComponent(pid)}&baselined=true`, { timeoutMs: 45_000 }),
           { count: 0 },
           "טעינת היסטוריית התראות"
         ),
-        optional(
-          api(`/api/schedule/conditions?projectId=${encodeURIComponent(pid)}&status=pending,resolved`),
+        loadPart(
+          api(`/api/schedule/conditions?projectId=${encodeURIComponent(pid)}&status=pending,resolved`, { timeoutMs: 45_000 }),
           { conditions: [] },
           "טעינת אבני דרך חוזיות"
         ),
-        optional(
-          api(`/api/schedule/activity-updates?projectId=${encodeURIComponent(pid)}`, { timeoutMs: 240_000 }),
+        loadPart(
+          api(`/api/schedule/activity-updates?projectId=${encodeURIComponent(pid)}`, { timeoutMs: 45_000 }),
           { total: 0, items: [] },
           "טעינת עדכונים והתראות"
         )
       ]);
+      const healthResult = healthLoad.value;
+      const sweep = sweepLoad.value;
+      const visibleAlerts = alertsLoad.value;
+      const baselined = baselinedLoad.value;
+      const pendingConditions = conditionsLoad.value;
+      const updates = updatesLoad.value;
+      const failedRequiredLoads = [healthLoad, sweepLoad].filter((part) => part.error);
+      if (failedRequiredLoads.length) setError(scheduleLoadFailureMessage(failedRequiredLoads));
       setHealth(healthResult);
       setSweepResult(sweep);
       setAlerts(visibleAlerts.alerts ?? []);
@@ -1069,12 +1095,14 @@ export function SchedulePage() {
         items: Array.isArray(updates.items) ? updates.items : []
       });
       setWarnings([...new Set([
-        ...(healthResult.warnings ?? []),
+        ...(healthResult?.warnings ?? []),
         ...(sweep.warnings ?? []),
-        visibleAlerts.warning,
-        baselined.warning,
-        pendingConditions.warning,
-        updates.warning
+        healthLoad.warning,
+        sweepLoad.warning,
+        alertsLoad.warning,
+        baselinedLoad.warning,
+        conditionsLoad.warning,
+        updatesLoad.warning
       ].filter(Boolean))]);
     } catch (err) {
       setError(err.message);
@@ -1501,7 +1529,14 @@ export function SchedulePage() {
       {/* What the engine could and could not compare — project level, always visible */}
       {projectGates ? <GatesBlock gates={projectGates} compact /> : null}
 
-      {error ? <div className="schedError">{error}</div> : null}
+      {error ? (
+        <div className="schedError" role="alert">
+          <span>{error}</span>
+          <button type="button" className="schedBtn" onClick={() => loadData(projectId, asOf, projectEndDate)} disabled={loading || !projectId}>
+            {loading ? "מנסה שוב…" : "נסה שוב"}
+          </button>
+        </div>
+      ) : null}
       {warnings.length ? (
         <div className="schedWarnings">{warnings.map((w) => <div key={w}>⚠ {w}</div>)}</div>
       ) : null}
