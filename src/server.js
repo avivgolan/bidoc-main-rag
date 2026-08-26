@@ -17,7 +17,7 @@ import { authorizeContractsExtractionRequest, authorizeDataQueryRequest } from "
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
-import { validateScheduleAssignmentAgentSettings } from "./scheduleActivityAssignmentEngine.js";
+import { scheduleAssignmentConfigurationSnapshot, validateScheduleAssignmentAgentSettings } from "./scheduleActivityAssignmentEngine.js";
 import { runScheduleConditionResolver } from "./subagents/scheduleConditionResolver.js";
 import { CONTRACTS_AGENT_VERSION, CONTRACTS_EXTRACTION_BUDGET_MS, CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES, CONTRACTS_MAX_RESPONSE_BYTES, CONTRACTS_PDF_READER_VERSION } from "./contracts/constants.js";
 import { contractsErrorResponse } from "./contracts/errors.js";
@@ -787,7 +787,14 @@ async function handleApi(req, res, url) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     await reloadSettingsFromDb();
-    return sendJson(res, 200, { ok: true, settings: config().scheduleAssignmentAgent });
+    const settings = config().scheduleAssignmentAgent;
+    const snapshot = scheduleAssignmentConfigurationSnapshot(settings);
+    return sendJson(res, 200, {
+      ok: true,
+      settings,
+      persisted: Boolean(readLocalSettings()?.scheduleAssignmentAgent),
+      snapshotId: snapshot.snapshotId
+    });
   }
 
   if (req.method === "POST" && url.pathname === "/api/settings/schedule-assignment-agent/validate") {

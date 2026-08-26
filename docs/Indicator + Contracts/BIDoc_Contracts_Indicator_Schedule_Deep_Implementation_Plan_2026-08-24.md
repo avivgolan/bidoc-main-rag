@@ -1,6 +1,6 @@
 # Contracts -> Indicator -> Schedule: Deep Implementation Plan
 
-Date: 2026-08-24 (updated 2026-08-25)
+Date: 2026-08-24 (updated 2026-08-26)
 Status: the CTO-approved direct-input lane has written and verified eight new pending rows in APP DATA. The normal reviewed-Contracts-to-Indicator sync remains a separate future bridge; no runtime trigger or due date was written.
 
 ## Target architecture and ownership
@@ -135,17 +135,36 @@ Improve alert-to-Gantt assignment without lowering safety gates or causing a wro
 
 Acceptance: each disagreement has a row-level explanation and the baseline makes false-auto rate visible.
 
+Implementation status (2026-08-26): the code-side Phase 2A baseline foundation is implemented, while the real human-labelled dataset run remains deferred. The evaluator now freezes a data cutoff, active Schedule version, engine version, settings version, configuration snapshot ID, per-role prompt hashes, fixture hash, and evaluated human-link IDs. It reports candidate recall@1/@5, correct and false automatic assignments, abstentions, role/JSON failures, latency, model-call count, and candidate count with a row-level explanation. The runtime also exposes `wouldAutoAssign` separately from an actual write and supports an internal `commit:false, persistAudit:false` fixture lane that neither writes audit rows nor creates `schedule_activity_alert_links`. Human labels are never passed into the assignment pipeline. A private ignored data directory and CLI support preparing historical human-confirmed/rejected fixtures and running the frozen baseline. The live read-only preparation attempt was not accepted as evidence because the configured APP DATA endpoint returned HTTP 522. This does not invalidate the independently published Phase 2B configuration, but it prevents any production-accuracy claim.
+
+Validation note (2026-08-26): a single synthetic Hebrew end-to-end smoke case exercised the current code-default extractor, embeddings, matcher, validator, judge, and unchanged 90/12 safety policy without any database read or write. The expected activity ranked first and top-5 recall was 100% for this one synthetic case; there were zero role/JSON failures and zero false automatic assignments. The policy correctly abstained because the final score was 86.96%, below the unchanged 90% threshold, despite a 36.29-point runner-up margin. The result validates the evaluation lane and gate explanation only; it is not a production-accuracy baseline and must not justify a prompt, model, weight, or threshold change.
+
+Remaining configuration hypotheses to measure on the frozen human-labelled set:
+
+1. The “semantic” stage currently embeds only the candidates that already survived deterministic retrieval; it is a bounded rerank, not retrieval across every active Gantt activity. If deterministic top-20 recall is poor, improving prompts or models cannot recover the missing activity.
+2. `maxModelCalls: 4` currently bounds chat-role calls only. The five-candidate smoke used four chat calls plus six embedding calls (ten provider calls total), so the UI/configuration name does not describe the actual provider-call budget.
+3. `tools.historical` is disabled in the current safe defaults. Human-confirmed links are evaluation labels only and are not yet used as a runtime score; any future historical feature must exclude the evaluated row to prevent leakage.
+4. The synthetic winner received semantic `0.69`, lexical `1.00`, temporal `1.00`, hierarchy `0.90`, and model-consensus `0.90`, producing `86.96%`. This explains the threshold abstention but is not evidence to lower the 90% gate. The real labelled set must determine whether the issue is conservative calibration, embedding quality, or desired abstention.
+
 ### Phase 2B — Prompts, models, and configuration
 
-Preserve current safety constraints until evidence proves a change helps: candidate-bound role outputs, zero temperature, matcher-and-validator agreement, hard-conflict blocking, 90% confidence, and 12-point margin.
+This is the primary delivery for Workstream 2. The evaluator is a supporting acceptance mechanism, not the product deliverable. Preserve the existing model family and safety constraints: `openai/gpt-4o-mini` for time filter, extraction, matching and validation; `openai/gpt-4o` for the conditional judge; `openai/text-embedding-3-large` for semantic ranking; zero temperature; candidate-bound outputs; matcher-and-validator agreement; hard-conflict blocking; 90% confidence; and a 12-point margin.
 
-Change one dimension at a time:
+Implementation order:
 
-1. If top-5 recall is poor, first improve deterministic retrieval (Hebrew tokens/synonyms, date windows, hierarchy, semantic candidate limit).
-2. Change a role prompt only for a measured error category; retain JSON-only schema and untrusted-source rules.
-3. Compare a model change per role on the frozen set. Adopt only if false-auto does not increase and benefit justifies latency/cost.
-4. Add immutable config/prompt snapshot IDs to evaluation and runtime runs. Never let a later settings edit rewrite historical evidence.
-5. Publish remote configuration only after dry-run review and explicit approval.
+1. Replace prompt-embedded JSON examples and legacy `json_object` mode with server-owned strict JSON Schemas (`json_schema`, `strict:true`).
+2. Give each role one bounded responsibility, explicit evidence priorities, calibrated decision meanings, anti-invention rules, and Hebrew explanation behavior.
+3. Pass the full bounded alert evidence envelope to the roles: title, description, question, answer, hashtags, alert type, canonical date, severity and status.
+4. Calibrate every numeric model score explicitly to the engine's 0–100 scale. Keep schemas separate from prompt prose.
+5. Record immutable settings version, schema name/version and prompt hash in every configuration snapshot and workflow log.
+6. Publish the explicitly approved GPT-4o allocation, 90% automatic threshold, 12-point margin and V2 weights. A future model or policy change requires a frozen labelled comparison and explicit approval.
+7. Publish remote configuration only after dry-run review and explicit approval.
+
+Implementation status (2026-08-26): V2.1 `schedule-assignment-openai.v2.1-rc1` is implemented and published to MAIN `agent_settings`. It applies the approved GPT-4o model allocation and 90/12 safety policy, adds five strict server-owned Structured Output contracts, versioned prompts, complete bounded alert evidence, Hebrew reasons, explicit validator score calibration and prompt/schema hashes. Each Chat role now follows the same reviewable structure: Identity, Objective, Instructions, Examples, Output Semantics, Failure Behavior and Context. The runtime rejects missing structured contracts and parses the strict response directly rather than extracting an arbitrary JSON fragment. Negative model reasons are now recorded as contradicting evidence instead of being mislabeled as supporting evidence. Publication replaced a remote `draft-v1` drift state that used unapproved GPT-5-family role models and a 50% automatic threshold.
+
+Verification (2026-08-26): 83 focused Schedule tests and the React production build pass. A one-case synthetic end-to-end smoke using the approved GPT-4o models completed with `system` instructions and strict Structured Outputs, no role or JSON failures, no database persistence and the expected activity ranked first at every candidate stage. The validator calibration defect was reproduced (`1` on an intended 0–100 scale), corrected, and the final score increased from 79.96% to 87.38%. The 90% policy still abstained, so this smoke proves contract compatibility and conservative behavior only; it is not a production-accuracy claim. The Settings UI now exposes active/persisted status, prompt version, publication time, configuration snapshot, instruction role and schema, and its reload path preserves the full prompt text. The publication command saved a pre-change rollback snapshot, changed only `scheduleAssignmentAgent`, reloaded the remote row in a fresh process and matched role/schema/prompt hashes plus snapshot `schedule-assignment-config:9f2fb7c98d4faae092c69927b92b0e1dcbcb4bd318344f08b7b9557d91d7b4d0`.
+
+Live labelled-validation attempt (2026-08-26): dataset preparation was retried against the approved APP DATA Schedule project and failed before producing a dataset with HTTP 522. Independent read-only diagnostics reached the same result through both PostgREST and a direct `select 1` via the Supabase management connection. API logs show 522 responses across unrelated existing tables and RPCs after earlier 200 responses, so this is a project-wide database connectivity outage rather than a missing Schedule table, RLS decision, or evaluator defect. MAIN cannot substitute for accuracy evidence because it contains alerts but no assignment-link history or Gantt rows. After explicit approval, V2 configuration publication proceeded independently; labelled validation remains deferred until Kapaim accepts read-only queries again.
 
 Acceptance: zero false automatic assignments in the labelled high-confidence holdout; ambiguity/no-match remains non-writing and auditable.
 

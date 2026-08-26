@@ -287,8 +287,8 @@ export async function saveScheduleProjectEndDate({
 // this module alone decides WHERE — keeping the profile switch a settings-only
 // change and the engine-table writes inside the isolation policy (spec 5.4:
 // schedule_* tables only, never application tables).
-export async function scheduleDataRequest({ config = null, settings = null, path, options = {} }) {
-  return scheduleFetch({ config: config || getConfig(), settings: settings || scheduleSettings(), path, options });
+export async function scheduleDataRequest({ config = null, settings = null, path, options = {}, fetchImpl = fetch }) {
+  return scheduleFetch({ config: config || getConfig(), settings: settings || scheduleSettings(), path, options, fetchImpl });
 }
 
 export async function scheduleRpcRequest({

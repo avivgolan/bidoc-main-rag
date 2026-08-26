@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { chatCompletion, createEmbedding, extractJsonObject, summarizeOpenRouterUsage } from "../openrouter.js";
+import { chatCompletion, createEmbedding, summarizeOpenRouterUsage } from "../openrouter.js";
 import {
   buildAssignmentCandidates,
   cosineSimilarity,
@@ -80,10 +80,26 @@ function compactTask(task) {
   };
 }
 
+function compactCandidateStage(candidate) {
+  return {
+    ...compactTask(candidate),
+    rank: candidate.rank ?? null,
+    finalScore: candidate.finalScore ?? null,
+    signals: candidate.signals || {}
+  };
+}
+
 function compactEvent(item) {
+  const list = (value, limit = 20) => Array.isArray(value)
+    ? value.map((entry) => String(entry || "").trim().slice(0, 160)).filter(Boolean).slice(0, limit)
+    : [];
   return {
     id: item.id,
     title: String(item.title || "").slice(0, 3000),
+    description: String(item.description || "").slice(0, 3000),
+    question: String(item.question || "").slice(0, 1500),
+    answer: String(item.answer || "").slice(0, 1500),
+    hashtags: list(item.hashtags),
     alertType: String(item.alertType || "").slice(0, 300),
     date: item.date,
     severity: item.severity,
@@ -91,21 +107,36 @@ function compactEvent(item) {
   };
 }
 
-async function callJsonRole({ apiKey, role, event, candidates = [], extra = {}, timeoutMs, telemetry = null }) {
+async function callJsonRole({ apiKey, roleName, role, event, candidates = [], extra = {}, timeoutMs, telemetry = null }) {
+  if (!roleName || !role?.schemaName || !role?.responseSchema) {
+    throw new Error(`Structured output contract is missing for schedule assignment role ${roleName || "unknown"}`);
+  }
   const content = await chatCompletion({
     apiKey,
     model: role.model,
     temperature: role.temperature,
     maxTokens: role.maxTokens,
+    reasoning: role.reasoning,
     timeoutMs,
     telemetry,
-    responseFormat: { type: "json_object" },
+    responseFormat: {
+      type: "json_schema",
+      json_schema: {
+        name: role.schemaName,
+        strict: true,
+        schema: role.responseSchema
+      }
+    },
     messages: [
-      { role: "system", content: role.prompt },
+      { role: role.instructionRole || "developer", content: role.prompt },
       { role: "user", content: JSON.stringify({ event, candidates, ...extra }) }
     ]
   });
-  return extractJsonObject(content);
+  try {
+    return JSON.parse(content);
+  } catch {
+    throw new Error(`Structured output from schedule assignment role ${roleName} was not valid JSON`);
+  }
 }
 
 function extractedEvent(value, source) {
@@ -161,7 +192,9 @@ export async function runScheduleActivityAssignmentAgent({
   sourceId,
   requestedBy = null,
   commit = true,
+  persistAudit = true,
   timeFilter = false,
+  evaluationFixture = null,
   config,
   settings: settingsInput = null,
   apiKey = "",
@@ -169,6 +202,8 @@ export async function runScheduleActivityAssignmentAgent({
   emit = null
 } = {}) {
   if (!projectId || !sourceId) throw new Error("projectId and sourceId are required");
+  if (commit && persistAudit === false) throw new Error("persistAudit=false is allowed only for a dry-run");
+  if (evaluationFixture && (commit || persistAudit)) throw new Error("evaluationFixture requires commit=false and persistAudit=false");
   const scheduleCfg = settingsInput || scheduleSettings();
   const agentSettings = normalizeScheduleAssignmentAgentSettings(config?.scheduleAssignmentAgent);
   const validation = validateScheduleAssignmentAgentSettings(agentSettings);
@@ -194,6 +229,7 @@ export async function runScheduleActivityAssignmentAgent({
     projectId,
     sourceId: String(sourceId),
     commit,
+    persistAudit,
     timeFilter
   });
   const warnings = [...validation.warnings];
@@ -220,23 +256,44 @@ export async function runScheduleActivityAssignmentAgent({
       })
     };
   };
-  const projectContext = await resolveIndicatorProjectContext({ projectId, config, settings: scheduleCfg });
-  const inputsPromise = timeFilter ? null : loadScheduleInputs({ config, projectId, engineProjectId: projectContext.scheduleProjectId, settings: scheduleCfg });
-  const [sourceRows, existingLinks] = await Promise.all([
-    scheduleDataRequest({
-      config,
-      settings: scheduleCfg,
-      path: `/rest/v1/alerts?select=${ALERT_COLUMNS}&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&id=eq.${encodeURIComponent(String(sourceId))}&limit=1`
-    }),
-    scheduleDataRequest({
-      config,
-      settings: scheduleCfg,
-      path: `/rest/v1/${LINKS_TABLE}?select=id,activity_key&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts&source_id=eq.${encodeURIComponent(String(sourceId))}&limit=1`
-    }).catch(() => [])
-  ]);
+  const projectContext = evaluationFixture
+    ? {
+        sourceProjectId: String(evaluationFixture.sourceProjectId || projectId),
+        scheduleProjectId: String(evaluationFixture.scheduleProjectId || projectId)
+      }
+    : await resolveIndicatorProjectContext({ projectId, config, settings: scheduleCfg });
+  const frozenInputs = evaluationFixture
+    ? { tasks: evaluationFixture.tasks || [], scheduleMeta: evaluationFixture.scheduleMeta || {} }
+    : null;
+  const inputsPromise = timeFilter
+    ? null
+    : frozenInputs
+      ? Promise.resolve(frozenInputs)
+      : loadScheduleInputs({ config, projectId, engineProjectId: projectContext.scheduleProjectId, settings: scheduleCfg });
+  const [sourceRows, existingLinks] = evaluationFixture
+    ? [[evaluationFixture.source].filter(Boolean), []]
+    : await Promise.all([
+        scheduleDataRequest({
+          config,
+          settings: scheduleCfg,
+          path: `/rest/v1/alerts?select=${ALERT_COLUMNS}&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&id=eq.${encodeURIComponent(String(sourceId))}&limit=1`
+        }),
+        scheduleDataRequest({
+          config,
+          settings: scheduleCfg,
+          path: `/rest/v1/${LINKS_TABLE}?select=id,activity_key&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts&source_id=eq.${encodeURIComponent(String(sourceId))}&limit=1`
+        }).catch(() => [])
+      ]);
   const source = sourceRows[0];
   if (!source) throw new Error("update or alert not found");
-  const event = scheduleActivityUpdateItem({ ...source, id: `alert_${source.id}` }, existingLinks[0]?.activity_key || null);
+  const baseEvent = scheduleActivityUpdateItem({ ...source, id: `alert_${source.id}` }, existingLinks[0]?.activity_key || null);
+  const event = {
+    ...baseEvent,
+    description: source.alert_description || source.metadata?.alert_description || "",
+    question: source.question || "",
+    answer: source.answer || "",
+    hashtags: Array.isArray(source.hashtags) ? source.hashtags : []
+  };
   if (!event.date) throw new Error("לא ניתן להריץ שיוך ללא תאריך עסקי קנוני");
   step("assignment_alert", "Alert/update loaded", {
     sourceId: String(source.id),
@@ -260,6 +317,7 @@ export async function runScheduleActivityAssignmentAgent({
         try {
           const rawTimeFilter = await callJsonRole({
             apiKey,
+            roleName: "timeFilter",
             role,
             event: compactEvent(event),
             timeoutMs: agentSettings.timeoutMs,
@@ -321,7 +379,9 @@ export async function runScheduleActivityAssignmentAgent({
   } else {
     step("assignment_time_filter", "Time relevance filter was not requested", { enabled: false }, "skipped");
   }
-  const inputs = await (inputsPromise || loadScheduleInputs({ config, projectId, engineProjectId: projectContext.scheduleProjectId, settings: scheduleCfg }));
+  const inputs = await (inputsPromise || (frozenInputs
+    ? Promise.resolve(frozenInputs)
+    : loadScheduleInputs({ config, projectId, engineProjectId: projectContext.scheduleProjectId, settings: scheduleCfg })));
   const tasks = inputs.tasks.filter((task) => task.activityKey && !task.isSummary);
   if (!tasks.length) throw new Error("לא נמצאו פעילויות בגרסת לוח הזמנים הפעילה");
   step("assignment_schedule", "Active Gantt activities loaded", {
@@ -329,39 +389,43 @@ export async function runScheduleActivityAssignmentAgent({
     taskCount: tasks.length,
     displayName: inputs.scheduleMeta.displayName || null
   });
-  let auditPersisted = true;
-  try {
-    await persistRows({
-      config,
-      settings: scheduleCfg,
-      table: RUNS_TABLE,
-      body: {
-        id: runId,
-        project_id: projectContext.scheduleProjectId,
-        source_table: "alerts",
-        source_id: String(source.id),
-        source_event_date: event.date,
-        schedule_version_id: String(inputs.scheduleMeta.sourceVersionId),
-        status: "running",
-        threshold_snapshot: agentSettings.autoAssignmentThreshold,
-        margin_snapshot: agentSettings.minimumRunnerUpMargin,
-        model_configuration: configuration,
-        tool_versions: { engine: SCHEDULE_ASSIGNMENT_ENGINE_VERSION },
-        started_at: startedAt,
-        requested_by: requestedBy
-      }
-    });
-  } catch (error) {
-    if (!isMissingAuditTableError(error)) throw error;
-    auditPersisted = false;
-    warnings.push("מיגרציית טבלאות הביקורת של סוכן השיוך טרם הוחלה; הריצה לא נשמרה במסד.");
+  const auditPersistenceSkipped = persistAudit === false;
+  let auditPersisted = false;
+  if (!auditPersistenceSkipped) {
+    try {
+      await persistRows({
+        config,
+        settings: scheduleCfg,
+        table: RUNS_TABLE,
+        body: {
+          id: runId,
+          project_id: projectContext.scheduleProjectId,
+          source_table: "alerts",
+          source_id: String(source.id),
+          source_event_date: event.date,
+          schedule_version_id: String(inputs.scheduleMeta.sourceVersionId),
+          status: "running",
+          threshold_snapshot: agentSettings.autoAssignmentThreshold,
+          margin_snapshot: agentSettings.minimumRunnerUpMargin,
+          model_configuration: configuration,
+          tool_versions: { engine: SCHEDULE_ASSIGNMENT_ENGINE_VERSION },
+          started_at: startedAt,
+          requested_by: requestedBy
+        }
+      });
+      auditPersisted = true;
+    } catch (error) {
+      if (!isMissingAuditTableError(error)) throw error;
+      warnings.push("מיגרציית טבלאות הביקורת של סוכן השיוך טרם הוחלה; הריצה לא נשמרה במסד.");
+    }
   }
-  step("assignment_audit_start", auditPersisted ? "Assignment audit run initialized" : "Assignment audit schema unavailable", {
+  step("assignment_audit_start", auditPersistenceSkipped ? "Assignment audit persistence skipped for evaluation" : auditPersisted ? "Assignment audit run initialized" : "Assignment audit schema unavailable", {
     persisted: auditPersisted,
+    skipped: auditPersistenceSkipped,
     runId,
     threshold: agentSettings.autoAssignmentThreshold,
     margin: agentSettings.minimumRunnerUpMargin
-  }, auditPersisted ? "done" : "error");
+  }, auditPersistenceSkipped ? "skipped" : auditPersisted ? "done" : "error");
 
   let extracted = compactEvent(event);
   let extractorOutput = null;
@@ -369,6 +433,7 @@ export async function runScheduleActivityAssignmentAgent({
   let validator = null;
   let judge = null;
   let semanticScores = {};
+  const candidateStages = { deterministic: [], semantic: [], final: [] };
   let modelCalls = 0;
   let aiCompleted = false;
   const roleErrors = {};
@@ -378,6 +443,7 @@ export async function runScheduleActivityAssignmentAgent({
     try {
       extractorOutput = await callJsonRole({
         apiKey,
+        roleName: "extractor",
         role: agentSettings.roles.extractor,
         event: compactEvent(event),
         timeoutMs: agentSettings.timeoutMs,
@@ -397,6 +463,7 @@ export async function runScheduleActivityAssignmentAgent({
   }, extractorOutput ? "done" : roleErrors.extractor ? "error" : "skipped");
 
   let candidates = buildAssignmentCandidates({ event: extracted, tasks, settings: agentSettings });
+  candidateStages.deterministic = candidates.map(compactCandidateStage);
   step("assignment_candidates", "Deterministic candidate retrieval completed", {
     candidateCount: candidates.length,
     tools: agentSettings.tools,
@@ -413,6 +480,7 @@ export async function runScheduleActivityAssignmentAgent({
         telemetryFor: (callId) => telemetryFor("assignment_embedding", callId)
       });
       candidates = buildAssignmentCandidates({ event: extracted, tasks, settings: agentSettings, semanticScores });
+      candidateStages.semantic = candidates.map(compactCandidateStage);
     } catch (error) {
       roleErrors.embedding = safeError(error);
       warnings.push("שכבת החיפוש הסמנטי נכשלה; לא יתבצע שיוך אוטומטי בריצה זו.");
@@ -433,6 +501,7 @@ export async function runScheduleActivityAssignmentAgent({
     modelCalls += 1;
     roleJobs.push(callJsonRole({
       apiKey,
+      roleName: "matcher",
       role: agentSettings.roles.matcher,
       event: extracted,
       candidates: modelCandidates,
@@ -446,6 +515,7 @@ export async function runScheduleActivityAssignmentAgent({
     modelCalls += 1;
     roleJobs.push(callJsonRole({
       apiKey,
+      roleName: "validator",
       role: agentSettings.roles.validator,
       event: extracted,
       candidates: modelCandidates,
@@ -470,8 +540,9 @@ export async function runScheduleActivityAssignmentAgent({
     decision: validator?.decision || null,
     error: roleErrors.validator || null
   }, validator ? "done" : roleErrors.validator ? "error" : "skipped");
-  aiCompleted = Boolean(extractorOutput && matcher && validator && !roleErrors.embedding && auditPersisted);
+  aiCompleted = Boolean(extractorOutput && matcher && validator && !roleErrors.embedding && (auditPersisted || auditPersistenceSkipped));
   candidates = buildAssignmentCandidates({ event: extracted, tasks, settings: agentSettings, semanticScores, matcher, validator });
+  candidateStages.final = candidates.map(compactCandidateStage);
 
   let decision = evaluateAssignmentDecision({
     candidates,
@@ -490,6 +561,7 @@ export async function runScheduleActivityAssignmentAgent({
       modelCalls += 1;
       const rawJudge = await callJsonRole({
         apiKey,
+        roleName: "judge",
         role: agentSettings.roles.judge,
         event: extracted,
         candidates: candidates.slice(0, 5).map((item) => ({ ...compactTask(item), finalScore: item.finalScore, evidence: item.supportingEvidence, conflicts: item.contradictingEvidence })),
@@ -569,11 +641,12 @@ export async function runScheduleActivityAssignmentAgent({
       warnings.push(`שמירת ביקורת הריצה נכשלה: ${safeError(error)}`);
     }
   }
-  step("assignment_audit", auditPersisted ? "Assignment audit finalized" : "Assignment audit was not persisted", {
+  step("assignment_audit", auditPersistenceSkipped ? "Assignment audit persistence skipped for evaluation" : auditPersisted ? "Assignment audit finalized" : "Assignment audit was not persisted", {
     persisted: auditPersisted,
+    skipped: auditPersistenceSkipped,
     candidateCount: candidates.length,
     status
-  }, auditPersisted ? "done" : "error");
+  }, auditPersistenceSkipped ? "skipped" : auditPersisted ? "done" : "error");
   if (commit && decision.autoAssigned && auditPersisted) {
     await commitAssignmentLink({
       config,
@@ -607,6 +680,7 @@ export async function runScheduleActivityAssignmentAgent({
     status,
     dryRun: !commit,
     auditPersisted,
+    auditPersistenceSkipped,
     engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
     event: compactEvent(event),
     extractedEvent: extracted,
@@ -619,10 +693,12 @@ export async function runScheduleActivityAssignmentAgent({
       runnerUpConfidence: decision.runnerUpConfidence,
       margin: decision.margin,
       reason: judge?.reason || decision.reason,
+      wouldAutoAssign: decision.autoAssigned,
       autoAssigned: Boolean(assignment),
       gates: decision.gates
     },
     candidates: candidates.slice(0, 8),
+    candidateStages,
     roles: {
       timeFilter: timeFilterRole || { error: timeFilter === true ? "not_required" : "not_requested" },
       extractor: extractorOutput ? { ok: true } : { ok: false, error: roleErrors.extractor || "not_run" },

@@ -1,0 +1,54 @@
+[
+  {
+    "id": "confirmed-match-1",
+    "sourceId": "alert-confirmed-1",
+    "scheduleVersionId": "schedule-v1",
+    "label": {
+      "type": "confirmed_match",
+      "expectedActivityKey": "gantt:schedule-v1:activity-1",
+      "reason": "A previously confirmed manual link."
+    },
+    "provenance": {
+      "source": "schedule_activity_alert_links",
+      "linkId": "link-confirmed-1",
+      "reviewedAt": "2026-08-20T10:00:00.000Z"
+    }
+  },
+  {
+    "id": "explicit-no-match-1",
+    "sourceId": "alert-no-match-1",
+    "scheduleVersionId": "schedule-v1",
+    "label": {
+      "type": "no_match",
+      "reason": "The alert does not belong to any active Gantt activity."
+    }
+  },
+  {
+    "id": "stale-activity-1",
+    "sourceId": "alert-stale-1",
+    "scheduleVersionId": "schedule-v0",
+    "label": {
+      "type": "stale_activity",
+      "forbiddenActivityKeys": ["gantt:schedule-v0:activity-7"],
+      "reason": "The historical activity is not part of the active schedule version."
+    }
+  },
+  {
+    "id": "irrelevant-alert-1",
+    "sourceId": "alert-irrelevant-1",
+    "scheduleVersionId": "schedule-v1",
+    "label": {
+      "type": "irrelevant_alert",
+      "reason": "The content has no schedule or activity-assignment relevance."
+    }
+  },
+  {
+    "id": "ambiguous-alert-1",
+    "sourceId": "alert-ambiguous-1",
+    "scheduleVersionId": "schedule-v1",
+    "label": {
+      "type": "ambiguous",
+      "reason": "Two active activities remain equally plausible and require human review."
+    }
+  }
+]

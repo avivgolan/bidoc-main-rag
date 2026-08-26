@@ -39,15 +39,29 @@ import {
 } from "../src/react/activityAssignmentBatch.js";
 import {
   buildAssignmentCandidates,
+  DEFAULT_SCHEDULE_ASSIGNMENT_AGENT_SETTINGS,
   evaluateTimeRelevance,
   evaluateAssignmentDecision,
   normalizeScheduleAssignmentAgentSettings,
+  scheduleAssignmentConfigurationSnapshot,
   sanitizeRoleResult,
   temporalAssignmentScore,
   timeRelevanceSignals,
   validateScheduleAssignmentAgentSettings
 } from "../src/scheduleActivityAssignmentEngine.js";
+import {
+  SCHEDULE_ASSIGNMENT_OPENAI_MODEL_PROFILE,
+  SCHEDULE_ASSIGNMENT_PROMPT_PACK_VERSION,
+  SCHEDULE_ASSIGNMENT_ROLE_PROMPTS,
+  SCHEDULE_ASSIGNMENT_ROLE_SCHEMAS
+} from "../src/scheduleActivityAssignmentPromptPack.js";
+import {
+  buildScheduleAssignmentEvaluationManifest,
+  evaluateScheduleAssignmentCase,
+  summarizeScheduleAssignmentEvaluation
+} from "../src/scheduleActivityAssignmentEvaluation.js";
 import { buildScheduleActivityAssignmentWorkflowLog } from "../src/scheduleActivityAssignmentWorkflow.js";
+import { runScheduleActivityAssignmentAgent } from "../src/subagents/scheduleActivityAssignmentAgent.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -184,7 +198,18 @@ test("schedule assignment workflow: exposes components, safe parameters, scores 
       timeFilterConfidenceThreshold: 80,
       tools: { semantic: true },
       weights: { semantic: 30 },
-      roles: { matcher: { enabled: true, model: "openai/gpt-4o-mini", temperature: 0, maxTokens: 1800, promptHash: "hash-only", prompt: "secret prompt" } }
+      roles: { matcher: {
+        enabled: true,
+        model: "openai/gpt-4o-mini",
+        instructionRole: "system",
+        temperature: 0,
+        maxTokens: 1800,
+        schemaName: "schedule_activity_match_v2",
+        schemaVersion: "2.0",
+        schemaHash: "schema-hash",
+        promptHash: "hash-only",
+        prompt: "secret prompt"
+      } }
     },
     scheduleMeta: { sourceVersionId: "file", displayName: "baseline" },
     taskCount: 102,
@@ -196,7 +221,11 @@ test("schedule assignment workflow: exposes components, safe parameters, scores 
   assert.equal(byId.get("assignment_matcher").input.role.model, "openai/gpt-4o-mini");
   assert.equal(byId.get("assignment_matcher").input.role.promptHash, "hash-only");
   assert.equal(byId.get("assignment_matcher").input.role.prompt, undefined);
-  assert.equal(byId.get("assignment_matcher").input.role.responseFormat, "json_object");
+  assert.equal(byId.get("assignment_matcher").input.role.responseFormat, "json_schema");
+  assert.equal(byId.get("assignment_matcher").input.role.schemaName, "schedule_activity_match_v2");
+  assert.equal(byId.get("assignment_matcher").input.role.schemaVersion, "2.0");
+  assert.equal(byId.get("assignment_matcher").input.role.schemaHash, "schema-hash");
+  assert.equal(byId.get("assignment_matcher").input.role.instructionRole, "system");
   assert.equal(byId.get("assignment_candidates").output.candidates[0].signals.temporal, 1);
   assert.equal(byId.get("assignment_matcher").openrouter[0].total_tokens, 321);
   assert.equal(workflow.openRouterUsage.totals.total_tokens, 321);
@@ -235,6 +264,208 @@ test("schedule assignment agent: default configuration is publishable and weight
   assert.equal(result.settings.minimumRunnerUpMargin, 12);
   assert.equal(result.settings.timeFilterConfidenceThreshold, 80);
   assert.equal(result.settings.roles.timeFilter.enabled, true);
+  assert.equal(result.settings.version, SCHEDULE_ASSIGNMENT_PROMPT_PACK_VERSION);
+});
+
+test("schedule assignment prompt pack: preserves approved model family and separates schemas from instructions", () => {
+  assert.deepEqual(Object.fromEntries(Object.entries(SCHEDULE_ASSIGNMENT_OPENAI_MODEL_PROFILE).map(([key, value]) => [key, value.model])), {
+    timeFilter: "openai/gpt-4o-mini",
+    extractor: "openai/gpt-4o-mini",
+    matcher: "openai/gpt-4o-mini",
+    validator: "openai/gpt-4o-mini",
+    judge: "openai/gpt-4o",
+    embedding: "openai/text-embedding-3-large"
+  });
+  for (const [roleName, prompt] of Object.entries(SCHEDULE_ASSIGNMENT_ROLE_PROMPTS)) {
+    for (const heading of ["# Identity", "# Objective", "# Instructions", "# Examples", "# Output Semantics", "# Failure Behavior", "# Context"]) {
+      assert.match(prompt, new RegExp(`^${heading.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}$`, "mu"), `${roleName} must include ${heading}`);
+    }
+    assert.match(prompt, /<example\s+id=/iu, `${roleName} must include bounded examples`);
+    assert.doesNotMatch(prompt, /Return only JSON|[{]"/iu, `${roleName} must not duplicate its output schema inside the prompt`);
+    assert.match(prompt, /untrusted evidence/iu, `${roleName} must defend its instruction boundary`);
+    const contract = SCHEDULE_ASSIGNMENT_ROLE_SCHEMAS[roleName];
+    assert.equal(contract.schema.type, "object");
+    assert.equal(contract.schema.additionalProperties, false);
+    assert.deepEqual(new Set(contract.schema.required), new Set(Object.keys(contract.schema.properties)));
+  }
+  assert.equal(DEFAULT_SCHEDULE_ASSIGNMENT_AGENT_SETTINGS.roles.matcher.schemaName, "schedule_activity_match_v2");
+  assert.equal(DEFAULT_SCHEDULE_ASSIGNMENT_AGENT_SETTINGS.roles.matcher.instructionRole, "system");
+});
+
+test("schedule assignment settings UI: identifies the active publication and reloads full prompt text", () => {
+  const uiSource = fs.readFileSync(new URL("../src/react/SettingsPage.jsx", import.meta.url), "utf8");
+  const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  const reloadHandler = uiSource.slice(uiSource.indexOf("const handleReload = async"), uiSource.indexOf("const handleExport ="));
+  assert.match(uiSource, /data-schedule-agent-publication/u);
+  assert.match(uiSource, /גרסת פרומפטים/u);
+  assert.match(uiSource, /פורסם לאחרונה/u);
+  assert.match(uiSource, /role:\s*\{roleValue\.instructionRole \|\| "system"\}/u);
+  assert.match(uiSource, /roleValue\.schemaName/u);
+  assert.match(reloadHandler, /apiFetch\("\/api\/settings\/schedule-assignment-agent"\)/u);
+  assert.match(reloadHandler, /scheduleAssignmentAgent:\s*scheduleAgentRes\.settings/u);
+  assert.match(serverSource, /snapshotId:\s*snapshot\.snapshotId/u);
+  assert.match(serverSource, /persisted:\s*Boolean\(readLocalSettings\(\)\?\.scheduleAssignmentAgent\)/u);
+});
+
+test("schedule assignment prompt pack: runtime requests strict Structured Outputs", () => {
+  const source = fs.readFileSync(new URL("../src/subagents/scheduleActivityAssignmentAgent.js", import.meta.url), "utf8");
+  assert.match(source, /type:\s*"json_schema"/u);
+  assert.match(source, /strict:\s*true/u);
+  assert.match(source, /schema:\s*role\.responseSchema/u);
+  assert.doesNotMatch(source, /responseFormat:\s*\{\s*type:\s*"json_object"/u);
+  assert.doesNotMatch(source, /extractJsonObject/u);
+});
+
+test("schedule assignment evaluation: configuration snapshot is stable and contains prompt hashes instead of prompt text", () => {
+  const first = scheduleAssignmentConfigurationSnapshot({ version: "baseline-v1" });
+  const second = scheduleAssignmentConfigurationSnapshot({ version: "baseline-v1" });
+  const changed = scheduleAssignmentConfigurationSnapshot({ version: "baseline-v2" });
+  assert.equal(first.snapshotId, second.snapshotId);
+  assert.notEqual(first.snapshotId, changed.snapshotId);
+  assert.match(first.snapshotId, /^schedule-assignment-config:[a-f0-9]{64}$/u);
+  assert.match(first.roles.matcher.promptHash, /^[a-f0-9]{64}$/u);
+  assert.match(first.roles.matcher.schemaHash, /^[a-f0-9]{64}$/u);
+  assert.equal(first.roles.matcher.prompt, undefined);
+});
+
+test("schedule assignment evaluation: frozen edge cases expose recall, false-auto, abstention and JSON failures", () => {
+  const fixtures = JSON.parse(fs.readFileSync(new URL("./fixtures/schedule-activity-assignment-evaluation.v1.json", import.meta.url), "utf8"));
+  const manifest = buildScheduleAssignmentEvaluationManifest({
+    dataCutoff: "2026-08-25T23:59:59.000Z",
+    activeScheduleVersionId: "schedule-v1",
+    settings: { version: "baseline-v1" },
+    cases: fixtures
+  });
+  assert.equal(manifest.caseCount, 5);
+  assert.equal(manifest.leakageControl.labelsExcludedFromHistoricalSignals, true);
+  assert.deepEqual(manifest.leakageControl.evaluatedLinkIds, ["link-confirmed-1"]);
+  assert.match(manifest.fixtureHash, /^sha256:[a-f0-9]{64}$/u);
+
+  const makeResult = ({ selectedActivityKey = null, candidates = [], candidateStages = null, wouldAutoAssign = false, gates = {}, roles = {}, calls = [] } = {}) => ({
+    decision: {
+      type: selectedActivityKey ? "match" : "no_match",
+      selectedActivityKey,
+      confidence: selectedActivityKey ? 94 : 20,
+      margin: selectedActivityKey ? 18 : 3,
+      wouldAutoAssign,
+      gates
+    },
+    candidates,
+    ...(candidateStages ? { candidateStages } : {}),
+    roles,
+    workflowLog: { openRouterUsage: { calls } }
+  });
+  const expected = "gantt:schedule-v1:activity-1";
+  const rows = [
+    evaluateScheduleAssignmentCase({
+      fixture: fixtures[0],
+      result: makeResult({
+        selectedActivityKey: expected,
+        candidates: [{ activityKey: expected }],
+        candidateStages: {
+          deterministic: [{ activityKey: "gantt:schedule-v1:activity-9" }, { activityKey: expected }],
+          semantic: [{ activityKey: expected }],
+          final: [{ activityKey: expected }]
+        },
+        wouldAutoAssign: true,
+        calls: [{ step: "assignment_embedding" }, { step: "assignment_matcher" }]
+      }),
+      durationMs: 800
+    }),
+    evaluateScheduleAssignmentCase({ fixture: fixtures[1], result: makeResult({ gates: { decisionMatch: false, threshold: false } }), durationMs: 400 }),
+    evaluateScheduleAssignmentCase({
+      fixture: fixtures[2],
+      result: makeResult({ selectedActivityKey: "gantt:schedule-v0:activity-7", candidates: [{ activityKey: "gantt:schedule-v0:activity-7" }], wouldAutoAssign: true }),
+      durationMs: 500
+    }),
+    evaluateScheduleAssignmentCase({ fixture: fixtures[3], result: makeResult(), durationMs: 300 }),
+    evaluateScheduleAssignmentCase({
+      fixture: fixtures[4],
+      result: makeResult({
+        selectedActivityKey: "gantt:schedule-v1:activity-2",
+        candidates: [{ activityKey: "gantt:schedule-v1:activity-2" }, { activityKey: "gantt:schedule-v1:activity-3" }],
+        roles: { matcher: { error: "invalid JSON response" } }
+      }),
+      durationMs: 900
+    })
+  ];
+  const summary = summarizeScheduleAssignmentEvaluation(rows);
+  assert.equal(summary.candidateRecallAt1, 1);
+  assert.equal(summary.candidateRecallAt5, 1);
+  assert.equal(summary.correctAutomaticAssignmentCount, 1);
+  assert.equal(summary.falseAutomaticAssignmentCount, 1);
+  assert.equal(summary.falseAutomaticAssignmentRate, 0.2);
+  assert.equal(summary.abstentionCount, 3);
+  assert.equal(summary.roleJsonFailureCount, 1);
+  assert.equal(summary.totalModelCalls, 2);
+  assert.equal(summary.totalEmbeddingCalls, 1);
+  assert.equal(summary.totalChatModelCalls, 1);
+  assert.deepEqual(summary.candidateRecallByStage.deterministic, { at1: 0, at5: 1 });
+  assert.deepEqual(summary.candidateRecallByStage.semantic, { at1: 1, at5: 1 });
+  assert.equal(summary.p95LatencyMs, 900);
+  assert.equal(summary.rows[0].topCandidates[0].activityKey, expected);
+  assert.match(summary.rows[2].explanation, /must abstain/iu);
+  assert.deepEqual(summary.rows[1].failedGates, ["decisionMatch", "threshold"]);
+  assert.match(summary.rows[1].explanation, /failed safety gates: decisionMatch, threshold/iu);
+});
+
+test("schedule assignment evaluation: non-persisting dry-run cannot be combined with commit and exposes policy eligibility", () => {
+  const source = fs.readFileSync(new URL("../src/subagents/scheduleActivityAssignmentAgent.js", import.meta.url), "utf8");
+  assert.match(source, /if \(commit && persistAudit === false\) throw/iu);
+  assert.match(source, /wouldAutoAssign: decision\.autoAssigned/iu);
+  assert.match(source, /auditPersistenceSkipped = persistAudit === false/iu);
+});
+
+test("schedule assignment evaluation: frozen fixture lane completes without database persistence", async () => {
+  const source = {
+    id: "alert-eval-1",
+    data_date: "2026-08-20",
+    alert_type: "delay",
+    severity_level: "high",
+    item_status: "open",
+    summary: "עיכוב בעבודות הריצוף"
+  };
+  const result = await runScheduleActivityAssignmentAgent({
+    projectId: PROJECT,
+    sourceId: source.id,
+    commit: false,
+    persistAudit: false,
+    evaluationFixture: {
+      sourceProjectId: PROJECT,
+      scheduleProjectId: PROJECT,
+      source,
+      scheduleMeta: { sourceVersionId: "schedule-v1", displayName: "Frozen fixture" },
+      tasks: [{
+        activityKey: "gantt:schedule-v1:activity-1",
+        name: "עבודות ריצוף",
+        plannedStart: "2026-08-01",
+        plannedFinish: "2026-08-31",
+        outlineLevel: 2,
+        isSummary: false
+      }]
+    },
+    config: {
+      scheduleAssignmentAgent: {
+        maxModelCalls: 0,
+        tools: { semantic: false, historical: false },
+        roles: {
+          extractor: { enabled: false },
+          matcher: { enabled: false },
+          validator: { enabled: false },
+          judge: { enabled: false },
+          embedding: { enabled: false }
+        }
+      }
+    },
+    settings: {},
+    apiKey: ""
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, true);
+  assert.equal(result.auditPersisted, false);
+  assert.equal(result.auditPersistenceSkipped, true);
+  assert.equal(result.assignment, null);
+  assert.equal(result.workflowLog.configuration.snapshotId.startsWith("schedule-assignment-config:"), true);
 });
 
 test("schedule assignment time filter: explicit schedule signals pass before a model call", () => {
@@ -288,6 +519,19 @@ test("schedule assignment agent: lexical, temporal and model evidence rank the r
   });
   assert.equal(candidates[0].activityKey, tasks[0].activityKey);
   assert.ok(candidates[0].finalScore > candidates[1].finalScore);
+});
+
+test("schedule assignment agent: positive and negative model reasons are classified as evidence correctly", () => {
+  const task = { activityKey: "gantt:file-a:1", name: "ריצוף", plannedStart: "2025-01-01", plannedFinish: "2025-01-31", outlineLevel: 3 };
+  const [candidate] = buildAssignmentCandidates({
+    event: { title: "עיכוב בריצוף", date: "2025-01-15" },
+    tasks: [task],
+    settings: normalizeScheduleAssignmentAgentSettings({ tools: { semantic: false, historical: false } }),
+    matcher: { scores: [{ activityKey: task.activityKey, score: 95, reason: "התאמה ישירה לריצוף" }] },
+    validator: { scores: [{ activityKey: task.activityKey, score: 20, reason: "סתירת מיקום", hardConflict: false }] }
+  });
+  assert.deepEqual(candidate.supportingEvidence, ["התאמה ישירה לריצוף"]);
+  assert.deepEqual(candidate.contradictingEvidence, ["סתירת מיקום"]);
 });
 
 test("schedule assignment agent: automatic write requires every safety gate and model agreement", () => {

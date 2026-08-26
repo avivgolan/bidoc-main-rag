@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "schedule-assignment-dataset.v1",
+  "dataCutoff": "2026-08-26T20:59:59.999Z",
+  "preparedAt": "2026-08-26T21:00:00.000Z",
+  "sourceProjectId": "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7",
+  "scheduleProjectId": "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5",
+  "activeScheduleVersionId": "smoke-v1",
+  "scheduleMeta": {
+    "sourceVersionId": "smoke-v1",
+    "displayName": "Schedule assignment synthetic smoke fixture",
+    "relevancyDate": "2026-08-26"
+  },
+  "tasks": [
+    {
+      "activityKey": "gantt:smoke-v1:101",
+      "name": "עבודות ריצוף בקומה הראשונה",
+      "plannedStart": "2026-08-01",
+      "plannedFinish": "2026-08-31",
+      "outlineLevel": 3,
+      "isSummary": false,
+      "isMilestone": false
+    },
+    {
+      "activityKey": "gantt:smoke-v1:102",
+      "name": "התקנת לוחות חשמל בקומה הראשונה",
+      "plannedStart": "2026-09-01",
+      "plannedFinish": "2026-09-20",
+      "outlineLevel": 3,
+      "isSummary": false,
+      "isMilestone": false
+    },
+    {
+      "activityKey": "gantt:smoke-v1:103",
+      "name": "עבודות איטום בגג המבנה",
+      "plannedStart": "2026-08-10",
+      "plannedFinish": "2026-08-25",
+      "outlineLevel": 3,
+      "isSummary": false,
+      "isMilestone": false
+    },
+    {
+      "activityKey": "gantt:smoke-v1:104",
+      "name": "יציקת קירות בטון בקומת החניון",
+      "plannedStart": "2026-07-15",
+      "plannedFinish": "2026-08-15",
+      "outlineLevel": 3,
+      "isSummary": false,
+      "isMilestone": false
+    },
+    {
+      "activityKey": "gantt:smoke-v1:105",
+      "name": "מסירת הפרויקט למזמין",
+      "plannedStart": "2026-12-15",
+      "plannedFinish": "2026-12-15",
+      "outlineLevel": 2,
+      "isSummary": false,
+      "isMilestone": true
+    }
+  ],
+  "cases": [
+    {
+      "id": "synthetic-confirmed-flooring-delay",
+      "projectId": "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7",
+      "sourceId": "synthetic-alert-1",
+      "scheduleVersionId": "smoke-v1",
+      "label": {
+        "type": "confirmed_match",
+        "expectedActivityKey": "gantt:smoke-v1:101",
+        "reason": "Synthetic smoke label: the alert explicitly describes delayed first-floor tiling."
+      },
+      "provenance": {
+        "source": "synthetic_smoke_fixture",
+        "linkId": null,
+        "reviewedAt": "2026-08-26T20:00:00.000Z"
+      },
+      "source": {
+        "id": "synthetic-alert-1",
+        "created_at": "2026-08-20T08:00:00.000Z",
+        "data_date": "2026-08-20",
+        "alert_type": "עיכוב בביצוע",
+        "severity_level": "high",
+        "item_status": "open",
+        "lifecycle_status": "active",
+        "summary": "עבודות הריצוף בקומה הראשונה מתעכבות בשל מחסור באריחי קרמיקה",
+        "alert_description": "הקבלן דיווח כי השלמת הריצוף בקומה הראשונה צפויה להידחות בשבוע.",
+        "metadata": {},
+        "hashtags": ["ריצוף", "עיכוב", "קומה ראשונה"]
+      }
+    }
+  ]
+}

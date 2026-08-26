@@ -10,6 +10,8 @@ function roleParameters(configuration = {}, roleName) {
   return {
     enabled: role.enabled === true,
     model: role.model || null,
+    instructionRole: role.instructionRole || null,
+    reasoningEffort: role.reasoning?.effort || null,
     temperature: role.temperature ?? null,
     maxTokens: role.maxTokens ?? null,
     candidateLimit: role.candidateLimit ?? null,
@@ -17,7 +19,10 @@ function roleParameters(configuration = {}, roleName) {
     topP: roleName === "embedding" ? null : 1,
     frequencyPenalty: roleName === "embedding" ? null : 0,
     presencePenalty: roleName === "embedding" ? null : 0,
-    responseFormat: roleName === "embedding" ? null : "json_object",
+    responseFormat: roleName === "embedding" ? null : "json_schema",
+    schemaName: role.schemaName || null,
+    schemaVersion: role.schemaVersion || null,
+    schemaHash: role.schemaHash || null,
     promptHash: role.promptHash || null
   };
 }
@@ -89,12 +94,13 @@ export function buildScheduleActivityAssignmentWorkflowLog({
       displayName: scheduleMeta.displayName || null,
       relevancyDate: scheduleMeta.relevancyDate || null
     }),
-    node("assignment_audit_start", "Initialize Assignment Audit", "database", filteredOut ? "skipped" : result.auditPersisted ? "done" : "error", {
+    node("assignment_audit_start", "Initialize Assignment Audit", "database", filteredOut || result.auditPersistenceSkipped ? "skipped" : result.auditPersisted ? "done" : "error", {
       runsTable: "schedule_activity_assignment_runs",
       thresholdSnapshot: configuration.autoAssignmentThreshold ?? null,
       marginSnapshot: configuration.minimumRunnerUpMargin ?? null
     }, {
       initialized: result.auditPersisted === true,
+      skipped: result.auditPersistenceSkipped === true,
       auditRunId: result.runId || null
     }),
     node("assignment_extractor", "Event Extractor", "ai", filteredOut ? "skipped" : roleStatus(roles.extractor), {
@@ -112,7 +118,8 @@ export function buildScheduleActivityAssignmentWorkflowLog({
       event: result.extractedEvent || result.event || null
     }, {
       candidateCount: result.candidates?.length || 0,
-      candidates
+      candidates,
+      stages: result.candidateStages || null
     }),
     node("assignment_embedding", "Semantic Embedding Search", "vector", filteredOut ? "skipped" : roleStatus(roles.embedding), {
       enabled: configuration.tools?.semantic === true,
@@ -138,11 +145,12 @@ export function buildScheduleActivityAssignmentWorkflowLog({
       suggestionThreshold: configuration.suggestionThreshold ?? null,
       maxModelCalls: configuration.maxModelCalls ?? null
     }, result.decision || null),
-    node("assignment_audit", "Persist Assignment Audit", "database", filteredOut ? "skipped" : result.auditPersisted ? "done" : "error", {
+    node("assignment_audit", "Persist Assignment Audit", "database", filteredOut || result.auditPersistenceSkipped ? "skipped" : result.auditPersisted ? "done" : "error", {
       runsTable: "schedule_activity_assignment_runs",
       candidatesTable: "schedule_activity_assignment_candidates"
     }, {
       persisted: result.auditPersisted === true,
+      skipped: result.auditPersistenceSkipped === true,
       auditRunId: result.runId || null
     }),
     node("assignment_write", "Commit Activity Link", "database", result.assignment ? "done" : "skipped", {
@@ -190,6 +198,8 @@ export function buildScheduleActivityAssignmentWorkflowLog({
     openRouterUsage,
     configuration: {
       engineVersion: result.engineVersion || null,
+      snapshotId: configuration.snapshotId || null,
+      settingsVersion: configuration.version || null,
       thresholds: {
         timeFilterConfidenceThreshold: configuration.timeFilterConfidenceThreshold ?? null,
         autoAssignmentThreshold: configuration.autoAssignmentThreshold ?? null,

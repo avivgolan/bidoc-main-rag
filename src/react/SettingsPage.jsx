@@ -384,17 +384,19 @@ function Toggle({ label, checked, onChange, info }) {
   );
 }
 
-function Textarea({ value, onChange, rows = 6, placeholder }) {
+function Textarea({ value, onChange, rows = 6, placeholder, dir, style, ...textareaProps }) {
   const [focused, setFocused] = useState(false);
   return (
     <textarea
       value={value ?? ""} rows={rows} placeholder={placeholder}
+      dir={dir}
       onChange={e => onChange(e.target.value)}
       onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
       spellCheck={false}
+      {...textareaProps}
       style={{ ...s.input, resize: "vertical", lineHeight: 1.5,
         borderColor: focused ? "var(--brand-500)" : undefined,
-        boxShadow: focused ? focusRing : "none" }}
+        boxShadow: focused ? focusRing : "none", ...style }}
     />
   );
 }
@@ -1157,11 +1159,26 @@ const SCHEDULE_ASSIGNMENT_WEIGHTS = [
   ["hierarchy", "היררכיה"], ["historical", "היסטוריה"], ["modelConsensus", "הסכמת מודלים"],
 ];
 
-function ScheduleAssignmentAgentSection({ form, update, models }) {
+function formatScheduleAgentPublishedAt(value) {
+  if (!value) return "טרם פורסם";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("he-IL", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function compactScheduleAgentSnapshot(value) {
+  const text = String(value || "");
+  if (!text) return "לא זמין";
+  const hash = text.includes(":") ? text.slice(text.lastIndexOf(":") + 1) : text;
+  return hash.length > 18 ? `${hash.slice(0, 10)}…${hash.slice(-6)}` : hash;
+}
+
+function ScheduleAssignmentAgentSection({ form, update, models, scheduleAgentMeta }) {
   const value = form.scheduleAssignmentAgent || {};
   const [validation, setValidation] = useState(null);
   const [lab, setLab] = useState({ projectId: "", sourceId: "", busy: false, result: null, error: "" });
   const weightTotal = Object.values(value.weights || {}).reduce((sum, item) => sum + (Number(item) || 0), 0);
+  const publicationStatus = scheduleAgentMeta?.persisted ? "פורסם ב-Supabase" : "ברירת מחדל מהקוד";
 
   const validateDraft = async () => {
     try {
@@ -1185,6 +1202,19 @@ function ScheduleAssignmentAgentSection({ form, update, models }) {
 
   return (
     <div style={s.section}>
+      <div data-schedule-agent-publication style={{
+        ...s.card,
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+        gap: 14,
+        borderColor: scheduleAgentMeta?.persisted ? "var(--success-border)" : "var(--warning-border, var(--line))",
+        background: scheduleAgentMeta?.persisted ? "var(--success-bg)" : "var(--surface-2)"
+      }}>
+        <div><small style={s.hint}>סטטוס פעיל</small><strong style={{ display: "block", marginTop: 4 }}>{publicationStatus}</strong></div>
+        <div><small style={s.hint}>גרסת פרומפטים</small><strong dir="ltr" style={{ display: "block", marginTop: 4, textAlign: "right", overflowWrap: "anywhere" }}>{value.version || "לא הוגדרה"}</strong></div>
+        <div><small style={s.hint}>פורסם לאחרונה</small><strong style={{ display: "block", marginTop: 4 }}>{formatScheduleAgentPublishedAt(value.publishedAt)}</strong></div>
+        <div title={scheduleAgentMeta?.snapshotId || ""}><small style={s.hint}>Configuration snapshot</small><strong dir="ltr" style={{ display: "block", marginTop: 4, textAlign: "right" }}>{compactScheduleAgentSnapshot(scheduleAgentMeta?.snapshotId)}</strong></div>
+      </div>
       <InfoHint>זהו מנגנון מבוקר לכל שורה. בריצה קבוצתית ניתן להפעיל מסנן זמן מקדים; לחיצה ידנית על שורה תמיד מריצה את התהליך המלא. המודלים מציעים ומנמקים בלבד ורכיב המדיניות בשרת הוא היחיד שרשאי לכתוב קשר.</InfoHint>
 
       <div>
@@ -1231,6 +1261,12 @@ function ScheduleAssignmentAgentSection({ form, update, models }) {
                 <div>
                   <Toggle label={role.label} checked={roleValue.enabled !== false} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.enabled`, v)} />
                   <p style={{ ...s.hint, marginTop: 6 }}>{role.desc}</p>
+                  {!isEmbedding ? (
+                    <div dir="ltr" style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8, justifyContent: "flex-end" }}>
+                      <code style={{ fontSize: 10.5, padding: "3px 7px", borderRadius: 999, background: "var(--surface-2)", border: "1px solid var(--line)" }}>role: {roleValue.instructionRole || "system"}</code>
+                      <code style={{ fontSize: 10.5, padding: "3px 7px", borderRadius: 999, background: "var(--surface-2)", border: "1px solid var(--line)" }}>{roleValue.schemaName || "schema unavailable"} · v{roleValue.schemaVersion || "?"}</code>
+                    </div>
+                  ) : null}
                 </div>
                 <Field label="מודל">
                   <ModelSelect value={roleValue.model || ""} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.model`, v)} models={models} includeEmbedding={isEmbedding} />
@@ -1246,7 +1282,7 @@ function ScheduleAssignmentAgentSection({ form, update, models }) {
                       <Field label="Max tokens"><Input type="number" min={100} max={8000} step={100} value={roleValue.maxTokens ?? 1200} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.maxTokens`, v)} /></Field>
                     </div>
                     <Accordion title="עריכת פרומפט">
-                      <Textarea rows={12} value={roleValue.prompt || ""} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.prompt`, v)} />
+                      <Textarea dir="ltr" style={{ textAlign: "left", fontFamily: "ui-monospace, SFMono-Regular, Consolas, monospace" }} rows={18} value={roleValue.prompt || ""} onChange={v => update(`scheduleAssignmentAgent.roles.${role.key}.prompt`, v)} />
                     </Accordion>
                   </>
                 )}
@@ -1514,6 +1550,7 @@ export function SettingsPage() {
   const [saveState, setSaveState] = useState("idle");
   const [configStatus, setConfigStatus] = useState({});
   const [modelStatus, setModelStatus] = useState("");
+  const [scheduleAgentMeta, setScheduleAgentMeta] = useState({ persisted: false, snapshotId: "" });
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -1529,6 +1566,10 @@ export function SettingsPage() {
       } : null;
       if (s) {
         setForm(settingsToForm(s));
+        setScheduleAgentMeta({
+          persisted: scheduleAgentRes?.persisted === true,
+          snapshotId: scheduleAgentRes?.snapshotId || baseSettings?.scheduleAssignmentAgent?.snapshotId || ""
+        });
         setConfigStatus({
           openRouter: s.openRouterConfigured,
           supabase: s.supabaseConfigured,
@@ -1555,6 +1596,11 @@ export function SettingsPage() {
           supabase: result.settings.supabaseConfigured,
           contentSupabase: result.settings.contentSupabaseConfigured,
         });
+        const scheduleAgentRes = await apiFetch("/api/settings/schedule-assignment-agent").catch(() => null);
+        if (scheduleAgentRes?.settings) {
+          setForm(settingsToForm({ ...result.settings, scheduleAssignmentAgent: scheduleAgentRes.settings }));
+          setScheduleAgentMeta({ persisted: scheduleAgentRes.persisted === true, snapshotId: scheduleAgentRes.snapshotId || "" });
+        }
       }
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 3000);
@@ -1567,7 +1613,15 @@ export function SettingsPage() {
     try {
       const result = await apiFetch("/api/settings/reload", { method: "POST", body: {} });
       if (result?.settings) {
-        setForm(settingsToForm(result.settings));
+        const scheduleAgentRes = await apiFetch("/api/settings/schedule-assignment-agent").catch(() => null);
+        setForm(settingsToForm({
+          ...result.settings,
+          ...(scheduleAgentRes?.settings ? { scheduleAssignmentAgent: scheduleAgentRes.settings } : {})
+        }));
+        setScheduleAgentMeta({
+          persisted: scheduleAgentRes?.persisted === true,
+          snapshotId: scheduleAgentRes?.snapshotId || result.settings.scheduleAssignmentAgent?.snapshotId || ""
+        });
         setConfigStatus({
           openRouter: result.settings.openRouterConfigured,
           supabase: result.settings.supabaseConfigured,
@@ -1635,7 +1689,7 @@ export function SettingsPage() {
     );
   }
 
-  const sectionProps = { form, update, models, configStatus };
+  const sectionProps = { form, update, models, configStatus, scheduleAgentMeta };
 
   return (
     <div dir="rtl" style={{ fontFamily: "var(--font-display)", color: "var(--text-primary)" }}>

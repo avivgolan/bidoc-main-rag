@@ -40,6 +40,8 @@
     "contracts:representative": "node scripts/evaluate-contracts-representative-set.mjs",
     "contracts:sample-live": "node scripts/evaluate-contracts-sample-live.mjs",
     "test:schedule": "node test/schedule-engine.test.js",
+    "schedule:assignment:evaluate": "node scripts/run-schedule-activity-assignment-evaluation.mjs",
+    "schedule:assignment:publish-v2": "node scripts/publish-schedule-activity-assignment-v2.mjs",
     "test:memory:smoke": "node scripts/smoke-chat-memory.mjs",
     "logs:memory": "node scripts/read-memory-log.mjs",
     "test:ui": "playwright test",
