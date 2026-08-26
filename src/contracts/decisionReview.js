@@ -333,9 +333,9 @@ export async function generateAndPersistContractsDecisions({
     relationshipReview,
     config,
     ...(r6Catalog ? { triggerCatalog: r6Catalog.triggers } : {}),
-    modelVersion: r6Enabled
+    modelVersion: config.contractsAgent?.decisions?.model || (r6Enabled
       ? config.models?.lite || config.models?.main || "openai/gpt-4o-mini"
-      : config.models?.main || config.models?.lite || "openai/gpt-4o",
+      : config.models?.main || config.models?.lite || "openai/gpt-4o"),
     ...(chatComplete ? { chatComplete } : {}),
     deadlineAt,
     signal,

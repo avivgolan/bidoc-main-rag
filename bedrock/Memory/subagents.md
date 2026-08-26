@@ -2,19 +2,21 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: subagents
-last_updated: 2026-08-05
+last_updated: 2026-08-25
 tags:
   - subagents
   - alert
   - meeting-evidence
   - delay-claim
   - data-query
+  - contracts
 ---
 
 # Subagents
 
 ## Current State
 
+- Settings has a dedicated React `contractsAgent` tab backed by persisted `contractsAgent` configuration. The live MAIN Supabase `public.agent_settings` row `id = 'default'` contains the matching JSONB object. It controls enabled state, server-owned model selection, prompts, timeouts, token/time budgets, concurrency, retries, repair limits, and confidence gates across extraction, clause enrichment, semantic relationships, decision normalization, and independent decision auto-review. Empty model/prompt values inherit the existing safe defaults; browser settings cannot change rollout/write permissions, evidence validation, or human-review boundaries.
 - The Tool Testing diagnostics page includes a dedicated internal-subagents group covering 14 operational subagents. Each check is an individual read-only readiness probe, reports active/error/inactive explicitly, and can be rerun without database writes.
 - The Alert subagent lives in `src/subagents/alert.js`.
 - Alert subagent settings are stored under `settings.subagents.alert`; the UI for them lives in the Subagents tab in `public/app.js`.
@@ -163,6 +165,8 @@ tags:
 - 2026-08-18 -- Corrected the R5 completeness gap that hid Schedule-impacting decisions with no target shape. The Hebrew Contracts UI now exposes all 37 retained rows with exact evidence, blockers, and deterministic non-mutating audit dispositions: 21 temporal/event-anchor correction candidates, two missing source values, 12 Schedule-context-only decisions, and two unresolved review/lineage rows. A reusable live audit command proves 42 Schedule-impacting decisions = five reviewed target-shaped rows plus 37 explained no-target rows, with zero model calls and zero writes. Read-only Supabase verification confirmed the three target tables still lack `source_contract_decision_id`, the R5 read RPC/migration are absent remotely, and migration history ends at R4.2C. Verification is now 146 Contracts tests plus the React build; R5 publication, canonical temporal corrections, and any promotion remain explicit live gates.
 - 2026-08-18 -- Published the separately approved R5 one-way Schedule lineage migration to KAPAIM as remote version `20260817212254` (`contracts_schedule_projection_r5`, local SHA-256 `010E80CE45B57657FB361FAE161F1FD7A305FE559D7766E02E0E5CA0CBB2C024`). Post-publication verification confirmed three nullable origin columns, three `ON DELETE RESTRICT` foreign keys to current contractual decisions, three unique indexes, three cross-target validation triggers, the private validator, and the service-role-only `SECURITY INVOKER` read RPC. All Schedule target tables remain empty, the live retained-workspace audit now reports `migrationAvailable = true` with all 42 Schedule-impacting decisions accounted for, and every write counter remains zero. Contracts 146/146, Schedule 47/47, the React build, syntax checks, `git diff --check`, and advisor review pass. One reviewed append-only decision correction and one separately approved target promotion remain the R5 exit gates.
 - 2026-08-18 -- Superseded the R5 Schedule-shadow/promotion interpretation after the user clarified ownership: Contracts only classifies decisions for a future `indicator_agent`; Indicator owns project placement, target selection/cardinality, activity mapping, date/calendar calculation, and every Schedule write. The active GET-only handoff derives from current `private.contracts` truth and creates no fourth table. Corrective KAPAIM migration `20260818080957` removes the legacy projection RPC and three Contracts-owned unique target indexes while retaining three ordinary lineage indexes and provenance-only triggers. The live retained workspace classifies all 137 current decisions as 40 suitable, 24 unsuitable, and 73 requiring explicit review (71 approved/corrected rows still have `schedule_impact = unknown`, two are non-terminal), with zero model calls and zero writes. Contracts 148/148, Schedule 47/47, React build, diff check, catalog verification, and advisor review pass. R5 implementation is complete; remaining suitability review changes only Contracts truth, while operational placement belongs to Indicator.
+- 2026-08-25 -- Added the persisted Contracts Agent Settings tab and runtime configuration for all five model stages. The focused Contracts suite passes 178/178 and the React bundle builds; the broader suite retains 13 unrelated legacy UI/static-contract failures from the pulled baseline.
+- 2026-08-25 -- Initialized the live MAIN Supabase `public.agent_settings` default row with the exact `contractsAgent` JSONB defaults for extraction, enrichment, relationships, decisions, and auto-review. The non-Contracts settings hash remained unchanged before and after the update.
 
 ## Gotchas
 

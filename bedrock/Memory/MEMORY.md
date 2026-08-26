@@ -2,7 +2,7 @@
 note_type: durable-memory-root
 project: bidoc agent
 status: active
-last_updated: 2026-08-14
+last_updated: 2026-08-22
 tags:
   - bedrock
   - memory
@@ -23,6 +23,7 @@ the right branch notes.
 - Timeline UI behavior is tracked in [timeline.md](timeline.md).
 - Workflow QA inspector behavior is tracked in [workflow.md](workflow.md).
 - AI project insights are tracked in [insights.md](insights.md); delay claim case infrastructure is tracked separately in [delay-claims.md](delay-claims.md).
+- The Phase 1 QA & Tuning MCP harness is tracked in [qa-tuning.md](qa-tuning.md).
 
 ## Recent Changes
 
@@ -32,6 +33,7 @@ the right branch notes.
 - 2026-06-23 - Added Workflow QA inspector memory after MVP node-card implementation.
 - 2026-06-24 - Added delay claim infrastructure memory after Stage 1 implementation.
 - 2026-06-24 - Added Insights memory after resetting the product direction from claim files to AI project insights.
+- 2026-08-22 - Added and deployed the Phase 1 QA & Tuning MCP service, schema, local stdio tools, and isolated execution memory.
 
 ## Decisions
 
@@ -52,3 +54,4 @@ the right branch notes.
 - [insights.md](insights.md) - AI project insights direction, index-first analysis endpoint, and current UI behavior.
 - [n8n-migration.md](n8n-migration.md) - n8n phase-out mapping, migration spec, and the internal indexing agent.
 - [schedule.md](schedule.md) - Schedule engine, contractual milestones, pending-condition resolution through chat RAG, and evidence gates.
+- [qa-tuning.md](qa-tuning.md) - Phase 1 QA harness, local MCP tools, isolated execution, traces, evaluation, and deferred experiment/promotion phases.

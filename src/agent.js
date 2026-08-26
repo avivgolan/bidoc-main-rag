@@ -50,7 +50,8 @@ import { appendMemoryLog } from "./memoryLogger.js";
 
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
 
-export async function runChatPipeline({ message, sessionId, userId = null, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [], ephemeral = false, forceRag = false }) {
+export async function runChatPipeline({ message, sessionId, userId = null, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [], ephemeral = false, forceRag = false, executionMode = "production", persistChatHistory = true }) {
+  const ephemeralRun = ephemeral || executionMode === "qa" || persistChatHistory === false;
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
   const openRouterCalls = [];
   let openRouterCallSequence = 0;
@@ -74,7 +75,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   const sanitized = sanitizeMessage(effectiveMessage);
   const memoryLoadStartedAt = Date.now();
   emitRunEvent(runId, "sanitize", "Message sanitized", { changed: sanitized !== message, length: sanitized.length });
-  const routingMemory = ephemeral
+  const routingMemory = ephemeralRun
     ? { mode: "disabled", recent: [], summary: null, sessionRow: null, memories: [], errors: [] }
     : await loadRoutingMemory({ config, sessionId, userId, query: sanitized }).catch((error) => ({
       mode: "session_only", recent: [], summary: null, sessionRow: null, memories: [], errors: [error.message]
@@ -82,10 +83,10 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   if (routingMemory.errors.length) {
     emitRunEvent(runId, "memory", "Routing memory degraded; chat continues", { errors: routingMemory.errors });
   }
-  const saved = ephemeral
+  const saved = ephemeralRun
     ? { id: null, status: "ephemeral" }
     : await saveMessage({ config, userMessage: message, sanitizedMessage: sanitized, sessionId });
-  emitRunEvent(runId, "save_message", ephemeral ? "Internal query kept out of chat history" : "Message saved", { id: saved.id, status: saved.status });
+  emitRunEvent(runId, "save_message", ephemeralRun ? "Internal query kept out of chat history" : "Message saved", { id: saved.id, status: saved.status, execution_mode: executionMode });
   const trace = [];
   let classification;
 
@@ -106,6 +107,12 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     console.log(`[classifier] FALLBACK (${error.message}) type=${classification.type} msg="${sanitized.slice(0, 70)}"`);
   }
   const resolvedMessage = classification.standalone_query || sanitized;
+  emitRunEvent(runId, "heuristic_override", trace.some((item) => item.step === "classifier" && item.fallback)
+    ? "Heuristic classifier fallback applied"
+    : "Heuristic override check completed", {
+    applied: trace.some((item) => item.step === "classifier" && item.fallback),
+    route: classification.type
+  });
   const beforeProfessional = Boolean(classification?.professional);
   classification = enforceProfessionalKnowledgeMode(classification, resolvedMessage, config);
   emitRunEvent(runId, "knowledge_vocabulary", classification?.knowledge_vocabulary_match
@@ -142,9 +149,16 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     classification = { ...classification, type: "RAG" };
     emitRunEvent(runId, "switch", "RAG route required by internal caller", {});
   }
+  emitRunEvent(runId, "query_planning", "Standalone query and route plan finalized", {
+    route: classification.type,
+    professional: Boolean(classification.professional),
+    investigation: Boolean(classification.investigation),
+    query_rewritten: resolvedMessage !== sanitized,
+    query_length: resolvedMessage.length
+  });
 
   let memoryCommand = null;
-  if (!ephemeral) {
+  if (!ephemeralRun) {
     try {
       memoryCommand = await applyExplicitMemoryCommand({ config, userId, sessionId, messageId: saved.id, message: sanitized });
       if (memoryCommand) classification = { ...classification, type: "CHAT" };
@@ -155,7 +169,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     }
   }
   const agentName = classification.type === "CHAT" ? "lite" : "main";
-  const memoryContext = ephemeral
+  const memoryContext = ephemeralRun
     ? { mode: "disabled", recent: [], summary: null, sessionRow: null, memories: [], errors: [] }
     : await loadAgentMemory({ config, sessionId, userId, query: resolvedMessage, agent: agentName }).catch((error) => ({
       mode: userId ? "user_and_session" : "session_only",
@@ -193,8 +207,12 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   }
 
   result.answer = sanitizeCustomerFacingAnswer(result.answer, { hebrew: isHebrew(sanitized) });
+  emitRunEvent(runId, "source_extraction", "Answer sources normalized", {
+    answer_length: result.answer.length,
+    source_count: Array.isArray(result.sources) ? result.sources.length : 0
+  });
 
-  const memoryWrite = ephemeral ? null : await finalizeChatMemory({
+  const memoryWrite = ephemeralRun ? null : await finalizeChatMemory({
     config,
     sessionId,
     userId,
@@ -208,7 +226,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   if (memoryWrite?.errors?.length) {
     trace.push({ step: "memory_write", ok: false, fallback: true, errors: memoryWrite.errors });
     emitRunEvent(runId, "memory_write", "Memory maintenance degraded; answer preserved", { errors: memoryWrite.errors });
-  } else if (!ephemeral) {
+  } else if (!ephemeralRun) {
     emitRunEvent(runId, "memory_write", "Persistent memory updated", { learned: memoryWrite?.learned || 0, turns: memoryWrite?.turnCount || 0 });
   }
   const workflowLog = buildWorkflowLog({
@@ -227,7 +245,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   workflowLog.cacheMetrics = finalizeCacheMetrics(cacheContext);
 
   const runEvents = getRunEvents(runId);
-  if (!ephemeral) {
+  if (!ephemeralRun) {
     await updateMessage({
       config,
       messageId: saved.id,
@@ -257,7 +275,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     rejectedItems: memoryWrite?.rejected || 0,
     localLogWritten: false
   };
-  if (!ephemeral) {
+  if (!ephemeralRun) {
     const logStatus = await appendMemoryLog({
       runId,
       sessionId,
@@ -303,7 +321,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     toolCalls: projectChatToolCallsForClient(result.toolCalls, { question: sanitized }),
     knowledgePlan: result.knowledgePlan || null,
     investigationPlan: result.investigationPlan || null,
-    memorySummary: ephemeral ? null : (memoryWrite?.summary || memorySummary),
+    memorySummary: ephemeralRun ? null : (memoryWrite?.summary || memorySummary),
     memoryDebug,
     sourceQuality: result.sourceQuality || null,
     conflicts: result.conflicts || [],
@@ -311,7 +329,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     trace,
     workflowLog
   };
-  if (!ephemeral) completeRun(runId, { messageId: saved.id, type: classification.type });
+  if (!ephemeralRun) completeRun(runId, { messageId: saved.id, type: classification.type });
   return output;
 }
 
@@ -482,6 +500,10 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
       date_to: classification.date_to,
       hashtags: classification.hashtags || []
     });
+    emitRunEvent(runId, "embedding", "Embedding request delegated to hybrid retrieval", {
+      model: config.models.embedding,
+      query_length: message.length
+    });
     const primarySearch = await hybridSearchWithRelaxedHashtags({
       config,
       query: message,
@@ -534,9 +556,21 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     sources.push(...hybridSources);
     toolCalls.push(annotateToolCall({ toolName: "hybrid_search", ok: true, rawQuery: message, data: hybridResults, sources: hybridSources, relaxedHashtags: primarySearch.relaxedHashtags }));
     emitRunEvent(runId, "hybrid_search", "Hybrid Search completed", { records: countRows(hybridResults), sources: hybridSources.length, plannedQueries: planQueries.length });
+    emitRunEvent(runId, "retrieval_filters", "Retrieval filters applied", {
+      hashtags: classification.hashtags || [],
+      date_from: classification.date_from || null,
+      date_to: classification.date_to || null,
+      returned_records: countRows(hybridResults)
+    });
+    emitRunEvent(runId, "deduplication", "Retrieval records normalized and deduplicated", {
+      returned_records: countRows(hybridResults),
+      unique_sources: hybridSources.length
+    });
     } catch (error) {
       toolCalls.push(annotateToolCall({ toolName: "hybrid_search", ok: false, rawQuery: message, error: error.message, data: null, sources: [] }));
       emitRunEvent(runId, "hybrid_search", "Hybrid Search failed", { error: error.message });
+      emitRunEvent(runId, "retrieval_filters", "Retrieval filters skipped because Hybrid Search failed", { error: error.message });
+      emitRunEvent(runId, "deduplication", "Deduplication skipped because Hybrid Search failed", { error: error.message });
     }
   } else {
     const reason = pureMeetingEvidenceRoute
@@ -560,6 +594,9 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
         dataQueryIntent: dataQueryRouting.intent
       });
     }
+    emitRunEvent(runId, "embedding", "Embedding skipped for exact structured route", { reason });
+    emitRunEvent(runId, "retrieval_filters", "Retrieval filters skipped for exact structured route", { reason });
+    emitRunEvent(runId, "deduplication", "Deduplication skipped for exact structured route", { reason });
   }
 
   if (hybridResults && config.graph?.enabled !== false) {
@@ -665,6 +702,10 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     shouldRunMeetingEvidence,
     dataQuerySettingsOverride: dataQueryRequestSettings,
     dataQueryRoutingOverride: dataQueryRouting
+  });
+  emitRunEvent(runId, "tool_selection", "Project tools selected", {
+    tools,
+    external_tools_allowed: config.qa?.externalToolsAllowed !== false
   });
   emitRunEvent(runId, "n8n_tools", "Calling hinted/fallback tools in parallel", { tools });
   const toolResults = await Promise.all(
@@ -944,6 +985,13 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     emitRunEvent(runId, "conflict_detection", "No obvious source conflicts detected", {});
   }
   emitRunEvent(runId, "source_quality", "Source quality scored", sourceQuality);
+  emitRunEvent(runId, "context_construction", "Answer context assembled", {
+    retrieval_records: countRows(rerankedResults || hybridResults),
+    graph_relationships: graphContext.length,
+    tool_calls: toolCalls.length,
+    sources: uniqueSources.length,
+    conflicts: conflicts.length
+  });
   const deterministicInvoiceAnswer = buildDeterministicInvoiceAnswer({
     message,
     routing: dataQueryRouting,
@@ -1462,6 +1510,16 @@ async function callProjectTool({
       cacheContext,
       telemetry: telemetryFor(toolName)
     });
+  }
+  if (config.qa?.externalToolsAllowed === false || config.qa?.sideEffectsAllowed === false) {
+    return {
+      toolName,
+      ok: false,
+      skipped: true,
+      error: "QA_SIDE_EFFECT_DENIED",
+      data: null,
+      sources: []
+    };
   }
   return callN8nTool({
     toolName,

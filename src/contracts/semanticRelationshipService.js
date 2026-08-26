@@ -37,7 +37,7 @@ export function loadContractsSemanticRelationshipsStatus({ config, env = process
     agentVersion: CONTRACTS_RELATIONSHIPS_R4_1_AGENT_VERSION,
     relationshipPolicyVersion: CONTRACTS_RELATIONSHIPS_R4_1_POLICY_VERSION,
     promptVersion: CONTRACTS_RELATIONSHIPS_R4_1_PROMPT_VERSION,
-    modelVersion: String(config?.models?.main || "openai/gpt-4o"),
+    modelVersion: String(config?.contractsAgent?.relationships?.model || config?.models?.main || "openai/gpt-4o"),
     scope: "same_generation_semantic_clause_pairs",
     persistenceEnabled: false,
     decisionCreationEnabled: false,

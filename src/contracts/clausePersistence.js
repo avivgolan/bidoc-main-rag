@@ -72,9 +72,9 @@ export function contractsClausePersistenceIdentity(config = {}, { useLiteModel =
   const parser = createContractsClauseParserGeneration();
   const enrichment = createContractsClauseEnrichmentGeneration({
     modelVersion: String(
-      useLiteModel
+      config.contractsAgent?.enrichment?.model || (useLiteModel
         ? config.models?.lite || config.models?.main || "openai/gpt-4o-mini"
-        : config.models?.main || config.models?.lite || "openai/gpt-4o"
+        : config.models?.main || config.models?.lite || "openai/gpt-4o")
     )
   });
   return { parser, enrichment };
@@ -253,9 +253,9 @@ export async function runContractsClausePersistence({
     generation,
     config,
     ...(r6Catalog ? { controlledTags: r6Catalog.tags } : {}),
-    modelVersion: r6Enabled
+    modelVersion: config.contractsAgent?.enrichment?.model || (r6Enabled
       ? config.models?.lite || config.models?.main || "openai/gpt-4o-mini"
-      : config.models?.main || config.models?.lite || "openai/gpt-4o",
+      : config.models?.main || config.models?.lite || "openai/gpt-4o"),
     deadlineAt,
     signal
   });

@@ -47,11 +47,13 @@ import { buildTimelineSearchText, createTimelineSearchController, timelineEventM
 import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigateByMonths, calWeekBoundary } from "../public/calendarHelpers.js";
 import { cleanChatUrl, renderChatMarkdown } from "../public/chatMarkdown.js";
 import { registerContractsAgentTests } from "./contracts-agent.tests.js";
+import { registerQaPhase1Tests } from "./qa-phase1.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 registerContractsAgentTests(test);
+registerQaPhase1Tests(test);
 const testJwt = (claims) => [
   Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
   Buffer.from(JSON.stringify(claims)).toString("base64url"),
@@ -5762,6 +5764,47 @@ test("settings import preserves advanced AI controls", () => {
   assert.equal(wrapped.graph.enabled, false);
   assert.equal(wrapped.knowledge.chunkSize, 1400);
   assert.equal(wrapped.toolsRuntime.parallelLimit, 2);
+});
+
+test("contracts agent settings are normalized, public, and importable", () => {
+  const raw = {
+    enabled: true,
+    extraction: {
+      primaryModel: "openai/contracts-primary",
+      retryModel: "openai/contracts-fallback",
+      temperature: 0.25,
+      maxTokens: 99999,
+      systemPrompt: "Extract only grounded contract facts."
+    },
+    relationships: {
+      model: "openai/contracts-relations",
+      verifierModel: "openai/contracts-verifier",
+      confidenceThreshold: 0.87,
+      verifierPrompt: "Reject unsupported relationships."
+    }
+  };
+  const config = getConfig({ contractsAgent: raw });
+  assert.equal(config.contractsAgent.extraction.primaryModel, "openai/contracts-primary");
+  assert.equal(config.contractsAgent.extraction.maxTokens, 16000);
+  assert.equal(config.contractsAgent.relationships.confidenceThreshold, 0.87);
+  assert.equal(config.contractsAgent.relationships.verifierModel, "openai/contracts-verifier");
+
+  const exposed = publicSettings(config, { contractsAgent: raw });
+  assert.equal(exposed.contractsAgent.extraction.systemPrompt, "Extract only grounded contract facts.");
+  assert.equal(exposed.contractsAgent.relationships.verifierPrompt, "Reject unsupported relationships.");
+
+  const imported = normalizeImportedSettingsFile({ settings: { contractsAgent: raw } });
+  assert.equal(imported.contractsAgent.extraction.retryModel, "openai/contracts-fallback");
+});
+
+test("contracts agent settings tab exposes every model stage and remains server-governed", () => {
+  const source = fs.readFileSync(new URL("../src/react/SettingsPage.jsx", import.meta.url), "utf8");
+  assert.match(source, /id:\s*"contractsAgent"/);
+  assert.match(source, /CONTRACTS_STAGES/);
+  for (const stage of ["extraction", "enrichment", "relationships", "decisions", "autoReview"]) {
+    assert.match(source, new RegExp(`key:\\s*"${stage}"`));
+  }
+  assert.match(source, /הרשאות כתיבה[\s\S]*נשארים נעולים/);
 });
 
 test("settings import preserves custom presets", () => {

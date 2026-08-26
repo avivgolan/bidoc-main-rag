@@ -3678,6 +3678,17 @@ export function registerContractsAgentTests(test) {
     );
   });
 
+  test("contracts extraction prompt can be overridden only through server settings", () => {
+    const messages = buildContractsModelMessages({
+      segments: [segment("s1", 1, "1", "1", "Exact source sentence.")],
+      pageCount: 1,
+      unreadablePages: [],
+      systemPrompt: "Custom server-owned contracts prompt. Return JSON only."
+    });
+    assert.equal(messages[0].content, "Custom server-owned contracts prompt. Return JSON only.");
+    assert.match(messages[1].content, /Exact source sentence/);
+  });
+
   test("contracts orchestrator repairs structure once and emits redacted telemetry", async () => {
     const pages = [{ pdfPage: 1, text: "6.7. A delay charge of 2,000 ILS applies per day." }];
     const segments = segmentContractPages(pages);

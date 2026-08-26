@@ -35,7 +35,9 @@ import {
   activityAssignmentBatchStatusText,
   applyActivityAssignmentBatchOutcome,
   buildActivityAssignmentBatchQueue,
-  createActivityAssignmentBatch
+  createActivityAssignmentBatch,
+  filterActivityUpdates,
+  hasActiveActivityUpdateFilters
 } from "../src/react/activityAssignmentBatch.js";
 import {
   buildAssignmentCandidates,
@@ -153,6 +155,29 @@ test("schedule assignment batch: queues every dated unassigned alert once in sou
     { id: "d", date: "2026-08-22", activityKey: null }
   ]);
   assert.deepEqual(queue.map((item) => item.id), ["a", "d"]);
+});
+
+test("schedule activity updates: column filters compose and resolve assigned activity names", () => {
+  const items = [
+    { id: "a", kind: "alert", date: "2025-01-15", title: "עיכוב בריצוף", alertType: "חריג", severity: 3, status: "open", activityKey: "gantt:file:1" },
+    { id: "b", kind: "update", date: "2025-02-10", title: "התקדמות צבע", alertType: "עדכון", severity: 1, status: "closed", activityKey: null },
+    { id: "c", kind: "alert", date: null, title: "ללא תאריך", alertType: "חריג", severity: 3, status: "open", activityKey: null }
+  ];
+  const activities = [{ key: "gantt:file:1", name: "ריצוף חללים ציבוריים" }];
+  const result = filterActivityUpdates(items, activities, {
+    kind: "alert",
+    dateFrom: "2025-01-01",
+    dateTo: "2025-01-31",
+    text: "ריצוף",
+    severity: "3",
+    status: "open",
+    assignmentState: "assigned",
+    activity: "חללים"
+  });
+  assert.deepEqual(result.map((item) => item.id), ["a"]);
+  assert.deepEqual(filterActivityUpdates(items, activities, { assignmentState: "unassigned" }).map((item) => item.id), ["b", "c"]);
+  assert.equal(hasActiveActivityUpdateFilters({ status: "open" }), true);
+  assert.equal(hasActiveActivityUpdateFilters({}), false);
 });
 
 test("schedule assignment review: exposes at most two valid choices without requiring audit persistence", () => {
@@ -1546,6 +1571,165 @@ test("schedule condition resolver: a row action processes only the requested con
   assert.equal(result.processed, 1);
   assert.equal(result.results[0].conditionId, "cond-b");
   assert.equal(result.results[0].dueDate, "2026-08-07");
+});
+
+// ─── edge cases: input coercion, alert tiers, sweep filters ──────────────────
+// Cover paths the original vectors left open: percent/float coercion, the
+// "approaching" severity tiers, and every sweep filter except isLate/minDaysLate.
+
+const CAL_COVERED = { workingWeekdays: [0, 1, 2, 3, 4], holidays: [], holidaysThrough: "2027-01-01" };
+const SWEEP_BASE = {
+  projectId: PROJECT,
+  asOf: AS_OF,
+  calendar: CAL_COVERED,
+  scheduleMeta: { relevancyDate: AS_OF },
+  tasks: [
+    { activityKey: "gantt:file-b:1", stableKey: 1, name: "late-big", plannedStart: "2025-10-01", plannedFinish: "2025-12-20", percentComplete: 30 },
+    { activityKey: "gantt:file-b:2", stableKey: 2, name: "late-small", plannedStart: "2026-07-01", plannedFinish: "2026-08-01", percentComplete: 90 },
+    { activityKey: "gantt:file-b:3", stableKey: 3, name: "due-soon", plannedStart: "2026-07-01", plannedFinish: "2026-08-06", percentComplete: 10 },
+    { activityKey: "gantt:file-b:4", stableKey: 4, name: "due-later", plannedStart: "2026-07-01", plannedFinish: "2026-09-30", percentComplete: 80 },
+    { activityKey: "gantt:file-b:5", stableKey: 5, name: "done", plannedStart: "2026-01-01", plannedFinish: "2026-02-01", percentComplete: 100 }
+  ]
+};
+
+test("schedule engine: reported percent clamps to 0..100 and a corrupt >100 reads as complete", () => {
+  const over = computeIndicator({
+    projectId: PROJECT, asOf: AS_OF,
+    task: { activityKey: "gantt:file-b:11", plannedStart: "2026-06-01", plannedFinish: "2026-09-01", percentComplete: 150 }
+  });
+  // 150 clamps to 100, and 100 is the completion signal — a corrupt source
+  // value silently becomes a completion claim. Documented, not desired.
+  assert.equal(over.timing.percentComplete, 100);
+  assert.equal(over.status, "completed_on_time");
+
+  const under = computeIndicator({
+    projectId: PROJECT, asOf: AS_OF,
+    task: { activityKey: "gantt:file-b:12", plannedStart: "2026-06-01", plannedFinish: "2026-09-01", percentComplete: -5 }
+  });
+  assert.equal(under.timing.percentComplete, 0);
+
+  // Non-numeric is the only input that survives as "unknown".
+  const unknown = computeIndicator({
+    projectId: PROJECT, asOf: AS_OF,
+    task: { activityKey: "gantt:file-b:13", plannedFinish: "2026-09-01", percentComplete: "לא ידוע" }
+  });
+  assert.equal(unknown.timing.percentComplete, null);
+});
+
+test("schedule engine: an absent percent reads as 0, unlike float which stays null", () => {
+  // Number(null) is 0. variances.remainingFloatDays guards against exactly this
+  // (a fabricated zero float would claim the critical path); percentComplete
+  // does not, so "not reported" and "reported 0%" are indistinguishable.
+  const absent = computeIndicator({
+    projectId: PROJECT, asOf: AS_OF,
+    task: { activityKey: "gantt:file-b:14", plannedStart: "2026-09-01", plannedFinish: "2026-10-01", percentComplete: null }
+  });
+  assert.equal(absent.timing.percentComplete, 0);
+  assert.equal(absent.status, "not_started"); // derived from the coerced zero
+
+  // The guarded field, for contrast: explicit 0 is kept, absent stays null.
+  const zeroFloat = computeIndicator({
+    projectId: PROJECT, asOf: AS_OF,
+    task: { activityKey: "gantt:file-b:15", plannedFinish: "2026-09-01", totalFloatDays: 0 }
+  });
+  assert.equal(zeroFloat.variances.remainingFloatDays, 0);
+  const noFloat = computeIndicator({
+    projectId: PROJECT, asOf: AS_OF,
+    task: { activityKey: "gantt:file-b:16", plannedFinish: "2026-09-01" }
+  });
+  assert.equal(noFloat.variances.remainingFloatDays, null);
+  // A non-numeric float is unknown, never 0.
+  const badFloat = computeIndicator({
+    projectId: PROJECT, asOf: AS_OF,
+    task: { activityKey: "gantt:file-b:17", plannedFinish: "2026-09-01", totalFloatDays: "n/a" }
+  });
+  assert.equal(badFloat.variances.remainingFloatDays, null);
+});
+
+test("schedule engine: extension status defaults to approved and a negative extension moves the date earlier", () => {
+  // No status at all counts as approved (the ?? default in contractEffectiveDate).
+  assert.deepEqual(
+    contractEffectiveDate({ contractDate: "2026-01-01", extensions: [{ extensionDays: 5 }] }),
+    { date: "2026-01-06", extensionDaysApplied: 5 }
+  );
+  // A negative "extension" pulls the effective date before the signed contract
+  // date. Nothing rejects it — the contract axis can be moved earlier by data.
+  assert.deepEqual(
+    contractEffectiveDate({ contractDate: "2026-01-01", extensions: [{ extensionDays: -10 }] }),
+    { date: "2025-12-22", extensionDaysApplied: -10 }
+  );
+  // Fractional days round, and snake_case input is accepted alongside camelCase.
+  assert.equal(contractEffectiveDate({ contractDate: "2026-01-01", extensions: [{ extensionDays: 2.6 }] }).date, "2026-01-04");
+  assert.equal(contractEffectiveDate({ contract_date: "2026-01-01", extensions: [{ extension_days: 3 }] }).date, "2026-01-04");
+});
+
+test("schedule engine: approaching alerts need a near deadline AND low progress, both tiers", () => {
+  const approaching = (plannedFinish, percentComplete) => computeIndicator({
+    projectId: PROJECT, asOf: AS_OF,
+    task: { activityKey: "gantt:file-b:80", name: "ריצוף", plannedStart: "2026-07-01", plannedFinish, percentComplete }
+  });
+
+  // Within 3 days and under 50% → severity 3.
+  const soon = approaching("2026-08-06", 10);
+  assert.equal(soon.lateness.daysRemaining, 2);
+  assert.deepEqual(deriveAlert(soon), { alertType: "schedule_approaching", severityLevel: 3 });
+
+  // Same 2 days, but 60% done clears the progress floor → no alert at all,
+  // even though the status is still at_risk.
+  const soonButProgressing = approaching("2026-08-06", 60);
+  assert.equal(soonButProgressing.status, "at_risk");
+  assert.equal(deriveSeverity(soonButProgressing), null);
+  assert.equal(deriveAlert(soonButProgressing), null);
+
+  // Within 7 days and under 25% → the lower tier 2.
+  const nearby = approaching("2026-08-09", 10);
+  assert.equal(nearby.lateness.daysRemaining, 5);
+  assert.deepEqual(deriveAlert(nearby), { alertType: "schedule_approaching", severityLevel: 2 });
+
+  // 5 days out at 30% misses the 25% floor for tier 2 — silent.
+  assert.equal(deriveSeverity(approaching("2026-08-09", 30)), null);
+
+  // Beyond the 7-day window, at_risk alone never alerts.
+  const far = approaching("2026-08-20", 10);
+  assert.equal(far.status, "at_risk");
+  assert.equal(deriveSeverity(far), null);
+});
+
+test("schedule engine: sweep dueWithinDays and dueWithinWorkingDays select only dated remaining work", () => {
+  const names = (filters) => sweep({ ...SWEEP_BASE, filters }).indicators.map((i) => i.subject.name);
+  // Late rows have daysRemaining null and must not leak into a "due within" view.
+  assert.deepEqual(names({ dueWithinDays: 3 }), ["due-soon"]);
+  assert.deepEqual(names({ dueWithinWorkingDays: 2 }), ["due-soon"]);
+  // A window wide enough to reach the far task picks up both, closest first.
+  assert.deepEqual(names({ dueWithinDays: 60 }), ["due-soon", "due-later"]);
+});
+
+test("schedule engine: sweep statuses, minSeverity and minConfidence filters compose", () => {
+  const names = (filters) => sweep({ ...SWEEP_BASE, filters }).indicators.map((i) => i.subject.name);
+  assert.deepEqual(names({ statuses: ["at_risk"] }), ["due-soon"]);
+  // minSeverity keeps 4 and 3, drops the unscored rows.
+  assert.deepEqual(names({ minSeverity: 3 }), ["late-big", "late-small", "due-soon"]);
+  assert.deepEqual(names({ minSeverity: 4 }), ["late-big"]);
+  // Composed filters intersect rather than override.
+  assert.deepEqual(names({ statuses: ["at_risk"], minSeverity: 4 }), []);
+
+  // A contractor-only basis scores 0.7 — "medium". Without a contract date or
+  // observed corroboration nothing in a pure Gantt sweep reaches "high", so
+  // minConfidence 0.8 empties the whole result set.
+  const all = sweep({ ...SWEEP_BASE });
+  assert.ok(all.indicators.every((i) => i.confidence.score === 0.7 && i.confidence.level === "medium"));
+  assert.deepEqual(names({ minConfidence: 0.8 }), []);
+  assert.equal(names({ minConfidence: 0.7 }).length, all.indicators.length);
+});
+
+test("schedule engine: a 100% task the data date cannot vouch for survives excludeCompleted", () => {
+  // "done" reports 100% but its finish is long before the data date, so the
+  // engine cannot prove on-time and returns insufficient_data. That status is
+  // not completed_*, so the default excludeCompleted filter does NOT drop it —
+  // an unverifiable completion stays visible instead of silently vanishing.
+  const done = sweep({ ...SWEEP_BASE }).indicators.find((i) => i.subject.name === "done");
+  assert.equal(done.status, "insufficient_data");
+  assert.equal(done.severity, null); // and it never alerts
 });
 
 const filterIndex = process.argv.indexOf("--filter");

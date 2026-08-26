@@ -229,8 +229,8 @@ export function contractsExtractionFingerprint(config = {}) {
     schemaVersion: "contract-extraction.v1",
     agentVersion: CONTRACTS_AGENT_VERSION,
     compilerVersion: CONTRACTS_COMPILER_VERSION,
-    primaryModel: String(config.models?.main || "openai/gpt-4o"),
-    retryModel: String(config.models?.lite || "")
+    primaryModel: String(config.contractsAgent?.extraction?.primaryModel || config.models?.main || "openai/gpt-4o"),
+    retryModel: String(config.contractsAgent?.extraction?.retryModel || config.models?.lite || "")
   });
   return crypto.createHash("sha256").update(source).digest("hex");
 }

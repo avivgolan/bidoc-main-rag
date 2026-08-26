@@ -285,7 +285,7 @@ function assertVerifierBatch(value, expectedIds) {
   return byId;
 }
 
-async function verifyBatch({ batch, config, chatComplete, modelVersion, timeoutMs, maxRetries, signal }) {
+async function verifyBatch({ batch, config, chatComplete, modelVersion, timeoutMs, maxRetries, maxTokens, temperature, systemPrompt, signal }) {
   const expectedIds = batch.map((candidate) => candidate.item.decisionId);
   let lastError = null;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -294,8 +294,8 @@ async function verifyBatch({ batch, config, chatComplete, modelVersion, timeoutM
       const content = await chatComplete({
         apiKey: config.openRouterApiKey,
         model: modelVersion,
-        temperature: 0,
-        maxTokens: 3_200,
+        temperature: Number(temperature) || 0,
+        maxTokens: Number(maxTokens) || 3_200,
         timeoutMs,
         signal,
         reasoning: { effort: "low", exclude: true },
@@ -305,7 +305,7 @@ async function verifyBatch({ batch, config, chatComplete, modelVersion, timeoutM
         },
         responseFormat: verifierResponseFormat(),
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: String(systemPrompt || "").trim() || SYSTEM_PROMPT },
           {
             role: "user",
             content: JSON.stringify({
@@ -356,10 +356,19 @@ export async function analyzeContractsDecisionAutoReview({
   decisionReview,
   config,
   chatComplete = chatCompletion,
-  deadlineAt = Date.now() + DEFAULT_DEADLINE_MS,
+  deadlineAt = null,
   signal,
   logger = console
 } = {}) {
+  const agentSettings = config?.contractsAgent;
+  const settings = agentSettings?.autoReview || {};
+  if (agentSettings?.enabled === false || settings.enabled === false) {
+    throw autoReviewError(
+      "contracts_decision_auto_review_disabled",
+      "Contracts decision auto-review is disabled in Settings.",
+      503
+    );
+  }
   if (!decisionReview || !Array.isArray(decisionReview.items) || !decisionReview.metrics) {
     throw autoReviewError(
       "contracts_decision_auto_review_response_invalid",
@@ -374,20 +383,24 @@ export async function analyzeContractsDecisionAutoReview({
       503
     );
   }
-  const modelVersion = config.models?.main || "openai/gpt-4o";
+  const modelVersion = settings.model || config.models?.main || "openai/gpt-4o";
+  const effectiveDeadline = deadlineAt !== null && deadlineAt !== undefined && Number.isFinite(Number(deadlineAt))
+    ? Number(deadlineAt)
+    : Date.now() + (Number(settings.totalBudgetMs) || DEFAULT_DEADLINE_MS);
   const pending = decisionReview.items.filter((item) => item?.reviewStatus === "proposed");
   const candidates = pending.map((item) => ({ item, policy: deterministicPolicy(item) }));
   const modelCandidates = candidates.filter((candidate) => candidate.policy.blockers.length === 0);
   const batches = [];
-  for (let index = 0; index < modelCandidates.length; index += DEFAULT_BATCH_SIZE) {
-    batches.push(modelCandidates.slice(index, index + DEFAULT_BATCH_SIZE));
+  const batchSize = Number(settings.batchSize) || DEFAULT_BATCH_SIZE;
+  for (let index = 0; index < modelCandidates.length; index += batchSize) {
+    batches.push(modelCandidates.slice(index, index + batchSize));
   }
   const timeoutMs = Math.max(1_000, Math.min(
-    Number(config.ai?.main?.timeoutMs) || DEFAULT_TIMEOUT_MS,
-    Math.max(1_000, Number(deadlineAt) - Date.now())
+    Number(settings.timeoutMs ?? config.ai?.main?.timeoutMs) || DEFAULT_TIMEOUT_MS,
+    Math.max(1_000, effectiveDeadline - Date.now())
   ));
-  const outcomes = await mapConcurrent(batches, DEFAULT_CONCURRENCY, async (batch) => {
-    if (Date.now() >= Number(deadlineAt)) {
+  const outcomes = await mapConcurrent(batches, Number(settings.concurrency) || DEFAULT_CONCURRENCY, async (batch) => {
+    if (Date.now() >= effectiveDeadline) {
       return { results: new Map(), calls: 0, failed: true, error: new Error("Decision verifier deadline exceeded.") };
     }
     const outcome = await verifyBatch({
@@ -395,8 +408,11 @@ export async function analyzeContractsDecisionAutoReview({
       config,
       chatComplete,
       modelVersion,
-      timeoutMs: Math.min(timeoutMs, Math.max(1_000, Number(deadlineAt) - Date.now())),
-      maxRetries: DEFAULT_MAX_RETRIES,
+      timeoutMs: Math.min(timeoutMs, Math.max(1_000, effectiveDeadline - Date.now())),
+      maxRetries: Number.isFinite(Number(settings.maxRetries)) ? Number(settings.maxRetries) : DEFAULT_MAX_RETRIES,
+      maxTokens: settings.maxTokens,
+      temperature: settings.temperature,
+      systemPrompt: settings.systemPrompt,
       signal
     });
     if (outcome.failed) logger.warn?.("[contracts-r4.2b1] verifier batch failed closed", {
@@ -542,10 +558,13 @@ export async function autoReviewContractsDecisions({
   env = process.env,
   fetchImpl = fetch,
   chatComplete,
-  deadlineAt = Date.now() + DEFAULT_DEADLINE_MS,
+  deadlineAt = null,
   signal,
   logger = console
 } = {}) {
+  const effectiveDeadline = deadlineAt !== null && deadlineAt !== undefined && Number.isFinite(Number(deadlineAt))
+    ? Number(deadlineAt)
+    : Date.now() + (Number(config?.contractsAgent?.autoReview?.totalBudgetMs) || DEFAULT_DEADLINE_MS);
   parseContractsDecisionAutoReviewRequest(body);
   if (!contractsDecisionReviewApproved(env) || !contractsR6Phase3Approved(env)) {
     throw autoReviewError(
@@ -563,19 +582,19 @@ export async function autoReviewContractsDecisions({
     config,
     env,
     fetchImpl,
-    timeoutMs: Math.max(1_000, Number(deadlineAt) - Date.now())
+    timeoutMs: Math.max(1_000, effectiveDeadline - Date.now())
   });
   const initialReview = await loadContractsDecisionReview({
     config,
     workspaceId: normalizedWorkspaceId,
     fetchImpl,
-    timeoutMs: Math.max(1_000, Number(deadlineAt) - Date.now())
+    timeoutMs: Math.max(1_000, effectiveDeadline - Date.now())
   });
   const plan = await analyzeContractsDecisionAutoReview({
     decisionReview: initialReview,
     config,
     ...(chatComplete ? { chatComplete } : {}),
-    deadlineAt,
+    deadlineAt: effectiveDeadline,
     signal,
     logger
   });
@@ -613,7 +632,7 @@ export async function autoReviewContractsDecisions({
         }))
       },
       fetchImpl,
-      timeoutMs: Math.max(1_000, Number(deadlineAt) - Date.now())
+      timeoutMs: Math.max(1_000, effectiveDeadline - Date.now())
     });
     if (applied?.autoReview?.atomic !== true
         || Number(applied?.autoReview?.approvedCount) !== eligible.length
@@ -628,13 +647,13 @@ export async function autoReviewContractsDecisions({
       config,
       workspaceId: normalizedWorkspaceId,
       fetchImpl,
-      timeoutMs: Math.max(1_000, Number(deadlineAt) - Date.now())
+      timeoutMs: Math.max(1_000, effectiveDeadline - Date.now())
     });
     const review = await loadContractsDecisionReview({
       config,
       workspaceId: normalizedWorkspaceId,
       fetchImpl,
-      timeoutMs: Math.max(1_000, Number(deadlineAt) - Date.now())
+      timeoutMs: Math.max(1_000, effectiveDeadline - Date.now())
     });
     return {
       agentVersion: CONTRACTS_DECISION_AUTO_REVIEW_AGENT_VERSION,

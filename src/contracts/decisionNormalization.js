@@ -277,6 +277,16 @@ export async function runContractsDecisionNormalization({
   now = () => Date.now(),
   logger = console
 } = {}) {
+  const agentSettings = config?.contractsAgent;
+  const settings = { ...(config?.contracts?.r4_2b || {}), ...(agentSettings?.decisions || {}) };
+  if (agentSettings?.enabled === false || settings.enabled === false) {
+    throw decisionError(
+      "contracts_decision_normalization_disabled",
+      "The Contracts Decisions Agent is disabled in Settings.",
+      503,
+      "decision.disabled"
+    );
+  }
   if (!config?.openRouterApiKey) {
     throw decisionError(
       "contracts_decision_normalization_unavailable",
@@ -288,10 +298,9 @@ export async function runContractsDecisionNormalization({
   const policyVersion = boundedText(decisionPolicyVersion, "decisionPolicyVersion", 1, 200);
   const normalizedPromptVersion = boundedText(promptVersion, "promptVersion", 1, 200);
   const triggers = normalizeTriggerCatalog(triggerCatalog);
-  const model = boundedText(modelVersion || config?.models?.lite || config?.models?.main || "openai/gpt-4o-mini", "modelVersion", 1, 200);
+  const model = boundedText(modelVersion || settings.model || config?.models?.lite || config?.models?.main || "openai/gpt-4o-mini", "modelVersion", 1, 200);
   const candidates = buildContractsDecisionCandidates({ preview, relationshipReview, targetClauseKeys });
   const batches = chunk(candidates, MAX_BATCH_SIZE);
-  const settings = config?.contracts?.r4_2b || {};
   const maxTokens = boundedInteger(settings.maxTokensPerCall, 700, 2_200, DEFAULT_MAX_TOKENS_PER_CALL);
   const maxTotalTokens = boundedInteger(settings.maxTotalModelTokens, maxTokens, 200_000, DEFAULT_MAX_TOTAL_TOKENS);
   const maxProviderRetries = boundedInteger(settings.maxProviderRetries, 0, 1, DEFAULT_MAX_PROVIDER_RETRIES);
@@ -314,12 +323,12 @@ export async function runContractsDecisionNormalization({
       "decision.token_budget_exceeded"
     );
   }
-  const timeoutMs = boundedInteger(config?.ai?.lite?.timeoutMs ?? config?.ai?.main?.timeoutMs, 1_000, DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
+  const timeoutMs = boundedInteger(settings.timeoutMs ?? config?.ai?.lite?.timeoutMs ?? config?.ai?.main?.timeoutMs, 1_000, 180_000, DEFAULT_TIMEOUT_MS);
   const effectiveDeadline = deadlineAt !== null
     && deadlineAt !== undefined
     && Number.isFinite(Number(deadlineAt))
     ? Number(deadlineAt)
-    : now() + DEFAULT_DEADLINE_MS;
+    : now() + (Number(settings.totalBudgetMs) || DEFAULT_DEADLINE_MS);
   let providerRetryCount = 0;
   let repairBatchCount = 0;
   let splitFallbackCallCount = 0;
@@ -359,7 +368,7 @@ export async function runContractsDecisionNormalization({
         const raw = await chatComplete({
           apiKey: config.openRouterApiKey,
           model,
-          temperature: 0,
+          temperature: Number(settings.temperature) || 0,
           maxTokens,
           timeoutMs: Math.max(1, Math.min(timeoutMs, remainingMs)),
           topP: 1,
@@ -427,7 +436,8 @@ export async function runContractsDecisionNormalization({
       batch,
       decisionPolicyVersion: policyVersion,
       promptVersion: normalizedPromptVersion,
-      triggerCatalog: triggers
+      triggerCatalog: triggers,
+      systemPrompt: settings.systemPrompt
     });
     let raw;
     let finalError = null;
@@ -571,11 +581,12 @@ export function buildContractsDecisionMessages({
   batch,
   decisionPolicyVersion = CONTRACTS_DECISIONS_R4_2B_POLICY_VERSION,
   promptVersion = CONTRACTS_DECISIONS_R4_2B_PROMPT_VERSION,
-  triggerCatalog = null
+  triggerCatalog = null,
+  systemPrompt = ""
 } = {}) {
   assertCandidateBatch(batch);
   return [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: String(systemPrompt || "").trim() || SYSTEM_PROMPT },
     {
       role: "user",
       content: JSON.stringify({
