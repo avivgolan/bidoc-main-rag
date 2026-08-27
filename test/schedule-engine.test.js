@@ -20,7 +20,7 @@ import {
 import {
   buildScheduleHealth, scheduleDataVersion, snapshotRowFromIndicator,
   buildScheduleWorkflowLog, planScheduleAlerts, subjectKeyOf,
-  BOOTSTRAP_SUMMARY_KEY, enrichConditionProvisionalDueDates, scheduleActivityUpdateItem,
+  BOOTSTRAP_SUMMARY_KEY, enrichConditionProvisionalDueDates, mergeLinkedLegacyAlertEvents, scheduleActivityUpdateItem,
   SCHEDULE_HEALTH_VERSION
 } from "../src/subagents/schedule.js";
 import {
@@ -279,6 +279,29 @@ test("schedule assignment batch: UI awaits each row and exposes controlled stop 
   assert.match(runner, /stopRequested[\s\S]+PAUSED/u);
   assert.match(page, />המשך מאותה נקודה</u);
   assert.match(page, />הרץ מחדש</u);
+});
+
+test("schedule activity updates: reviewed legacy links remain visible after alert-id replacement", () => {
+  const result = mergeLinkedLegacyAlertEvents({
+    events: [
+      { id: "alert_4001", date: "2026-08-20", content: "current" },
+      { id: "alert_4002", date: "2026-08-22", content: "current unlinked" }
+    ],
+    links: [
+      { source_id: "4001", activity_key: "gantt:file:1" },
+      { source_id: "1474", activity_key: "gantt:file:2" },
+      { source_id: "1435", activity_key: "gantt:file:3" }
+    ],
+    legacyEvents: [
+      { id: "alert_1474", date: "2026-08-18", content: "reviewed legacy" },
+      { id: "alert_1435", date: "2026-08-19", content: "reviewed legacy" },
+      { id: "alert_9999", date: "2026-08-17", content: "not linked" },
+      { id: "alert_4001", date: "2026-08-16", content: "duplicate current" }
+    ]
+  });
+
+  assert.equal(result.recoveredCount, 2);
+  assert.deepEqual(result.events.map((event) => event.id), ["alert_1474", "alert_1435", "alert_4001", "alert_4002"]);
 });
 
 test("schedule UI: APP DATA failures preserve partial results and expose a bounded retry", () => {

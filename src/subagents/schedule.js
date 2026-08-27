@@ -12,7 +12,7 @@
 // by the migration runbook, never an application table.
 
 import { getConfig } from "../config.js";
-import { fetchAlertsTimelineEvents } from "../supabase.js";
+import { fetchAlertsTimelineEvents, fetchLegacyAlertsTimelineEvents } from "../supabase.js";
 import { getProjectDateTime } from "../clock.js";
 import { computeIndicator, sweep, deriveAlert, deriveSeverity, ENGINE_VERSION, CONTRACT_VERSION } from "../scheduleEngine.js";
 import { diffCalendarDays, toIsoDate } from "../scheduleCalendar.js";
@@ -684,6 +684,22 @@ export function scheduleActivityUpdateItem(row = {}, activityKey = null) {
   };
 }
 
+export function mergeLinkedLegacyAlertEvents({ events = [], links = [], legacyEvents = [] } = {}) {
+  const currentIds = new Set(events.map((event) => String(event.id || "").replace(/^alert_/u, "")));
+  const linkedIds = new Set(links.map((link) => String(link.source_id || "").replace(/^alert_/u, "")));
+  const recovered = legacyEvents.filter((event) => {
+    const id = String(event.id || "").replace(/^alert_/u, "");
+    return linkedIds.has(id) && !currentIds.has(id);
+  });
+  return {
+    events: [...events, ...recovered].sort((left, right) => {
+      const dateCompare = String(left.date || "").localeCompare(String(right.date || ""));
+      return dateCompare || String(left.id || "").localeCompare(String(right.id || ""));
+    }),
+    recoveredCount: recovered.length
+  };
+}
+
 // Use the exact alert-event adapter that feeds the Timeline page. Only the
 // reviewed association is Schedule-owned and persisted in the link table.
 export async function listScheduleActivityUpdates({ projectId, config = null, settings: settingsInput = null } = {}) {
@@ -701,14 +717,28 @@ export async function listScheduleActivityUpdates({ projectId, config = null, se
       linksWarning = `טעינת קשרי פעילות: ${error.message}`;
       return [];
     });
-  const [events, links] = await Promise.all([eventsPromise, linksPromise]);
+  const [currentEvents, links] = await Promise.all([eventsPromise, linksPromise]);
+  const currentEventIds = new Set(currentEvents.map((event) => String(event.id || "").replace(/^alert_/u, "")));
+  const orphanedLinkIds = links
+    .map((row) => String(row.source_id || "").replace(/^alert_/u, ""))
+    .filter((id) => id && !currentEventIds.has(id));
+  let legacyWarning = null;
+  const legacyEvents = orphanedLinkIds.length
+    ? await fetchLegacyAlertsTimelineEvents({ config: cfg, ids: orphanedLinkIds }).catch((error) => {
+        legacyWarning = `טעינת שיוכים היסטוריים: ${error.message}`;
+        return [];
+      })
+    : [];
+  const restored = mergeLinkedLegacyAlertEvents({ events: currentEvents, links, legacyEvents });
+  const events = restored.events;
   const activityBySource = new Map(links.map((row) => [String(row.source_id), row.activity_key || null]));
   return {
     projectId: projectContext.sourceProjectId,
     scheduleProjectId: projectContext.scheduleProjectId,
     total: events.length,
     items: events.map((event) => scheduleActivityUpdateItem(event, activityBySource.get(String(event.id).replace(/^alert_/u, "")))),
-    ...(linksWarning ? { warning: linksWarning } : {})
+    recoveredLegacyLinks: restored.recoveredCount,
+    ...((linksWarning || legacyWarning) ? { warning: [linksWarning, legacyWarning].filter(Boolean).join("; ") } : {})
   };
 }
 

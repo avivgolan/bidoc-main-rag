@@ -1192,6 +1192,22 @@ function uniqueTimelineTags(value, extra = null) {
   ].filter(Boolean))];
 }
 
+const ALERT_TIMELINE_SELECT = "id,created_at,question,answer,alert_description,alert_type,severity_level,input_data_type,input_data_id,analyzed_data,data_link,data_date,status,item_status,hashtags,summary,content,metadata,is_relevant";
+const LEGACY_ALERTS_BACKUP_TABLE = "alerts_backup_dedupe_20260822";
+
+function alertTimelineEvent(row) {
+  const date = timelineRowDate(row);
+  return {
+    id: `alert_${row.id}`,
+    date,
+    tags: parseHashtags(row.hashtags || row.metadata?.hashtags || row.metadata?.tags || row.alert_type).concat(row.alert_type ? [row.alert_type] : []).filter((tag, index, all) => tag && all.indexOf(tag) === index),
+    content: alertRowContent(row),
+    metadata: alertRowMetadata(row),
+    source: "alert",
+    severity: Number(row.severity_level || row.metadata?.severity_level || 1)
+  };
+}
+
 export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig)) return [];
@@ -1199,23 +1215,34 @@ export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {
   const pageSize = 500;
   for (let offset = 0; offset < limit; offset += pageSize) {
     const batchLimit = Math.min(pageSize, limit - offset);
-    const query = `/rest/v1/${contentConfig.alertsTable}?select=id,created_at,question,answer,alert_description,alert_type,severity_level,input_data_type,input_data_id,analyzed_data,data_link,data_date,status,item_status,hashtags,summary,content,metadata,is_relevant&order=data_date.asc.nullslast,created_at.asc,id.asc&limit=${batchLimit}&offset=${offset}`;
+    const query = `/rest/v1/${contentConfig.alertsTable}?select=${ALERT_TIMELINE_SELECT}&order=data_date.asc.nullslast,created_at.asc,id.asc&limit=${batchLimit}&offset=${offset}`;
     const batch = await supabaseFetch(contentConfig, query);
     rows.push(...(batch || []));
     if (!Array.isArray(batch) || batch.length < batchLimit) break;
   }
-  return (rows || []).map((row) => {
-    const date = timelineRowDate(row);
-    return {
-      id: `alert_${row.id}`,
-      date,
-      tags: parseHashtags(row.hashtags || row.metadata?.hashtags || row.metadata?.tags || row.alert_type).concat(row.alert_type ? [row.alert_type] : []).filter((tag, index, all) => tag && all.indexOf(tag) === index),
-      content: alertRowContent(row),
-      metadata: alertRowMetadata(row),
-      source: "alert",
-      severity: Number(row.severity_level || row.metadata?.severity_level || 1)
-    };
-  }).filter((event) => event.date);
+  return (rows || []).map(alertTimelineEvent).filter((event) => event.date);
+}
+
+// Compatibility read for Schedule links created before the alerts table was
+// rebuilt. The backup is never copied back into `alerts`; only the exact linked
+// rows are returned so reviewed CTO assignments remain visible.
+export async function fetchLegacyAlertsTimelineEvents({ config, ids = [] }) {
+  const contentConfig = contentSupabaseConfig(config);
+  if (!isConfigured(contentConfig)) return [];
+  const normalizedIds = [...new Set(ids
+    .map((id) => String(id || "").trim().replace(/^alert_/u, ""))
+    .filter((id) => /^\d+$/u.test(id)))];
+  if (!normalizedIds.length) return [];
+
+  const rows = [];
+  const chunkSize = 100;
+  for (let offset = 0; offset < normalizedIds.length; offset += chunkSize) {
+    const chunk = normalizedIds.slice(offset, offset + chunkSize);
+    const query = `/rest/v1/${LEGACY_ALERTS_BACKUP_TABLE}?select=${ALERT_TIMELINE_SELECT}&id=in.(${chunk.join(",")})&order=data_date.asc.nullslast,created_at.asc,id.asc`;
+    const batch = await supabaseFetch(contentConfig, query);
+    rows.push(...(batch || []));
+  }
+  return rows.map(alertTimelineEvent).filter((event) => event.date);
 }
 
 function alertRowContent(row = {}) {
