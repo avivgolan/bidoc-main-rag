@@ -10,6 +10,9 @@ import {
 import { loadScheduleSource, scheduleDataRequest, scheduleSettings } from "../src/scheduleIngestion.js";
 import { resolveIndicatorProjectContext } from "../src/indicator/contractConditions.js";
 import { runScheduleActivityAssignmentAgent } from "../src/subagents/scheduleActivityAssignmentAgent.js";
+import { listSharedScheduleAssignmentEvaluationLabels } from "../src/subagents/scheduleActivityAssignmentReviewQueue.js";
+import { loadScheduleAssignmentEvaluationSources } from "../src/subagents/schedule.js";
+import { reconcileScheduleAssignmentReviewLabels, summarizeScheduleAssignmentLabelCoverage } from "../src/scheduleActivityAssignmentLabels.js";
 
 const args = process.argv.slice(2);
 const hasFlag = (name) => args.includes(name);
@@ -50,21 +53,11 @@ async function loadRuntime({ reloadRemoteSettings = true } = {}) {
   return { config: getConfig(), settings: scheduleSettings() };
 }
 
-async function readAlert({ config, settings, scheduleProjectId, sourceId }) {
-  const rows = await scheduleDataRequest({
-    config,
-    settings,
-    fetchImpl: timeoutFetch,
-    path: `/rest/v1/alerts?select=*&project_id=eq.${encodeURIComponent(scheduleProjectId)}&id=eq.${encodeURIComponent(String(sourceId))}&limit=1`
-  });
-  return rows[0] || null;
-}
-
 async function prepareDataset() {
   const projectId = valueAfter("--project");
   if (!projectId) throw new Error("--prepare requires --project <project-id>");
   const dataCutoff = safeTimestamp(valueAfter("--cutoff") || new Date().toISOString());
-  const { config, settings } = await loadRuntime({ reloadRemoteSettings: false });
+  const { config, settings } = await loadRuntime({ reloadRemoteSettings: !hasFlag("--code-defaults") });
   const explicitScheduleProjectId = valueAfter("--schedule-project");
   const context = explicitScheduleProjectId
     ? { sourceProjectId: projectId, scheduleProjectId: explicitScheduleProjectId }
@@ -72,7 +65,7 @@ async function prepareDataset() {
   const scheduleSource = await loadScheduleSource({ config, projectId, settings, fetchImpl: timeoutFetch });
   const inputs = { tasks: scheduleSource.tasks, scheduleMeta: scheduleSource.scheduleMeta };
   const cutoffMs = Date.parse(dataCutoff);
-  const [rawLinks, rawRejectedRuns] = await Promise.all([
+  const [rawLinks, rawRejectedRuns, sharedLabelResult] = await Promise.all([
     scheduleDataRequest({
       config,
       settings,
@@ -84,7 +77,12 @@ async function prepareDataset() {
       settings,
       fetchImpl: timeoutFetch,
       path: `/rest/v1/schedule_activity_assignment_runs?select=id,project_id,source_id,schedule_version_id,status,selected_activity_key,review_reason,reviewed_at&project_id=eq.${encodeURIComponent(context.scheduleProjectId)}&status=eq.rejected&limit=1000`
-    }).catch(() => [])
+    }).catch(() => []),
+    listSharedScheduleAssignmentEvaluationLabels({
+      projectId: context.sourceProjectId,
+      config,
+      fetchImpl: timeoutFetch
+    }).catch(() => ({ count: 0, cases: [], coverage: null }))
   ]);
   const links = rawLinks
     .filter((row) => ["manual", "agent_approved"].includes(String(row.assignment_method || "manual")))
@@ -93,14 +91,29 @@ async function prepareDataset() {
   const rejectedRuns = rawRejectedRuns
     .filter((row) => !row.reviewed_at || Date.parse(row.reviewed_at) <= cutoffMs)
     .sort((left, right) => Date.parse(left.reviewed_at || 0) - Date.parse(right.reviewed_at || 0));
+  const sharedLabelCases = (Array.isArray(sharedLabelResult.cases) ? sharedLabelResult.cases : [])
+    .filter((item) => !item.provenance?.reviewedAt || Date.parse(item.provenance.reviewedAt) <= cutoffMs)
+    .sort((left, right) => Date.parse(left.provenance?.reviewedAt || 0) - Date.parse(right.provenance?.reviewedAt || 0));
+  const sourceRecovery = await loadScheduleAssignmentEvaluationSources({
+    linkedSourceIds: links.map((row) => row.source_id),
+    currentOnlySourceIds: [
+      ...rejectedRuns.map((row) => row.source_id),
+      ...sharedLabelCases.map((item) => item.sourceId)
+    ],
+    config
+  });
+  const recoveredSourceById = new Map(sourceRecovery.sources.map((item) => [String(item.sourceId), item]));
   const activeScheduleVersionId = String(inputs.scheduleMeta.sourceVersionId || "");
   const casesBySource = new Map();
   for (const link of links) {
+    const sourceId = String(link.source_id || "");
+    const recoveredSource = recoveredSourceById.get(sourceId);
+    if (!sourceId || !recoveredSource) continue;
     const activeActivity = String(link.activity_key || "").startsWith(`gantt:${activeScheduleVersionId}:`);
-    casesBySource.set(String(link.source_id), {
+    casesBySource.set(sourceId, {
       id: `link:${link.id}`,
       projectId: context.sourceProjectId,
-      sourceId: String(link.source_id),
+      sourceId,
       scheduleVersionId: activeScheduleVersionId,
       label: activeActivity
         ? {
@@ -116,13 +129,53 @@ async function prepareDataset() {
       provenance: {
         source: "schedule_activity_alert_links",
         linkId: String(link.id),
-        reviewedAt: link.updated_at || link.created_at || null
-      }
+        reviewedAt: link.updated_at || link.created_at || null,
+        recordOrigin: recoveredSource.recordOrigin,
+        assignmentMethod: String(link.assignment_method || "manual")
+      },
+      source: recoveredSource.source
+    });
+  }
+  const reconciledReviewLabels = reconcileScheduleAssignmentReviewLabels({
+    reviewCases: sharedLabelCases,
+    canonicalCases: [...casesBySource.values()]
+  });
+  const evidenceExclusions = [...reconciledReviewLabels.exclusions];
+  const blockedReviewSourceIds = new Set(reconciledReviewLabels.blockedSourceIds);
+  for (const labelledCase of reconciledReviewLabels.selectedCases) {
+    const sourceId = String(labelledCase.sourceId || "");
+    if (!sourceId) continue;
+    if (labelledCase.scheduleVersionId && labelledCase.scheduleVersionId !== activeScheduleVersionId) {
+      evidenceExclusions.push({
+        sourceId,
+        reviewId: labelledCase.provenance?.linkId || null,
+        reason: "review_label_schedule_version_mismatch"
+      });
+      continue;
+    }
+    const recoveredSource = recoveredSourceById.get(sourceId);
+    if (!recoveredSource) {
+      evidenceExclusions.push({
+        sourceId,
+        reviewId: labelledCase.provenance?.linkId || null,
+        reason: "review_label_source_not_recovered"
+      });
+      continue;
+    }
+    casesBySource.set(sourceId, {
+      ...labelledCase,
+      scheduleVersionId: activeScheduleVersionId,
+      provenance: {
+        ...labelledCase.provenance,
+        recordOrigin: recoveredSource.recordOrigin
+      },
+      source: recoveredSource.source
     });
   }
   for (const run of rejectedRuns) {
     const sourceId = String(run.source_id || "");
-    if (!sourceId || casesBySource.has(sourceId) || !run.selected_activity_key) continue;
+    const recoveredSource = recoveredSourceById.get(sourceId);
+    if (!sourceId || blockedReviewSourceIds.has(sourceId) || casesBySource.has(sourceId) || !run.selected_activity_key || !recoveredSource) continue;
     casesBySource.set(sourceId, {
       id: `rejected-run:${run.id}`,
       projectId: context.sourceProjectId,
@@ -136,25 +189,47 @@ async function prepareDataset() {
       provenance: {
         source: "schedule_activity_assignment_runs",
         linkId: null,
-        reviewedAt: run.reviewed_at || null
-      }
+        reviewedAt: run.reviewed_at || null,
+        recordOrigin: recoveredSource.recordOrigin,
+        assignmentMethod: null
+      },
+      source: recoveredSource.source
     });
   }
-  const cases = [];
-  for (const item of casesBySource.values()) {
-    const source = await readAlert({ config, settings, scheduleProjectId: context.scheduleProjectId, sourceId: item.sourceId });
-    if (source) cases.push({ ...item, source });
-  }
+  const cases = [...casesBySource.values()];
+  const includedSourceIds = new Set(cases.map((item) => item.sourceId));
+  const exclusions = [
+    ...sourceRecovery.exclusions,
+    ...evidenceExclusions,
+    ...links
+      .filter((row) => !includedSourceIds.has(String(row.source_id || "")))
+      .map((row) => ({ sourceId: String(row.source_id || ""), reason: "eligible_link_not_included", linkId: String(row.id || "") })),
+    ...rejectedRuns
+      .filter((row) => row.selected_activity_key && !includedSourceIds.has(String(row.source_id || "")))
+      .map((row) => ({ sourceId: String(row.source_id || ""), reason: "eligible_rejected_run_not_included", runId: String(row.id || "") }))
+  ].filter((item, index, all) => all.findIndex((other) => other.sourceId === item.sourceId && other.reason === item.reason) === index);
   const dataset = {
-    schemaVersion: "schedule-assignment-dataset.v1",
+    schemaVersion: "schedule-assignment-dataset.v2",
     dataCutoff,
     preparedAt: new Date().toISOString(),
+    settingsSource: hasFlag("--code-defaults") ? "code_defaults" : "remote_active_settings",
     sourceProjectId: context.sourceProjectId,
     scheduleProjectId: context.scheduleProjectId,
     activeScheduleVersionId,
     scheduleMeta: inputs.scheduleMeta,
     tasks: inputs.tasks,
-    cases
+    cases,
+    sourceRecovery: {
+      requestedCount: sourceRecovery.requestedCount,
+      currentCount: sourceRecovery.currentCount,
+      recoveredLegacyCount: sourceRecovery.recoveredLegacyCount,
+      eligibleLinkCount: links.length,
+      eligibleRejectedRunCount: rejectedRuns.filter((row) => row.selected_activity_key).length,
+      eligibleSharedReviewLabelCount: sharedLabelCases.length,
+      includedCaseCount: cases.length,
+      exclusions
+    },
+    labelCoverage: summarizeScheduleAssignmentLabelCoverage(cases)
   };
   const defaultPath = path.join(localRoot, `${safeFileName(projectId)}-${dataCutoff.slice(0, 10)}-dataset.json`);
   const outputPath = await writePrivateJson(valueAfter("--output") || defaultPath, dataset);
@@ -166,7 +241,10 @@ async function prepareDataset() {
     activeScheduleVersionId,
     taskCount: inputs.tasks.length,
     caseCount: cases.length,
-    labelBreakdown: Object.fromEntries(Object.values(SCHEDULE_ASSIGNMENT_LABEL_TYPES).map((label) => [label, cases.filter((item) => item.label.type === label).length]))
+    labelBreakdown: Object.fromEntries(Object.values(SCHEDULE_ASSIGNMENT_LABEL_TYPES).map((label) => [label, cases.filter((item) => item.label.type === label).length])),
+    labelCoverage: dataset.labelCoverage,
+    sourceRecovery: dataset.sourceRecovery,
+    exclusionBreakdown: Object.fromEntries([...new Set(exclusions.map((item) => item.reason))].map((reason) => [reason, exclusions.filter((item) => item.reason === reason).length]))
   }, null, 2));
 }
 
@@ -176,16 +254,47 @@ async function runEvaluation() {
   const dataset = JSON.parse(await readFile(path.resolve(datasetPath), "utf8"));
   const { config, settings } = await loadRuntime({ reloadRemoteSettings: !hasFlag("--code-defaults") });
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is not configured; the full baseline cannot run.");
-  const limit = Math.max(1, Math.min(dataset.cases.length, Number(valueAfter("--limit")) || dataset.cases.length));
-  const selectedCases = dataset.cases.slice(0, limit);
+  const requestedSourceIds = new Set(String(valueAfter("--source-ids") || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean));
+  const eligibleCases = requestedSourceIds.size
+    ? dataset.cases.filter((item) => requestedSourceIds.has(String(item.sourceId)))
+    : dataset.cases;
+  if (requestedSourceIds.size && eligibleCases.length !== requestedSourceIds.size) {
+    const found = new Set(eligibleCases.map((item) => String(item.sourceId)));
+    const missing = [...requestedSourceIds].filter((sourceId) => !found.has(sourceId));
+    throw new Error(`Unknown --source-ids: ${missing.join(", ")}`);
+  }
+  const limit = Math.max(1, Math.min(eligibleCases.length, Number(valueAfter("--limit")) || eligibleCases.length));
+  const selectedCases = eligibleCases.slice(0, limit);
+  const retrievalOnly = hasFlag("--retrieval-only");
+  const evaluationConfig = retrievalOnly
+    ? {
+        ...config,
+        scheduleAssignmentAgent: {
+          ...config.scheduleAssignmentAgent,
+          maxModelCalls: 0,
+          roles: Object.fromEntries(Object.entries(config.scheduleAssignmentAgent.roles || {}).map(([roleName, role]) => [
+            roleName,
+            roleName === "embedding" ? role : { ...role, enabled: false }
+          ]))
+        }
+      }
+    : config;
+  const retrieval = {
+    strategy: valueAfter("--retrieval-strategy") || "deterministic_first",
+    semanticPoolLimit: Number(valueAfter("--semantic-pool-limit")) || 20,
+    modelCandidateLimit: Number(valueAfter("--model-candidate-limit")) || 20
+  };
   const manifest = buildScheduleAssignmentEvaluationManifest({
     dataCutoff: dataset.dataCutoff,
     activeScheduleVersionId: dataset.activeScheduleVersionId,
-    settings: config.scheduleAssignmentAgent,
+    settings: evaluationConfig.scheduleAssignmentAgent,
     cases: selectedCases
   });
   const rows = [];
-  for (const fixture of selectedCases) {
+  for (const [caseIndex, fixture] of selectedCases.entries()) {
     const startedAt = Date.now();
     let result;
     try {
@@ -202,9 +311,10 @@ async function runEvaluation() {
           tasks: dataset.tasks,
           scheduleMeta: dataset.scheduleMeta
         },
-        config,
+        config: evaluationConfig,
         settings,
-        apiKey: config.openRouterApiKey
+        apiKey: evaluationConfig.openRouterApiKey,
+        retrieval
       });
     } catch (error) {
       result = {
@@ -215,21 +325,52 @@ async function runEvaluation() {
         workflowLog: { openRouterUsage: { calls: [] } }
       };
     }
-    rows.push(evaluateScheduleAssignmentCase({ fixture, result, durationMs: Date.now() - startedAt }));
+    const evaluated = evaluateScheduleAssignmentCase({ fixture, result, durationMs: Date.now() - startedAt });
+    rows.push(evaluated);
+    console.error(JSON.stringify({
+      progress: `${caseIndex + 1}/${selectedCases.length}`,
+      sourceId: fixture.sourceId,
+      labelType: evaluated.labelType,
+      selectedActivityKey: evaluated.selectedActivityKey,
+      expectedActivityKey: evaluated.expectedActivityKey,
+      finalRank: evaluated.candidateRecallByStage?.final?.rank ?? null,
+      durationMs: evaluated.durationMs
+    }));
   }
   const report = {
-    schemaVersion: "schedule-assignment-evaluation-report.v1",
+    schemaVersion: "schedule-assignment-evaluation-report.v2",
     generatedAt: new Date().toISOString(),
     runtime: {
       settingsSource: hasFlag("--code-defaults") ? "code_defaults" : "remote_active_settings",
-      databasePersistence: "disabled"
+      databasePersistence: "disabled",
+      retrievalOnly,
+      retrieval
+    },
+    dataset: {
+      schemaVersion: dataset.schemaVersion || null,
+      sourceRecovery: dataset.sourceRecovery || null
     },
     manifest,
     summary: summarizeScheduleAssignmentEvaluation(rows)
   };
-  const defaultPath = path.join(localRoot, `${safeFileName(dataset.sourceProjectId)}-${dataset.dataCutoff.slice(0, 10)}-baseline-report.json`);
+  const retrievalSuffixBase = retrieval.strategy === "deterministic_first" && retrieval.modelCandidateLimit === 20
+    ? "baseline"
+    : `${safeFileName(retrieval.strategy)}-model-${retrieval.modelCandidateLimit}-semantic-${retrieval.semanticPoolLimit}`;
+  const retrievalSuffix = retrievalOnly ? `${retrievalSuffixBase}-retrieval-only` : retrievalSuffixBase;
+  const defaultPath = path.join(localRoot, `${safeFileName(dataset.sourceProjectId)}-${dataset.dataCutoff.slice(0, 10)}-${retrievalSuffix}-report.json`);
   const outputPath = await writePrivateJson(valueAfter("--output") || defaultPath, report);
-  console.log(JSON.stringify({ ok: true, mode, outputPath, manifest, metrics: { ...report.summary, rows: undefined } }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    mode,
+    outputPath,
+    manifest,
+    metrics: {
+      ...report.summary,
+      rows: undefined,
+      rawScorePolicySweep: undefined,
+      rawScorePolicySweepRows: report.summary.rawScorePolicySweep.length
+    }
+  }, null, 2));
 }
 
 if (!mode) {

@@ -700,6 +700,111 @@ export function mergeLinkedLegacyAlertEvents({ events = [], links = [], legacyEv
   };
 }
 
+function normalizedAlertSourceId(value) {
+  return String(value || "").trim().replace(/^alert_/u, "");
+}
+
+export function scheduleAssignmentEvaluationSource(event = {}, recordOrigin = "alerts") {
+  const metadata = event.metadata && typeof event.metadata === "object" ? event.metadata : {};
+  const id = normalizedAlertSourceId(event.id);
+  const tags = Array.isArray(event.tags)
+    ? event.tags.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const content = String(event.content || metadata.summary || metadata.alert_description || "").trim();
+  return {
+    id,
+    created_at: metadata.created_at || null,
+    data_date: contentAlertDate(metadata.data_date || event.date),
+    alert_type: String(metadata.alert_type || tags.at(-1) || "עדכון").trim(),
+    severity_level: event.severity == null ? metadata.severity_level ?? null : event.severity,
+    item_status: metadata.item_status || null,
+    lifecycle_status: metadata.lifecycle_status || null,
+    status: metadata.status || null,
+    summary: String(metadata.summary || content).trim(),
+    alert_description: String(metadata.alert_description || content).trim(),
+    question: String(metadata.question || "").trim(),
+    answer: String(metadata.answer || "").trim(),
+    content,
+    data_link: metadata.data_link || metadata.url || null,
+    hashtags: tags,
+    metadata: {
+      ...metadata,
+      evaluation_record_origin: recordOrigin
+    }
+  };
+}
+
+// Evaluation may recover a backup row only when the source has an explicit
+// Schedule link. Additional negative cases are current-alert reads only.
+export async function loadScheduleAssignmentEvaluationSources({
+  linkedSourceIds = [],
+  currentOnlySourceIds = [],
+  config = null,
+  fetchCurrentEvents = fetchAlertsTimelineEvents,
+  fetchLegacyEvents = fetchLegacyAlertsTimelineEvents
+} = {}) {
+  const linkedIds = [...new Set(linkedSourceIds.map(normalizedAlertSourceId).filter(Boolean))];
+  const currentOnlyIds = [...new Set(currentOnlySourceIds.map(normalizedAlertSourceId).filter(Boolean))];
+  const requestedIds = [...new Set([...linkedIds, ...currentOnlyIds])];
+  const requested = new Set(requestedIds);
+  if (!requestedIds.length) {
+    return {
+      sources: [],
+      exclusions: [],
+      requestedCount: 0,
+      currentCount: 0,
+      recoveredLegacyCount: 0
+    };
+  }
+
+  const currentEvents = (await fetchCurrentEvents({ config, limit: 2000 }))
+    .filter((event) => requested.has(normalizedAlertSourceId(event.id)));
+  const currentById = new Map(currentEvents.map((event) => [normalizedAlertSourceId(event.id), event]));
+  const missingLinkedIds = linkedIds.filter((id) => !currentById.has(id));
+  const legacyEvents = missingLinkedIds.length
+    ? await fetchLegacyEvents({ config, ids: missingLinkedIds })
+    : [];
+  const restored = mergeLinkedLegacyAlertEvents({
+    events: currentEvents,
+    links: linkedIds.map((sourceId) => ({ source_id: sourceId })),
+    legacyEvents
+  });
+  const recoveredIds = new Set(legacyEvents
+    .map((event) => normalizedAlertSourceId(event.id))
+    .filter((id) => missingLinkedIds.includes(id)));
+  const eventById = new Map(restored.events.map((event) => [normalizedAlertSourceId(event.id), event]));
+  const sources = [];
+  const exclusions = [];
+  for (const sourceId of requestedIds) {
+    const event = eventById.get(sourceId);
+    if (!event) {
+      exclusions.push({
+        sourceId,
+        reason: linkedIds.includes(sourceId)
+          ? "linked_alert_source_missing_or_undated"
+          : "current_alert_source_missing_or_undated"
+      });
+      continue;
+    }
+    const recordOrigin = recoveredIds.has(sourceId)
+      ? "alerts_backup_dedupe_20260822"
+      : "alerts";
+    const source = scheduleAssignmentEvaluationSource(event, recordOrigin);
+    if (!source.data_date) {
+      exclusions.push({ sourceId, reason: "canonical_business_date_missing" });
+      continue;
+    }
+    sources.push({ sourceId, recordOrigin, source });
+  }
+  return {
+    sources,
+    exclusions,
+    requestedCount: requestedIds.length,
+    currentCount: sources.filter((item) => item.recordOrigin === "alerts").length,
+    recoveredLegacyCount: sources.filter((item) => item.recordOrigin === "alerts_backup_dedupe_20260822").length
+  };
+}
+
 // Use the exact alert-event adapter that feeds the Timeline page. Only the
 // reviewed association is Schedule-owned and persisted in the link table.
 export async function listScheduleActivityUpdates({ projectId, config = null, settings: settingsInput = null } = {}) {

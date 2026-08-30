@@ -1,8 +1,14 @@
 import { supabaseHeaders } from "../config.js";
+import {
+  normalizeScheduleAssignmentReviewLabel,
+  scheduleAssignmentReviewRowToEvaluationCase,
+  summarizeScheduleAssignmentLabelCoverage
+} from "../scheduleActivityAssignmentLabels.js";
 
 export const SCHEDULE_ASSIGNMENT_REVIEWS_TABLE = "schedule_activity_assignment_reviews";
 const UPSERT_REVIEW_RPC = "bidoc_upsert_schedule_assignment_review_v1";
 const RESOLVE_REVIEWS_RPC = "bidoc_resolve_schedule_assignment_reviews_v1";
+const RESOLVE_REVIEW_LABEL_RPC = "bidoc_resolve_schedule_assignment_review_label_v1";
 
 function safeText(value, max = 1000) {
   return String(value ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/gu, "").slice(0, max);
@@ -67,21 +73,52 @@ export function scheduleAssignmentReviewSnapshot(result = {}) {
     event: {
       id: safeText(result.event?.id || result.sourceId, 160),
       title: safeText(result.event?.title, 3000),
+      description: safeText(result.event?.description, 3000),
+      question: safeText(result.event?.question, 1500),
+      answer: safeText(result.event?.answer, 1500),
+      hashtags: Array.isArray(result.event?.hashtags)
+        ? result.event.hashtags.map((item) => safeText(item, 160)).filter(Boolean).slice(0, 20)
+        : [],
       alertType: safeText(result.event?.alertType, 300),
       date: safeText(result.event?.date, 20) || null,
       severity: result.event?.severity == null ? null : Number(result.event.severity),
-      status: safeText(result.event?.status, 160) || null
+      status: safeText(result.event?.status, 160) || null,
+      recordOrigin: safeText(result.event?.metadata?.evaluation_record_origin || result.event?.recordOrigin, 160) || null
     },
     decision: {
       type: safeText(result.decision?.type, 80) || "ambiguous",
       selectedActivityKey: safeText(result.decision?.selectedActivityKey, 500) || null,
       selectedActivityName: safeText(result.decision?.selectedActivityName, 500) || null,
+      rankingScore: Math.max(0, Math.min(100, Number(result.decision?.rankingScore ?? result.decision?.confidence) || 0)),
+      runnerUpRankingScore: Math.max(0, Math.min(100, Number(result.decision?.runnerUpRankingScore ?? result.decision?.runnerUpConfidence) || 0)),
+      rankingGap: Math.max(0, Math.min(100, Number(result.decision?.rankingGap ?? result.decision?.margin) || 0)),
+      calibratedProbability: Number.isFinite(result.decision?.calibratedProbability)
+        ? Math.max(0, Math.min(1, Number(result.decision.calibratedProbability)))
+        : null,
+      calibration: result.decision?.calibration && typeof result.decision.calibration === "object"
+        ? {
+            status: safeText(result.decision.calibration.status, 80) || "unavailable",
+            artifactId: safeText(result.decision.calibration.artifactId, 300) || null,
+            reason: safeText(result.decision.calibration.reason, 300) || null
+          }
+        : { status: "unavailable", artifactId: null, reason: "calibrator_unavailable" },
       confidence: Math.max(0, Math.min(100, Number(result.decision?.confidence) || 0)),
       runnerUpConfidence: Math.max(0, Math.min(100, Number(result.decision?.runnerUpConfidence) || 0)),
       margin: Math.max(0, Math.min(100, Number(result.decision?.margin) || 0)),
       reason: safeText(result.decision?.reason, 3000),
       autoAssigned: false,
-      gates: result.decision?.gates && typeof result.decision.gates === "object" ? result.decision.gates : {}
+      gates: result.decision?.gates && typeof result.decision.gates === "object" ? result.decision.gates : {},
+      engineVersion: safeText(result.engineVersion, 160) || null,
+      scheduleVersionId: safeText(result.scheduleVersionId, 500) || null,
+      settingsVersion: safeText(result.settingsVersion, 160) || null,
+      configurationSnapshotId: safeText(result.configurationSnapshotId, 300) || null,
+      retrieval: result.retrieval && typeof result.retrieval === "object"
+        ? {
+            strategy: safeText(result.retrieval.strategy, 80) || null,
+            semanticPoolLimit: Number(result.retrieval.semanticPoolLimit) || null,
+            modelCandidateLimit: Number(result.retrieval.modelCandidateLimit) || null
+          }
+        : null
     },
     candidates
   };
@@ -150,8 +187,74 @@ export async function listSharedScheduleAssignmentReviews({ projectId, status = 
   return { count: reviews.length, reviews };
 }
 
-export async function resolveSharedScheduleAssignmentReviews({ projectId, sourceId, status, activityKey = null, resolvedBy = null, note = null, config, fetchImpl = fetch } = {}) {
+export async function listSharedScheduleAssignmentEvaluationLabels({ projectId, limit = 5000, config, fetchImpl = fetch } = {}) {
+  if (!projectId) throw new Error("projectId is required");
+  const safeLimit = Math.max(1, Math.min(5000, Number(limit) || 5000));
+  const rows = await mainDataRequest({
+    config,
+    fetchImpl,
+    path: `/rest/v1/${SCHEDULE_ASSIGNMENT_REVIEWS_TABLE}?select=*&source_project_id=eq.${encodeURIComponent(projectId)}&status=in.(selected,rejected)&order=resolved_at.desc&limit=${safeLimit}`
+  });
+  const labelledRows = (Array.isArray(rows) ? rows : []).filter((row) => row?.evaluation_label_type);
+  const cases = labelledRows.map(scheduleAssignmentReviewRowToEvaluationCase).filter(Boolean);
+  return {
+    count: cases.length,
+    cases,
+    coverage: summarizeScheduleAssignmentLabelCoverage(cases)
+  };
+}
+
+export async function getPendingSharedScheduleAssignmentReview({ projectId, sourceId, config, fetchImpl = fetch } = {}) {
   if (!projectId || !sourceId) throw new Error("projectId and sourceId are required");
+  const rows = await mainDataRequest({
+    config,
+    fetchImpl,
+    path: `/rest/v1/${SCHEDULE_ASSIGNMENT_REVIEWS_TABLE}?select=*&source_project_id=eq.${encodeURIComponent(projectId)}&source_id=eq.${encodeURIComponent(String(sourceId))}&status=eq.pending&order=created_at.desc&limit=1`
+  });
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) throw new Error("pending shared Schedule assignment review not found");
+  return row;
+}
+
+export async function resolveSharedScheduleAssignmentReviews({
+  projectId,
+  sourceId,
+  status,
+  activityKey = null,
+  resolvedBy = null,
+  note = null,
+  labelType = null,
+  forbiddenActivityKeys = [],
+  config,
+  fetchImpl = fetch
+} = {}) {
+  if (!projectId || !sourceId) throw new Error("projectId and sourceId are required");
+  if (labelType) {
+    const label = normalizeScheduleAssignmentReviewLabel({
+      labelType,
+      expectedActivityKey: activityKey,
+      forbiddenActivityKeys,
+      reason: note
+    });
+    const resolvedCount = await mainDataRequest({
+      config,
+      fetchImpl,
+      path: `/rest/v1/rpc/${RESOLVE_REVIEW_LABEL_RPC}`,
+      options: {
+        method: "POST",
+        body: {
+          p_source_project_id: projectId,
+          p_source_id: String(sourceId),
+          p_label_type: label.type,
+          p_expected_activity_key: label.expectedActivityKey,
+          p_forbidden_activity_keys: label.forbiddenActivityKeys,
+          p_resolved_by: resolvedBy ? String(resolvedBy) : null,
+          p_reason: label.reason
+        }
+      }
+    });
+    return { resolved: Number(resolvedCount) || 0, label };
+  }
   if (!["selected", "rejected"].includes(status)) throw new Error("unsupported review resolution");
   const resolvedCount = await mainDataRequest({
     config,

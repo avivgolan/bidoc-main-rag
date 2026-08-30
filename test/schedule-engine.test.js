@@ -20,7 +20,8 @@ import {
 import {
   buildScheduleHealth, scheduleDataVersion, snapshotRowFromIndicator,
   buildScheduleWorkflowLog, planScheduleAlerts, subjectKeyOf,
-  BOOTSTRAP_SUMMARY_KEY, enrichConditionProvisionalDueDates, mergeLinkedLegacyAlertEvents, scheduleActivityUpdateItem,
+  BOOTSTRAP_SUMMARY_KEY, enrichConditionProvisionalDueDates, loadScheduleAssignmentEvaluationSources,
+  mergeLinkedLegacyAlertEvents, scheduleActivityUpdateItem, scheduleAssignmentEvaluationSource,
   SCHEDULE_HEALTH_VERSION
 } from "../src/subagents/schedule.js";
 import {
@@ -40,16 +41,27 @@ import {
   hasActiveActivityUpdateFilters
 } from "../src/react/activityAssignmentBatch.js";
 import {
+  listSharedScheduleAssignmentEvaluationLabels,
+  resolveSharedScheduleAssignmentReviews,
   scheduleAssignmentNeedsSharedReview,
   scheduleAssignmentReviewSnapshot,
   sharedReviewRowToAgentResult
 } from "../src/subagents/scheduleActivityAssignmentReviewQueue.js";
+import {
+  normalizeScheduleAssignmentReviewLabel,
+  reconcileScheduleAssignmentReviewLabels,
+  SCHEDULE_ASSIGNMENT_LABEL_TYPES,
+  SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS,
+  scheduleAssignmentReviewRowToEvaluationCase,
+  summarizeScheduleAssignmentLabelCoverage
+} from "../src/scheduleActivityAssignmentLabels.js";
 import {
   buildAssignmentCandidates,
   DEFAULT_SCHEDULE_ASSIGNMENT_AGENT_SETTINGS,
   evaluateTimeRelevance,
   evaluateAssignmentDecision,
   normalizeScheduleAssignmentAgentSettings,
+  SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
   scheduleAssignmentConfigurationSnapshot,
   sanitizeRoleResult,
   temporalAssignmentScore,
@@ -63,12 +75,31 @@ import {
   SCHEDULE_ASSIGNMENT_ROLE_SCHEMAS
 } from "../src/scheduleActivityAssignmentPromptPack.js";
 import {
+  buildScheduleAssignmentPolicySweep,
   buildScheduleAssignmentEvaluationManifest,
   evaluateScheduleAssignmentCase,
   summarizeScheduleAssignmentEvaluation
 } from "../src/scheduleActivityAssignmentEvaluation.js";
+import {
+  applyScheduleAssignmentCalibration,
+  buildScheduleAssignmentCalibrationArtifact,
+  SCHEDULE_ASSIGNMENT_CALIBRATION_ARTIFACT_VERSION,
+  SCHEDULE_ASSIGNMENT_CALIBRATION_FEATURE_VERSION,
+  validateScheduleAssignmentCalibratorCompatibility
+} from "../src/scheduleActivityAssignmentCalibration.js";
+import {
+  buildScheduleAssignmentCalibratedPolicySweep,
+  buildScheduleAssignmentPolicyArtifact,
+  SCHEDULE_ASSIGNMENT_POLICY_ARTIFACT_VERSION
+} from "../src/scheduleActivityAssignmentPolicy.js";
 import { buildScheduleActivityAssignmentWorkflowLog } from "../src/scheduleActivityAssignmentWorkflow.js";
-import { runScheduleActivityAssignmentAgent } from "../src/subagents/scheduleActivityAssignmentAgent.js";
+import {
+  normalizeScheduleAssignmentRetrievalOptions,
+  runScheduleActivityAssignmentAgent,
+  scheduleAssignmentActivityEmbeddingText,
+  selectScheduleAssignmentRetrievalKeys,
+  SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES
+} from "../src/subagents/scheduleActivityAssignmentAgent.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -238,6 +269,135 @@ test("schedule assignment shared review: persists only actionable decisions and 
   assert.deepEqual(hydrated.candidates.map((candidate) => candidate.activityKey), ["gantt:file:1", "gantt:file:2"]);
 });
 
+test("schedule assignment labels: explicit reviewed outcomes have strict non-overlapping shapes", () => {
+  const confirmed = normalizeScheduleAssignmentReviewLabel({
+    labelType: SCHEDULE_ASSIGNMENT_LABEL_TYPES.CONFIRMED_MATCH,
+    expectedActivityKey: "gantt:file:1",
+    reason: "Reviewer selected this activity."
+  });
+  assert.equal(confirmed.resolutionStatus, "selected");
+  assert.deepEqual(confirmed.forbiddenActivityKeys, []);
+  const rejected = normalizeScheduleAssignmentReviewLabel({
+    labelType: SCHEDULE_ASSIGNMENT_LABEL_TYPES.REJECTED_MATCH,
+    forbiddenActivityKeys: ["gantt:file:1", "not-a-gantt-key", "gantt:file:1"],
+    reason: "The proposed activity is wrong."
+  });
+  assert.deepEqual(rejected.forbiddenActivityKeys, ["gantt:file:1"]);
+  assert.equal(rejected.resolutionStatus, "rejected");
+  assert.throws(() => normalizeScheduleAssignmentReviewLabel({
+    labelType: SCHEDULE_ASSIGNMENT_LABEL_TYPES.NO_MATCH,
+    expectedActivityKey: "gantt:file:1",
+    reason: "None fits."
+  }), /cannot contain an expected activity/iu);
+  assert.throws(() => normalizeScheduleAssignmentReviewLabel({
+    labelType: SCHEDULE_ASSIGNMENT_LABEL_TYPES.REJECTED_MATCH,
+    reason: "Wrong proposal."
+  }), /requires at least one forbidden activity/iu);
+  assert.equal(SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS.length, 4);
+});
+
+test("schedule assignment labels: resolved shared rows become provenance-rich evaluation cases", () => {
+  const row = {
+    id: "review-1",
+    run_id: "run-1",
+    source_project_id: PROJECT,
+    source_id: "alert-9",
+    status: "rejected",
+    evaluation_label_type: "ambiguous",
+    expected_activity_key: null,
+    forbidden_activity_keys: [],
+    evaluation_label_reason: "Two activities remain plausible.",
+    labelled_by: "reviewer-1",
+    labelled_at: "2026-08-30T12:00:00Z",
+    event_snapshot: { recordOrigin: "alerts" },
+    decision_snapshot: { scheduleVersionId: "file-a" }
+  };
+  const evaluationCase = scheduleAssignmentReviewRowToEvaluationCase(row);
+  assert.equal(evaluationCase.label.type, "ambiguous");
+  assert.equal(evaluationCase.scheduleVersionId, "file-a");
+  assert.equal(evaluationCase.provenance.source, "schedule_activity_assignment_reviews");
+  assert.equal(evaluationCase.provenance.reviewer, "reviewer-1");
+  const coverage = summarizeScheduleAssignmentLabelCoverage([evaluationCase]);
+  assert.equal(coverage.caseCount, 1);
+  assert.equal(coverage.remainingCaseCount, 99);
+  assert.ok(coverage.missingLabelTypes.includes("no_match"));
+});
+
+test("schedule assignment labels: canonical links win and conflicting repeated reviews are excluded", () => {
+  const labelled = (sourceId, type, reviewedAt, linkId, expectedActivityKey = null) => ({
+    sourceId,
+    label: { type, expectedActivityKey, forbiddenActivityKeys: [] },
+    provenance: { reviewedAt, linkId }
+  });
+  const canonical = labelled("canonical", "confirmed_match", "2026-08-01T00:00:00Z", "link-1", "gantt:file:1");
+  const result = reconcileScheduleAssignmentReviewLabels({
+    canonicalCases: [canonical],
+    reviewCases: [
+      labelled("canonical", "confirmed_match", "2026-08-20T00:00:00Z", "review-canonical", "gantt:file:1"),
+      labelled("duplicate", "no_match", "2026-08-20T00:00:00Z", "review-old"),
+      labelled("duplicate", "no_match", "2026-08-21T00:00:00Z", "review-new"),
+      labelled("conflict", "no_match", "2026-08-20T00:00:00Z", "review-no-match"),
+      labelled("conflict", "ambiguous", "2026-08-21T00:00:00Z", "review-ambiguous")
+    ]
+  });
+  assert.deepEqual(result.selectedCases.map((item) => item.provenance.linkId), ["review-new"]);
+  assert.deepEqual(result.blockedSourceIds, ["conflict"]);
+  assert.ok(result.exclusions.some((item) => item.reason === "review_label_duplicate_of_canonical_link"));
+  assert.ok(result.exclusions.some((item) => item.reason === "review_label_superseded_duplicate"));
+  assert.ok(result.exclusions.some((item) => item.reason === "conflicting_shared_review_labels"));
+});
+
+test("schedule assignment labels: backend sends normalized labels to the dedicated service-role RPC", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, options, body: JSON.parse(options.body) });
+    return new Response("1", { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const result = await resolveSharedScheduleAssignmentReviews({
+    projectId: PROJECT,
+    sourceId: "alert-9",
+    status: "rejected",
+    labelType: "no_match",
+    forbiddenActivityKeys: ["browser:key:must-not-survive"],
+    note: "Reviewer confirmed no active activity is suitable.",
+    resolvedBy: "reviewer-1",
+    config: { supabaseUrl: "https://main.example.test", supabaseServiceRoleKey: "service-key" },
+    fetchImpl
+  });
+  assert.equal(result.resolved, 1);
+  assert.match(requests[0].url, /bidoc_resolve_schedule_assignment_review_label_v1/iu);
+  assert.equal(requests[0].body.p_label_type, "no_match");
+  assert.deepEqual(requests[0].body.p_forbidden_activity_keys, []);
+});
+
+test("schedule assignment labels: listing ignores old operational resolutions without an explicit label", async () => {
+  const rows = [
+    { id: "old", source_id: "old-alert", status: "rejected" },
+    {
+      id: "labelled",
+      run_id: "run-labelled",
+      source_project_id: PROJECT,
+      source_id: "alert-labelled",
+      status: "rejected",
+      evaluation_label_type: "irrelevant_alert",
+      forbidden_activity_keys: [],
+      evaluation_label_reason: "Not relevant to Schedule assignment.",
+      labelled_at: "2026-08-30T12:00:00Z",
+      event_snapshot: {},
+      decision_snapshot: { scheduleVersionId: "file-a" }
+    }
+  ];
+  const fetchImpl = async () => new Response(JSON.stringify(rows), { status: 200, headers: { "content-type": "application/json" } });
+  const result = await listSharedScheduleAssignmentEvaluationLabels({
+    projectId: PROJECT,
+    config: { supabaseUrl: "https://main.example.test", supabaseServiceRoleKey: "service-key" },
+    fetchImpl
+  });
+  assert.equal(result.count, 1);
+  assert.equal(result.cases[0].label.type, "irrelevant_alert");
+  assert.equal(result.coverage.labelBreakdown.irrelevant_alert, 1);
+});
+
 test("schedule assignment shared review: MAIN migration and server routes stay backend-only", () => {
   const sql = fs.readFileSync(new URL("../supabase/migrations/20260830084450_schedule_activity_assignment_review_queue.sql", import.meta.url), "utf8");
   assert.match(sql, /create table public\.schedule_activity_assignment_reviews/iu);
@@ -253,6 +413,29 @@ test("schedule assignment shared review: MAIN migration and server routes stay b
   const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
   assert.match(page, /ממתינים להחלטת צוות/iu);
   assert.match(page, /reviews\?projectId=/iu);
+});
+
+test("schedule assignment labels: additive migration and routes remain backend-only and server-validated", () => {
+  const sql = fs.readFileSync(new URL("../supabase/migrations/20260830174803_schedule_assignment_evaluation_labels.sql", import.meta.url), "utf8");
+  assert.match(sql, /evaluation_label_type text/iu);
+  assert.match(sql, /confirmed_match.+rejected_match.+no_match/isu);
+  assert.match(sql, /bidoc_resolve_schedule_assignment_review_label_v1/iu);
+  assert.match(sql, /security invoker/iu);
+  assert.match(sql, /set search_path = ''/iu);
+  assert.match(sql, /revoke all on function public\.bidoc_resolve_schedule_assignment_review_label_v1[\s\S]+from public, anon, authenticated/iu);
+  assert.match(sql, /grant execute on function public\.bidoc_resolve_schedule_assignment_review_label_v1[\s\S]+to service_role/iu);
+  const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  const routeStart = server.indexOf('url.pathname === "/api/schedule/activity-updates/assignment-agent/review-label"');
+  const routeEnd = server.indexOf("const assignmentRunMatch", routeStart);
+  const route = server.slice(routeStart, routeEnd);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  assert.match(route, /getSuperadminSession\(req\)/u);
+  assert.match(route, /trustedCandidateKeys/u);
+  assert.doesNotMatch(route, /body\.forbiddenActivityKeys/u);
+  const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
+  assert.match(page, /SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS\.map/iu);
+  assert.match(page, /תוויות כיול מפורשות/iu);
+  assert.match(page, /ציון התאמה \{candidate\.finalScore\}/u);
 });
 
 test("schedule assignment workflow: exposes components, safe parameters, scores and telemetry", () => {
@@ -363,6 +546,131 @@ test("schedule activity updates: reviewed legacy links remain visible after aler
 
   assert.equal(result.recoveredCount, 2);
   assert.deepEqual(result.events.map((event) => event.id), ["alert_1474", "alert_1435", "alert_4001", "alert_4002"]);
+});
+
+test("schedule assignment evaluation: recovers only explicitly linked legacy alert sources", async () => {
+  const requestedLegacyIds = [];
+  const result = await loadScheduleAssignmentEvaluationSources({
+    linkedSourceIds: ["4001", "1474", "1999"],
+    currentOnlySourceIds: ["9001", "9002"],
+    config: {},
+    fetchCurrentEvents: async () => [
+      { id: "alert_4001", date: "2026-08-20", content: "current linked", tags: ["עיכוב"], metadata: { alert_type: "עיכוב" }, severity: 3 },
+      { id: "alert_9001", date: "2026-08-21", content: "current rejected", tags: ["בדיקה"], metadata: { item_status: "open" }, severity: 2 },
+      { id: "alert_7777", date: "2026-08-22", content: "unrequested current" }
+    ],
+    fetchLegacyEvents: async ({ ids }) => {
+      requestedLegacyIds.push(...ids);
+      return [
+        { id: "alert_1474", date: "2026-08-18", content: "reviewed legacy", tags: ["לו\"ז"], metadata: { question: "מה התעכב?" }, severity: 4 },
+        { id: "alert_9002", date: "2026-08-19", content: "unlinked legacy must not load" }
+      ];
+    }
+  });
+  assert.deepEqual(requestedLegacyIds, ["1474", "1999"]);
+  assert.equal(result.requestedCount, 5);
+  assert.equal(result.currentCount, 2);
+  assert.equal(result.recoveredLegacyCount, 1);
+  assert.deepEqual(result.sources.map((item) => item.sourceId), ["4001", "1474", "9001"]);
+  assert.deepEqual(result.exclusions, [
+    { sourceId: "1999", reason: "linked_alert_source_missing_or_undated" },
+    { sourceId: "9002", reason: "current_alert_source_missing_or_undated" }
+  ]);
+  const legacy = result.sources.find((item) => item.sourceId === "1474");
+  assert.equal(legacy.recordOrigin, "alerts_backup_dedupe_20260822");
+  assert.equal(legacy.source.data_date, "2026-08-18");
+  assert.equal(legacy.source.question, "מה התעכב?");
+  assert.equal(legacy.source.metadata.evaluation_record_origin, "alerts_backup_dedupe_20260822");
+  const normalized = scheduleAssignmentEvaluationSource({ id: "alert_3", date: "2026-08-23", content: "בדיקה" }, "alerts");
+  assert.equal(normalized.id, "3");
+  assert.equal(normalized.data_date, "2026-08-23");
+});
+
+test("schedule assignment retrieval: defaults preserve the deterministic-first production path", () => {
+  assert.deepEqual(normalizeScheduleAssignmentRetrievalOptions({}, { maxCandidates: 20 }), {
+    strategy: "deterministic_first",
+    semanticPoolLimit: 20,
+    modelCandidateLimit: 20,
+    fullSetSemantic: false
+  });
+  assert.deepEqual(normalizeScheduleAssignmentRetrievalOptions({
+    strategy: "unknown",
+    semanticPoolLimit: 500,
+    modelCandidateLimit: 1
+  }, { maxCandidates: 20 }), {
+    strategy: "deterministic_first",
+    semanticPoolLimit: 50,
+    modelCandidateLimit: 2,
+    fullSetSemantic: false
+  });
+});
+
+test("schedule assignment retrieval: full semantic and hybrid union select bounded stable keys", () => {
+  const deterministicCandidates = ["a", "b", "c", "d"].map((activityKey) => ({ activityKey }));
+  const semanticCandidates = ["d", "e", "f", "a"].map((activityKey) => ({ activityKey }));
+  assert.deepEqual(selectScheduleAssignmentRetrievalKeys({
+    strategy: SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES.FULL_SEMANTIC,
+    deterministicCandidates,
+    semanticCandidates,
+    modelCandidateLimit: 4
+  }), ["d", "e", "f", "a"]);
+  assert.deepEqual(selectScheduleAssignmentRetrievalKeys({
+    strategy: SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES.HYBRID_UNION,
+    deterministicCandidates,
+    semanticCandidates,
+    modelCandidateLimit: 4
+  }), ["a", "b", "d", "e"]);
+  assert.deepEqual(selectScheduleAssignmentRetrievalKeys({
+    strategy: SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES.DETERMINISTIC_FIRST,
+    deterministicCandidates,
+    semanticCandidates,
+    modelCandidateLimit: 3
+  }), ["a", "b", "c"]);
+  const deterministicTwenty = Array.from({ length: 20 }, (_, index) => ({ activityKey: `d${index + 1}` }));
+  const semanticTwenty = Array.from({ length: 20 }, (_, index) => ({ activityKey: `s${index + 1}` }));
+  const wideUnion = selectScheduleAssignmentRetrievalKeys({
+    strategy: SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES.HYBRID_UNION,
+    deterministicCandidates: deterministicTwenty,
+    semanticCandidates: semanticTwenty,
+    modelCandidateLimit: 20
+  });
+  assert.deepEqual(wideUnion.slice(0, 14), deterministicTwenty.slice(0, 14).map((item) => item.activityKey));
+  assert.deepEqual(wideUnion.slice(14), semanticTwenty.slice(0, 6).map((item) => item.activityKey));
+});
+
+test("schedule assignment retrieval: construction scope vocabulary links plural soffits and slip risk to the intended trades", () => {
+  const tasks = [
+    { activityKey: "gantt:v1:49", name: "בינוי מחיצות וסינרים קונסטרוקציה בלבד", plannedStart: "2024-12-04", plannedFinish: "2024-12-15", outlineLevel: 2 },
+    { activityKey: "gantt:v1:15", name: "איפיון אריח פורצלן + אישור אדריכל + הזמנה", plannedStart: "2024-11-28", plannedFinish: "2024-11-28", outlineLevel: 2 },
+    { activityKey: "gantt:v1:20", name: "אישור דוגמאות צבע", plannedStart: "2024-12-10", plannedFinish: "2024-12-12", outlineLevel: 2 }
+  ];
+  const soffit = buildAssignmentCandidates({
+    event: { title: "טיפול בנושא סינר היקפי ליד קיר המסך", date: "2024-11-13" },
+    tasks,
+    settings: { maxCandidates: 20 }
+  });
+  assert.equal(soffit[0].activityKey, "gantt:v1:49");
+  assert.ok(soffit[0].signals.lexical > 0);
+  const slip = buildAssignmentCandidates({
+    event: { title: "סכנת החלקה באתר ממתינה לטיפול", date: "2024-12-12" },
+    tasks,
+    settings: { maxCandidates: 20 }
+  });
+  assert.equal(slip[0].activityKey, "gantt:v1:15");
+  assert.ok(slip[0].signals.lexical > 0);
+});
+
+test("schedule assignment retrieval: activity embedding identity invalidates on version, text, or dates", () => {
+  const base = {
+    activityKey: "gantt:v1:10",
+    name: "בדיקת מערכות",
+    plannedStart: "2026-01-01",
+    plannedFinish: "2026-01-10"
+  };
+  const fingerprint = scheduleAssignmentActivityEmbeddingText(base);
+  assert.notEqual(scheduleAssignmentActivityEmbeddingText({ ...base, activityKey: "gantt:v2:10" }), fingerprint);
+  assert.notEqual(scheduleAssignmentActivityEmbeddingText({ ...base, name: "מסירת מערכות" }), fingerprint);
+  assert.notEqual(scheduleAssignmentActivityEmbeddingText({ ...base, plannedFinish: "2026-01-11" }), fingerprint);
 });
 
 test("schedule UI: APP DATA failures preserve partial results and expose a bounded retry", () => {
@@ -532,13 +840,34 @@ test("schedule assignment evaluation: frozen edge cases expose recall, false-aut
   assert.equal(summary.totalModelCalls, 2);
   assert.equal(summary.totalEmbeddingCalls, 1);
   assert.equal(summary.totalChatModelCalls, 1);
-  assert.deepEqual(summary.candidateRecallByStage.deterministic, { at1: 0, at5: 1 });
-  assert.deepEqual(summary.candidateRecallByStage.semantic, { at1: 1, at5: 1 });
+  assert.deepEqual(summary.candidateRecallByStage.deterministic, { at1: 0, at5: 1, inSet: 1 });
+  assert.deepEqual(summary.candidateRecallByStage.semantic, { at1: 1, at5: 1, inSet: 1 });
   assert.equal(summary.p95LatencyMs, 900);
   assert.equal(summary.rows[0].topCandidates[0].activityKey, expected);
+  assert.equal(summary.rows[0].candidateStages.deterministic[0].activityKey, "gantt:schedule-v1:activity-9");
+  assert.equal(summary.rows[0].roleOutcomes && typeof summary.rows[0].roleOutcomes, "object");
   assert.match(summary.rows[2].explanation, /must abstain/iu);
   assert.deepEqual(summary.rows[1].failedGates, ["decisionMatch", "threshold"]);
   assert.match(summary.rows[1].explanation, /failed safety gates: decisionMatch, threshold/iu);
+  assert.equal(summary.rawScorePolicySweepWarning.includes("cannot authorize"), true);
+  assert.equal(summary.rawScorePolicySweep.length, 96);
+  assert.equal(summary.scoreDistributions.confirmedMatch.confidence.count, 1);
+  assert.equal(summary.retrievalDiagnostics.modelCandidateCount.count, 0);
+  assert.equal(summary.decisionByLabel.confirmed_match.match, 1);
+  const sweep = buildScheduleAssignmentPolicySweep(rows, { thresholds: [90], margins: [10] });
+  assert.deepEqual(sweep.map(({ threshold, margin, eligibleCount, correctAutomaticAssignmentCount, falseAutomaticAssignmentCount }) => ({
+    threshold,
+    margin,
+    eligibleCount,
+    correctAutomaticAssignmentCount,
+    falseAutomaticAssignmentCount
+  })), [{
+    threshold: 90,
+    margin: 10,
+    eligibleCount: 3,
+    correctAutomaticAssignmentCount: 1,
+    falseAutomaticAssignmentCount: 2
+  }]);
 });
 
 test("schedule assignment evaluation: non-persisting dry-run cannot be combined with commit and exposes policy eligibility", () => {
@@ -666,7 +995,7 @@ test("schedule assignment agent: positive and negative model reasons are classif
   assert.deepEqual(candidate.contradictingEvidence, ["סתירת מיקום"]);
 });
 
-test("schedule assignment agent: automatic write requires every safety gate and model agreement", () => {
+test("schedule assignment agent: automatic write requires calibrated probability and explicit role gates", () => {
   const settings = normalizeScheduleAssignmentAgentSettings({
     tools: { semantic: false, historical: false },
     weights: { semantic: 0, lexical: 20, temporal: 20, hierarchy: 10, historical: 0, modelConsensus: 50 },
@@ -678,11 +1007,312 @@ test("schedule assignment agent: automatic write requires every safety gate and 
   ];
   const matcher = { bestActivityKey: "gantt:file-a:1" };
   const validator = { bestActivityKey: "gantt:file-a:1", decision: "match" };
-  const allowed = evaluateAssignmentDecision({ candidates, settings, matcher, validator, eventDate: "2025-01-15", scheduleVersionId: "file-a", aiCompleted: true });
-  const blocked = evaluateAssignmentDecision({ candidates, settings, matcher, validator, eventDate: "2025-01-15", scheduleVersionId: "file-a", aiCompleted: false });
+  const calibrator = {
+    artifactVersion: SCHEDULE_ASSIGNMENT_CALIBRATION_ARTIFACT_VERSION,
+    artifactId: "schedule-assignment-calibrator:test-ready",
+    context: {
+      featureVersion: SCHEDULE_ASSIGNMENT_CALIBRATION_FEATURE_VERSION,
+      engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
+      scheduleVersionId: "file-a"
+    },
+    readyForProduction: true,
+    selectedMethod: "platt",
+    selectedModel: { method: "platt", coefficient: 0, intercept: 10, mean: 0, scale: 1 }
+  };
+  const noCalibrator = evaluateAssignmentDecision({ candidates, settings, matcher, validator, eventDate: "2025-01-15", scheduleVersionId: "file-a", aiCompleted: true });
+  const allowed = evaluateAssignmentDecision({ candidates, settings, matcher, validator, eventDate: "2025-01-15", scheduleVersionId: "file-a", aiCompleted: true, calibrator });
+  const blocked = evaluateAssignmentDecision({ candidates, settings, matcher, validator, eventDate: "2025-01-15", scheduleVersionId: "file-a", aiCompleted: false, calibrator });
+  assert.equal(noCalibrator.autoAssigned, false);
+  assert.equal(noCalibrator.gates.calibratedThreshold, false);
   assert.equal(allowed.autoAssigned, true);
   assert.equal(blocked.autoAssigned, false);
-  assert.equal(blocked.gates.aiCompleted, false);
+  assert.equal(blocked.gates.requiredRolesCompleted, false);
+  assert.equal(blocked.gates.matcherValidatorAgreement, true);
+  assert.equal(allowed.rankingScore, allowed.confidence);
+  assert.equal(allowed.runnerUpRankingScore, allowed.runnerUpConfidence);
+  assert.equal(allowed.rankingGap, allowed.margin);
+  assert.ok(allowed.calibratedProbability > 0.99);
+  assert.equal(allowed.calibration.status, "calibrated");
+  assert.equal(allowed.gates.calibratedThreshold, true);
+});
+
+test("schedule assignment policy: calibrated sweep blocks raw-score, role-disagreement and hard-conflict shortcuts", () => {
+  const calibrationArtifact = {
+    artifactVersion: SCHEDULE_ASSIGNMENT_CALIBRATION_ARTIFACT_VERSION,
+    context: { featureVersion: SCHEDULE_ASSIGNMENT_CALIBRATION_FEATURE_VERSION },
+    readyForProduction: true,
+    selectedMethod: "platt",
+    selectedModel: { method: "platt", coefficient: 1, intercept: 0, mean: 0, scale: 1 }
+  };
+  const baseGates = {
+    decisionMatch: true,
+    noHardConflict: true,
+    canonicalDate: true,
+    activeScheduleActivity: true,
+    unassigned: true,
+    freshRun: true,
+    requiredRolesCompleted: true
+  };
+  const rows = [
+    {
+      caseId: "correct",
+      sourceId: "correct",
+      labelType: "confirmed_match",
+      expectedActivityKey: "gantt:file-a:1",
+      selectedActivityKey: "gantt:file-a:1",
+      decisionType: "match",
+      rankingScore: 90,
+      rankingGap: 15,
+      matcherValidatorAgreement: true,
+      judgeOutcome: "match",
+      providerCost: 0.01,
+      totalTokens: 100,
+      durationMs: 500,
+      gates: baseGates
+    },
+    {
+      caseId: "negative-low-probability",
+      sourceId: "negative-low-probability",
+      labelType: "no_match",
+      selectedActivityKey: "gantt:file-a:2",
+      decisionType: "match",
+      rankingScore: 20,
+      rankingGap: 15,
+      matcherValidatorAgreement: true,
+      judgeOutcome: "match",
+      gates: baseGates
+    },
+    {
+      caseId: "role-disagreement",
+      sourceId: "role-disagreement",
+      labelType: "confirmed_match",
+      expectedActivityKey: "gantt:file-a:3",
+      selectedActivityKey: "gantt:file-a:3",
+      decisionType: "match",
+      rankingScore: 90,
+      rankingGap: 15,
+      matcherValidatorAgreement: false,
+      judgeOutcome: "not_run",
+      gates: baseGates
+    },
+    {
+      caseId: "hard-conflict",
+      sourceId: "hard-conflict",
+      labelType: "rejected_match",
+      selectedActivityKey: "gantt:file-a:4",
+      decisionType: "match",
+      rankingScore: 95,
+      rankingGap: 20,
+      matcherValidatorAgreement: true,
+      judgeOutcome: "conflict",
+      hardConflict: true,
+      gates: { ...baseGates, noHardConflict: false }
+    },
+    {
+      caseId: "judge-ambiguous",
+      sourceId: "judge-ambiguous",
+      labelType: "confirmed_match",
+      expectedActivityKey: "gantt:file-a:5",
+      selectedActivityKey: "gantt:file-a:5",
+      decisionType: "match",
+      rankingScore: 95,
+      rankingGap: 20,
+      matcherValidatorAgreement: true,
+      judgeOutcome: "ambiguous",
+      gates: baseGates
+    }
+  ];
+  const [result] = buildScheduleAssignmentCalibratedPolicySweep(rows, {
+    calibrationArtifact,
+    grid: {
+      probabilityThresholds: [0.7],
+      rankingMargins: [10],
+      requireMatcherValidatorAgreement: [true],
+      requireJudgeMatchWhenRun: [true],
+      blockHardConflict: [true]
+    }
+  });
+  assert.equal(result.eligibleCount, 1);
+  assert.equal(result.correctAutomaticAssignmentCount, 1);
+  assert.equal(result.falseAutomaticAssignmentCount, 0);
+  assert.equal(result.safeCoverageRate, 0.2);
+  assert.equal(result.safetyEligible, true);
+  assert.equal(result.totalEligibleProviderCost, 0.01);
+  assert.equal(result.totalEligibleTokens, 100);
+  assert.equal(result.distributions.eligibleLatencyMs.mean, 500);
+});
+
+test("schedule assignment policy: artifact selects on validation, accepts on held-out rows, and stays disabled", () => {
+  const calibrationArtifact = {
+    artifactVersion: SCHEDULE_ASSIGNMENT_CALIBRATION_ARTIFACT_VERSION,
+    artifactId: "schedule-assignment-calibrator:phase4-test",
+    context: {
+      featureVersion: SCHEDULE_ASSIGNMENT_CALIBRATION_FEATURE_VERSION,
+      engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
+      scheduleVersionId: "file-a"
+    },
+    readyForProduction: true,
+    selectedMethod: "platt",
+    selectedModel: { method: "platt", coefficient: 1, intercept: 0, mean: 0, scale: 1 },
+    split: {
+      validationCaseIds: ["validation-positive", "validation-negative"],
+      testCaseIds: ["acceptance-positive", "acceptance-negative"]
+    }
+  };
+  const gates = {
+    decisionMatch: true,
+    noHardConflict: true,
+    canonicalDate: true,
+    activeScheduleActivity: true,
+    unassigned: true,
+    freshRun: true,
+    requiredRolesCompleted: true
+  };
+  const row = (caseId, positive) => ({
+    caseId,
+    sourceId: caseId,
+    labelType: positive ? "confirmed_match" : "no_match",
+    expectedActivityKey: positive ? `gantt:file-a:${caseId}` : null,
+    selectedActivityKey: `gantt:file-a:${caseId}`,
+    decisionType: "match",
+    rankingScore: positive ? 90 : 20,
+    rankingGap: 15,
+    matcherValidatorAgreement: true,
+    judgeOutcome: "match",
+    gates
+  });
+  const artifact = buildScheduleAssignmentPolicyArtifact({
+    rows: [row("validation-positive", true), row("validation-negative", false), row("acceptance-positive", true), row("acceptance-negative", false)],
+    calibrationArtifact,
+    manifest: {
+      engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
+      activeScheduleVersionId: "file-a",
+      fixtureHash: "sha256:phase4-test"
+    },
+    grid: {
+      probabilityThresholds: [0.7],
+      rankingMargins: [10],
+      requireMatcherValidatorAgreement: [true],
+      requireJudgeMatchWhenRun: [false],
+      blockHardConflict: [true]
+    }
+  });
+  assert.equal(artifact.artifactVersion, SCHEDULE_ASSIGNMENT_POLICY_ARTIFACT_VERSION);
+  assert.equal(artifact.readyForShadow, true);
+  assert.equal(artifact.readyForProduction, false);
+  assert.equal(artifact.selectedPolicy.enabled, false);
+  assert.equal(artifact.acceptanceMetrics.correctAutomaticAssignmentCount, 1);
+  assert.equal(artifact.acceptanceMetrics.falseAutomaticAssignmentCount, 0);
+  assert.equal(artifact.context.datasetHash, "sha256:phase4-test");
+  assert.match(artifact.context.policyConfigurationHash, /^sha256:[a-f0-9]{64}$/u);
+
+  const blocked = buildScheduleAssignmentPolicyArtifact({
+    rows: [row("validation-positive", true), row("validation-negative", false), row("acceptance-positive", true), row("acceptance-negative", false)],
+    calibrationArtifact: { ...calibrationArtifact, readyForProduction: false },
+    grid: {
+      probabilityThresholds: [0.7],
+      rankingMargins: [10],
+      requireMatcherValidatorAgreement: [true],
+      requireJudgeMatchWhenRun: [false],
+      blockHardConflict: [true]
+    }
+  });
+  assert.equal(blocked.readyForShadow, false);
+  assert.equal(blocked.selectedPolicy, null);
+  assert.ok(blocked.readinessReasons.includes("calibration_artifact_not_ready"));
+});
+
+test("schedule assignment calibration: small evidence remains advisory and cannot emit probability", () => {
+  const rows = Array.from({ length: 30 }, (_, index) => {
+    const correct = index < 16;
+    return {
+      caseId: `small-${index}`,
+      sourceId: String(1000 + index),
+      labelType: correct ? "confirmed_match" : index % 2 ? "rejected_match" : "no_match",
+      expectedActivityKey: correct ? `gantt:file-a:${index}` : null,
+      selectedActivityKey: correct ? `gantt:file-a:${index}` : `gantt:file-a:wrong-${index}`,
+      rankingScore: correct ? 80 + index % 10 : 30 + index % 10,
+      runnerUpRankingScore: 25,
+      rankingGap: correct ? 55 : 8,
+      allCandidates: []
+    };
+  });
+  const artifact = buildScheduleAssignmentCalibrationArtifact({
+    rows,
+    manifest: { engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION, activeScheduleVersionId: "file-a" }
+  });
+  assert.equal(artifact.artifactVersion, SCHEDULE_ASSIGNMENT_CALIBRATION_ARTIFACT_VERSION);
+  assert.equal(artifact.context.featureVersion, SCHEDULE_ASSIGNMENT_CALIBRATION_FEATURE_VERSION);
+  assert.equal(artifact.readyForProduction, false);
+  assert.ok(artifact.readinessReasons.includes("case_count_below_100"));
+  assert.deepEqual([...artifact.split.trainCaseIds, ...artifact.split.validationCaseIds, ...artifact.split.testCaseIds].sort(), rows.map((row) => row.caseId).sort());
+  const applied = applyScheduleAssignmentCalibration({
+    artifact,
+    features: { rankingScore: 0.9 },
+    context: { engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION, scheduleVersionId: "file-a" }
+  });
+  assert.equal(applied.status, "not_ready");
+  assert.equal(applied.probability, null);
+});
+
+test("schedule assignment calibration: held-out artifact is versioned, gated, and rejects stale context", () => {
+  const negativeLabels = ["confirmed_match", "rejected_match", "no_match", "stale_activity", "irrelevant_alert", "ambiguous"];
+  const rows = [
+    ...Array.from({ length: 60 }, (_, index) => ({
+      caseId: `positive-${index}`,
+      sourceId: `p-${index}`,
+      labelType: "confirmed_match",
+      expectedActivityKey: `gantt:file-a:p-${index}`,
+      selectedActivityKey: `gantt:file-a:p-${index}`,
+      rankingScore: 82 + index % 14,
+      runnerUpRankingScore: 25 + index % 8,
+      rankingGap: 50 + index % 12,
+      allCandidates: []
+    })),
+    ...Array.from({ length: 60 }, (_, index) => ({
+      caseId: `negative-${index}`,
+      sourceId: `n-${index}`,
+      labelType: negativeLabels[index % negativeLabels.length],
+      expectedActivityKey: negativeLabels[index % negativeLabels.length] === "confirmed_match" ? `gantt:file-a:expected-${index}` : null,
+      selectedActivityKey: `gantt:file-a:wrong-${index}`,
+      rankingScore: 8 + index % 22,
+      runnerUpRankingScore: 5 + index % 5,
+      rankingGap: 1 + index % 8,
+      allCandidates: []
+    }))
+  ];
+  const configurationSnapshotId = "schedule-assignment-config:test";
+  const artifact = buildScheduleAssignmentCalibrationArtifact({
+    rows,
+    manifest: {
+      engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
+      activeScheduleVersionId: "file-a",
+      settingsVersion: "calibration-test-v1",
+      configurationSnapshotId
+    },
+    retrieval: { strategy: "hybrid_union", deterministicLimit: 14, semanticLimit: 6 }
+  });
+  assert.equal(artifact.readyForProduction, true);
+  assert.notEqual(artifact.selectedMethod, "control");
+  assert.equal(artifact.readinessReasons.includes("selected_calibrator_failed_held_out_improvement"), false);
+  assert.equal(artifact.comparisons[artifact.selectedMethod].test.count, 24);
+  assert.equal(artifact.comparisons[artifact.selectedMethod].test.positiveCount, 12);
+  assert.equal(artifact.comparisons[artifact.selectedMethod].test.negativeCount, 12);
+  assert.equal(artifact.comparisons[artifact.selectedMethod].test.reliabilityBins.length, 5);
+  const context = {
+    engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
+    scheduleVersionId: "file-a",
+    settingsVersion: "calibration-test-v1",
+    configurationSnapshotId
+  };
+  assert.equal(validateScheduleAssignmentCalibratorCompatibility(artifact, context).compatible, true);
+  const applied = applyScheduleAssignmentCalibration({ artifact, features: { rankingScore: 0.9 }, context });
+  assert.equal(applied.status, "calibrated");
+  assert.ok(applied.probability > 0.5 && applied.probability <= 1);
+  const stale = applyScheduleAssignmentCalibration({ artifact, features: { rankingScore: 0.9 }, context: { ...context, engineVersion: "schedule-assignment.stale" } });
+  assert.equal(stale.status, "unavailable");
+  assert.equal(stale.probability, null);
+  assert.equal(stale.reason, "engineVersion_mismatch");
 });
 
 test("schedule assignment agent: model output cannot inject an unknown activity key", () => {

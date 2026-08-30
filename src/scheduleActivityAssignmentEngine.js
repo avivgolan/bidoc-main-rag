@@ -5,8 +5,12 @@ import {
   SCHEDULE_ASSIGNMENT_ROLE_PROMPTS,
   scheduleAssignmentRoleContract
 } from "./scheduleActivityAssignmentPromptPack.js";
+import {
+  applyScheduleAssignmentCalibration,
+  scheduleAssignmentCalibrationFeatures
+} from "./scheduleActivityAssignmentCalibration.js";
 
-export const SCHEDULE_ASSIGNMENT_ENGINE_VERSION = "schedule-assignment.v2.0-rc1";
+export const SCHEDULE_ASSIGNMENT_ENGINE_VERSION = "schedule-assignment.v2.1-rc1";
 
 function aiRole(roleName, { enabled = true } = {}) {
   const profile = SCHEDULE_ASSIGNMENT_OPENAI_MODEL_PROFILE[roleName];
@@ -69,7 +73,8 @@ const STOP_WORDS = new Set([
 ]);
 
 const SYNONYMS = new Map([
-  ["ריצוף", ["אריח", "אריחים", "קרמיקה"]],
+  ["ריצוף", ["אריח", "אריחים", "קרמיקה", "פורצלן", "החלקה", "חלקה"]],
+  ["סינר", ["סינרים"]],
   ["חשמל", ["כבל", "כבלים", "לוח", "תאורה"]],
   ["אינסטלציה", ["צנרת", "מים", "ביוב"]],
   ["בטון", ["יציקה", "יציקות"]],
@@ -327,45 +332,112 @@ export function buildAssignmentCandidates({ event, tasks = [], settings: inputSe
   return candidates.sort((a, b) => b.finalScore - a.finalScore || a.name.localeCompare(b.name, "he")).slice(0, settings.maxCandidates).map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
-export function evaluateAssignmentDecision({ candidates = [], settings: inputSettings = {}, matcher = null, validator = null, judge = null, eventDate = null, existingActivityKey = null, scheduleVersionId = null, stale = false, aiCompleted = false } = {}) {
+export function evaluateAssignmentDecision({
+  candidates = [],
+  settings: inputSettings = {},
+  matcher = null,
+  validator = null,
+  judge = null,
+  eventDate = null,
+  existingActivityKey = null,
+  scheduleVersionId = null,
+  stale = false,
+  aiCompleted = false,
+  calibrator = null,
+  calibrationContext = {}
+} = {}) {
   const settings = normalizeScheduleAssignmentAgentSettings(inputSettings);
   const selected = judge?.selectedActivityKey
     ? candidates.find((item) => item.activityKey === judge.selectedActivityKey) || candidates[0]
     : candidates[0];
   const runnerUp = candidates.find((item) => item.activityKey !== selected?.activityKey) || null;
-  const confidence = selected?.finalScore ?? 0;
-  const runnerUpConfidence = runnerUp?.finalScore ?? 0;
-  const margin = Number((confidence - runnerUpConfidence).toFixed(2));
+  const rankingScore = selected?.finalScore ?? 0;
+  const runnerUpRankingScore = runnerUp?.finalScore ?? 0;
+  const rankingGap = Number((rankingScore - runnerUpRankingScore).toFixed(2));
   const roleAgreement = Boolean(selected && matcher?.bestActivityKey === selected.activityKey && validator?.bestActivityKey === selected.activityKey);
   const hardConflict = Boolean(selected?.hardConflict || judge?.decision === "conflict" || validator?.decision === "conflict");
-  const decision = !selected || confidence < settings.suggestionThreshold
+  const decision = !selected || rankingScore < settings.suggestionThreshold
     ? "no_match"
     : hardConflict
       ? "conflict"
       : roleAgreement || judge?.decision === "match"
         ? "match"
         : "ambiguous";
-  const gates = {
+  const baseGates = {
     decisionMatch: decision === "match",
-    threshold: confidence >= settings.autoAssignmentThreshold,
-    margin: margin >= settings.minimumRunnerUpMargin,
+    margin: rankingGap >= settings.minimumRunnerUpMargin,
     noHardConflict: !hardConflict,
     canonicalDate: Boolean(isoDay(eventDate) != null),
     activeScheduleActivity: Boolean(selected?.activityKey && scheduleVersionId && selected.activityKey.startsWith(`gantt:${scheduleVersionId}:`)),
     unassigned: !existingActivityKey,
     freshRun: stale !== true,
     autoAssignmentEnabled: settings.autoAssignmentEnabled === true,
-    aiCompleted: aiCompleted === true && roleAgreement
+    requiredRolesCompleted: aiCompleted === true,
+    matcherValidatorAgreement: roleAgreement
+  };
+  const calibration = applyScheduleAssignmentCalibration({
+    artifact: calibrator,
+    features: scheduleAssignmentCalibrationFeatures({
+      rankingScore,
+      runnerUpRankingScore,
+      rankingGap,
+      selectedActivityKey: selected?.activityKey || null,
+      selectedCandidate: selected,
+      runnerUpCandidate: runnerUp,
+      matcher,
+      validator,
+      decisionType: decision,
+      gates: baseGates
+    }),
+    context: {
+      ...calibrationContext,
+      engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
+      scheduleVersionId
+    }
+  });
+  const gates = {
+    decisionMatch: baseGates.decisionMatch,
+    calibratedThreshold: calibration.status === "calibrated"
+      && Number.isFinite(calibration.probability)
+      && calibration.probability * 100 >= settings.autoAssignmentThreshold,
+    margin: baseGates.margin,
+    noHardConflict: baseGates.noHardConflict,
+    canonicalDate: baseGates.canonicalDate,
+    activeScheduleActivity: baseGates.activeScheduleActivity,
+    unassigned: baseGates.unassigned,
+    freshRun: baseGates.freshRun,
+    autoAssignmentEnabled: baseGates.autoAssignmentEnabled,
+    requiredRolesCompleted: baseGates.requiredRolesCompleted,
+    matcherValidatorAgreement: baseGates.matcherValidatorAgreement
   };
   const autoAssigned = settings.enabled && Object.values(gates).every(Boolean);
   const reason = autoAssigned
-    ? `הפעילות נבחרה בציון ${confidence}% ובפער ${margin} נקודות מהמועמד הבא.`
+    ? `הפעילות נבחרה בהסתברות מכוילת ${Math.round(calibration.probability * 100)}% ובפער ${rankingGap} נקודות מהמועמד הבא.`
     : decision === "no_match"
       ? "לא נמצא מועמד שעבר את סף ההצעה."
       : hardConflict
         ? "זוהתה סתירה מהותית ולכן לא בוצע שיוך."
-        : `נדרשת בדיקה אנושית: ציון ${confidence}%, פער ${margin} נקודות.`;
-  return { decision, selected, runnerUp, confidence, runnerUpConfidence, margin, roleAgreement, hardConflict, gates, autoAssigned, reason };
+        : calibration.status !== "calibrated"
+          ? "נדרשת בדיקה אנושית: אין הסתברות מכוילת תקפה להפעלת שיוך אוטומטי."
+        : `נדרשת בדיקה אנושית: ציון התאמה ${rankingScore}, פער ${rankingGap} נקודות.`;
+  return {
+    decision,
+    selected,
+    runnerUp,
+    rankingScore,
+    runnerUpRankingScore,
+    rankingGap,
+    calibratedProbability: calibration.probability,
+    calibration,
+    confidence: rankingScore,
+    runnerUpConfidence: runnerUpRankingScore,
+    margin: rankingGap,
+    roleAgreement,
+    hardConflict,
+    gates,
+    autoAssigned,
+    reason
+  };
 }
 
 export function sanitizeRoleResult(value = {}, allowedActivityKeys = [], { validator = false } = {}) {

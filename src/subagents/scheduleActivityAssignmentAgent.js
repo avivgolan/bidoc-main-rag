@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { chatCompletion, createEmbedding, summarizeOpenRouterUsage } from "../openrouter.js";
+import { createCacheContext, finalizeCacheMetrics } from "../cache.js";
 import {
   buildAssignmentCandidates,
   cosineSimilarity,
@@ -152,22 +153,177 @@ function extractedEvent(value, source) {
   };
 }
 
-async function semanticScoresForCandidates({ apiKey, role, event, candidates, telemetryFor = null }) {
+export const SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES = Object.freeze({
+  DETERMINISTIC_FIRST: "deterministic_first",
+  FULL_SEMANTIC: "full_semantic",
+  HYBRID_UNION: "hybrid_union"
+});
+
+export function normalizeScheduleAssignmentRetrievalOptions(value = {}, agentSettings = {}) {
+  const allowed = new Set(Object.values(SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES));
+  const strategy = allowed.has(value?.strategy)
+    ? value.strategy
+    : SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES.DETERMINISTIC_FIRST;
+  const maxCandidates = Math.max(2, Math.min(50, Math.round(Number(agentSettings?.maxCandidates) || 20)));
+  const semanticPoolLimit = Math.max(2, Math.min(50, Math.round(Number(value?.semanticPoolLimit) || maxCandidates)));
+  const modelCandidateLimit = Math.max(2, Math.min(20, Math.round(Number(value?.modelCandidateLimit) || maxCandidates)));
+  return {
+    strategy,
+    semanticPoolLimit,
+    modelCandidateLimit,
+    fullSetSemantic: strategy !== SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES.DETERMINISTIC_FIRST
+  };
+}
+
+export function scheduleAssignmentActivityEmbeddingText(candidate = {}) {
+  return [
+    candidate.activityKey,
+    candidate.name,
+    candidate.plannedStart,
+    candidate.plannedFinish
+  ].filter(Boolean).join(" | ");
+}
+
+function scheduleAssignmentQueryEmbeddingText(event = {}) {
+  return [
+    event.title,
+    event.description,
+    event.alertType,
+    ...(event.subjects || []),
+    ...(event.locations || []),
+    ...(event.trades || []),
+    ...(event.keywords || []),
+    event.date
+  ].filter(Boolean).join(" | ");
+}
+
+function semanticCandidateStage(tasks = [], semanticScores = {}, limit = 20) {
+  return tasks
+    .filter((task) => task?.activityKey && !task.isSummary && Number.isFinite(Number(semanticScores[task.activityKey])))
+    .map((task) => ({
+      ...compactTask(task),
+      finalScore: Number((Number(semanticScores[task.activityKey]) * 100).toFixed(2)),
+      signals: { semantic: Number(semanticScores[task.activityKey]) }
+    }))
+    .sort((left, right) => right.signals.semantic - left.signals.semantic
+      || left.name.localeCompare(right.name, "he")
+      || left.activityKey.localeCompare(right.activityKey))
+    .slice(0, limit)
+    .map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
+async function mapWithConcurrency(items = [], concurrency = 8, worker) {
+  const output = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(items.length, Math.max(1, concurrency)) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      output[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return output;
+}
+
+export function selectScheduleAssignmentRetrievalKeys({
+  strategy,
+  deterministicCandidates = [],
+  semanticCandidates = [],
+  modelCandidateLimit = 20
+} = {}) {
+  const limit = Math.max(2, Math.min(20, Math.round(Number(modelCandidateLimit) || 20)));
+  if (strategy === SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES.FULL_SEMANTIC) {
+    return semanticCandidates.slice(0, limit).map((item) => item.activityKey);
+  }
+  if (strategy !== SCHEDULE_ASSIGNMENT_RETRIEVAL_STRATEGIES.HYBRID_UNION) {
+    return deterministicCandidates.slice(0, limit).map((item) => item.activityKey);
+  }
+  const selected = [];
+  const selectedSet = new Set();
+  const addSelected = (items, count) => {
+    for (const item of items.slice(0, count)) {
+      const activityKey = typeof item === "string" ? item : item?.activityKey;
+      if (!activityKey || selectedSet.has(activityKey)) continue;
+      selectedSet.add(activityKey);
+      selected.push(activityKey);
+    }
+  };
+  const semanticReserve = Math.max(1, Math.min(6, Math.ceil(limit * 0.5)));
+  addSelected(deterministicCandidates, limit - semanticReserve);
+  addSelected(semanticCandidates, semanticReserve);
+  const ranks = new Map();
+  const add = (items, leg) => items.forEach((item, index) => {
+    if (!item?.activityKey) return;
+    const current = ranks.get(item.activityKey) || {
+      activityKey: item.activityKey,
+      deterministicRank: Number.POSITIVE_INFINITY,
+      semanticRank: Number.POSITIVE_INFINITY
+    };
+    current[leg] = index + 1;
+    ranks.set(item.activityKey, current);
+  });
+  add(deterministicCandidates, "deterministicRank");
+  add(semanticCandidates, "semanticRank");
+  const fusedKeys = [...ranks.values()]
+    .map((item) => ({
+      ...item,
+      bestRank: Math.min(item.deterministicRank, item.semanticRank),
+      rankSum: item.deterministicRank + item.semanticRank
+    }))
+    .sort((left, right) => left.bestRank - right.bestRank
+      || left.rankSum - right.rankSum
+      || left.activityKey.localeCompare(right.activityKey))
+    .map((item) => item.activityKey);
+  addSelected(fusedKeys, fusedKeys.length);
+  return selected.slice(0, limit);
+}
+
+async function semanticScoresForCandidates({
+  apiKey,
+  role,
+  event,
+  candidates,
+  fullSetSemantic = false,
+  cacheContext = null,
+  telemetryFor = null
+}) {
   if (!apiKey || !role.enabled || !role.model || !candidates.length) return {};
-  const limited = candidates.slice(0, role.candidateLimit);
+  const limited = candidates.slice(0, role.candidateLimit || candidates.length);
   const queryVector = await createEmbedding({
     apiKey,
     model: role.model,
-    input: [event.title, event.alertType, event.date].filter(Boolean).join(" | "),
+    input: fullSetSemantic
+      ? scheduleAssignmentQueryEmbeddingText(event)
+      : [event.title, event.alertType, event.date].filter(Boolean).join(" | "),
+    cacheContext,
     telemetry: telemetryFor?.("query") || null
   });
-  const vectors = await Promise.all(limited.map((candidate) => createEmbedding({
-    apiKey,
-    model: role.model,
-    input: [candidate.name, candidate.plannedStart, candidate.plannedFinish].filter(Boolean).join(" | "),
-    telemetry: telemetryFor?.(candidate.activityKey) || null
-  })));
-  return Object.fromEntries(limited.map((candidate, index) => [candidate.activityKey, cosineSimilarity(queryVector, vectors[index])]));
+  const vectorResults = await mapWithConcurrency(limited, 8, async (candidate) => {
+    try {
+      const vector = await createEmbedding({
+        apiKey,
+        model: role.model,
+        input: fullSetSemantic
+          ? scheduleAssignmentActivityEmbeddingText(candidate)
+          : [candidate.name, candidate.plannedStart, candidate.plannedFinish].filter(Boolean).join(" | "),
+        cacheContext,
+        telemetry: telemetryFor?.(candidate.activityKey) || null
+      });
+      return { candidate, vector, error: null };
+    } catch (error) {
+      return { candidate, vector: null, error: safeError(error) };
+    }
+  });
+  const failures = vectorResults
+    .filter((item) => item.error)
+    .map((item) => ({ activityKey: item.candidate.activityKey, error: item.error }));
+  if (!fullSetSemantic && failures.length) throw new Error(failures[0].error);
+  const scores = Object.fromEntries(vectorResults
+    .filter((item) => Array.isArray(item.vector))
+    .map((item) => [item.candidate.activityKey, cosineSimilarity(queryVector, item.vector)]));
+  if (!Object.keys(scores).length) throw new Error(failures[0]?.error || "Semantic activity embeddings were unavailable");
+  return { scores, failures };
 }
 
 function candidateDbRow(runId, row) {
@@ -199,6 +355,7 @@ export async function runScheduleActivityAssignmentAgent({
   settings: settingsInput = null,
   apiKey = "",
   runId: runIdInput = null,
+  retrieval: retrievalInput = null,
   emit = null
 } = {}) {
   if (!projectId || !sourceId) throw new Error("projectId and sourceId are required");
@@ -206,11 +363,15 @@ export async function runScheduleActivityAssignmentAgent({
   if (evaluationFixture && (commit || persistAudit)) throw new Error("evaluationFixture requires commit=false and persistAudit=false");
   const scheduleCfg = settingsInput || scheduleSettings();
   const agentSettings = normalizeScheduleAssignmentAgentSettings(config?.scheduleAssignmentAgent);
+  const retrieval = normalizeScheduleAssignmentRetrievalOptions(retrievalInput || {}, agentSettings);
   const validation = validateScheduleAssignmentAgentSettings(agentSettings);
   if (!validation.ok) throw new Error(`הגדרת סוכן השיוך אינה תקינה: ${validation.errors.join(" ")}`);
   if (!agentSettings.enabled) throw new Error("סוכן השיוך כבוי בהגדרות");
 
   const runId = runIdInput || crypto.randomUUID();
+  const retrievalCacheContext = retrieval.fullSetSemantic
+    ? createCacheContext({ config: config || {}, runId })
+    : null;
   const startedAt = new Date().toISOString();
   const trace = [];
   const openRouterCalls = [];
@@ -238,7 +399,8 @@ export async function runScheduleActivityAssignmentAgent({
     step("assignment_result", "Schedule activity assignment finished", {
       status: result.status,
       selectedActivityKey: result.decision?.selectedActivityKey || null,
-      confidence: result.decision?.confidence ?? null,
+      rankingScore: result.decision?.rankingScore ?? result.decision?.confidence ?? null,
+      calibratedProbability: result.decision?.calibratedProbability ?? null,
       warnings: result.warnings?.length || 0
     });
     const openRouterUsage = summarizeOpenRouterUsage(openRouterCalls);
@@ -363,6 +525,11 @@ export async function runScheduleActivityAssignmentAgent({
           type: "filtered_out",
           selectedActivityKey: null,
           selectedActivityName: null,
+          rankingScore: 0,
+          runnerUpRankingScore: 0,
+          rankingGap: 0,
+          calibratedProbability: null,
+          calibration: { status: "not_applicable", probability: null, artifactId: null, reason: "filtered_out" },
           confidence: timeFilterResult.confidence,
           runnerUpConfidence: 0,
           margin: 0,
@@ -433,7 +600,7 @@ export async function runScheduleActivityAssignmentAgent({
   let validator = null;
   let judge = null;
   let semanticScores = {};
-  const candidateStages = { deterministic: [], semantic: [], final: [] };
+  const candidateStages = { deterministic: [], semantic: [], retrieval: [], final: [] };
   let modelCalls = 0;
   let aiCompleted = false;
   const roleErrors = {};
@@ -472,15 +639,50 @@ export async function runScheduleActivityAssignmentAgent({
   });
   if (apiKey && agentSettings.tools.semantic && agentSettings.roles.embedding.enabled) {
     try {
-      semanticScores = await semanticScoresForCandidates({
+      const semanticScanCandidates = retrieval.fullSetSemantic
+        ? tasks.filter((task) => task?.activityKey && !task.isSummary)
+        : candidates;
+      const semanticResult = await semanticScoresForCandidates({
         apiKey,
-        role: agentSettings.roles.embedding,
+        role: retrieval.fullSetSemantic
+          ? { ...agentSettings.roles.embedding, candidateLimit: semanticScanCandidates.length }
+          : agentSettings.roles.embedding,
         event: extracted,
-        candidates,
+        candidates: semanticScanCandidates,
+        fullSetSemantic: retrieval.fullSetSemantic,
+        cacheContext: retrievalCacheContext,
         telemetryFor: (callId) => telemetryFor("assignment_embedding", callId)
       });
-      candidates = buildAssignmentCandidates({ event: extracted, tasks, settings: agentSettings, semanticScores });
-      candidateStages.semantic = candidates.map(compactCandidateStage);
+      semanticScores = semanticResult.scores;
+      if (semanticResult.failures.length) {
+        roleErrors.embedding = `${semanticResult.failures.length} activity embeddings failed; automatic assignment is blocked.`;
+        warnings.push("חלק מהטמעות הפעילויות נכשלו; הדירוג החלקי נשמר לבדיקה אך שיוך אוטומטי נחסם.");
+      }
+      if (retrieval.fullSetSemantic) {
+        candidateStages.semantic = semanticCandidateStage(tasks, semanticScores, retrieval.semanticPoolLimit);
+        const retrievalKeys = selectScheduleAssignmentRetrievalKeys({
+          strategy: retrieval.strategy,
+          deterministicCandidates: candidateStages.deterministic,
+          semanticCandidates: candidateStages.semantic,
+          modelCandidateLimit: retrieval.modelCandidateLimit
+        });
+        const retrievalRank = new Map(retrievalKeys.map((activityKey, index) => [activityKey, index]));
+        const retrievalTasks = tasks
+          .filter((task) => retrievalRank.has(task.activityKey))
+          .sort((left, right) => retrievalRank.get(left.activityKey) - retrievalRank.get(right.activityKey));
+        const scoredByKey = new Map(buildAssignmentCandidates({
+          event: extracted,
+          tasks: retrievalTasks,
+          settings: agentSettings,
+          semanticScores
+        }).map((item) => [item.activityKey, item]));
+        candidates = retrievalKeys.map((activityKey) => scoredByKey.get(activityKey)).filter(Boolean);
+        candidateStages.retrieval = candidates.map(compactCandidateStage);
+      } else {
+        candidates = buildAssignmentCandidates({ event: extracted, tasks, settings: agentSettings, semanticScores });
+        candidateStages.semantic = candidates.map(compactCandidateStage);
+        candidateStages.retrieval = candidates.map(compactCandidateStage);
+      }
     } catch (error) {
       roleErrors.embedding = safeError(error);
       warnings.push("שכבת החיפוש הסמנטי נכשלה; לא יתבצע שיוך אוטומטי בריצה זו.");
@@ -489,7 +691,10 @@ export async function runScheduleActivityAssignmentAgent({
   step("assignment_embedding", Object.keys(semanticScores).length ? "Semantic candidate scoring completed" : "Semantic scoring was unavailable", {
     enabled: agentSettings.tools.semantic && agentSettings.roles.embedding.enabled,
     model: agentSettings.roles.embedding.model,
+    retrievalStrategy: retrieval.strategy,
     candidateLimit: agentSettings.roles.embedding.candidateLimit,
+    semanticPoolLimit: retrieval.semanticPoolLimit,
+    modelCandidateLimit: retrieval.modelCandidateLimit,
     scoredCandidates: Object.keys(semanticScores).length,
     error: roleErrors.embedding || null
   }, Object.keys(semanticScores).length ? "done" : roleErrors.embedding ? "error" : "skipped");
@@ -541,7 +746,13 @@ export async function runScheduleActivityAssignmentAgent({
     error: roleErrors.validator || null
   }, validator ? "done" : roleErrors.validator ? "error" : "skipped");
   aiCompleted = Boolean(extractorOutput && matcher && validator && !roleErrors.embedding && (auditPersisted || auditPersistenceSkipped));
-  candidates = buildAssignmentCandidates({ event: extracted, tasks, settings: agentSettings, semanticScores, matcher, validator });
+  const finalCandidateKeys = retrieval.fullSetSemantic
+    ? new Set(modelCandidates.map((item) => item.activityKey))
+    : null;
+  const finalTasks = finalCandidateKeys
+    ? tasks.filter((task) => finalCandidateKeys.has(task.activityKey))
+    : tasks;
+  candidates = buildAssignmentCandidates({ event: extracted, tasks: finalTasks, settings: agentSettings, semanticScores, matcher, validator });
   candidateStages.final = candidates.map(compactCandidateStage);
 
   let decision = evaluateAssignmentDecision({
@@ -552,9 +763,14 @@ export async function runScheduleActivityAssignmentAgent({
     eventDate: event.date,
     existingActivityKey: event.activityKey,
     scheduleVersionId: inputs.scheduleMeta.sourceVersionId,
-    aiCompleted
+    aiCompleted,
+    calibrator: config?.scheduleAssignmentCalibration || null,
+    calibrationContext: {
+      settingsVersion: agentSettings.version || null,
+      configurationSnapshotId: configuration.snapshotId
+    }
   });
-  const nearThreshold = Math.abs(decision.confidence - agentSettings.autoAssignmentThreshold) <= agentSettings.judgeNearThresholdRange;
+  const nearThreshold = Math.abs(decision.rankingScore - agentSettings.autoAssignmentThreshold) <= agentSettings.judgeNearThresholdRange;
   const roleDisagreement = matcher?.bestActivityKey !== validator?.bestActivityKey;
   if (apiKey && agentSettings.roles.judge.enabled && modelCalls < agentSettings.maxModelCalls && (nearThreshold || roleDisagreement || decision.decision === "ambiguous")) {
     try {
@@ -590,7 +806,12 @@ export async function runScheduleActivityAssignmentAgent({
       eventDate: event.date,
       existingActivityKey: event.activityKey,
       scheduleVersionId: inputs.scheduleMeta.sourceVersionId,
-      aiCompleted
+      aiCompleted,
+      calibrator: config?.scheduleAssignmentCalibration || null,
+      calibrationContext: {
+        settingsVersion: agentSettings.version || null,
+        configurationSnapshotId: configuration.snapshotId
+      }
     });
   }
   step("assignment_judge", judge ? "Decision judge completed" : "Decision judge was not required", {
@@ -604,6 +825,11 @@ export async function runScheduleActivityAssignmentAgent({
   }, judge ? "done" : roleErrors.judge ? "error" : "skipped");
   step("assignment_policy", "Safety and auto-assignment policy evaluated", {
     decision: decision.decision,
+    rankingScore: decision.rankingScore,
+    runnerUpRankingScore: decision.runnerUpRankingScore,
+    rankingGap: decision.rankingGap,
+    calibratedProbability: decision.calibratedProbability,
+    calibrationStatus: decision.calibration.status,
     confidence: decision.confidence,
     runnerUpConfidence: decision.runnerUpConfidence,
     margin: decision.margin,
@@ -682,6 +908,9 @@ export async function runScheduleActivityAssignmentAgent({
     auditPersisted,
     auditPersistenceSkipped,
     engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
+    scheduleVersionId: inputs.scheduleMeta.sourceVersionId,
+    settingsVersion: agentSettings.version || null,
+    configurationSnapshotId: configuration.snapshotId,
     event: compactEvent(event),
     extractedEvent: extracted,
     timeFilter: timeFilter === true ? { enabled: true, skipped: false, ...timeFilterResult } : { enabled: false, skipped: false },
@@ -689,6 +918,13 @@ export async function runScheduleActivityAssignmentAgent({
       type: decision.decision,
       selectedActivityKey: decision.selected?.activityKey || null,
       selectedActivityName: decision.selected?.name || null,
+      rankingScore: decision.rankingScore,
+      runnerUpRankingScore: decision.runnerUpRankingScore,
+      rankingGap: decision.rankingGap,
+      calibratedProbability: decision.calibratedProbability,
+      calibration: decision.calibration,
+      roleAgreement: decision.roleAgreement,
+      hardConflict: decision.hardConflict,
       confidence: decision.confidence,
       runnerUpConfidence: decision.runnerUpConfidence,
       margin: decision.margin,
@@ -699,6 +935,14 @@ export async function runScheduleActivityAssignmentAgent({
     },
     candidates: candidates.slice(0, 8),
     candidateStages,
+    retrieval: {
+      ...retrieval,
+      deterministicCandidateCount: candidateStages.deterministic.length,
+      semanticCandidateCount: candidateStages.semantic.length,
+      modelCandidateCount: modelCandidates.length,
+      scoredSemanticCandidateCount: Object.keys(semanticScores).length,
+      cache: retrievalCacheContext ? finalizeCacheMetrics(retrievalCacheContext) : null
+    },
     roles: {
       timeFilter: timeFilterRole || { error: timeFilter === true ? "not_required" : "not_requested" },
       extractor: extractorOutput ? { ok: true } : { ok: false, error: roleErrors.extractor || "not_run" },
@@ -799,8 +1043,13 @@ export async function confirmScheduleActivityAssignment({ projectId, runId, acti
 
 export async function rejectScheduleActivityAssignment({ projectId, runId, requestedBy = null, reason = "" , config, settings: settingsInput = null } = {}) {
   const settings = settingsInput || scheduleSettings();
-  const { run } = await getScheduleActivityAssignmentRun({ projectId, runId, config, settings });
+  const { run, candidates } = await getScheduleActivityAssignmentRun({ projectId, runId, config, settings });
   if (!["review_required", "no_match"].includes(run.status)) throw new Error("assignment run is not awaiting review");
   await patchRows({ config, settings, table: RUNS_TABLE, filter: `id=eq.${encodeURIComponent(runId)}`, body: { status: "rejected", review_reason: String(reason || "").slice(0, 1000), reviewed_by: requestedBy, reviewed_at: new Date().toISOString() } });
-  return { runId, sourceId: String(run.source_id), status: "rejected" };
+  return {
+    runId,
+    sourceId: String(run.source_id),
+    status: "rejected",
+    rejectedCandidateKeys: candidates.map((candidate) => String(candidate.activity_key || "")).filter(Boolean).slice(0, 20)
+  };
 }

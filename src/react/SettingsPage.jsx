@@ -1418,7 +1418,7 @@ function ScheduleAssignmentAgentSection({ form, update, models, scheduleAgentMet
             <Toggle label="אפשר שיוך אוטומטי לאחר לחיצה" checked={value.autoAssignmentEnabled === true} onChange={v => update("scheduleAssignmentAgent.autoAssignmentEnabled", v)} />
           </div>
           <div style={s.grid3}>
-            <Field label="סף שיוך אוטומטי (%)" hint={Number(value.autoAssignmentThreshold) < 85 ? "אזהרה: סף נמוך מ־85% מגדיל סיכון לשיוך שגוי." : "ברירת המחדל: 90%."}>
+            <Field label="סף הסתברות מכוילת לשיוך (%)" hint={Number(value.autoAssignmentThreshold) < 85 ? "אזהרה: סף נמוך מ־85% מגדיל סיכון לשיוך שגוי. הסף אינו פעיל ללא ארטיפקט כיול תקף." : "ברירת המחדל: 90%. הסף אינו פעיל ללא ארטיפקט כיול תקף."}>
               <Input type="number" min={50} max={100} value={value.autoAssignmentThreshold ?? 90} onChange={v => update("scheduleAssignmentAgent.autoAssignmentThreshold", v)} />
             </Field>
             <Field label="פער מהמועמד השני" hint="ברירת המחדל: 12 נקודות.">
@@ -1525,7 +1525,14 @@ function ScheduleAssignmentAgentSection({ form, update, models, scheduleAgentMet
           {lab.result ? (
             <div role="status" style={{ background: "var(--surface-2)", border: "1px solid var(--line)", borderRadius: "var(--r)", padding: 12, fontSize: 12.5, lineHeight: 1.7 }}>
               <strong>{lab.result.decision?.selectedActivityName || "לא נמצאה פעילות חד־משמעית"}</strong>
-              <div>ציון: {lab.result.decision?.confidence ?? 0}% · פער: {lab.result.decision?.margin ?? 0} · החלטה: {lab.result.decision?.type}</div>
+              <div>
+                ציון התאמה: {lab.result.decision?.rankingScore ?? lab.result.decision?.confidence ?? 0}
+                {` · פער: ${lab.result.decision?.rankingGap ?? lab.result.decision?.margin ?? 0}`}
+                {Number.isFinite(lab.result.decision?.calibratedProbability)
+                  ? ` · הסתברות מכוילת: ${Math.round(lab.result.decision.calibratedProbability * 100)}%`
+                  : ""}
+                {` · החלטה: ${lab.result.decision?.type}`}
+              </div>
               <div>{lab.result.decision?.reason}</div>
             </div>
           ) : null}

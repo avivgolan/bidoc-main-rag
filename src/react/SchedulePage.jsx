@@ -11,6 +11,7 @@ import {
   filterActivityUpdates,
   hasActiveActivityUpdateFilters
 } from "./activityAssignmentBatch.js";
+import { SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS } from "../scheduleActivityAssignmentLabels.js";
 
 // Schedule Intelligence tab (spec section 15, phases 1-2 screens).
 //
@@ -455,7 +456,7 @@ function ActivityPicker({ activities, value, disabled, busy, onChange }) {
 function ActivityUpdatesTable({
   items, activities, busyId, onAssign, agentBusyId, agentResults, onRunAgent, onConfirmAgent, onRejectAgent,
   agentBatch, onStartAgentBatch, onStopAgentBatch, onResumeAgentBatch, onRestartAgentBatch,
-  timeFilterEnabled, onTimeFilterChange
+  timeFilterEnabled, onTimeFilterChange, labelCoverage
 }) {
   const [filters, setFilters] = useState(() => ({ ...DEFAULT_ACTIVITY_UPDATE_FILTERS }));
   const [visibleCount, setVisibleCount] = useState(100);
@@ -497,7 +498,11 @@ function ActivityUpdatesTable({
       <div className="activityUpdatesHead">
         <div>
           <h3 id="activity-updates-title">עדכונים והתראות על ציר הזמן</h3>
-          <p aria-live="polite">{filtersActive ? `${filtered.length} מתוך ${items.length}` : items.length} פריטים · {assigned} משויכים לפעילות{sharedReviewCount ? ` · ${sharedReviewCount} ממתינים להחלטת צוות` : ""}</p>
+          <p aria-live="polite">
+            {filtersActive ? `${filtered.length} מתוך ${items.length}` : items.length} פריטים · {assigned} משויכים לפעילות
+            {sharedReviewCount ? ` · ${sharedReviewCount} ממתינים להחלטת צוות` : ""}
+            {labelCoverage ? ` · ${labelCoverage.caseCount || 0} תוויות כיול מפורשות` : ""}
+          </p>
         </div>
         <div className="activityUpdatesHeadTools">
           <div className="activityAgentBatchControls" aria-label="הרצת איתור אוטומטי לכל ההתראות">
@@ -588,6 +593,7 @@ function ActivityUpdatesTable({
               const reviewCandidates = activityAssignmentReviewCandidates(agentResult);
               const reviewChoiceBusy = isAgentBusy || busyId === item.id || batchActive;
               const hasPersistedAuditRun = Boolean(agentResult?.runId && agentResult?.auditPersisted);
+              const canRecordReviewedLabel = Boolean(agentResult?.persistedReview && agentResult?.reviewId);
               return (
                 <React.Fragment key={`${item.sourceTable}:${item.id}`}>
                   <tr className={item.activityKey ? "is-assigned" : ""}>
@@ -621,7 +627,13 @@ function ActivityUpdatesTable({
                           <div className={`activityAgentResult ${agentResult.decision?.autoAssigned ? "is-auto" : ""}`}>
                             <div className="activityAgentResultHead">
                               <strong>{agentResult.decision?.autoAssigned ? "שויך אוטומטית" : agentResult.decision?.selectedActivityName || "לא נמצאה התאמה חד־משמעית"}</strong>
-                              <span>ציון {agentResult.decision?.confidence ?? 0}% · פער {agentResult.decision?.margin ?? 0}</span>
+                              <span>
+                                ציון התאמה {agentResult.decision?.rankingScore ?? agentResult.decision?.confidence ?? 0}
+                                {` · פער ${agentResult.decision?.rankingGap ?? agentResult.decision?.margin ?? 0}`}
+                                {Number.isFinite(agentResult.decision?.calibratedProbability)
+                                  ? ` · הסתברות מכוילת ${Math.round(agentResult.decision.calibratedProbability * 100)}%`
+                                  : ""}
+                              </span>
                             </div>
                             {agentResult.persistedReview ? (
                               <span className={`activityAgentSharedReviewBadge ${agentResult.approved || agentResult.rejected ? "is-resolved" : ""}`}>
@@ -631,19 +643,22 @@ function ActivityUpdatesTable({
                             <p>{agentResult.decision?.reason}</p>
                             {reviewCandidates.length ? (
                               <div className="activityAgentReview" aria-label="בחירת פעילות מתוך הצעות הסוכן">
-                                <strong className="activityAgentReviewPrompt">נדרשת החלטה שלך — בחר את הפעילות המתאימה:</strong>
+                                <strong className="activityAgentReviewPrompt">נדרשת החלטה שלך - בחר את הפעילות המתאימה:</strong>
                                 <div className="activityAgentCandidates" role="group" aria-label="פעילויות מוצעות">
                                   {reviewCandidates.map(candidate => (
                                     <button type="button" key={candidate.activityKey} disabled={reviewChoiceBusy}
                                       onClick={() => hasPersistedAuditRun
                                         ? onConfirmAgent(item, agentResult, candidate)
                                         : onAssign(item, candidate.activityKey)}>
-                                      <span>{candidate.name}</span><small>{candidate.finalScore}% · {candidate.plannedStart || "?"}–{candidate.plannedFinish || "?"}</small>
+                                      <span>{candidate.name}</span><small>ציון התאמה {candidate.finalScore} · {candidate.plannedStart || "?"}–{candidate.plannedFinish || "?"}</small>
                                     </button>
                                   ))}
-                                  {hasPersistedAuditRun ? (
+                                  {canRecordReviewedLabel ? SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS.map((option) => (
+                                    <button type="button" className="is-reject" key={option.type} disabled={reviewChoiceBusy}
+                                      onClick={() => onRejectAgent(item, agentResult, option)}>{option.labelHe}</button>
+                                  )) : hasPersistedAuditRun ? (
                                     <button type="button" className="is-reject" disabled={reviewChoiceBusy}
-                                      onClick={() => onRejectAgent(item, agentResult)}>אף אפשרות אינה מתאימה</button>
+                                      onClick={() => onRejectAgent(item, agentResult, SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS[0])}>אף אפשרות אינה מתאימה</button>
                                   ) : null}
                                 </div>
                               </div>
@@ -1004,6 +1019,7 @@ export function SchedulePage() {
   const [activityUpdateBusyId, setActivityUpdateBusyId] = useState(null);
   const [activityAgentBusyId, setActivityAgentBusyId] = useState(null);
   const [activityAgentResults, setActivityAgentResults] = useState({});
+  const [activityAssignmentLabelCoverage, setActivityAssignmentLabelCoverage] = useState(null);
   const [activityAgentBatch, setActivityAgentBatch] = useState(() => createActivityAssignmentBatch());
   const [activityAgentTimeFilter, setActivityAgentTimeFilter] = useState(false);
   const activityAgentBatchControlRef = useRef({ token: 0, stopRequested: false, active: false });
@@ -1041,6 +1057,7 @@ export function SchedulePage() {
     setLoading(true);
     setError("");
     setActivityAgentResults({});
+    setActivityAssignmentLabelCoverage(null);
     try {
       const calculationDate = asOfValue || projectEndDateValue || "";
       const asOfQuery = calculationDate ? `&asOf=${encodeURIComponent(calculationDate)}` : "";
@@ -1095,6 +1112,7 @@ export function SchedulePage() {
       const pendingConditions = conditionsLoad.value;
       const updates = updatesLoad.value;
       const sharedReviews = sharedReviewsLoad.value;
+      setActivityAssignmentLabelCoverage(sharedReviews.labelCoverage || null);
       const failedRequiredLoads = [healthLoad, sweepLoad].filter((part) => part.error);
       if (failedRequiredLoads.length) setError(scheduleLoadFailureMessage(failedRequiredLoads));
       setHealth(healthResult);
@@ -1341,7 +1359,21 @@ export function SchedulePage() {
       if (result.reviewQueueWarning) setWarnings((current) => [...new Set([...current, `סנכרון החלטת צוות: ${result.reviewQueueWarning}`])]);
       setActivityAgentResults(current => ({
         ...current,
-        [item.id]: { ...run, auditPersisted: false, decision: { ...run.decision, autoAssigned: false, selectedActivityName: candidate.name, confidence: candidate.finalScore, reason: "הצעת הסוכן אושרה ונשמרה." }, approved: true }
+        [item.id]: {
+          ...run,
+          auditPersisted: false,
+          decision: {
+            ...run.decision,
+            autoAssigned: false,
+            selectedActivityName: candidate.name,
+            rankingScore: candidate.finalScore,
+            calibratedProbability: null,
+            calibration: { status: "not_applicable", probability: null, artifactId: null, reason: "manual_review" },
+            confidence: candidate.finalScore,
+            reason: "הצעת הסוכן אושרה ונשמרה."
+          },
+          approved: true
+        }
       }));
     } catch (err) {
       setActivityAgentResults(current => ({ ...current, [item.id]: { ...run, error: err.message } }));
@@ -1350,18 +1382,33 @@ export function SchedulePage() {
     }
   }, [projectId]);
 
-  const rejectActivityAssignmentAgent = useCallback(async (item, run) => {
+  const rejectActivityAssignmentAgent = useCallback(async (item, run, labelOption = SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS[0]) => {
     if (!projectId || !run?.runId) return;
     setActivityAgentBusyId(item.id);
     setError("");
     try {
-      const result = await api("/api/schedule/activity-updates/assignment-agent/reject", {
-        method: "POST", body: { projectId, runId: run.runId, reason: "נדחה ידנית ממסך לוח הזמנים" }
+      const result = await api(run.auditPersisted
+        ? "/api/schedule/activity-updates/assignment-agent/reject"
+        : "/api/schedule/activity-updates/assignment-agent/review-label", {
+        method: "POST",
+        body: {
+          projectId,
+          runId: run.runId,
+          sourceId: item.id,
+          labelType: labelOption.type,
+          reason: labelOption.reasonHe
+        }
       });
       if (result.reviewQueueWarning) setWarnings((current) => [...new Set([...current, `סנכרון החלטת צוות: ${result.reviewQueueWarning}`])]);
       setActivityAgentResults(current => ({
         ...current,
-        [item.id]: { ...run, auditPersisted: false, decision: { ...run.decision, reason: "הצעת הסוכן נדחתה ולא נוצר שיוך." }, rejected: true }
+        [item.id]: {
+          ...run,
+          auditPersisted: false,
+          decision: { ...run.decision, reason: labelOption.reasonHe },
+          evaluationLabelType: labelOption.type,
+          rejected: true
+        }
       }));
     } catch (err) {
       setActivityAgentResults(current => ({ ...current, [item.id]: { ...run, error: err.message } }));
@@ -1650,7 +1697,8 @@ export function SchedulePage() {
         onRejectAgent={rejectActivityAssignmentAgent} agentBatch={activityAgentBatch}
         onStartAgentBatch={startActivityAssignmentBatch} onStopAgentBatch={stopActivityAssignmentBatch}
         onResumeAgentBatch={resumeActivityAssignmentBatch} onRestartAgentBatch={restartActivityAssignmentBatch}
-        timeFilterEnabled={activityAgentTimeFilter} onTimeFilterChange={setActivityAgentTimeFilter} />
+        timeFilterEnabled={activityAgentTimeFilter} onTimeFilterChange={setActivityAgentTimeFilter}
+        labelCoverage={activityAssignmentLabelCoverage} />
     </div>
   );
 }
