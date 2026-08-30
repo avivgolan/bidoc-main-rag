@@ -12,6 +12,7 @@ import {
   hasActiveActivityUpdateFilters
 } from "./activityAssignmentBatch.js";
 import { SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS } from "../scheduleActivityAssignmentLabels.js";
+import { mergeScheduleActivityUpdatesWithSharedReviews } from "./scheduleActivityAssignmentReviewState.js";
 
 // Schedule Intelligence tab (spec section 15, phases 1-2 screens).
 //
@@ -603,9 +604,9 @@ function ActivityUpdatesTable({
                     <td>{item.severity ?? "—"}</td><td>{item.status || "—"}</td>
                     <td>
                       <div className="activityAssignmentActions">
-                        <ActivityPicker activities={activities} value={item.activityKey} disabled={!item.date || batchActive}
+                        <ActivityPicker activities={activities} value={item.activityKey} disabled={!item.date || batchActive || agentResult?.detachedFromCurrentFeed}
                           busy={busyId === item.id} onChange={(activityKey) => onAssign(item, activityKey)} />
-                        <button type="button" className="activityAgentButton" disabled={!item.date || Boolean(item.activityKey) || isAgentBusy || busyId === item.id || batchActive}
+                        <button type="button" className="activityAgentButton" disabled={!item.date || Boolean(item.activityKey) || isAgentBusy || busyId === item.id || batchActive || agentResult?.detachedFromCurrentFeed}
                           onClick={() => onRunAgent(item)} title="הפעל סוכן חיפוש והכרעה מבוקר עבור שורה זו">
                           {isAgentBusy ? "הסוכן בודק…" : "איתור אוטומטי"}
                         </button>
@@ -640,6 +641,9 @@ function ActivityUpdatesTable({
                                 {agentResult.approved ? "נבחרה פעילות · הרשומה סומנה כטופלה" : agentResult.rejected ? "ההצעות נדחו · הרשומה סומנה כטופלה" : "נשמר ב־MAIN · ממתין להחלטת צוות"}
                               </span>
                             ) : null}
+                            {agentResult.detachedFromCurrentFeed ? (
+                              <small className="activityAgentWarning">ההתראה המקורית אינה נמצאת עוד בפיד הפעיל. ההחלטה תישמר כתווית כיול בלבד ולא תשנה שיוך בלוח.</small>
+                            ) : null}
                             <p>{agentResult.decision?.reason}</p>
                             {reviewCandidates.length ? (
                               <div className="activityAgentReview" aria-label="בחירת פעילות מתוך הצעות הסוכן">
@@ -647,7 +651,7 @@ function ActivityUpdatesTable({
                                 <div className="activityAgentCandidates" role="group" aria-label="פעילויות מוצעות">
                                   {reviewCandidates.map(candidate => (
                                     <button type="button" key={candidate.activityKey} disabled={reviewChoiceBusy}
-                                      onClick={() => hasPersistedAuditRun
+                                      onClick={() => canRecordReviewedLabel || hasPersistedAuditRun
                                         ? onConfirmAgent(item, agentResult, candidate)
                                         : onAssign(item, candidate.activityKey)}>
                                       <span>{candidate.name}</span><small>ציון התאמה {candidate.finalScore} · {candidate.plannedStart || "?"}–{candidate.plannedFinish || "?"}</small>
@@ -1120,19 +1124,9 @@ export function SchedulePage() {
       setAlerts(visibleAlerts.alerts ?? []);
       setBaselinedCount(baselined.count ?? 0);
       setConditions(pendingConditions);
-      setActivityUpdates({
-        total: Number(updates.total) || 0,
-        items: Array.isArray(updates.items) ? updates.items : []
-      });
-      const updateById = new Map((Array.isArray(updates.items) ? updates.items : []).map((item) => [String(item.id), item]));
-      setActivityAgentResults(Object.fromEntries(
-        (Array.isArray(sharedReviews.reviews) ? sharedReviews.reviews : [])
-          .filter((review) => {
-            const item = updateById.get(String(review.sourceId));
-            return item && !item.activityKey;
-          })
-          .map((review) => [String(review.sourceId), review])
-      ));
+      const mergedActivityUpdates = mergeScheduleActivityUpdatesWithSharedReviews(updates.items, sharedReviews.reviews);
+      setActivityUpdates({ total: mergedActivityUpdates.items.length, items: mergedActivityUpdates.items });
+      setActivityAgentResults(mergedActivityUpdates.agentResults);
       setWarnings([...new Set([
         ...(healthResult?.warnings ?? []),
         ...(sweep.warnings ?? []),
@@ -1348,14 +1342,26 @@ export function SchedulePage() {
     setActivityAgentBusyId(item.id);
     setError("");
     try {
-      const result = await api("/api/schedule/activity-updates/assignment-agent/confirm", {
+      const labelOnly = Boolean(run.persistedReview && run.detachedFromCurrentFeed);
+      const result = await api(labelOnly
+        ? "/api/schedule/activity-updates/assignment-agent/review-label"
+        : "/api/schedule/activity-updates/assignment-agent/confirm", {
         method: "POST",
-        body: { projectId, runId: run.runId, activityKey: candidate.activityKey }
+        body: {
+          projectId,
+          runId: run.runId,
+          sourceId: item.id,
+          activityKey: candidate.activityKey,
+          labelType: "confirmed_match",
+          reason: "הבודק אישר את הפעילות המוצעת כתווית כיול."
+        }
       });
-      setActivityUpdates(current => ({
-        ...current,
-        items: current.items.map(existing => existing.id === item.id ? result.item : existing)
-      }));
+      if (!labelOnly) {
+        setActivityUpdates(current => ({
+          ...current,
+          items: current.items.map(existing => existing.id === item.id ? result.item : existing)
+        }));
+      }
       if (result.reviewQueueWarning) setWarnings((current) => [...new Set([...current, `סנכרון החלטת צוות: ${result.reviewQueueWarning}`])]);
       setActivityAgentResults(current => ({
         ...current,
@@ -1387,7 +1393,7 @@ export function SchedulePage() {
     setActivityAgentBusyId(item.id);
     setError("");
     try {
-      const result = await api(run.auditPersisted
+      const result = await api(run.auditPersisted && !run.detachedFromCurrentFeed
         ? "/api/schedule/activity-updates/assignment-agent/reject"
         : "/api/schedule/activity-updates/assignment-agent/review-label", {
         method: "POST",

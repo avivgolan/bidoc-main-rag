@@ -30,6 +30,7 @@ import {
   scheduleResolverError, settingsOwnedAiConfig
 } from "../src/subagents/scheduleConditionResolver.js";
 import { DEFAULT_SCHEDULE_VIEW, formatIsraeliDate, makeScheduleScale, parseIsraeliDate, scheduleSubjectKey } from "../src/react/scheduleTimeline.js";
+import { mergeScheduleActivityUpdatesWithSharedReviews } from "../src/react/scheduleActivityAssignmentReviewState.js";
 import {
   ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
   activityAssignmentReviewCandidates,
@@ -269,6 +270,22 @@ test("schedule assignment shared review: persists only actionable decisions and 
   assert.deepEqual(hydrated.candidates.map((candidate) => candidate.activityKey), ["gantt:file:1", "gantt:file:2"]);
 });
 
+test("schedule assignment shared review: missing source rows remain visible as pinned label-only snapshots", () => {
+  const current = [{ id: "alert-current", title: "Current", activityKey: null }];
+  const review = {
+    sourceId: "alert-missing",
+    persistedReview: true,
+    event: { id: "alert-missing", title: "Saved review", alertType: "עיכוב", date: "2025-01-15", severity: 4 },
+    candidates: [{ activityKey: "gantt:file:1", name: "ריצוף" }]
+  };
+  const merged = mergeScheduleActivityUpdatesWithSharedReviews(current, [review]);
+  assert.equal(merged.detachedCount, 1);
+  assert.equal(merged.items[0].id, "alert-missing");
+  assert.equal(merged.items[0].reviewSnapshot, true);
+  assert.equal(merged.agentResults["alert-missing"].detachedFromCurrentFeed, true);
+  assert.equal(merged.items[1], current[0]);
+});
+
 test("schedule assignment labels: explicit reviewed outcomes have strict non-overlapping shapes", () => {
   const confirmed = normalizeScheduleAssignmentReviewLabel({
     labelType: SCHEDULE_ASSIGNMENT_LABEL_TYPES.CONFIRMED_MATCH,
@@ -431,6 +448,8 @@ test("schedule assignment labels: additive migration and routes remain backend-o
   assert.ok(routeStart >= 0 && routeEnd > routeStart);
   assert.match(route, /getSuperadminSession\(req\)/u);
   assert.match(route, /trustedCandidateKeys/u);
+  assert.match(route, /CONFIRMED_MATCH/u);
+  assert.match(route, /trustedCandidateKeys\.includes\(selectedActivityKey\)/u);
   assert.doesNotMatch(route, /body\.forbiddenActivityKeys/u);
   const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
   assert.match(page, /SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS\.map/iu);

@@ -2593,7 +2593,10 @@ async function handleApi(req, res, url) {
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     const body = await readJson(req).catch(() => ({}));
     if (!body.projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
-    if (!SCHEDULE_ASSIGNMENT_NEGATIVE_LABEL_TYPES.includes(body.labelType) || body.labelType === SCHEDULE_ASSIGNMENT_LABEL_TYPES.STALE_ACTIVITY) {
+    const isConfirmedMatch = body.labelType === SCHEDULE_ASSIGNMENT_LABEL_TYPES.CONFIRMED_MATCH;
+    const isSupportedNegative = SCHEDULE_ASSIGNMENT_NEGATIVE_LABEL_TYPES.includes(body.labelType)
+      && body.labelType !== SCHEDULE_ASSIGNMENT_LABEL_TYPES.STALE_ACTIVITY;
+    if (!isConfirmedMatch && !isSupportedNegative) {
       return sendJson(res, 400, { error: "unsupported review label" });
     }
     try {
@@ -2605,10 +2608,15 @@ async function handleApi(req, res, url) {
       const trustedCandidateKeys = (Array.isArray(review.candidates_snapshot) ? review.candidates_snapshot : [])
         .map((candidate) => String(candidate?.activityKey || ""))
         .filter((activityKey) => activityKey.startsWith("gantt:"));
+      const selectedActivityKey = String(body.activityKey || "");
+      if (isConfirmedMatch && !trustedCandidateKeys.includes(selectedActivityKey)) {
+        return sendJson(res, 400, { error: "activityKey is not a trusted review candidate" });
+      }
       const result = await resolveSharedScheduleAssignmentReviews({
         projectId: body.projectId,
         sourceId: body.sourceId,
-        status: "rejected",
+        status: isConfirmedMatch ? "selected" : "rejected",
+        activityKey: isConfirmedMatch ? selectedActivityKey : null,
         resolvedBy: reviewer.sub,
         note: body.reason,
         labelType: body.labelType,
