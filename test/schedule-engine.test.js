@@ -40,6 +40,11 @@ import {
   hasActiveActivityUpdateFilters
 } from "../src/react/activityAssignmentBatch.js";
 import {
+  scheduleAssignmentNeedsSharedReview,
+  scheduleAssignmentReviewSnapshot,
+  sharedReviewRowToAgentResult
+} from "../src/subagents/scheduleActivityAssignmentReviewQueue.js";
+import {
   buildAssignmentCandidates,
   DEFAULT_SCHEDULE_ASSIGNMENT_AGENT_SETTINGS,
   evaluateTimeRelevance,
@@ -192,6 +197,62 @@ test("schedule assignment review: exposes at most two valid choices without requ
   });
   assert.deepEqual(candidates.map((candidate) => candidate.activityKey), ["gantt:file:1", "gantt:file:2"]);
   assert.deepEqual(activityAssignmentReviewCandidates({ decision: { autoAssigned: true }, candidates }), []);
+});
+
+test("schedule assignment shared review: persists only actionable decisions and reconstructs the team card", () => {
+  const result = {
+    runId: "11111111-1111-4111-8111-111111111111",
+    projectId: PROJECT,
+    scheduleProjectId: PROJECT,
+    sourceId: "alert-9",
+    status: "review_required",
+    auditPersisted: true,
+    event: { id: "alert-9", title: "עיכוב בריצוף", alertType: "עיכוב", date: "2025-01-15", severity: 4, status: "בטיפול" },
+    decision: { type: "ambiguous", confidence: 52.62, runnerUpConfidence: 52.37, margin: 0.25, reason: "נדרשת החלטת צוות", autoAssigned: false },
+    candidates: [
+      { activityKey: "gantt:file:1", name: "ריצוף", finalScore: 52.62, plannedStart: "2025-01-10", plannedFinish: "2025-01-20" },
+      { activityKey: "gantt:file:2", name: "אספקה", finalScore: 52.37 },
+      { activityKey: "gantt:file:3", name: "מועמד שלישי", finalScore: 50 }
+    ]
+  };
+  assert.equal(scheduleAssignmentNeedsSharedReview(result), true);
+  assert.equal(scheduleAssignmentNeedsSharedReview({ ...result, assignment: { activityKey: "gantt:file:1" } }), false);
+  assert.equal(scheduleAssignmentNeedsSharedReview({ ...result, status: "filtered_out" }), false);
+  const snapshot = scheduleAssignmentReviewSnapshot(result);
+  assert.equal(snapshot.candidates.length, 2);
+  assert.equal(snapshot.candidates[0].name, "ריצוף");
+  const hydrated = sharedReviewRowToAgentResult({
+    id: "review-1",
+    run_id: result.runId,
+    source_project_id: PROJECT,
+    schedule_project_id: PROJECT,
+    source_id: result.sourceId,
+    event_snapshot: snapshot.event,
+    decision_snapshot: snapshot.decision,
+    candidates_snapshot: snapshot.candidates,
+    audit_persisted: true,
+    created_at: "2026-08-30T08:00:00Z"
+  });
+  assert.equal(hydrated.persistedReview, true);
+  assert.equal(hydrated.auditPersisted, true);
+  assert.deepEqual(hydrated.candidates.map((candidate) => candidate.activityKey), ["gantt:file:1", "gantt:file:2"]);
+});
+
+test("schedule assignment shared review: MAIN migration and server routes stay backend-only", () => {
+  const sql = fs.readFileSync(new URL("../supabase/migrations/20260830084450_schedule_activity_assignment_review_queue.sql", import.meta.url), "utf8");
+  assert.match(sql, /create table public\.schedule_activity_assignment_reviews/iu);
+  assert.match(sql, /alter table public\.schedule_activity_assignment_reviews enable row level security/iu);
+  assert.match(sql, /revoke all on table public\.schedule_activity_assignment_reviews from public, anon, authenticated/iu);
+  assert.match(sql, /grant select, insert, update, delete on table public\.schedule_activity_assignment_reviews to service_role/iu);
+  assert.match(sql, /bidoc_upsert_schedule_assignment_review_v1/iu);
+  assert.match(sql, /bidoc_resolve_schedule_assignment_reviews_v1/iu);
+  const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+  assert.match(server, /assignment-agent\/reviews/iu);
+  assert.match(server, /persistSharedScheduleAssignmentReview/iu);
+  assert.match(server, /resolveSharedScheduleAssignmentReviews/iu);
+  const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
+  assert.match(page, /ממתינים להחלטת צוות/iu);
+  assert.match(page, /reviews\?projectId=/iu);
 });
 
 test("schedule assignment workflow: exposes components, safe parameters, scores and telemetry", () => {

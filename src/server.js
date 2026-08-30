@@ -17,6 +17,7 @@ import { authorizeContractsExtractionRequest, authorizeDataQueryRequest } from "
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
+import { listSharedScheduleAssignmentReviews, persistSharedScheduleAssignmentReview, resolveSharedScheduleAssignmentReviews, scheduleAssignmentNeedsSharedReview } from "./subagents/scheduleActivityAssignmentReviewQueue.js";
 import { scheduleAssignmentConfigurationSnapshot, validateScheduleAssignmentAgentSettings } from "./scheduleActivityAssignmentEngine.js";
 import { runScheduleConditionResolver } from "./subagents/scheduleConditionResolver.js";
 import { CONTRACTS_AGENT_VERSION, CONTRACTS_EXTRACTION_BUDGET_MS, CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES, CONTRACTS_MAX_RESPONSE_BYTES, CONTRACTS_PDF_READER_VERSION } from "./contracts/constants.js";
@@ -2375,6 +2376,23 @@ async function handleApi(req, res, url) {
     }
   }
 
+  if (req.method === "GET" && url.pathname === "/api/schedule/activity-updates/assignment-agent/reviews") {
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const result = await listSharedScheduleAssignmentReviews({
+        projectId,
+        status: url.searchParams.get("status") || "pending",
+        config: getConfig()
+      });
+      return sendJson(res, 200, { ok: true, projectId, ...result });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message, reviews: [] });
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/api/schedule/activity-updates/assign") {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
@@ -2389,7 +2407,19 @@ async function handleApi(req, res, url) {
         linkedBy: reviewer.sub,
         config: buildRequestConfig(req, body)
       });
-      return sendJson(res, 200, { ok: true, item });
+      let reviewQueueWarning = null;
+      if (item.activityKey) {
+        await resolveSharedScheduleAssignmentReviews({
+          projectId,
+          sourceId: item.id,
+          status: "selected",
+          activityKey: item.activityKey,
+          resolvedBy: reviewer.sub,
+          note: "פעילות נבחרה ידנית מלוח הזמנים",
+          config: getConfig()
+        }).catch((error) => { reviewQueueWarning = error.message; });
+      }
+      return sendJson(res, 200, { ok: true, item, ...(reviewQueueWarning ? { reviewQueueWarning } : {}) });
     } catch (error) {
       return sendJson(res, /required|not found|does not belong|ללא data_date/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
     }
@@ -2442,6 +2472,31 @@ async function handleApi(req, res, url) {
           emitRunEvent(runId, "workflow_persistence_warning", "Workflow persistence failed", { status: "warning", error: error.message });
         });
       }
+      try {
+        if (result.assignment) {
+          await resolveSharedScheduleAssignmentReviews({
+            projectId,
+            sourceId: result.sourceId,
+            status: "selected",
+            activityKey: result.assignment.activityKey,
+            resolvedBy: reviewer.sub,
+            note: "הסוכן שייך את ההתראה אוטומטית",
+            config: getConfig()
+          });
+        } else if (scheduleAssignmentNeedsSharedReview(result)) {
+          const sharedReview = await persistSharedScheduleAssignmentReview({
+            result,
+            projectId,
+            requestedBy: reviewer.sub,
+            config: getConfig()
+          });
+          result.persistedReview = sharedReview.persisted === true;
+          result.reviewId = sharedReview.reviewId || null;
+        }
+      } catch (error) {
+        result.persistedReview = false;
+        result.warnings = [...(result.warnings || []), `שמירת ההחלטה המשותפת ב־MAIN נכשלה: ${error.message}`];
+      }
       return sendJson(res, 200, result);
     } catch (error) {
       failRun(runId, error);
@@ -2481,7 +2536,17 @@ async function handleApi(req, res, url) {
         requestedBy: reviewer.sub,
         config: getConfig()
       });
-      return sendJson(res, 200, { ok: true, ...result });
+      let reviewQueueWarning = null;
+      await resolveSharedScheduleAssignmentReviews({
+        projectId: body.projectId,
+        sourceId: result.item.id,
+        status: "selected",
+        activityKey: result.activityKey,
+        resolvedBy: reviewer.sub,
+        note: "הצעת הסוכן אושרה ידנית",
+        config: getConfig()
+      }).catch((error) => { reviewQueueWarning = error.message; });
+      return sendJson(res, 200, { ok: true, ...result, ...(reviewQueueWarning ? { reviewQueueWarning } : {}) });
     } catch (error) {
       return sendJson(res, /required|not found|not awaiting|not a candidate|כבר משויכת/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
     }
@@ -2494,7 +2559,16 @@ async function handleApi(req, res, url) {
     if (!body.projectId || !body.runId) return sendJson(res, 400, { error: "projectId and runId are required" });
     try {
       const result = await rejectScheduleActivityAssignment({ projectId: body.projectId, runId: body.runId, reason: body.reason, requestedBy: reviewer.sub, config: getConfig() });
-      return sendJson(res, 200, { ok: true, ...result });
+      let reviewQueueWarning = null;
+      await resolveSharedScheduleAssignmentReviews({
+        projectId: body.projectId,
+        sourceId: result.sourceId,
+        status: "rejected",
+        resolvedBy: reviewer.sub,
+        note: body.reason || "הצעת הסוכן נדחתה ידנית",
+        config: getConfig()
+      }).catch((error) => { reviewQueueWarning = error.message; });
+      return sendJson(res, 200, { ok: true, ...result, ...(reviewQueueWarning ? { reviewQueueWarning } : {}) });
     } catch (error) {
       return sendJson(res, /required|not found|not awaiting/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
     }

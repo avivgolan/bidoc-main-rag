@@ -473,6 +473,7 @@ function ActivityUpdatesTable({
     [items, activities, effectiveFilters]
   );
   const assigned = filtered.filter((item) => item.activityKey).length;
+  const sharedReviewCount = Object.values(agentResults || {}).filter((result) => result?.persistedReview && !result?.approved && !result?.rejected).length;
   const eligibleCount = useMemo(() => buildActivityAssignmentBatchQueue(filtered).length, [filtered]);
   const severityOptions = useMemo(() => [...new Set(items.map((item) => item.severity).filter((value) => value !== null && value !== undefined))]
     .sort((a, b) => Number(a) - Number(b)), [items]);
@@ -496,7 +497,7 @@ function ActivityUpdatesTable({
       <div className="activityUpdatesHead">
         <div>
           <h3 id="activity-updates-title">עדכונים והתראות על ציר הזמן</h3>
-          <p aria-live="polite">{filtersActive ? `${filtered.length} מתוך ${items.length}` : items.length} פריטים · {assigned} משויכים לפעילות</p>
+          <p aria-live="polite">{filtersActive ? `${filtered.length} מתוך ${items.length}` : items.length} פריטים · {assigned} משויכים לפעילות{sharedReviewCount ? ` · ${sharedReviewCount} ממתינים להחלטת צוות` : ""}</p>
         </div>
         <div className="activityUpdatesHeadTools">
           <div className="activityAgentBatchControls" aria-label="הרצת איתור אוטומטי לכל ההתראות">
@@ -622,6 +623,11 @@ function ActivityUpdatesTable({
                               <strong>{agentResult.decision?.autoAssigned ? "שויך אוטומטית" : agentResult.decision?.selectedActivityName || "לא נמצאה התאמה חד־משמעית"}</strong>
                               <span>ציון {agentResult.decision?.confidence ?? 0}% · פער {agentResult.decision?.margin ?? 0}</span>
                             </div>
+                            {agentResult.persistedReview ? (
+                              <span className={`activityAgentSharedReviewBadge ${agentResult.approved || agentResult.rejected ? "is-resolved" : ""}`}>
+                                {agentResult.approved ? "נבחרה פעילות · הרשומה סומנה כטופלה" : agentResult.rejected ? "ההצעות נדחו · הרשומה סומנה כטופלה" : "נשמר ב־MAIN · ממתין להחלטת צוות"}
+                              </span>
+                            ) : null}
                             <p>{agentResult.decision?.reason}</p>
                             {reviewCandidates.length ? (
                               <div className="activityAgentReview" aria-label="בחירת פעילות מתוך הצעות הסוכן">
@@ -1045,7 +1051,7 @@ export function SchedulePage() {
           return { value: fallback, warning: `${label}: ${error.message}`, error, label };
         }
       };
-      const [healthLoad, sweepLoad, alertsLoad, baselinedLoad, conditionsLoad, updatesLoad] = await Promise.all([
+      const [healthLoad, sweepLoad, alertsLoad, baselinedLoad, conditionsLoad, updatesLoad, sharedReviewsLoad] = await Promise.all([
         loadPart(
           api(`/api/schedule/health?projectId=${encodeURIComponent(pid)}${asOfQuery}`, { timeoutMs: 45_000 }),
           null,
@@ -1075,6 +1081,11 @@ export function SchedulePage() {
           api(`/api/schedule/activity-updates?projectId=${encodeURIComponent(pid)}`, { timeoutMs: 45_000 }),
           { total: 0, items: [] },
           "טעינת עדכונים והתראות"
+        ),
+        loadPart(
+          api(`/api/schedule/activity-updates/assignment-agent/reviews?projectId=${encodeURIComponent(pid)}&status=pending`),
+          { reviews: [] },
+          "טעינת החלטות צוות"
         )
       ]);
       const healthResult = healthLoad.value;
@@ -1083,6 +1094,7 @@ export function SchedulePage() {
       const baselined = baselinedLoad.value;
       const pendingConditions = conditionsLoad.value;
       const updates = updatesLoad.value;
+      const sharedReviews = sharedReviewsLoad.value;
       const failedRequiredLoads = [healthLoad, sweepLoad].filter((part) => part.error);
       if (failedRequiredLoads.length) setError(scheduleLoadFailureMessage(failedRequiredLoads));
       setHealth(healthResult);
@@ -1094,6 +1106,15 @@ export function SchedulePage() {
         total: Number(updates.total) || 0,
         items: Array.isArray(updates.items) ? updates.items : []
       });
+      const updateById = new Map((Array.isArray(updates.items) ? updates.items : []).map((item) => [String(item.id), item]));
+      setActivityAgentResults(Object.fromEntries(
+        (Array.isArray(sharedReviews.reviews) ? sharedReviews.reviews : [])
+          .filter((review) => {
+            const item = updateById.get(String(review.sourceId));
+            return item && !item.activityKey;
+          })
+          .map((review) => [String(review.sourceId), review])
+      ));
       setWarnings([...new Set([
         ...(healthResult?.warnings ?? []),
         ...(sweep.warnings ?? []),
@@ -1102,7 +1123,8 @@ export function SchedulePage() {
         alertsLoad.warning,
         baselinedLoad.warning,
         conditionsLoad.warning,
-        updatesLoad.warning
+        updatesLoad.warning,
+        sharedReviewsLoad.warning
       ].filter(Boolean))]);
     } catch (err) {
       setError(err.message);
@@ -1147,6 +1169,7 @@ export function SchedulePage() {
         ...current,
         items: current.items.map((existing) => existing.id === item.id ? result.item : existing)
       }));
+      if (result.reviewQueueWarning) setWarnings((current) => [...new Set([...current, `סנכרון החלטת צוות: ${result.reviewQueueWarning}`])]);
       setActivityAgentResults((current) => {
         if (!current[item.id]) return current;
         const next = { ...current };
@@ -1315,6 +1338,7 @@ export function SchedulePage() {
         ...current,
         items: current.items.map(existing => existing.id === item.id ? result.item : existing)
       }));
+      if (result.reviewQueueWarning) setWarnings((current) => [...new Set([...current, `סנכרון החלטת צוות: ${result.reviewQueueWarning}`])]);
       setActivityAgentResults(current => ({
         ...current,
         [item.id]: { ...run, auditPersisted: false, decision: { ...run.decision, autoAssigned: false, selectedActivityName: candidate.name, confidence: candidate.finalScore, reason: "הצעת הסוכן אושרה ונשמרה." }, approved: true }
@@ -1331,9 +1355,10 @@ export function SchedulePage() {
     setActivityAgentBusyId(item.id);
     setError("");
     try {
-      await api("/api/schedule/activity-updates/assignment-agent/reject", {
+      const result = await api("/api/schedule/activity-updates/assignment-agent/reject", {
         method: "POST", body: { projectId, runId: run.runId, reason: "נדחה ידנית ממסך לוח הזמנים" }
       });
+      if (result.reviewQueueWarning) setWarnings((current) => [...new Set([...current, `סנכרון החלטת צוות: ${result.reviewQueueWarning}`])]);
       setActivityAgentResults(current => ({
         ...current,
         [item.id]: { ...run, auditPersisted: false, decision: { ...run.decision, reason: "הצעת הסוכן נדחתה ולא נוצר שיוך." }, rejected: true }

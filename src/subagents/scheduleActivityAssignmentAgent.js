@@ -802,5 +802,5 @@ export async function rejectScheduleActivityAssignment({ projectId, runId, reque
   const { run } = await getScheduleActivityAssignmentRun({ projectId, runId, config, settings });
   if (!["review_required", "no_match"].includes(run.status)) throw new Error("assignment run is not awaiting review");
   await patchRows({ config, settings, table: RUNS_TABLE, filter: `id=eq.${encodeURIComponent(runId)}`, body: { status: "rejected", review_reason: String(reason || "").slice(0, 1000), reviewed_by: requestedBy, reviewed_at: new Date().toISOString() } });
-  return { runId, status: "rejected" };
+  return { runId, sourceId: String(run.source_id), status: "rejected" };
 }

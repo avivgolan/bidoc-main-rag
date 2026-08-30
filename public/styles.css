@@ -10635,6 +10635,8 @@ body:has(#timeline.active) .sidebar {
 .activityAgentResultHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .activityAgentResultHead strong { color: var(--text-primary); font-size: 0.8rem; }
 .activityAgentResultHead span { color: var(--text-muted); font-size: 0.7rem; white-space: nowrap; }
+.activityAgentSharedReviewBadge { align-self: flex-start; display: inline-flex; align-items: center; min-height: 24px; padding: 3px 8px; border: 1px solid color-mix(in srgb, #7d57c2 38%, var(--line)); border-radius: 999px; background: color-mix(in srgb, #7d57c2 9%, var(--surface)); color: #6840ad; font-size: 0.66rem; font-weight: 800; }
+.activityAgentSharedReviewBadge.is-resolved { border-color: color-mix(in srgb, var(--brand-600) 38%, var(--line)); background: var(--brand-50); color: var(--brand-700); }
 .activityAgentResult p { margin: 0; color: var(--text-secondary); line-height: 1.5; }
 .activityAgentReview { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
 .activityAgentReviewPrompt { color: var(--text-primary); font-size: 0.74rem; }
