@@ -425,11 +425,13 @@ test("schedule assignment shared review: MAIN migration and server routes stay b
   assert.match(sql, /bidoc_resolve_schedule_assignment_reviews_v1/iu);
   const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(server, /assignment-agent\/reviews/iu);
+  assert.match(server, /Cache-Control", "private, no-store/iu);
   assert.match(server, /persistSharedScheduleAssignmentReview/iu);
   assert.match(server, /resolveSharedScheduleAssignmentReviews/iu);
   const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
   assert.match(page, /ממתינים להחלטת צוות/iu);
   assert.match(page, /reviews\?projectId=/iu);
+  assert.match(page, /cache: "no-store"/iu);
 });
 
 test("schedule assignment labels: additive migration and routes remain backend-only and server-validated", () => {

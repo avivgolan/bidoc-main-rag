@@ -83,7 +83,7 @@ const GATE_LABELS = {
 const MONTHS_HE = ["ינו", "פבר", "מרץ", "אפר", "מאי", "יוני", "יולי", "אוג", "ספט", "אוק", "נוב", "דצמ"];
 const AXES_ROW_CAP = 120;
 
-async function api(path, { method = "GET", body = null, timeoutMs = 120_000 } = {}) {
+async function api(path, { method = "GET", body = null, timeoutMs = 120_000, cache = "default" } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -91,6 +91,7 @@ async function api(path, { method = "GET", body = null, timeoutMs = 120_000 } = 
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+      cache,
       signal: controller.signal
     });
     const json = await res.json().catch(() => ({}));
@@ -1104,7 +1105,7 @@ export function SchedulePage() {
           "טעינת עדכונים והתראות"
         ),
         loadPart(
-          api(`/api/schedule/activity-updates/assignment-agent/reviews?projectId=${encodeURIComponent(pid)}&status=pending`),
+          api(`/api/schedule/activity-updates/assignment-agent/reviews?projectId=${encodeURIComponent(pid)}&status=pending`, { cache: "no-store" }),
           { reviews: [] },
           "טעינת החלטות צוות"
         )

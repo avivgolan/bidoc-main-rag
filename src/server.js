@@ -2378,6 +2378,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/activity-updates/assignment-agent/reviews") {
+    res.setHeader("Cache-Control", "private, no-store");
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     const projectId = url.searchParams.get("projectId") || "";
