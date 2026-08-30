@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 
-Status: the Phase 4 policy-evaluation framework is implemented locally, but evidence-based policy selection is blocked. The Phase 3.1 MAIN migration is applied, local collection API is verified, application deployment is not verified, and Phase 5 has not started.
+Status: the Phase 4 policy-evaluation framework is implemented, but evidence-based policy selection is blocked. The Phase 3.1 MAIN migration and authenticated production collection UI are deployed and verified. Four reviews are pending, zero explicit labels exist, and Phase 5 has not started.
 
 Current engine: `schedule-assignment.v2.1-rc1`
 Current published configuration: `schedule-assignment-openai.v2.1-rc1`
@@ -428,13 +428,13 @@ If calibration is unavailable, stale, or incompatible with the active feature ve
 
 ## 9A. Phase 3.1 - Reviewed evidence collection
 
-Implementation status: completed locally on 2026-08-30. The collection path now supports explicit labels for confirmed matches, rejected matches, no match, ambiguous cases, irrelevant alerts, and stale activities. Labels are merged with canonical links using conflict-safe precedence, and readiness is reported against the 100-case evidence target.
+Implementation status: deployed and verified in the authenticated production Schedule UI on 2026-08-30. The collection path supports explicit labels for confirmed matches, rejected matches, no match, ambiguous cases, irrelevant alerts, and stale activities. Labels are merged with canonical links using conflict-safe precedence, and readiness is reported against the 100-case evidence target.
 
 The latest read-only refresh contains 30 reviewed cases: 28 confirmed matches and 2 rejected matches. Another 70 representative reviewed cases are required, and the dataset still has no examples of `no_match`, `stale_activity`, `irrelevant_alert`, or `ambiguous`.
 
-The additive backend-only migration remains local and unapplied. The implementation checkpoint is recorded in `BIDoc_Schedule_Activity_Assignment_Calibration_Phase_3_1_Reviewed_Evidence_Collection_Checkpoint_2026-08-30.md`.
+The additive backend-only migration is applied in MAIN. Production build `4a102c1` shows four pending cards, including three durable snapshot-only reviews whose original alert rows are no longer in the active feed. No explicit labels were created during verification. The implementation and activation checkpoints are recorded in the Phase 3.1 checkpoint documents.
 
-Phase 3.1 does not authorize Phase 4. Applying the migration and deploying the collection path require separate approval. The expanded dataset must be frozen and reviewed before calibration is rerun.
+The expanded dataset must be frozen and reviewed before calibration and Phase 4 policy selection are rerun. Collection-path activation does not authorize an automatic policy, shadow mode, or Phase 5 work.
 
 ## 10. Phase 4 - Automatic decision policy calibration
 
@@ -698,8 +698,8 @@ Prevent calibration drift as alerts, activities, Schedule versions, models, prom
 Phase 4 tooling is complete, but policy selection remains evidence-blocked. The immediate next action is the separately gated Phase 3.1 activation and evidence collection sequence:
 
 1. Completed: review, approve, apply, and verify the additive MAIN label migration.
-2. Commit and push the reviewed change set so the existing Vercel Git integration deploys it, then verify the authenticated label-collection path.
-3. Collect at least 70 additional representative cases across all missing label classes.
+2. Completed: commit, push, automatic deployment, and authenticated production verification of the label-collection path.
+3. Next: collect at least 70 additional representative cases across all missing label classes.
 4. Freeze and review the expanded dataset.
 5. Rerun evaluation, compatible v2 calibration, and the Phase 4 policy acceptance sweep.
 6. Stop before Phase 5 unless a disabled policy is genuinely `readyForShadow` and receives separate approval.

@@ -1,7 +1,7 @@
 # Schedule Activity Assignment Calibration. Phase 3.1 MAIN Activation Checkpoint
 
 Date: 2026-08-30
-Status: MAIN schema activated and verified. Local collection API verified. Application deployment pending Git publication through the existing automatic Vercel integration. No explicit labels created.
+Status: MAIN schema activated and verified. The authenticated production collection UI is deployed and verified. Four reviews are pending and no explicit labels have been created.
 
 ## 1. Approved scope
 
@@ -84,16 +84,40 @@ The local server was then started on port 4000. A short-lived simulated same-ori
 
 Result: HTTP 200, 3 pending review cards, and 0 explicit queue labels. The public login page also rendered meaningful RTL content without a framework error overlay or browser console errors. This is local API and login-wall evidence, not a claim that the authenticated production UI was manually reviewed.
 
-## 6. Deployment path
+## 6. Deployment and production verification
 
-Deployment had not yet been triggered at this checkpoint. This repository deploys through its existing Vercel Git integration when the tracked production branch is updated. Direct Vercel connector access, a local `.vercel/project.json`, and a local Vercel CLI are not required for that established path. Git `origin/main` still pointed at commit `436d27a`; the current Phase 1 through Phase 4 work remained uncommitted in the existing dirty worktree.
+The reviewed Phase 1 through Phase 4 change set was committed as `9f61e29` and pushed to `origin/main`. The existing Vercel Git integration deployed it automatically. Authenticated production verification then exposed two collection-path defects: durable reviews were dropped when their original alert row no longer existed, and the reviewer GET could reuse stale cached data.
 
-The next publication action is one reviewed commit containing the complete scoped change set, followed by a push to the tracked branch. The push is expected to trigger Vercel automatically. Production readiness is still not claimed until the deployed endpoint is verified.
+The focused fixes were committed and deployed as:
+
+- `9e6655c fix(schedule): restore durable review cards`
+- `4a102c1 fix(schedule): bypass cached review data`
+
+Production build `4a102c1` was verified in an existing authenticated Chrome session on the exact Schedule page for project `81b1cbac-8fcf-43c1-acdc-6b5c809de0e5`.
+
+Observed production result:
+
+| Check | Result |
+| --- | ---: |
+| Schedule items shown | 544 |
+| Existing activity links shown | 24 |
+| Pending review cards | 4 |
+| Current-feed review cards | 1 |
+| Durable snapshot-only review cards | 3 |
+| Candidate buttons | 8 |
+| Each negative-label choice | 4 |
+| Explicit labels | 0 |
+| Schedule load warnings or errors | 0 |
+
+Every snapshot-only card clearly states that its decision will be stored as a calibration label only and will not change a Schedule link. Its manual activity picker cannot be opened and its rerun button is disabled. A positive label-only choice is validated on the server against the candidates stored in the durable review record. The authenticated reviewer endpoint and client request now use `private, no-store` behavior.
+
+No candidate or label button was clicked during verification. The only browser console warnings were unrelated pre-existing Cytoscape style warnings from the graph library. There was no Schedule framework error overlay.
 
 ## 7. Current gate
 
 The database can now collect explicit labels once application code containing the new UI/API contract is deployed. Evidence and policy state remain blocked:
 
+- Pending review cards available to the team: 4.
 - Explicit queue labels: 0.
 - Frozen reviewed cases: 30.
 - Remaining cases to minimum: 70.
@@ -103,4 +127,4 @@ The database can now collect explicit labels once application code containing th
 - Shadow readiness: false.
 - Production readiness: false.
 
-The next safe step is Git publication, automatic deployment, and exact production verification of the collection path. After that verification, the team can begin reviewed label collection. Automatic decisions remain out of scope.
+The next safe step is human reviewed-label collection. The team must resolve representative cases across every missing class until at least 70 additional valid cases have been collected. Automatic decisions remain disabled and out of scope.

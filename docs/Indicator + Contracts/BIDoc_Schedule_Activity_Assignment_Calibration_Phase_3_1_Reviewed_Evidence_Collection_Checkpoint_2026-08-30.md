@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 
-Status: the additive MAIN schema is applied and verified. The local authenticated collection API is verified. Application deployment is pending Git publication to the tracked production branch. Direct Vercel account access is not required for this repository's automatic deployment. Explicit production labels collected: 0. Phase 4 remains evidence-blocked.
+Status: the additive MAIN schema and authenticated production collection UI are deployed and verified. Four review cards are pending and explicit production labels collected remain 0. Phase 4 remains evidence-blocked.
 Decision: collect explicit human outcomes through the existing shared review flow, merge only valid reviewed labels into frozen datasets, and keep calibration and automatic-decision policy blocked until the evidence gate passes.
 
 ## 1. Outcome
@@ -110,8 +110,8 @@ The first attempt used `--code-defaults` and failed before output because that l
 - Service-role RPC payload and browser-input rejection tests.
 - Existing-row compatibility test proving unlabeled operational resolutions are ignored.
 - Authenticated route and backend-only migration source checks.
-- Full Schedule test suite: 110/110 passed.
-- React production build: passed with 24 modules transformed.
+- Full Schedule test suite: 111/111 passed after the durable-review regression fix.
+- React production build: passed with 25 modules transformed.
 - JavaScript syntax checks: 10 changed entry points passed.
 - `git diff --check`: passed, with only existing Windows line-ending normalization warnings.
 - PostgreSQL catalog verification of all six columns, three validated constraints, the valid partial index, function configuration, RLS, and privileges.
@@ -119,11 +119,13 @@ The first attempt used `--code-defaults` and failed before output because that l
 - Live read-only dataset preparation with active settings after migration.
 - Local exact API-path check: HTTP 200, 3 pending review cards, and explicit queue-label coverage of 0/100 under a short-lived simulated same-origin superadmin session.
 - Local login page browser check: meaningful RTL content, no error overlay, and no warning or error console entries.
+- Authenticated production Schedule check on build `4a102c1`: 4 pending cards, 8 candidate buttons, all 4 negative-label choices on each card, 3 clearly marked snapshot-only reviews, and 0 explicit labels.
+- Production review reads use `private, no-store`; snapshot-only reviews cannot rerun the agent or open the manual activity picker, and a positive label-only choice is server-validated against stored candidates.
 
 Supabase recorded the migration as version `20260830174803`. The local file was aligned to that exact remote migration history entry. The security advisor reports only the expected informational `rls_enabled_no_policy` finding for this backend-only table. The performance advisor reports the new partial index as unused, which is expected before explicit labels exist.
 
-No review label, Schedule link, deployment, commit, push, production policy setting, calibrator activation, or automatic-assignment activation occurred. The only remote write in this activation step was the approved additive schema migration.
+The approved schema migration, commits, push, and collection-UI deployment occurred. No review label, Schedule link, production policy setting, calibrator activation, or automatic-assignment activation occurred.
 
 ## 6. Next approval gate
 
-The next bounded action is to commit and push the reviewed change set to the tracked production branch, allow the existing Vercel Git integration to deploy it automatically, and verify the exact production Schedule review page. After deployment, reviewers must accumulate at least 70 additional representative cases with coverage across every missing label class. Calibration must be rerun only after freezing and reviewing that expanded dataset.
+The next bounded action is human reviewed-label collection. Reviewers must accumulate at least 70 additional representative cases with coverage across every missing label class. Calibration must be rerun only after freezing and reviewing that expanded dataset.

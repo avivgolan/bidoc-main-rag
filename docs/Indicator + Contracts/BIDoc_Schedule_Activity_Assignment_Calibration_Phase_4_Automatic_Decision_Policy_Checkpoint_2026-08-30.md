@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 
-Status: the Phase 4 policy-evaluation framework is implemented and verified locally. Policy selection is blocked by the evidence gate. No policy is active, Phase 5 has not started, and the Phase 3.1 MAIN migration is applied and verified.
+Status: the Phase 4 policy-evaluation framework is implemented and verified. Policy selection is blocked by the evidence gate. No policy is active, Phase 5 has not started, and the Phase 3.1 MAIN migration plus authenticated production collection UI are deployed and verified.
 
 ## 1. Outcome
 
@@ -119,23 +119,23 @@ The diagnostic-only best configuration was 50% probability, 15 ranking points, r
 
 ## 5. Supabase and security boundary
 
-No new schema was required for Phase 4. The existing Phase 3.1 migration remains local and unapplied. No Supabase table, function, grant, policy, or row changed.
+No new schema was required for Phase 4. The separately approved Phase 3.1 migration is now applied in MAIN and the collection UI is deployed. Production verification created no explicit labels and changed no review or Schedule row.
 
 The current Supabase guidance was rechecked before implementation. The existing migration's `SECURITY INVOKER` and explicit function-execution revocation model remains the required boundary. Phase 4 did not weaken or bypass it.
 
 ## 6. Verification
 
-- Schedule tests: 110/110 passed.
+- Schedule tests: 111/111 passed after the production collection-path regression fix.
 - Calibrated-threshold fail-closed regression passed.
 - Explicit required-role and Matcher/Validator gate regressions passed.
 - Calibrated sweep, Judge outcome, hard-conflict, cost, token, and latency regressions passed.
 - Validation-selection and held-out acceptance artifact regression passed.
 - Actual blocked 392-configuration run completed successfully.
-- React production build passed with 24 modules transformed.
+- React production build passed with 25 modules transformed.
 - JavaScript syntax checks passed for 13 changed entry points.
 - `git diff --check` passed with only Windows line-ending normalization warnings.
 
-No migration apply, database write, deployment, commit, push, remote-setting change, policy activation, automatic link, or Phase 5 implementation occurred.
+The separately approved Phase 3.1 migration, commits, push, and collection-UI deployment occurred. No explicit-label write, remote-setting change, policy activation, automatic link, or Phase 5 implementation occurred.
 
 ## 7. Next evidence gate
 
@@ -143,9 +143,9 @@ Phase 4 cannot select a real operating point until Phase 3.1 collection is activ
 
 The next bounded sequence is:
 
-1. Review and separately approve the additive Phase 3.1 MAIN migration.
-2. Apply the migration and deploy the authenticated label-collection path only after that approval.
-3. Collect at least 70 additional representative reviewed cases, including every missing negative and ambiguous label class.
+1. Completed: review, approve, and apply the additive Phase 3.1 MAIN migration.
+2. Completed: deploy and verify the authenticated label-collection path.
+3. Next: collect at least 70 additional representative reviewed cases, including every missing negative and ambiguous label class.
 4. Freeze a new dataset and rerun evaluation.
 5. Build a compatible `schedule-assignment-calibration-features.v2` calibrator.
 6. Rerun the Phase 4 policy sweep and held-out acceptance check.
