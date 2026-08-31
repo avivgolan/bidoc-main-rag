@@ -199,7 +199,7 @@ async function handleApi(req, res, url) {
   // bypass the login wall. Same-origin calls (the standalone UI) need a session.
   if (!url.pathname.startsWith("/api/auth/")) {
     const isContractsExtractionRoute = req.method === "POST"
-      && ["/api/contracts/extract"].includes(url.pathname);
+      && ["/api/contracts/extract", "/api/contracts/clauses/preview"].includes(url.pathname);
     const hasContractsIngestionSecret = Object.prototype.hasOwnProperty.call(
       req.headers,
       "x-contracts-ingestion-secret"
@@ -1001,7 +1001,11 @@ async function handleApi(req, res, url) {
   // performs no Supabase, Storage, Schedule, decision, or relationship write.
   if (req.method === "POST" && url.pathname === "/api/contracts/clauses/preview") {
     try {
-      if (!getSuperadminSession(req)) {
+      const hasIngestionSecret = Object.prototype.hasOwnProperty.call(
+        req.headers,
+        "x-contracts-ingestion-secret"
+      );
+      if (!hasIngestionSecret && !getSuperadminSession(req)) {
         return sendJson(res, 401, { error: "נדרשת התחברות כסופראדמין" });
       }
       const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
@@ -1039,13 +1043,15 @@ async function handleApi(req, res, url) {
         listSavedContractsClauseWorkspaces,
         parseContractsClauseWorkspaceListRequest
       } = await import("./contracts/clausePersistence.js");
-      if (!contractsClausePersistenceApproved()) {
-        return sendJson(res, 503, {
-          error: "contracts_clause_persistence_not_enabled",
-          code: "contracts_clause_persistence_not_enabled"
-        });
-      }
       const request = parseContractsClauseWorkspaceListRequest(url.searchParams);
+      const { listPublicContractWorkspaces } = await import("./contracts/publicWorkspaceRead.js");
+      const publicList = await listPublicContractWorkspaces({ config: config(), ...request });
+      if (publicList.items.length) {
+        return sendJson(res, 200, { ok: true, items: publicList.items, source: "public.contract_workspaces" });
+      }
+      if (!contractsClausePersistenceApproved()) {
+        return sendJson(res, 200, { ok: true, items: [], source: "public.contract_workspaces" });
+      }
       const result = await listSavedContractsClauseWorkspaces({ config: config(), ...request });
       return sendJson(res, 200, { ok: true, ...result });
     } catch (error) {
@@ -1063,10 +1069,19 @@ async function handleApi(req, res, url) {
         contractsClausePersistenceApproved,
         getSavedContractsClauseWorkspace
       } = await import("./contracts/clausePersistence.js");
+      const { getPublicContractWorkspace } = await import("./contracts/publicWorkspaceRead.js");
+      const publicWorkspace = await getPublicContractWorkspace({
+        config: config(),
+        workspaceId: contractsClauseWorkspaceMatch[1]
+      });
+      if (publicWorkspace) {
+        const { sendContractsJson } = await import("./contracts/response.js");
+        return sendContractsJson(res, 200, { ok: true, ...publicWorkspace, source: "public.contract_workspaces" });
+      }
       if (!contractsClausePersistenceApproved()) {
-        return sendJson(res, 503, {
-          error: "contracts_clause_persistence_not_enabled",
-          code: "contracts_clause_persistence_not_enabled"
+        return sendJson(res, 404, {
+          error: "contracts_clause_workspace_not_found",
+          code: "contracts_clause_workspace_not_found"
         });
       }
       const result = await getSavedContractsClauseWorkspace({
