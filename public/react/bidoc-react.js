@@ -14324,7 +14324,7 @@ function ln({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, a
 										}),
 										l.persistedReview ? /* @__PURE__ */ (0, x.jsx)("span", {
 											className: `activityAgentSharedReviewBadge ${l.approved || l.rejected ? "is-resolved" : ""}`,
-											children: l.approved ? "נבחרה פעילות · הרשומה סומנה כטופלה" : l.rejected ? "ההצעות נדחו · הרשומה סומנה כטופלה" : "נשמר ב־MAIN · ממתין להחלטת צוות"
+											children: l.approved ? "נבחרה פעילות · הרשומה סומנה כטופלה" : l.rejected ? "ההצעות נדחו · הרשומה סומנה כטופלה" : "כרטיס הבדיקה נשמר · ממתין להחלטת צוות"
 										}) : null,
 										l.detachedFromCurrentFeed ? /* @__PURE__ */ (0, x.jsx)("small", {
 											className: "activityAgentWarning",

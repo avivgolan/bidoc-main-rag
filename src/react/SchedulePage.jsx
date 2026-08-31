@@ -659,7 +659,7 @@ function ActivityUpdatesTable({
                             </div>
                             {agentResult.persistedReview ? (
                               <span className={`activityAgentSharedReviewBadge ${agentResult.approved || agentResult.rejected ? "is-resolved" : ""}`}>
-                                {agentResult.approved ? "נבחרה פעילות · הרשומה סומנה כטופלה" : agentResult.rejected ? "ההצעות נדחו · הרשומה סומנה כטופלה" : "נשמר ב־MAIN · ממתין להחלטת צוות"}
+                                {agentResult.approved ? "נבחרה פעילות · הרשומה סומנה כטופלה" : agentResult.rejected ? "ההצעות נדחו · הרשומה סומנה כטופלה" : "כרטיס הבדיקה נשמר · ממתין להחלטת צוות"}
                               </span>
                             ) : null}
                             {agentResult.detachedFromCurrentFeed ? (

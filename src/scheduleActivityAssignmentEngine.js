@@ -418,8 +418,8 @@ export function evaluateAssignmentDecision({
       : hardConflict
         ? "זוהתה סתירה מהותית ולכן לא בוצע שיוך."
         : calibration.status !== "calibrated"
-          ? "נדרשת בדיקה אנושית: אין הסתברות מכוילת תקפה להפעלת שיוך אוטומטי."
-        : `נדרשת בדיקה אנושית: ציון התאמה ${rankingScore}, פער ${rankingGap} נקודות.`;
+          ? "נדרשת בדיקה אנושית: אין עדיין מספיק נתוני כיול כדי לאפשר שיוך אוטומטי."
+          : `נדרשת בדיקה אנושית: ציון התאמה ${rankingScore}, פער ${rankingGap} נקודות.`;
   return {
     decision,
     selected,

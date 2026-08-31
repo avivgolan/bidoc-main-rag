@@ -54,6 +54,16 @@ A future manual reassignment records `manual` and clears an older agent run iden
 - The deployed bundle no longer contains the `אתר את כולם` action text.
 - Authenticated rendered production verification remains pending a renewed reviewer session.
 
+### 4.1 Plain-language review refinement
+
+The follow-up UI review replaced technical or premature decision wording on pending cards:
+
+- `אין הסתברות מכוילת תקפה` became `אין עדיין מספיק נתוני כיול כדי לאפשר שיוך אוטומטי`.
+- `החלטה זו נשמרה ב-MAIN` became `כרטיס הבדיקה נשמר וממתין להחלטת הצוות`.
+- The pending badge now describes a saved review card and no longer implies that a team decision was already made.
+
+Focused regressions cover all three messages. The Schedule suite remains at 112 passing tests and the React production build still transforms 25 modules.
+
 ## 5. Next gate
 
 After authenticated production verification:

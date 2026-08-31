@@ -288,6 +288,7 @@ test("schedule assignment shared review: persists only actionable decisions and 
   assert.equal(hydrated.persistedReview, true);
   assert.equal(hydrated.auditPersisted, true);
   assert.deepEqual(hydrated.candidates.map((candidate) => candidate.activityKey), ["gantt:file:1", "gantt:file:2"]);
+  assert.deepEqual(hydrated.warnings, ["כרטיס הבדיקה נשמר וממתין להחלטת הצוות."]);
 });
 
 test("schedule assignment shared review: missing source rows remain visible as pinned label-only snapshots", () => {
@@ -566,7 +567,9 @@ test("schedule assignment batch: UI awaits each row and exposes controlled stop 
   assert.match(page, />הרץ מחדש</u);
   assert.match(page, /בדוק \$\{boundedBatchCount\} מתוך \$\{eligibleCount\} לא משויכות/u);
   assert.match(page, /המספר אינו מציין שיוכים שבוצעו/u);
+  assert.match(page, /כרטיס הבדיקה נשמר · ממתין להחלטת צוות/u);
   assert.doesNotMatch(page, /אתר את כולם/u);
+  assert.doesNotMatch(page, /נשמר ב־MAIN · ממתין להחלטת צוות/u);
 });
 
 test("schedule activity updates: reviewed legacy links remain visible after alert-id replacement", () => {
@@ -1068,6 +1071,7 @@ test("schedule assignment agent: automatic write requires calibrated probability
   const blocked = evaluateAssignmentDecision({ candidates, settings, matcher, validator, eventDate: "2025-01-15", scheduleVersionId: "file-a", aiCompleted: false, calibrator });
   assert.equal(noCalibrator.autoAssigned, false);
   assert.equal(noCalibrator.gates.calibratedThreshold, false);
+  assert.equal(noCalibrator.reason, "נדרשת בדיקה אנושית: אין עדיין מספיק נתוני כיול כדי לאפשר שיוך אוטומטי.");
   assert.equal(allowed.autoAssigned, true);
   assert.equal(blocked.autoAssigned, false);
   assert.equal(blocked.gates.requiredRolesCompleted, false);

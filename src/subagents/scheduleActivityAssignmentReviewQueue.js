@@ -144,7 +144,7 @@ export function sharedReviewRowToAgentResult(row = {}) {
     decision: { ...decision, autoAssigned: false },
     candidates,
     assignment: null,
-    warnings: ["החלטה זו נשמרה ב־MAIN וזמינה לכל חברי הצוות המורשים."]
+    warnings: ["כרטיס הבדיקה נשמר וממתין להחלטת הצוות."]
   };
 }
 
