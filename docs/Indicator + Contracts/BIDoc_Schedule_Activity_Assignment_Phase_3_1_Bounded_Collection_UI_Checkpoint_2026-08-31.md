@@ -2,7 +2,7 @@
 
 Date: 2026-08-31
 
-Status: implemented and verified locally. Production verification is pending the automatic deployment triggered by the scoped commit.
+Status: implemented, pushed in commit `69e6d68`, and verified in the deployed public production bundle. Authenticated rendered-page verification remains pending because the saved browser session redirected to login.
 
 ## 1. Problem addressed
 
@@ -50,7 +50,9 @@ A future manual reassignment records `manual` and clears an older agent run iden
 - `npm.cmd run test:schedule`: 112 tests passed.
 - `npm.cmd run react:build`: passed, 25 modules transformed.
 - JavaScript syntax checks passed for the changed server, Schedule, and assignment modules.
-- Authenticated rendered production verification remains pending deployment.
+- The public production bundle returned HTTP 200 and contains the bounded-count explanation, review-only warning, and assignment-provenance labels.
+- The deployed bundle no longer contains the `אתר את כולם` action text.
+- Authenticated rendered production verification remains pending a renewed reviewer session.
 
 ## 5. Next gate
 
