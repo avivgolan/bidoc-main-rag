@@ -1334,7 +1334,7 @@ function GeneralSection({ form, update }) {
 // ─── Section: Schedule Activity Assignment Agent ─────────────────────────────
 
 const SCHEDULE_ASSIGNMENT_ROLES = [
-  { key: "timeFilter", label: "מסנן קשר לזמן", desc: "שכבה מקדימה לריצת „אתר את כולם” בלבד; דילוג בטוח על התראות שאינן קשורות לזמן או ללו״ז." },
+  { key: "timeFilter", label: "מסנן קשר לזמן", desc: "שכבה מקדימה לבדיקה קבוצתית בלבד; דילוג בטוח על התראות שאינן קשורות לזמן או ללו״ז." },
   { key: "extractor", label: "חילוץ אירוע", desc: "ממיר את ההתראה למבנה עובדתי קשיח." },
   { key: "matcher", label: "התאמה מקצועית", desc: "בודק התאמה לתחום, מיקום וסוג העבודה." },
   { key: "validator", label: "בקרת לוח זמנים", desc: "בודק תאריכים, היררכיה וסתירות בלו״ז." },

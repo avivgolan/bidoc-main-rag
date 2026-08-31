@@ -6,6 +6,16 @@ export const ACTIVITY_ASSIGNMENT_BATCH_STATUSES = Object.freeze({
   COMPLETED: "completed"
 });
 
+export const ACTIVITY_ASSIGNMENT_BATCH_LIMIT_OPTIONS = Object.freeze([10, 25, 50]);
+export const DEFAULT_ACTIVITY_ASSIGNMENT_BATCH_LIMIT = ACTIVITY_ASSIGNMENT_BATCH_LIMIT_OPTIONS[0];
+
+export const ACTIVITY_ASSIGNMENT_METHOD_PRESENTATIONS = Object.freeze({
+  manual: Object.freeze({ key: "manual", label: "שויך ידנית" }),
+  agent_approved: Object.freeze({ key: "agent-approved", label: "הוצע על ידי הסוכן ואושר" }),
+  agent_auto: Object.freeze({ key: "agent-auto", label: "שויך אוטומטית" }),
+  existing: Object.freeze({ key: "existing", label: "שיוך קיים" })
+});
+
 export const DEFAULT_ACTIVITY_UPDATE_FILTERS = Object.freeze({
   query: "",
   kind: "",
@@ -82,7 +92,18 @@ export function createActivityAssignmentBatch(overrides = {}) {
   };
 }
 
-export function buildActivityAssignmentBatchQueue(items = []) {
+export function normalizeActivityAssignmentBatchLimit(value) {
+  const normalized = Number(value);
+  return ACTIVITY_ASSIGNMENT_BATCH_LIMIT_OPTIONS.includes(normalized)
+    ? normalized
+    : DEFAULT_ACTIVITY_ASSIGNMENT_BATCH_LIMIT;
+}
+
+export function buildActivityAssignmentBatchQueue(items = [], { limit = Number.POSITIVE_INFINITY } = {}) {
+  const normalizedLimit = Number.isFinite(Number(limit))
+    ? Math.max(0, Math.floor(Number(limit)))
+    : Number.POSITIVE_INFINITY;
+  if (normalizedLimit === 0) return [];
   const seen = new Set();
   const queue = [];
   for (const item of Array.isArray(items) ? items : []) {
@@ -90,8 +111,23 @@ export function buildActivityAssignmentBatchQueue(items = []) {
     if (!id || !item?.date || item?.activityKey || seen.has(id)) continue;
     seen.add(id);
     queue.push(item);
+    if (queue.length >= normalizedLimit) break;
   }
   return queue;
+}
+
+export function activityAssignmentBatchConfirmationText({ batchSize = 0, eligibleCount = 0 } = {}) {
+  return [
+    `המערכת תבדוק ${Number(batchSize) || 0} מתוך ${Number(eligibleCount) || 0} ההתראות הלא משויכות.`,
+    "הריצה הקבוצתית היא במצב בדיקה בלבד ואינה כותבת שיוכים אוטומטיים.",
+    "תוצאות לא ודאיות יישמרו להחלטה אנושית. להמשיך?"
+  ].join("\n\n");
+}
+
+export function activityAssignmentMethodPresentation(item = {}) {
+  if (!item?.activityKey) return null;
+  return ACTIVITY_ASSIGNMENT_METHOD_PRESENTATIONS[item.assignmentMethod]
+    || ACTIVITY_ASSIGNMENT_METHOD_PRESENTATIONS.existing;
 }
 
 export function activityAssignmentReviewCandidates(result, limit = 2) {
@@ -123,13 +159,13 @@ export function activityAssignmentBatchStatusText(batch) {
   const total = Number(batch?.total) || 0;
   switch (batch?.status) {
     case ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING:
-      return `${batch?.timeFilter ? "מסנן ומאתר" : "מאתר"} שורה ${Math.min(processed + 1, total)} מתוך ${total}`;
+      return `${batch?.timeFilter ? "מסנן ובודק" : "בודק"} שורה ${Math.min(processed + 1, total)} מתוך ${total}`;
     case ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING:
-      return "בקשת העצירה נקלטה — מסיים את השורה הפעילה";
+      return "בקשת העצירה נקלטה - מסיים את השורה הפעילה";
     case ACTIVITY_ASSIGNMENT_BATCH_STATUSES.PAUSED:
       return `הריצה נעצרה אחרי ${processed} מתוך ${total}`;
     case ACTIVITY_ASSIGNMENT_BATCH_STATUSES.COMPLETED:
-      return `הריצה הסתיימה: ${processed} עובדו · ${batch.assigned || 0} שויכו · ${batch.review || 0} לבדיקה · ${batch.skipped || 0} דולגו · ${batch.failed || 0} נכשלו`;
+      return `הריצה הסתיימה: ${processed} נבדקו · ${batch.assigned || 0} שויכו · ${batch.review || 0} הועברו להחלטה · ${batch.skipped || 0} דולגו · ${batch.failed || 0} נכשלו`;
     default:
       return "";
   }

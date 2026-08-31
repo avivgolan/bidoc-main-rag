@@ -663,11 +663,15 @@ function contentAlertDate(value) {
   return match ? match[1] : null;
 }
 
-export function scheduleActivityUpdateItem(row = {}, activityKey = null) {
+export function scheduleActivityUpdateItem(row = {}, activityKey = null, assignmentMethod = null) {
   const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
   const rawId = String(row.id || "").replace(/^alert_/u, "");
   const sourceEventId = String(row.source_event_id || (String(row.id || "").startsWith("alert_") ? row.id : `alert_${rawId}`));
   const alertType = String(row.alert_type || metadata.alert_type || row.tags?.at(-1) || "עדכון").trim();
+  const normalizedActivityKey = activityKey || null;
+  const normalizedAssignmentMethod = normalizedActivityKey && ["manual", "agent_auto", "agent_approved"].includes(String(assignmentMethod || ""))
+    ? String(assignmentMethod)
+    : null;
   return {
     id: rawId,
     sourceEventId,
@@ -680,7 +684,8 @@ export function scheduleActivityUpdateItem(row = {}, activityKey = null) {
     severity: row.severity == null && row.severity_level == null ? null : Number(row.severity ?? row.severity_level),
     status: row.item_status || metadata.item_status || row.lifecycle_status || row.status || metadata.status || null,
     href: row.data_link || metadata.data_link || metadata.url || null,
-    activityKey: activityKey || null
+    activityKey: normalizedActivityKey,
+    assignmentMethod: normalizedAssignmentMethod
   };
 }
 
@@ -817,7 +822,7 @@ export async function listScheduleActivityUpdates({ projectId, config = null, se
   const linksPromise = scheduleDataRequest({
       config: cfg,
       settings,
-      path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?select=source_id,activity_key,event_date&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts`
+      path: `/rest/v1/${ACTIVITY_ALERT_LINKS_TABLE}?select=source_id,activity_key,event_date,assignment_method&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts`
     }).catch((error) => {
       linksWarning = `טעינת קשרי פעילות: ${error.message}`;
       return [];
@@ -836,12 +841,15 @@ export async function listScheduleActivityUpdates({ projectId, config = null, se
     : [];
   const restored = mergeLinkedLegacyAlertEvents({ events: currentEvents, links, legacyEvents });
   const events = restored.events;
-  const activityBySource = new Map(links.map((row) => [String(row.source_id), row.activity_key || null]));
+  const linkBySource = new Map(links.map((row) => [String(row.source_id), row]));
   return {
     projectId: projectContext.sourceProjectId,
     scheduleProjectId: projectContext.scheduleProjectId,
     total: events.length,
-    items: events.map((event) => scheduleActivityUpdateItem(event, activityBySource.get(String(event.id).replace(/^alert_/u, "")))),
+    items: events.map((event) => {
+      const link = linkBySource.get(String(event.id).replace(/^alert_/u, ""));
+      return scheduleActivityUpdateItem(event, link?.activity_key || null, link?.assignment_method || null);
+    }),
     recoveredLegacyLinks: restored.recoveredCount,
     ...((linksWarning || legacyWarning) ? { warning: [linksWarning, legacyWarning].filter(Boolean).join("; ") } : {})
   };
@@ -905,11 +913,9 @@ export async function assignScheduleActivityUpdate({
     confidence: confidence == null ? null : Math.max(0, Math.min(100, Number(confidence))),
     review_note: reviewNote ? String(reviewNote).slice(0, 1000) : null
   };
-  // Keep manual assignment compatible until the audit migration is deployed.
-  // The DB default records `manual`; agent writes always carry the full audit.
-  const audit = assignmentRunId || assignmentMethod !== "manual" || confidence != null || reviewNote
-    ? auditValues
-    : {};
+  // Every saved assignment carries its current provenance. A later manual
+  // reassignment must not retain an older agent method or run identifier.
+  const audit = normalizedActivityKey ? auditValues : {};
   if (existing[0]?.id && !normalizedActivityKey) {
     await scheduleDataRequest({
       config: cfg,
@@ -945,7 +951,11 @@ export async function assignScheduleActivityUpdate({
       }
     });
   }
-  return scheduleActivityUpdateItem({ ...source, id: `alert_${normalizedSourceId}` }, normalizedActivityKey);
+  return scheduleActivityUpdateItem(
+    { ...source, id: `alert_${normalizedSourceId}` },
+    normalizedActivityKey,
+    normalizedActivityKey ? auditValues.assignment_method : null
+  );
 }
 
 // ─── Pending contractual conditions (spec 6.8א) ──────────────────────────────

@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 
-Status: the Phase 4 policy-evaluation framework is implemented, but evidence-based policy selection is blocked. The Phase 3.1 MAIN migration and authenticated production collection UI are deployed and verified. Four reviews are pending, zero explicit labels exist, and Phase 5 has not started.
+Status: the Phase 4 policy-evaluation framework is implemented, but evidence-based policy selection is blocked. The Phase 3.1 MAIN migration and authenticated production collection UI are deployed and verified. A bounded, review-only collection safety update is implemented locally and awaits automatic deployment verification. Four reviews are pending, zero explicit labels exist, and Phase 5 has not started.
 
 Current engine: `schedule-assignment.v2.1-rc1`
 Current published configuration: `schedule-assignment-openai.v2.1-rc1`
@@ -434,6 +434,8 @@ The latest read-only refresh contains 30 reviewed cases: 28 confirmed matches an
 
 The additive backend-only migration is applied in MAIN. Production build `4a102c1` shows four pending cards, including three durable snapshot-only reviews whose original alert rows are no longer in the active feed. No explicit labels were created during verification. The implementation and activation checkpoints are recorded in the Phase 3.1 checkpoint documents.
 
+The 2026-08-31 bounded collection update replaces the ambiguous all-row action with a 10, 25, or 50 row review-only batch. The batch cannot write automatic links, the full eligible count is identified as a waiting queue, and assigned rows display persisted assignment provenance. Its checkpoint is `BIDoc_Schedule_Activity_Assignment_Phase_3_1_Bounded_Collection_UI_Checkpoint_2026-08-31.md`.
+
 The expanded dataset must be frozen and reviewed before calibration and Phase 4 policy selection are rerun. Collection-path activation does not authorize an automatic policy, shadow mode, or Phase 5 work.
 
 ## 10. Phase 4 - Automatic decision policy calibration
@@ -699,7 +701,8 @@ Phase 4 tooling is complete, but policy selection remains evidence-blocked. The 
 
 1. Completed: review, approve, apply, and verify the additive MAIN label migration.
 2. Completed: commit, push, automatic deployment, and authenticated production verification of the label-collection path.
-3. Next: collect at least 70 additional representative cases across all missing label classes.
-4. Freeze and review the expanded dataset.
-5. Rerun evaluation, compatible v2 calibration, and the Phase 4 policy acceptance sweep.
-6. Stop before Phase 5 unless a disabled policy is genuinely `readyForShadow` and receives separate approval.
+3. Completed locally, deployment verification pending: bound grouped collection to 10, 25, or 50 review-only rows and clarify assignment provenance.
+4. Next: review the four pending cases and collect at least 70 additional representative cases across all missing label classes.
+5. Freeze and review the expanded dataset.
+6. Rerun evaluation, compatible v2 calibration, and the Phase 4 policy acceptance sweep.
+7. Stop before Phase 5 unless a disabled policy is genuinely `readyForShadow` and receives separate approval.

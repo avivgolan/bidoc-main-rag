@@ -10570,6 +10570,9 @@ body:has(#timeline.active) .sidebar {
 .activityUpdatesGlobalFilter button:disabled { opacity: 0.45; cursor: not-allowed; }
 .activityUpdatesGlobalFilter input:focus-visible, .activityUpdatesGlobalFilter button:focus-visible { outline: none; border-color: #7d57c2; box-shadow: 0 0 0 3px color-mix(in srgb, #7d57c2 18%, transparent); }
 .activityAgentBatchControls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.activityAgentBatchLimit { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--text-secondary); font-size: 0.72rem; font-weight: 700; }
+.activityAgentBatchLimit select { min-height: 27px; padding: 3px 7px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface-2); color: var(--text-primary); font: inherit; }
+.activityAgentBatchLimit:focus-within { outline: 3px solid color-mix(in srgb, #7d57c2 18%, transparent); outline-offset: 1px; }
 .activityAgentTimeFilter { min-height: 38px; display: inline-flex; align-items: center; gap: 7px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--text-secondary); font-size: 0.74rem; font-weight: 700; cursor: pointer; }
 .activityAgentTimeFilter input { width: 17px; height: 17px; margin: 0; accent-color: #6840ad; cursor: pointer; }
 .activityAgentTimeFilter:has(input:checked) { border-color: color-mix(in srgb, #7d57c2 55%, var(--line)); background: color-mix(in srgb, #7d57c2 8%, var(--surface)); color: #6840ad; }
@@ -10580,6 +10583,7 @@ body:has(#timeline.active) .sidebar {
 .activityAgentBatchButton.is-stop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); background: var(--danger-soft); }
 .activityAgentBatchButton:hover:not(:disabled), .activityAgentBatchButton:focus-visible { outline: none; border-color: #7d57c2; box-shadow: 0 0 0 3px color-mix(in srgb, #7d57c2 18%, transparent); }
 .activityAgentBatchButton:disabled { opacity: 0.5; cursor: not-allowed; }
+.activityAgentBatchExplanation { width: 100%; margin: 0 !important; color: var(--text-muted); font-size: 0.68rem !important; text-align: right; }
 .activityAgentBatchStatus { display: flex; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; color: var(--text-secondary); font-size: 0.7rem; }
 .activityAgentBatchStatus progress { width: min(150px, 30vw); height: 7px; accent-color: #6840ad; }
 .activityAgentBatchStatus.is-paused { color: var(--amber); }
@@ -10626,6 +10630,9 @@ body:has(#timeline.active) .sidebar {
 .activityAgentButton { min-height: 34px; padding: 6px 9px; border: 1px solid color-mix(in srgb, #7d57c2 55%, var(--line)); border-radius: 8px; background: color-mix(in srgb, #7d57c2 8%, var(--surface)); color: #6840ad; font: inherit; font-size: 0.7rem; font-weight: 800; cursor: pointer; white-space: nowrap; }
 .activityAgentButton:hover:not(:disabled), .activityAgentButton:focus-visible { border-color: #7d57c2; background: color-mix(in srgb, #7d57c2 14%, var(--surface)); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, #7d57c2 18%, transparent); }
 .activityAgentButton:disabled { opacity: 0.48; cursor: not-allowed; }
+.activityAssignmentMethod { min-height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 5px 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface-2); color: var(--text-secondary); font-size: 0.66rem; font-weight: 800; line-height: 1.25; text-align: center; white-space: nowrap; }
+.activityAssignmentMethod.is-agent-approved { border-color: color-mix(in srgb, #7d57c2 48%, var(--line)); background: color-mix(in srgb, #7d57c2 9%, var(--surface)); color: #6840ad; }
+.activityAssignmentMethod.is-agent-auto { border-color: color-mix(in srgb, var(--brand-600) 45%, var(--line)); background: var(--brand-50); color: var(--brand-700); }
 .activityAgentResultRow td { padding: 0 10px 10px; background: color-mix(in srgb, #7d57c2 3%, var(--surface)); }
 .activityAgentResult { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid color-mix(in srgb, #7d57c2 28%, var(--line)); border-radius: 10px; background: color-mix(in srgb, #7d57c2 5%, var(--surface)); }
 .activityAgentResult.is-auto { border-color: var(--brand-300); background: var(--brand-50); }
@@ -10655,7 +10662,9 @@ body:has(#timeline.active) .sidebar {
   .activityUpdatesGlobalFilter { align-items: stretch; flex-direction: column; }
   .activityUpdatesGlobalFilter input, .activityUpdatesGlobalFilter button { width: 100%; }
   .activityAgentBatchControls { justify-content: stretch; }
+  .activityAgentBatchLimit, .activityAgentTimeFilter { flex: 1 1 auto; justify-content: center; }
   .activityAgentBatchButton { flex: 1 1 auto; }
+  .activityAgentBatchExplanation { text-align: right; }
   .activityAgentBatchStatus { justify-content: flex-start; flex-wrap: wrap; }
 }
 

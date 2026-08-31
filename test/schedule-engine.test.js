@@ -33,13 +33,16 @@ import { DEFAULT_SCHEDULE_VIEW, formatIsraeliDate, makeScheduleScale, parseIsrae
 import { mergeScheduleActivityUpdatesWithSharedReviews } from "../src/react/scheduleActivityAssignmentReviewState.js";
 import {
   ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
+  activityAssignmentBatchConfirmationText,
   activityAssignmentReviewCandidates,
   activityAssignmentBatchStatusText,
+  activityAssignmentMethodPresentation,
   applyActivityAssignmentBatchOutcome,
   buildActivityAssignmentBatchQueue,
   createActivityAssignmentBatch,
   filterActivityUpdates,
-  hasActiveActivityUpdateFilters
+  hasActiveActivityUpdateFilters,
+  normalizeActivityAssignmentBatchLimit
 } from "../src/react/activityAssignmentBatch.js";
 import {
   listSharedScheduleAssignmentEvaluationLabels,
@@ -165,7 +168,7 @@ test("schedule activity updates: canonical business date and source assignment a
     item_status: "open",
     summary: "הושלמה יציקת הקומה",
     created_at: "2099-01-01T00:00:00Z"
-  }, "gantt:file-a:9");
+  }, "gantt:file-a:9", "manual");
   assert.deepEqual(item, {
     id: "17",
     sourceEventId: "alert_17",
@@ -178,7 +181,8 @@ test("schedule activity updates: canonical business date and source assignment a
     severity: 2,
     status: "open",
     href: null,
-    activityKey: "gantt:file-a:9"
+    activityKey: "gantt:file-a:9",
+    assignmentMethod: "manual"
   });
 });
 
@@ -192,6 +196,22 @@ test("schedule assignment batch: queues every dated unassigned alert once in sou
     { id: "d", date: "2026-08-22", activityKey: null }
   ]);
   assert.deepEqual(queue.map((item) => item.id), ["a", "d"]);
+  assert.deepEqual(buildActivityAssignmentBatchQueue([dated, { id: "d", date: "2026-08-22", activityKey: null }], { limit: 1 }).map((item) => item.id), ["a"]);
+  assert.deepEqual(buildActivityAssignmentBatchQueue([dated], { limit: 0 }), []);
+  assert.equal(normalizeActivityAssignmentBatchLimit("25"), 25);
+  assert.equal(normalizeActivityAssignmentBatchLimit("508"), 10);
+});
+
+test("schedule assignment batch: confirmation and provenance wording distinguish review from assignment", () => {
+  const confirmation = activityAssignmentBatchConfirmationText({ batchSize: 10, eligibleCount: 508 });
+  assert.match(confirmation, /10 מתוך 508/u);
+  assert.match(confirmation, /בדיקה בלבד/u);
+  assert.match(confirmation, /אינה כותבת שיוכים אוטומטיים/u);
+  assert.equal(activityAssignmentMethodPresentation({ activityKey: "gantt:file:1", assignmentMethod: "manual" }).label, "שויך ידנית");
+  assert.equal(activityAssignmentMethodPresentation({ activityKey: "gantt:file:1", assignmentMethod: "agent_approved" }).label, "הוצע על ידי הסוכן ואושר");
+  assert.equal(activityAssignmentMethodPresentation({ activityKey: "gantt:file:1", assignmentMethod: "agent_auto" }).label, "שויך אוטומטית");
+  assert.equal(activityAssignmentMethodPresentation({ activityKey: "gantt:file:1" }).label, "שיוך קיים");
+  assert.equal(activityAssignmentMethodPresentation({ activityKey: null }), null);
 });
 
 test("schedule activity updates: column filters compose and resolve assigned activity names", () => {
@@ -540,10 +560,13 @@ test("schedule assignment batch: UI awaits each row and exposes controlled stop 
   const runner = page.slice(start, end);
   assert.ok(start >= 0 && end > start);
   assert.match(runner, /for \(let index = startIndex; index < queue\.length; index \+= 1\)/u);
-  assert.match(runner, /const outcome = await runActivityAssignmentAgent\(queue\[index\], \{ timeFilter \}\)/u);
+  assert.match(runner, /const outcome = await runActivityAssignmentAgent\(queue\[index\], \{ timeFilter, reviewOnly: true \}\)/u);
   assert.match(runner, /stopRequested[\s\S]+PAUSED/u);
   assert.match(page, />המשך מאותה נקודה</u);
   assert.match(page, />הרץ מחדש</u);
+  assert.match(page, /בדוק \$\{boundedBatchCount\} מתוך \$\{eligibleCount\} לא משויכות/u);
+  assert.match(page, /המספר אינו מציין שיוכים שבוצעו/u);
+  assert.doesNotMatch(page, /אתר את כולם/u);
 });
 
 test("schedule activity updates: reviewed legacy links remain visible after alert-id replacement", () => {
@@ -1360,7 +1383,7 @@ test("schedule assignment agent: migration keeps audit tables private and commit
   assert.match(sql, /grant execute on function public\.bidoc_schedule_commit_activity_assignment_v1[\s\S]+to service_role/iu);
 });
 
-test("schedule assignment agent: runtime route accepts only project and source identity from the browser", () => {
+test("schedule assignment agent: runtime route owns settings and accepts only lower-authority browser flags", () => {
   const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   const start = server.indexOf('url.pathname === "/api/schedule/activity-updates/assignment-agent/run"');
   const end = server.indexOf('url.pathname === "/api/schedule/activity-updates/assignment-agent/confirm"', start);
@@ -1370,12 +1393,14 @@ test("schedule assignment agent: runtime route accepts only project and source i
   assert.match(route, /settingsOpenRouterApiKey\(\)/u);
   assert.match(route, /config: getConfig\(\)/u);
   assert.match(route, /timeFilter: body\.timeFilter === true/u);
+  assert.match(route, /const reviewOnly = body\.reviewOnly === true/u);
+  assert.match(route, /commit: !reviewOnly/u);
   assert.match(route, /createRun\(runId\)/u);
   assert.match(route, /const runId = crypto\.randomUUID\(\)/u);
   assert.match(route, /recordRunHistory\(/u);
   assert.match(route, /workflowLog: result\.workflowLog/u);
   assert.match(route, /persistScheduleActivityAssignmentWorkflow\(/u);
-  assert.doesNotMatch(route, /body\.(?:prompt|model|threshold|apiKey)/u);
+  assert.doesNotMatch(route, /body\.(?:prompt|model|threshold|apiKey|commit)/u);
   assert.doesNotMatch(route, /buildRequestConfig/u);
 });
 

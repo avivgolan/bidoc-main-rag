@@ -1,15 +1,20 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_SCHEDULE_VIEW, formatIsraeliDate, makeScheduleScale, parseIsraeliDate, scheduleSubjectKey } from "./scheduleTimeline.js";
 import {
+  ACTIVITY_ASSIGNMENT_BATCH_LIMIT_OPTIONS,
   ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
+  activityAssignmentBatchConfirmationText,
   activityAssignmentReviewCandidates,
   activityAssignmentBatchStatusText,
+  activityAssignmentMethodPresentation,
   applyActivityAssignmentBatchOutcome,
   buildActivityAssignmentBatchQueue,
   createActivityAssignmentBatch,
+  DEFAULT_ACTIVITY_ASSIGNMENT_BATCH_LIMIT,
   DEFAULT_ACTIVITY_UPDATE_FILTERS,
   filterActivityUpdates,
-  hasActiveActivityUpdateFilters
+  hasActiveActivityUpdateFilters,
+  normalizeActivityAssignmentBatchLimit
 } from "./activityAssignmentBatch.js";
 import { SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS } from "../scheduleActivityAssignmentLabels.js";
 import { mergeScheduleActivityUpdatesWithSharedReviews } from "./scheduleActivityAssignmentReviewState.js";
@@ -458,7 +463,7 @@ function ActivityPicker({ activities, value, disabled, busy, onChange }) {
 function ActivityUpdatesTable({
   items, activities, busyId, onAssign, agentBusyId, agentResults, onRunAgent, onConfirmAgent, onRejectAgent,
   agentBatch, onStartAgentBatch, onStopAgentBatch, onResumeAgentBatch, onRestartAgentBatch,
-  timeFilterEnabled, onTimeFilterChange, labelCoverage
+  timeFilterEnabled, onTimeFilterChange, batchLimit, onBatchLimitChange, labelCoverage
 }) {
   const [filters, setFilters] = useState(() => ({ ...DEFAULT_ACTIVITY_UPDATE_FILTERS }));
   const [visibleCount, setVisibleCount] = useState(100);
@@ -478,6 +483,7 @@ function ActivityUpdatesTable({
   const assigned = filtered.filter((item) => item.activityKey).length;
   const sharedReviewCount = Object.values(agentResults || {}).filter((result) => result?.persistedReview && !result?.approved && !result?.rejected).length;
   const eligibleCount = useMemo(() => buildActivityAssignmentBatchQueue(filtered).length, [filtered]);
+  const boundedBatchCount = Math.min(eligibleCount, normalizeActivityAssignmentBatchLimit(batchLimit));
   const severityOptions = useMemo(() => [...new Set(items.map((item) => item.severity).filter((value) => value !== null && value !== undefined))]
     .sort((a, b) => Number(a) - Number(b)), [items]);
   const statusOptions = useMemo(() => [...new Set(items.map((item) => String(item.status || "").trim()).filter(Boolean))]
@@ -507,7 +513,14 @@ function ActivityUpdatesTable({
           </p>
         </div>
         <div className="activityUpdatesHeadTools">
-          <div className="activityAgentBatchControls" aria-label="הרצת איתור אוטומטי לכל ההתראות">
+          <div className="activityAgentBatchControls" aria-label="בדיקה קבוצתית של התראות לא משויכות">
+            <label className="activityAgentBatchLimit">
+              <span>כמות לבדיקה</span>
+              <select value={batchLimit} disabled={batchActive}
+                onChange={(event) => onBatchLimitChange(normalizeActivityAssignmentBatchLimit(event.target.value))}>
+                {ACTIVITY_ASSIGNMENT_BATCH_LIMIT_OPTIONS.map((limit) => <option key={limit} value={limit}>{limit}</option>)}
+              </select>
+            </label>
             <label className="activityAgentTimeFilter" title="בריצה קבוצתית בלבד: דלג על התראות שאינן קשורות לזמן, עיכוב, תאריך או לוח זמנים">
               <input type="checkbox" checked={timeFilterEnabled} disabled={batchActive}
                 onChange={(event) => onTimeFilterChange(event.target.checked)} />
@@ -518,14 +531,15 @@ function ActivityUpdatesTable({
                 <button type="button" className="activityAgentBatchButton is-primary" disabled={anotherRowActionActive}
                   onClick={onResumeAgentBatch}>המשך מאותה נקודה</button>
                 <button type="button" className="activityAgentBatchButton" disabled={anotherRowActionActive || !eligibleCount}
-                  onClick={() => onRestartAgentBatch(filtered)}>הרץ מחדש</button>
+                  onClick={() => onRestartAgentBatch(filtered, batchLimit)}>הרץ מחדש</button>
               </>
             ) : agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.COMPLETED ? (
-              <button type="button" className="activityAgentBatchButton" disabled={!eligibleCount} onClick={() => onRestartAgentBatch(filtered)}>הרץ מחדש</button>
+              <button type="button" className="activityAgentBatchButton" disabled={!eligibleCount}
+                onClick={() => onRestartAgentBatch(filtered, batchLimit)}>הרץ מחדש</button>
             ) : (
               <>
                 <button type="button" className="activityAgentBatchButton is-primary" disabled={batchActive || anotherRowActionActive || !eligibleCount}
-                  onClick={() => onStartAgentBatch(filtered)}>{eligibleCount ? `אתר את כולם (${eligibleCount})` : "אין שורות לאיתור"}</button>
+                  onClick={() => onStartAgentBatch(filtered, batchLimit)}>{eligibleCount ? `בדוק ${boundedBatchCount} מתוך ${eligibleCount} לא משויכות` : "אין התראות לא משויכות לבדיקה"}</button>
                 {batchActive ? (
                   <button type="button" className="activityAgentBatchButton is-stop"
                     disabled={agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING}
@@ -534,6 +548,7 @@ function ActivityUpdatesTable({
               </>
             )}
           </div>
+          {eligibleCount ? <p className="activityAgentBatchExplanation">{eligibleCount} התראות ממתינות לבדיקה. המספר אינו מציין שיוכים שבוצעו.</p> : null}
           {batchStatusText ? (
             <div className={`activityAgentBatchStatus is-${agentBatch.status}`} role="status" aria-live="polite">
               <progress max={Math.max(agentBatch.total, 1)} value={agentBatch.processed} aria-label={batchStatusText} />
@@ -596,6 +611,7 @@ function ActivityUpdatesTable({
               const reviewChoiceBusy = isAgentBusy || busyId === item.id || batchActive;
               const hasPersistedAuditRun = Boolean(agentResult?.runId && agentResult?.auditPersisted);
               const canRecordReviewedLabel = Boolean(agentResult?.persistedReview && agentResult?.reviewId);
+              const assignmentPresentation = activityAssignmentMethodPresentation(item);
               return (
                 <React.Fragment key={`${item.sourceTable}:${item.id}`}>
                   <tr className={item.activityKey ? "is-assigned" : ""}>
@@ -607,10 +623,14 @@ function ActivityUpdatesTable({
                       <div className="activityAssignmentActions">
                         <ActivityPicker activities={activities} value={item.activityKey} disabled={!item.date || batchActive || agentResult?.detachedFromCurrentFeed}
                           busy={busyId === item.id} onChange={(activityKey) => onAssign(item, activityKey)} />
-                        <button type="button" className="activityAgentButton" disabled={!item.date || Boolean(item.activityKey) || isAgentBusy || busyId === item.id || batchActive || agentResult?.detachedFromCurrentFeed}
-                          onClick={() => onRunAgent(item)} title="הפעל סוכן חיפוש והכרעה מבוקר עבור שורה זו">
-                          {isAgentBusy ? "הסוכן בודק…" : "איתור אוטומטי"}
-                        </button>
+                        {assignmentPresentation ? (
+                          <span className={`activityAssignmentMethod is-${assignmentPresentation.key}`}>{assignmentPresentation.label}</span>
+                        ) : (
+                          <button type="button" className="activityAgentButton" disabled={!item.date || isAgentBusy || busyId === item.id || batchActive || agentResult?.detachedFromCurrentFeed}
+                            onClick={() => onRunAgent(item)} title="בדוק התאמה והצג הצעות לפעילות עבור שורה זו">
+                            {isAgentBusy ? "בודק התאמה…" : "בדיקת התאמה"}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1027,6 +1047,7 @@ export function SchedulePage() {
   const [activityAssignmentLabelCoverage, setActivityAssignmentLabelCoverage] = useState(null);
   const [activityAgentBatch, setActivityAgentBatch] = useState(() => createActivityAssignmentBatch());
   const [activityAgentTimeFilter, setActivityAgentTimeFilter] = useState(false);
+  const [activityAgentBatchLimit, setActivityAgentBatchLimit] = useState(DEFAULT_ACTIVITY_ASSIGNMENT_BATCH_LIMIT);
   const activityAgentBatchControlRef = useRef({ token: 0, stopRequested: false, active: false });
   const [baselinedCount, setBaselinedCount] = useState(null);
   const [conditions, setConditions] = useState(null);
@@ -1196,7 +1217,7 @@ export function SchedulePage() {
     }
   }, [projectId]);
 
-  const runActivityAssignmentAgent = useCallback(async (item, { timeFilter = false } = {}) => {
+  const runActivityAssignmentAgent = useCallback(async (item, { timeFilter = false, reviewOnly = false } = {}) => {
     if (!projectId || !item?.id) return { ok: false, error: "חסרים פרויקט או מזהה התראה" };
     setActivityAgentBusyId(item.id);
     setError("");
@@ -1204,7 +1225,12 @@ export function SchedulePage() {
     try {
       const result = await api("/api/schedule/activity-updates/assignment-agent/run", {
         method: "POST",
-        body: { projectId, sourceId: item.id, ...(timeFilter ? { timeFilter: true } : {}) },
+        body: {
+          projectId,
+          sourceId: item.id,
+          ...(timeFilter ? { timeFilter: true } : {}),
+          ...(reviewOnly ? { reviewOnly: true } : {})
+        },
         timeoutMs: 900_000
       });
       setActivityAgentResults(current => ({ ...current, [item.id]: result }));
@@ -1276,7 +1302,7 @@ export function SchedulePage() {
         nextIndex: index,
         currentId: queue[index].id
       }));
-      const outcome = await runActivityAssignmentAgent(queue[index], { timeFilter });
+      const outcome = await runActivityAssignmentAgent(queue[index], { timeFilter, reviewOnly: true });
       if (activityAgentBatchControlRef.current.token !== token) return;
       stats = applyActivityAssignmentBatchOutcome(stats, outcome);
       const nextIndex = index + 1;
@@ -1308,12 +1334,18 @@ export function SchedulePage() {
     ));
   }, []);
 
-  const startActivityAssignmentBatch = useCallback((scopedItems = activityUpdates.items) => {
-    const queue = buildActivityAssignmentBatchQueue(scopedItems);
+  const startActivityAssignmentBatch = useCallback((scopedItems = activityUpdates.items, requestedLimit = activityAgentBatchLimit) => {
+    const eligibleQueue = buildActivityAssignmentBatchQueue(scopedItems);
+    const queue = buildActivityAssignmentBatchQueue(scopedItems, { limit: normalizeActivityAssignmentBatchLimit(requestedLimit) });
     if (!queue.length) return;
+    const confirmationText = activityAssignmentBatchConfirmationText({
+      batchSize: queue.length,
+      eligibleCount: eligibleQueue.length
+    });
+    if (typeof window !== "undefined" && !window.confirm(confirmationText)) return;
     clearActivityAgentBatchResults(queue);
     void runActivityAssignmentBatch({ queue, timeFilter: activityAgentTimeFilter });
-  }, [activityUpdates.items, activityAgentTimeFilter, clearActivityAgentBatchResults, runActivityAssignmentBatch]);
+  }, [activityUpdates.items, activityAgentBatchLimit, activityAgentTimeFilter, clearActivityAgentBatchResults, runActivityAssignmentBatch]);
 
   const stopActivityAssignmentBatch = useCallback(() => {
     if (activityAgentBatch.status !== ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING) return;
@@ -1331,12 +1363,9 @@ export function SchedulePage() {
     });
   }, [activityAgentBatch, runActivityAssignmentBatch]);
 
-  const restartActivityAssignmentBatch = useCallback((scopedItems = activityUpdates.items) => {
-    const queue = buildActivityAssignmentBatchQueue(scopedItems);
-    if (!queue.length) return;
-    clearActivityAgentBatchResults(queue);
-    void runActivityAssignmentBatch({ queue, timeFilter: activityAgentTimeFilter });
-  }, [activityUpdates.items, activityAgentTimeFilter, clearActivityAgentBatchResults, runActivityAssignmentBatch]);
+  const restartActivityAssignmentBatch = useCallback((scopedItems = activityUpdates.items, requestedLimit = activityAgentBatchLimit) => {
+    startActivityAssignmentBatch(scopedItems, requestedLimit);
+  }, [activityUpdates.items, activityAgentBatchLimit, startActivityAssignmentBatch]);
 
   const confirmActivityAssignmentAgent = useCallback(async (item, run, candidate) => {
     if (!projectId || !run?.runId || !candidate?.activityKey) return;
@@ -1705,6 +1734,7 @@ export function SchedulePage() {
         onStartAgentBatch={startActivityAssignmentBatch} onStopAgentBatch={stopActivityAssignmentBatch}
         onResumeAgentBatch={resumeActivityAssignmentBatch} onRestartAgentBatch={restartActivityAssignmentBatch}
         timeFilterEnabled={activityAgentTimeFilter} onTimeFilterChange={setActivityAgentTimeFilter}
+        batchLimit={activityAgentBatchLimit} onBatchLimitChange={setActivityAgentBatchLimit}
         labelCoverage={activityAssignmentLabelCoverage} />
     </div>
   );

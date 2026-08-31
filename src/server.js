@@ -2437,17 +2437,19 @@ async function handleApi(req, res, url) {
     const body = await readJson(req).catch(() => ({}));
     const projectId = body.projectId || body.project_id || "";
     if (!projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
+    const reviewOnly = body.reviewOnly === true;
     const runId = crypto.randomUUID();
     createRun(runId);
     try {
-      // The browser cannot supply a model, prompt, threshold or key. Refresh
-      // the SETTINGS-owned configuration and secret for every explicit click.
+      // The browser cannot supply a model, prompt, threshold or key. It may
+      // only reduce authority through reviewOnly, which disables link writes.
+      // Refresh the SETTINGS-owned configuration and secret for every click.
       await reloadSettingsFromDb();
       const result = await runScheduleActivityAssignmentAgent({
         projectId,
         sourceId: body.sourceId,
         requestedBy: reviewer.sub,
-        commit: true,
+        commit: !reviewOnly,
         timeFilter: body.timeFilter === true,
         config: getConfig(),
         apiKey: settingsOpenRouterApiKey(),
@@ -2510,7 +2512,7 @@ async function handleApi(req, res, url) {
         kind: "schedule_activity_assignment",
         runId,
         nodes: [
-          { id: "assignment_start", label: "Schedule Assignment Trigger", kind: "trigger", status: "done", input: { projectId, sourceId: body.sourceId, timeFilterEnabled: body.timeFilter === true }, output: { runId } },
+          { id: "assignment_start", label: "Schedule Assignment Trigger", kind: "trigger", status: "done", input: { projectId, sourceId: body.sourceId, timeFilterEnabled: body.timeFilter === true, reviewOnly }, output: { runId } },
           { id: "assignment_error", label: "Assignment Run Error", kind: "output", status: "error", input: {}, output: { error: error.message } }
         ],
         edges: [{ from: "assignment_start", to: "assignment_error" }],

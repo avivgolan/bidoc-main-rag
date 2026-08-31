@@ -443,12 +443,16 @@ export async function runScheduleActivityAssignmentAgent({
         scheduleDataRequest({
           config,
           settings: scheduleCfg,
-          path: `/rest/v1/${LINKS_TABLE}?select=id,activity_key&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts&source_id=eq.${encodeURIComponent(String(sourceId))}&limit=1`
+          path: `/rest/v1/${LINKS_TABLE}?select=id,activity_key,assignment_method&project_id=eq.${encodeURIComponent(projectContext.scheduleProjectId)}&source_table=eq.alerts&source_id=eq.${encodeURIComponent(String(sourceId))}&limit=1`
         }).catch(() => [])
       ]);
   const source = sourceRows[0];
   if (!source) throw new Error("update or alert not found");
-  const baseEvent = scheduleActivityUpdateItem({ ...source, id: `alert_${source.id}` }, existingLinks[0]?.activity_key || null);
+  const baseEvent = scheduleActivityUpdateItem(
+    { ...source, id: `alert_${source.id}` },
+    existingLinks[0]?.activity_key || null,
+    existingLinks[0]?.assignment_method || null
+  );
   const event = {
     ...baseEvent,
     description: source.alert_description || source.metadata?.alert_description || "",
@@ -884,7 +888,11 @@ export async function runScheduleActivityAssignmentAgent({
       method: "agent_auto",
       reviewNote: decision.reason
     });
-    assignment = scheduleActivityUpdateItem({ ...source, id: `alert_${source.id}` }, decision.selected.activityKey);
+    assignment = scheduleActivityUpdateItem(
+      { ...source, id: `alert_${source.id}` },
+      decision.selected.activityKey,
+      "agent_auto"
+    );
     status = "auto_assigned";
   }
   step("assignment_write", assignment ? "Activity assignment link committed" : "No automatic activity link was written", {
@@ -1037,7 +1045,11 @@ export async function confirmScheduleActivityAssignment({ projectId, runId, acti
     path: `/rest/v1/alerts?select=${ALERT_COLUMNS}&project_id=eq.${encodeURIComponent(run.project_id)}&id=eq.${encodeURIComponent(run.source_id)}&limit=1`
   });
   if (!sourceRows[0]) throw new Error("update or alert not found after assignment");
-  const item = scheduleActivityUpdateItem({ ...sourceRows[0], id: `alert_${sourceRows[0].id}` }, activityKey);
+  const item = scheduleActivityUpdateItem(
+    { ...sourceRows[0], id: `alert_${sourceRows[0].id}` },
+    activityKey,
+    "agent_approved"
+  );
   return { item, runId, activityKey };
 }
 
