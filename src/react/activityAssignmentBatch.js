@@ -138,6 +138,14 @@ export function activityAssignmentReviewCandidates(result, limit = 2) {
     .slice(0, safeLimit);
 }
 
+export function activityAssignmentReviewHeader(item = {}, result = {}) {
+  const alertTitle = String(item?.title || result?.event?.title || "").trim() || "התראה ללא כותרת";
+  const recommendation = result?.decision?.autoAssigned
+    ? "שויך אוטומטית"
+    : String(result?.decision?.selectedActivityName || "").trim() || "לא נמצאה התאמה חד-משמעית";
+  return { alertTitle, recommendation };
+}
+
 export function applyActivityAssignmentBatchOutcome(stats, outcome) {
   const next = {
     processed: Number(stats?.processed) || 0,

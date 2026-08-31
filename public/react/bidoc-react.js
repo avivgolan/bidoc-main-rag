@@ -1901,10 +1901,10 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		var t = e && e.nodeName && e.nodeName.toLowerCase();
 		return t && (t === "input" && (e.type === "text" || e.type === "search" || e.type === "tel" || e.type === "url" || e.type === "password") || t === "textarea" || e.contentEditable === "true");
 	}
-	var W = rn && "documentMode" in document && 11 >= document.documentMode, wr = null, Tr = null, Er = null, Dr = !1;
+	var wr = rn && "documentMode" in document && 11 >= document.documentMode, W = null, Tr = null, Er = null, Dr = !1;
 	function Or(e, t, n) {
 		var r = n.window === n ? n.document : n.nodeType === 9 ? n : n.ownerDocument;
-		Dr || wr == null || wr !== jt(r) || (r = wr, "selectionStart" in r && Cr(r) ? r = {
+		Dr || W == null || W !== jt(r) || (r = W, "selectionStart" in r && Cr(r) ? r = {
 			start: r.selectionStart,
 			end: r.selectionEnd
 		} : (r = (r.ownerDocument && r.ownerDocument.defaultView || window).getSelection(), r = {
@@ -1915,13 +1915,13 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		}), Er && vr(Er, r) || (Er = r, r = Td(Tr, "onSelect"), 0 < r.length && (t = new gn("onSelect", "select", null, t, n), e.push({
 			event: t,
 			listeners: r
-		}), t.target = wr)));
+		}), t.target = W)));
 	}
 	function kr(e, t) {
 		var n = {};
 		return n[e.toLowerCase()] = t.toLowerCase(), n["Webkit" + e] = "webkit" + t, n["Moz" + e] = "moz" + t, n;
 	}
-	var G = {
+	var Ar = {
 		animationend: kr("Animation", "AnimationEnd"),
 		animationiteration: kr("Animation", "AnimationIteration"),
 		animationstart: kr("Animation", "AnimationStart"),
@@ -1929,13 +1929,13 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		transitionstart: kr("Transition", "TransitionStart"),
 		transitioncancel: kr("Transition", "TransitionCancel"),
 		transitionend: kr("Transition", "TransitionEnd")
-	}, Ar = {}, jr = {};
-	rn && (jr = document.createElement("div").style, "AnimationEvent" in window || (delete G.animationend.animation, delete G.animationiteration.animation, delete G.animationstart.animation), "TransitionEvent" in window || delete G.transitionend.transition);
+	}, G = {}, jr = {};
+	rn && (jr = document.createElement("div").style, "AnimationEvent" in window || (delete Ar.animationend.animation, delete Ar.animationiteration.animation, delete Ar.animationstart.animation), "TransitionEvent" in window || delete Ar.transitionend.transition);
 	function Mr(e) {
-		if (Ar[e]) return Ar[e];
-		if (!G[e]) return e;
-		var t = G[e], n;
-		for (n in t) if (t.hasOwnProperty(n) && n in jr) return Ar[e] = t[n];
+		if (G[e]) return G[e];
+		if (!Ar[e]) return e;
+		var t = Ar[e], n;
+		for (n in t) if (t.hasOwnProperty(n) && n in jr) return G[e] = t[n];
 		return e;
 	}
 	var Nr = Mr("animationend"), Pr = Mr("animationiteration"), Fr = Mr("animationstart"), Ir = Mr("transitionrun"), Lr = Mr("transitionstart"), Rr = Mr("transitioncancel"), zr = Mr("transitionend"), Br = /* @__PURE__ */ new Map(), Vr = "abort auxClick beforeToggle cancel canPlay canPlayThrough click close contextMenu copy cut drag dragEnd dragEnter dragExit dragLeave dragOver dragStart drop durationChange emptied encrypted ended error gotPointerCapture input invalid keyDown keyPress keyUp load loadedData loadedMetadata loadStart lostPointerCapture mouseDown mouseMove mouseOut mouseOver mouseUp paste pause play playing pointerCancel pointerDown pointerMove pointerOut pointerOver pointerUp progress rateChange reset resize seeked seeking stalled submit suspend timeUpdate touchCancel touchEnd touchStart volumeChange scroll toggle touchMove waiting wheel".split(" ");
@@ -6355,10 +6355,10 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 				}
 				switch (y = r ? ft(r) : window, e) {
 					case "focusin":
-						($n(y) || y.contentEditable === "true") && (wr = y, Tr = r, Er = null);
+						($n(y) || y.contentEditable === "true") && (W = y, Tr = r, Er = null);
 						break;
 					case "focusout":
-						Er = Tr = wr = null;
+						Er = Tr = W = null;
 						break;
 					case "mousedown":
 						Dr = !0;
@@ -6368,7 +6368,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 					case "dragend":
 						Dr = !1, Or(s, n, i);
 						break;
-					case "selectionchange": if (W) break;
+					case "selectionchange": if (wr) break;
 					case "keydown":
 					case "keyup": Or(s, n, i);
 				}
@@ -13411,7 +13411,13 @@ function Ft(e, t = 2) {
 	let n = Math.max(0, Math.min(2, Number(t) || 0));
 	return (Array.isArray(e.candidates) ? e.candidates : []).filter((e) => e?.activityKey && e?.name).slice(0, n);
 }
-function It(e, t) {
+function It(e = {}, t = {}) {
+	return {
+		alertTitle: String(e?.title || t?.event?.title || "").trim() || "התראה ללא כותרת",
+		recommendation: t?.decision?.autoAssigned ? "שויך אוטומטית" : String(t?.decision?.selectedActivityName || "").trim() || "לא נמצאה התאמה חד-משמעית"
+	};
+}
+function Lt(e, t) {
 	let n = {
 		processed: Number(e?.processed) || 0,
 		assigned: Number(e?.assigned) || 0,
@@ -13421,7 +13427,7 @@ function It(e, t) {
 	};
 	return n.processed += 1, t?.ok ? t.result?.status === "filtered_out" || t.result?.timeFilter?.skipped === !0 ? n.skipped += 1 : t.result?.assignment ? n.assigned += 1 : n.review += 1 : n.failed += 1, n;
 }
-function Lt(e) {
+function Rt(e) {
 	let t = Number(e?.processed) || 0, n = Number(e?.total) || 0;
 	switch (e?.status) {
 		case St.RUNNING: return `${e?.timeFilter ? "מסנן ובודק" : "בודק"} שורה ${Math.min(t + 1, n)} מתוך ${n}`;
@@ -13433,49 +13439,49 @@ function Lt(e) {
 }
 //#endregion
 //#region src/scheduleActivityAssignmentLabels.js
-var Rt = Object.freeze({
+var zt = Object.freeze({
 	CONFIRMED_MATCH: "confirmed_match",
 	REJECTED_MATCH: "rejected_match",
 	NO_MATCH: "no_match",
 	STALE_ACTIVITY: "stale_activity",
 	IRRELEVANT_ALERT: "irrelevant_alert",
 	AMBIGUOUS: "ambiguous"
-}), zt = Object.freeze([
-	Rt.REJECTED_MATCH,
-	Rt.NO_MATCH,
-	Rt.STALE_ACTIVITY,
-	Rt.IRRELEVANT_ALERT,
-	Rt.AMBIGUOUS
-]), Bt = Object.freeze([
+}), Bt = Object.freeze([
+	zt.REJECTED_MATCH,
+	zt.NO_MATCH,
+	zt.STALE_ACTIVITY,
+	zt.IRRELEVANT_ALERT,
+	zt.AMBIGUOUS
+]), Vt = Object.freeze([
 	{
-		type: Rt.NO_MATCH,
+		type: zt.NO_MATCH,
 		labelHe: "אף פעילות אינה מתאימה",
 		reasonHe: "הבודק אישר שאין פעילות מתאימה בגרסת לוח הזמנים הפעילה."
 	},
 	{
-		type: Rt.AMBIGUOUS,
+		type: zt.AMBIGUOUS,
 		labelHe: "אין מספיק מידע להכריע",
 		reasonHe: "הבודק אישר שכמה פעילויות נותרו סבירות ואין די מידע להכרעה."
 	},
 	{
-		type: Rt.IRRELEVANT_ALERT,
+		type: zt.IRRELEVANT_ALERT,
 		labelHe: "לא רלוונטי לשיוך בלוח",
 		reasonHe: "הבודק אישר שההתראה אינה צריכה להיכנס לתהליך שיוך הפעילויות."
 	},
 	{
-		type: Rt.REJECTED_MATCH,
+		type: zt.REJECTED_MATCH,
 		labelHe: "ההצעות שגויות. קיימת פעילות אחרת",
 		reasonHe: "הבודק דחה את הפעילויות שהוצעו אך לא קבע שאין פעילות מתאימה אחרת."
 	}
 ]);
-new Set(Object.values(Rt)), new Set(zt);
+new Set(Object.values(zt)), new Set(Bt);
 //#endregion
 //#region src/react/scheduleActivityAssignmentReviewState.js
-function Vt(e) {
+function Ht(e) {
 	return String(e ?? "").trim();
 }
-function Ht(e = {}) {
-	let t = e.event && typeof e.event == "object" ? e.event : {}, n = Vt(e.sourceId || t.id), r = Vt(t.alertType) || "החלטת צוות";
+function Ut(e = {}) {
+	let t = e.event && typeof e.event == "object" ? e.event : {}, n = Ht(e.sourceId || t.id), r = Ht(t.alertType) || "החלטת צוות";
 	return {
 		id: n,
 		sourceEventId: `alert_${n}`,
@@ -13483,19 +13489,19 @@ function Ht(e = {}) {
 		sourceKind: "timeline_alert_review_snapshot",
 		kind: /עדכון|update/iu.test(r) ? "update" : "alert",
 		alertType: r,
-		title: Vt(t.title) || "התראה שנשמרה לבדיקת צוות",
-		date: Vt(t.date) || null,
+		title: Ht(t.title) || "התראה שנשמרה לבדיקת צוות",
+		date: Ht(t.date) || null,
 		severity: t.severity == null ? null : Number(t.severity),
-		status: Vt(t.status) || null,
+		status: Ht(t.status) || null,
 		href: null,
 		activityKey: null,
 		reviewSnapshot: !0
 	};
 }
-function Ut(e = [], t = []) {
-	let n = Array.isArray(e) ? e : [], r = new Map(n.map((e) => [Vt(e?.id), e])), i = /* @__PURE__ */ new Map(), a = [];
+function Wt(e = [], t = []) {
+	let n = Array.isArray(e) ? e : [], r = new Map(n.map((e) => [Ht(e?.id), e])), i = /* @__PURE__ */ new Map(), a = [];
 	for (let e of Array.isArray(t) ? t : []) {
-		let t = Vt(e?.sourceId);
+		let t = Ht(e?.sourceId);
 		if (!t || i.has(t)) continue;
 		let n = r.get(t);
 		if (n?.activityKey) continue;
@@ -13503,9 +13509,9 @@ function Ut(e = [], t = []) {
 		i.set(t, o ? {
 			...e,
 			detachedFromCurrentFeed: !0
-		} : e), o && a.push(Ht(e));
+		} : e), o && a.push(Ut(e));
 	}
-	let o = new Set(i.keys()), s = n.filter((e) => o.has(Vt(e?.id))), c = n.filter((e) => !o.has(Vt(e?.id)));
+	let o = new Set(i.keys()), s = n.filter((e) => o.has(Ht(e?.id))), c = n.filter((e) => !o.has(Ht(e?.id)));
 	return {
 		items: [
 			...a,
@@ -13518,7 +13524,7 @@ function Ut(e = [], t = []) {
 }
 //#endregion
 //#region src/react/SchedulePage.jsx
-var Wt = {
+var Gt = {
 	on_track: "בזמן",
 	watch: "במעקב",
 	at_risk: "בסיכון",
@@ -13533,7 +13539,7 @@ var Wt = {
 	source_conflict: "סתירה בין מקורות",
 	not_started: "טרם החלה",
 	blocked: "חסומה"
-}, Gt = {
+}, Kt = {
 	on_track: "ok",
 	completed_on_time: "ok",
 	watch: "watch",
@@ -13548,17 +13554,17 @@ var Wt = {
 	source_conflict: "conflict",
 	insufficient_data: "unknown",
 	not_started: "idle"
-}, Kt = {
+}, qt = {
 	contract_finish: "החוזה",
 	contractor_planned_finish: "לוח הקבלן",
 	forecast_finish: "תחזית"
-}, qt = {
+}, Jt = {
 	contractAxis: "ציר חוזי",
 	scheduleVersions: "גרסאות לוח",
 	dependencies: "תלויות",
 	observedEvents: "אירועי שטח",
 	calendar: "לוח שנה"
-}, Jt = [
+}, Yt = [
 	"ינו",
 	"פבר",
 	"מרץ",
@@ -13571,8 +13577,8 @@ var Wt = {
 	"אוק",
 	"נוב",
 	"דצמ"
-], Yt = 120;
-async function Xt(e, { method: t = "GET", body: n = null, timeoutMs: r = 12e4, cache: i = "default" } = {}) {
+], Xt = 120;
+async function Zt(e, { method: t = "GET", body: n = null, timeoutMs: r = 12e4, cache: i = "default" } = {}) {
 	let a = new AbortController(), o = setTimeout(() => a.abort(), r);
 	try {
 		let r = await fetch(e, {
@@ -13588,11 +13594,11 @@ async function Xt(e, { method: t = "GET", body: n = null, timeoutMs: r = 12e4, c
 		clearTimeout(o);
 	}
 }
-function Zt(e = []) {
+function Qt(e = []) {
 	let t = e.map(({ label: e, error: t }) => `${e}: ${t?.message || "שגיאה לא ידועה"}`), n = /(?:522|connection terminated|connection timeout|failed to fetch|abort|timeout)/iu;
 	return `${t.some((e) => n.test(e)) ? "APP DATA אינו זמין כרגע (522/timeout). נתוני לוח הזמנים המוצגים חלקיים או אינם זמינים." : "לא ניתן היה להשלים את טעינת נתוני לוח הזמנים. הנתונים המוצגים עשויים להיות חלקיים."} לא בוצע שינוי בנתונים. אפשר לנסות שוב לאחר שחיבור Supabase יתאושש.`;
 }
-function Qt(e) {
+function $t(e) {
 	if (!e) return "—";
 	if (e.daysLate != null) {
 		let t = e.workingDaysLate == null ? "" : ` (${e.workingDaysLate} ימי עבודה)`;
@@ -13605,13 +13611,13 @@ function Qt(e) {
 	}
 	return "—";
 }
-function $t(e) {
-	return !e?.basis || !e?.basisDate ? "ללא בסיס" : `מול ${Kt[e.basis] ?? e.basis}: ${e.basisDate}`;
+function en(e) {
+	return !e?.basis || !e?.basisDate ? "ללא בסיס" : `מול ${qt[e.basis] ?? e.basis}: ${e.basisDate}`;
 }
-var en = ({ status: e }) => /* @__PURE__ */ (0, x.jsx)("span", {
-	className: `schedBadge schedTone-${Gt[e] ?? "unknown"}`,
-	children: Wt[e] ?? e
-}), tn = ({ confidence: e }) => {
+var tn = ({ status: e }) => /* @__PURE__ */ (0, x.jsx)("span", {
+	className: `schedBadge schedTone-${Kt[e] ?? "unknown"}`,
+	children: Gt[e] ?? e
+}), nn = ({ confidence: e }) => {
 	if (!e) return null;
 	let t = e.level ?? "low", n = t === "high" ? "ביטחון גבוה" : t === "medium" ? "ביטחון בינוני" : "ביטחון נמוך";
 	return /* @__PURE__ */ (0, x.jsxs)("span", {
@@ -13619,12 +13625,12 @@ var en = ({ status: e }) => /* @__PURE__ */ (0, x.jsx)("span", {
 		title: `ציון: ${e.score}`,
 		children: [t === "low" ? "⚠ " : "", n]
 	});
-}, nn = ({ gates: e, compact: t = !1 }) => e ? /* @__PURE__ */ (0, x.jsxs)("div", {
+}, rn = ({ gates: e, compact: t = !1 }) => e ? /* @__PURE__ */ (0, x.jsxs)("div", {
 	className: `schedGates ${t ? "is-compact" : ""}`,
 	children: [!t && /* @__PURE__ */ (0, x.jsx)("span", {
 		className: "schedGatesTitle",
 		children: "מה נבדק:"
-	}), Object.entries(qt).map(([t, n]) => {
+	}), Object.entries(Jt).map(([t, n]) => {
 		let r = e[t], i = r === "ok" || t === "scheduleVersions" && Number(r) > 1, a = t === "scheduleVersions" ? `${n}: ${r}` : n;
 		return /* @__PURE__ */ (0, x.jsxs)("span", {
 			className: `schedGate ${i ? "is-ok" : r === "stale" ? "is-stale" : "is-missing"}`,
@@ -13636,7 +13642,7 @@ var en = ({ status: e }) => /* @__PURE__ */ (0, x.jsx)("span", {
 			]
 		}, t);
 	})]
-}) : null, rn = ({ showLateLines: e = !0 }) => /* @__PURE__ */ (0, x.jsxs)("div", {
+}) : null, an = ({ showLateLines: e = !0 }) => /* @__PURE__ */ (0, x.jsxs)("div", {
 	className: "axisLegend",
 	children: [
 		/* @__PURE__ */ (0, x.jsxs)("span", { children: [/* @__PURE__ */ (0, x.jsx)("i", { className: "axisSwatch swPlan" }), " תכנון הקבלן"] }),
@@ -13662,7 +13668,7 @@ var en = ({ status: e }) => /* @__PURE__ */ (0, x.jsx)("span", {
 		/* @__PURE__ */ (0, x.jsxs)("span", { children: [/* @__PURE__ */ (0, x.jsx)("i", { className: "axisSwatch swToday" }), " קו \"נכון ל-\""] })
 	]
 });
-function an({ indicator: e, scale: t, asOf: n, showLateLines: r = !0, selected: i, onSelect: a, eventCount: o = 0, expanded: s = !1, onToggleEvents: c }) {
+function on({ indicator: e, scale: t, asOf: n, showLateLines: r = !0, selected: i, onSelect: a, eventCount: o = 0, expanded: s = !1, onToggleEvents: c }) {
 	let l = e.timing ?? {}, u = e.lateness ?? {}, d = t.pos(l.plannedStart), f = t.pos(l.plannedFinish), p = t.pos(l.contractFinish), m = t.pos(l.forecastFinish), h = t.pos(l.observedStart), g = t.pos(l.observedFinish), _ = t.pos(u.basisDate), v = t.pos(n), y = l.percentComplete, b = u.isLate === !0;
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: `axisRow ${i ? "is-selected" : ""}`,
@@ -13700,7 +13706,7 @@ function an({ indicator: e, scale: t, asOf: n, showLateLines: r = !0, selected: 
 							left: `${_}%`,
 							width: `${v - _}%`
 						},
-						title: `${Qt(u)} — ${$t(u)}`
+						title: `${$t(u)} — ${en(u)}`
 					})]
 				}),
 				/* @__PURE__ */ (0, x.jsx)("div", {
@@ -13740,15 +13746,15 @@ function an({ indicator: e, scale: t, asOf: n, showLateLines: r = !0, selected: 
 				})]
 			}), /* @__PURE__ */ (0, x.jsxs)("span", {
 				className: "axisNameMeta",
-				children: [/* @__PURE__ */ (0, x.jsx)(en, { status: e.status }), /* @__PURE__ */ (0, x.jsx)("span", {
+				children: [/* @__PURE__ */ (0, x.jsx)(tn, { status: e.status }), /* @__PURE__ */ (0, x.jsx)("span", {
 					className: "axisLateText",
-					children: Qt(u)
+					children: $t(u)
 				})]
 			})]
 		})]
 	});
 }
-function on({ item: e, scale: t }) {
+function sn({ item: e, scale: t }) {
 	let n = t.pos(e.date);
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "axisEventRow",
@@ -13778,7 +13784,7 @@ function on({ item: e, scale: t }) {
 		})]
 	});
 }
-function sn({ indicators: e, allIndicators: t, pendingConditions: n, timelineItems: r, asOf: i, showLateLines: a, showAsOfMarker: o, selected: s, onSelect: c }) {
+function cn({ indicators: e, allIndicators: t, pendingConditions: n, timelineItems: r, asOf: i, showLateLines: a, showAsOfMarker: o, selected: s, onSelect: c }) {
 	let [l, u] = (0, b.useState)(() => /* @__PURE__ */ new Set()), d = (0, b.useMemo)(() => (n ?? []).flatMap((e) => {
 		let t = e?.metadata?.trigger_evidence?.provisionalDueDate;
 		return t ? [{
@@ -13850,11 +13856,11 @@ function sn({ indicators: e, allIndicators: t, pendingConditions: n, timelineIte
 		className: "schedEmpty",
 		children: "אין תאריכים להצגה"
 	});
-	let y = e.slice(0, Yt), S = o ? h.pos(i) : null, C = a && o;
+	let y = e.slice(0, Xt), S = o ? h.pos(i) : null, C = a && o;
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "axesView",
 		children: [
-			/* @__PURE__ */ (0, x.jsx)(rn, { showLateLines: C }),
+			/* @__PURE__ */ (0, x.jsx)(an, { showLateLines: C }),
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "axesBody",
 				children: [/* @__PURE__ */ (0, x.jsxs)("div", {
@@ -13866,7 +13872,7 @@ function sn({ indicators: e, allIndicators: t, pendingConditions: n, timelineIte
 							className: "axesMonthTick",
 							style: { left: `${e.left}%` },
 							children: [
-								Jt[e.month],
+								Yt[e.month],
 								" ",
 								String(e.year).slice(2)
 							]
@@ -13919,7 +13925,7 @@ function sn({ indicators: e, allIndicators: t, pendingConditions: n, timelineIte
 					className: "axesRows",
 					children: y.map((e) => {
 						let t = xt(e), n = _.get(t) || [], r = l.has(t);
-						return /* @__PURE__ */ (0, x.jsxs)(b.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)(an, {
+						return /* @__PURE__ */ (0, x.jsxs)(b.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)(on, {
 							indicator: e,
 							scale: h,
 							asOf: i,
@@ -13929,18 +13935,18 @@ function sn({ indicators: e, allIndicators: t, pendingConditions: n, timelineIte
 							eventCount: n.length,
 							expanded: r,
 							onToggleEvents: () => v(t)
-						}), r ? n.map((e) => /* @__PURE__ */ (0, x.jsx)(on, {
+						}), r ? n.map((e) => /* @__PURE__ */ (0, x.jsx)(sn, {
 							item: e,
 							scale: h
 						}, `${e.sourceTable}:${e.id}`)) : null] }, t);
 					})
 				})]
 			}),
-			e.length > Yt ? /* @__PURE__ */ (0, x.jsxs)("div", {
+			e.length > Xt ? /* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "axesCapNote",
 				children: [
 					"מוצגות ",
-					Yt,
+					Xt,
 					" הפעילויות החמורות מתוך ",
 					e.length,
 					" — צמצם עם הפילטרים למעלה"
@@ -13949,7 +13955,7 @@ function sn({ indicators: e, allIndicators: t, pendingConditions: n, timelineIte
 		]
 	});
 }
-function cn({ activities: e, value: t, disabled: n, busy: r, onChange: i }) {
+function ln({ activities: e, value: t, disabled: n, busy: r, onChange: i }) {
 	let a = (0, b.useRef)(null), [o, s] = (0, b.useState)(""), c = e.find((e) => e.key === t), l = e.filter((e) => `${e.name} ${e.dateLabel}`.toLocaleLowerCase("he").includes(o.trim().toLocaleLowerCase("he"))).slice(0, 80), u = (e) => {
 		i(e), s(""), a.current && (a.current.open = !1);
 	};
@@ -13996,7 +14002,7 @@ function cn({ activities: e, value: t, disabled: n, busy: r, onChange: i }) {
 		})]
 	});
 }
-function ln({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, agentResults: a, onRunAgent: o, onConfirmAgent: s, onRejectAgent: c, agentBatch: l, onStartAgentBatch: u, onStopAgentBatch: d, onResumeAgentBatch: f, onRestartAgentBatch: p, timeFilterEnabled: m, onTimeFilterChange: h, batchLimit: g, onBatchLimitChange: _, labelCoverage: v }) {
+function un({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, agentResults: a, onRunAgent: o, onConfirmAgent: s, onRejectAgent: c, agentBatch: l, onStartAgentBatch: u, onStopAgentBatch: d, onResumeAgentBatch: f, onRestartAgentBatch: p, timeFilterEnabled: m, onTimeFilterChange: h, batchLimit: g, onBatchLimitChange: _, labelCoverage: v }) {
 	let [y, S] = (0, b.useState)(() => ({ ...Et })), [C, w] = (0, b.useState)(100), T = (0, b.useDeferredValue)(y.query), E = (0, b.useDeferredValue)(y.text), D = (0, b.useDeferredValue)(y.activity), O = (0, b.useMemo)(() => ({
 		...y,
 		query: T,
@@ -14018,7 +14024,7 @@ function ln({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, a
 		})), w(100);
 	}, []), te = (0, b.useCallback)(() => {
 		S({ ...Et }), w(100);
-	}, []), L = l.status === St.RUNNING || l.status === St.STOPPING, ne = !!(i || n), re = Lt(l);
+	}, []), L = l.status === St.RUNNING || l.status === St.STOPPING, ne = !!(i || n), re = Rt(l);
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "activityUpdatesPanel",
 		"aria-labelledby": "activity-updates-title",
@@ -14245,7 +14251,7 @@ function ln({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, a
 							}) })
 						]
 					})] }), /* @__PURE__ */ (0, x.jsxs)("tbody", { children: [k.slice(0, C).map((e) => {
-						let l = a?.[e.id], u = i === e.id, d = Ft(l), f = u || n === e.id || L, p = !!(l?.runId && l?.auditPersisted), m = !!(l?.persistedReview && l?.reviewId), h = Pt(e);
+						let l = a?.[e.id], u = i === e.id, d = Ft(l), f = It(e, l), p = u || n === e.id || L, m = !!(l?.runId && l?.auditPersisted), h = !!(l?.persistedReview && l?.reviewId), g = Pt(e);
 						return /* @__PURE__ */ (0, x.jsxs)(b.Fragment, { children: [/* @__PURE__ */ (0, x.jsxs)("tr", {
 							className: e.activityKey ? "is-assigned" : "",
 							children: [
@@ -14274,15 +14280,15 @@ function ln({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, a
 								/* @__PURE__ */ (0, x.jsx)("td", { children: e.status || "—" }),
 								/* @__PURE__ */ (0, x.jsx)("td", { children: /* @__PURE__ */ (0, x.jsxs)("div", {
 									className: "activityAssignmentActions",
-									children: [/* @__PURE__ */ (0, x.jsx)(cn, {
+									children: [/* @__PURE__ */ (0, x.jsx)(ln, {
 										activities: t,
 										value: e.activityKey,
 										disabled: !e.date || L || l?.detachedFromCurrentFeed,
 										busy: n === e.id,
 										onChange: (t) => r(e, t)
-									}), h ? /* @__PURE__ */ (0, x.jsx)("span", {
-										className: `activityAssignmentMethod is-${h.key}`,
-										children: h.label
+									}), g ? /* @__PURE__ */ (0, x.jsx)("span", {
+										className: `activityAssignmentMethod is-${g.key}`,
+										children: g.label
 									}) : /* @__PURE__ */ (0, x.jsx)("button", {
 										type: "button",
 										className: "activityAgentButton",
@@ -14315,12 +14321,29 @@ function ln({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, a
 									children: [
 										/* @__PURE__ */ (0, x.jsxs)("div", {
 											className: "activityAgentResultHead",
-											children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: l.decision?.autoAssigned ? "שויך אוטומטית" : l.decision?.selectedActivityName || "לא נמצאה התאמה חד־משמעית" }), /* @__PURE__ */ (0, x.jsxs)("span", { children: [
-												"ציון התאמה ",
-												l.decision?.rankingScore ?? l.decision?.confidence ?? 0,
-												` · פער ${l.decision?.rankingGap ?? l.decision?.margin ?? 0}`,
-												Number.isFinite(l.decision?.calibratedProbability) ? ` · הסתברות מכוילת ${Math.round(l.decision.calibratedProbability * 100)}%` : ""
-											] })]
+											children: [/* @__PURE__ */ (0, x.jsxs)("div", {
+												className: "activityAgentResultIdentity",
+												children: [
+													/* @__PURE__ */ (0, x.jsx)("small", { children: "ההתראה שנבדקת" }),
+													/* @__PURE__ */ (0, x.jsx)("strong", {
+														title: f.alertTitle,
+														children: f.alertTitle
+													}),
+													/* @__PURE__ */ (0, x.jsxs)("span", { children: [
+														/* @__PURE__ */ (0, x.jsx)("b", { children: "הצעת הסוכן המובילה:" }),
+														" ",
+														f.recommendation
+													] })
+												]
+											}), /* @__PURE__ */ (0, x.jsxs)("span", {
+												className: "activityAgentResultScore",
+												children: [
+													"ציון התאמה ",
+													l.decision?.rankingScore ?? l.decision?.confidence ?? 0,
+													` · פער ${l.decision?.rankingGap ?? l.decision?.margin ?? 0}`,
+													Number.isFinite(l.decision?.calibratedProbability) ? ` · הסתברות מכוילת ${Math.round(l.decision.calibratedProbability * 100)}%` : ""
+												]
+											})]
 										}),
 										l.persistedReview ? /* @__PURE__ */ (0, x.jsx)("span", {
 											className: `activityAgentSharedReviewBadge ${l.approved || l.rejected ? "is-resolved" : ""}`,
@@ -14341,29 +14364,37 @@ function ln({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, a
 												className: "activityAgentCandidates",
 												role: "group",
 												"aria-label": "פעילויות מוצעות",
-												children: [d.map((t) => /* @__PURE__ */ (0, x.jsxs)("button", {
+												children: [d.map((t, n) => /* @__PURE__ */ (0, x.jsxs)("button", {
 													type: "button",
-													disabled: f,
-													onClick: () => m || p ? s(e, l, t) : r(e, t.activityKey),
-													children: [/* @__PURE__ */ (0, x.jsx)("span", { children: t.name }), /* @__PURE__ */ (0, x.jsxs)("small", { children: [
-														"ציון התאמה ",
-														t.finalScore,
-														" · ",
-														t.plannedStart || "?",
-														"–",
-														t.plannedFinish || "?"
-													] })]
-												}, t.activityKey)), m ? Bt.map((t) => /* @__PURE__ */ (0, x.jsx)("button", {
+													disabled: p,
+													onClick: () => h || m ? s(e, l, t) : r(e, t.activityKey),
+													children: [
+														/* @__PURE__ */ (0, x.jsxs)("em", { children: [
+															"אפשרות ",
+															n + 1,
+															n === 0 ? " · הצעת הסוכן המובילה" : ""
+														] }),
+														/* @__PURE__ */ (0, x.jsx)("span", { children: t.name }),
+														/* @__PURE__ */ (0, x.jsxs)("small", { children: [
+															"ציון התאמה ",
+															t.finalScore,
+															" · ",
+															t.plannedStart || "?",
+															"–",
+															t.plannedFinish || "?"
+														] })
+													]
+												}, t.activityKey)), h ? Vt.map((t) => /* @__PURE__ */ (0, x.jsx)("button", {
 													type: "button",
 													className: "is-reject",
-													disabled: f,
+													disabled: p,
 													onClick: () => c(e, l, t),
 													children: t.labelHe
-												}, t.type)) : p ? /* @__PURE__ */ (0, x.jsx)("button", {
+												}, t.type)) : m ? /* @__PURE__ */ (0, x.jsx)("button", {
 													type: "button",
 													className: "is-reject",
-													disabled: f,
-													onClick: () => c(e, l, Bt[0]),
+													disabled: p,
+													onClick: () => c(e, l, Vt[0]),
 													children: "אף אפשרות אינה מתאימה"
 												}) : null]
 											})]
@@ -14392,7 +14423,7 @@ function ln({ items: e, activities: t, busyId: n, onAssign: r, agentBusyId: i, a
 		]
 	});
 }
-var un = ({ indicator: e, onClose: t }) => {
+var dn = ({ indicator: e, onClose: t }) => {
 	if (!e) return null;
 	let n = e.timing ?? {}, r = e.variances ?? {};
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -14401,8 +14432,8 @@ var un = ({ indicator: e, onClose: t }) => {
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "schedDetailHead",
 				children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [
-					/* @__PURE__ */ (0, x.jsx)(en, { status: e.status }),
-					/* @__PURE__ */ (0, x.jsx)(tn, { confidence: e.confidence }),
+					/* @__PURE__ */ (0, x.jsx)(tn, { status: e.status }),
+					/* @__PURE__ */ (0, x.jsx)(nn, { confidence: e.confidence }),
 					e.severity != null && /* @__PURE__ */ (0, x.jsxs)("span", {
 						className: "schedBadge schedSeverity",
 						children: ["חומרה ", e.severity]
@@ -14421,9 +14452,9 @@ var un = ({ indicator: e, onClose: t }) => {
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "schedDetailMeta",
 				children: [
-					Qt(e.lateness),
+					$t(e.lateness),
 					" · ",
-					$t(e.lateness)
+					en(e.lateness)
 				]
 			}),
 			/* @__PURE__ */ (0, x.jsx)("p", {
@@ -14443,7 +14474,7 @@ var un = ({ indicator: e, onClose: t }) => {
 					/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "Float נותר" }), /* @__PURE__ */ (0, x.jsx)("b", { children: r.remainingFloatDays == null ? "— (אין נתוני תלויות)" : `${r.remainingFloatDays} ימים` })] })
 				]
 			}),
-			/* @__PURE__ */ (0, x.jsx)(nn, { gates: e.gates }),
+			/* @__PURE__ */ (0, x.jsx)(rn, { gates: e.gates }),
 			e.evidence?.length ? /* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "schedEvidence",
 				children: [/* @__PURE__ */ (0, x.jsx)("div", {
@@ -14466,7 +14497,7 @@ var un = ({ indicator: e, onClose: t }) => {
 			}) : null
 		]
 	});
-}, dn = {
+}, fn = {
 	execution: "ביצוע",
 	payment: "תשלומים",
 	notice: "הודעות",
@@ -14474,30 +14505,30 @@ var un = ({ indicator: e, onClose: t }) => {
 	insurance: "ביטוחים",
 	warranty: "בדק ואחריות",
 	other: "אחר"
-}, fn = {
+}, pn = {
 	hours: "שעות",
 	working_days: "ימי עבודה",
 	calendar_days: "ימים",
 	weeks: "שבועות",
 	months: "חודשים"
-}, pn = {
+}, mn = {
 	event: "אירוע נכנס",
 	schedule_task: "נקודה בלוח הקבלן",
 	milestone: "אבן דרך אחרת",
 	unspecified: "לא הוגדר"
 };
-function mn(e) {
+function hn(e) {
 	if (e.offset_value == null) return "ללא כימות";
-	let t = fn[e.offset_unit] ?? e.offset_unit ?? "";
+	let t = pn[e.offset_unit] ?? e.offset_unit ?? "";
 	return `${Number(e.offset_value)} ${t}`.trim();
 }
-function hn(e) {
+function gn(e) {
 	let t = e?.metadata?.contracts_workspace_id, n = e?.source_contract_decision_id;
 	if (!t || !n) return null;
 	let r = new URLSearchParams({ decisionId: n });
 	return e.source_page && r.set("page", String(e.source_page)), `/api/contracts/workspaces/${encodeURIComponent(t)}/source-link?${r}`;
 }
-var gn = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onManualResolve: a, manualDates: o, onManualDateChange: s, rowResults: c }) => {
+var _n = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onManualResolve: a, manualDates: o, onManualDateChange: s, rowResults: c }) => {
 	let l = e?.conditions ?? [], u = Object.entries(l.reduce((e, t) => ((e[t.category] ||= []).push(t), e), {}));
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "condBox",
@@ -14534,7 +14565,7 @@ var gn = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 				className: "condGroup",
 				children: [/* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "condGroupTitle",
-					children: [dn[e] ?? e, /* @__PURE__ */ (0, x.jsx)("span", {
+					children: [fn[e] ?? e, /* @__PURE__ */ (0, x.jsx)("span", {
 						className: "condGroupCount",
 						children: t.length
 					})]
@@ -14547,7 +14578,7 @@ var gn = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 							/* @__PURE__ */ (0, x.jsx)("th", { children: "האירוע שמפעיל את הספירה" }),
 							/* @__PURE__ */ (0, x.jsx)("th", { children: "תאריך האירוע בפועל" })
 						] }) }), /* @__PURE__ */ (0, x.jsx)("tbody", { children: t.map((e) => {
-							let t = c?.[e.id], n = r === e.id, l = hn(e), u = e.metadata?.pending_reason, d = o && Object.prototype.hasOwnProperty.call(o, e.id) ? o[e.id] : yt(e.trigger_event_date ?? ""), f = vt(d), p = !!d && !f, m = e.status === "resolved";
+							let t = c?.[e.id], n = r === e.id, l = gn(e), u = e.metadata?.pending_reason, d = o && Object.prototype.hasOwnProperty.call(o, e.id) ? o[e.id] : yt(e.trigger_event_date ?? ""), f = vt(d), p = !!d && !f, m = e.status === "resolved";
 							return /* @__PURE__ */ (0, x.jsxs)("tr", {
 								className: m ? "is-resolved" : "",
 								title: e.source_excerpt,
@@ -14557,7 +14588,7 @@ var gn = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 										children: [
 											/* @__PURE__ */ (0, x.jsxs)("div", {
 												className: "condOffsetLine",
-												children: [/* @__PURE__ */ (0, x.jsx)("b", { children: mn(e) }), /* @__PURE__ */ (0, x.jsx)("span", {
+												children: [/* @__PURE__ */ (0, x.jsx)("b", { children: hn(e) }), /* @__PURE__ */ (0, x.jsx)("span", {
 													className: `condState is-${e.status}`,
 													children: m ? "הושלם" : "ממתין"
 												})]
@@ -14592,7 +14623,7 @@ var gn = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 											/* @__PURE__ */ (0, x.jsx)("strong", { children: e.anchor_description || "האירוע המפעיל טרם תואר" }),
 											/* @__PURE__ */ (0, x.jsx)("span", {
 												className: `condAnchor is-${e.anchor_kind}`,
-												children: pn[e.anchor_kind] ?? e.anchor_kind
+												children: mn[e.anchor_kind] ?? e.anchor_kind
 											}),
 											u ? /* @__PURE__ */ (0, x.jsx)("span", {
 												className: "condPendingReason",
@@ -14673,7 +14704,7 @@ var gn = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 			})]
 		}) : null]
 	});
-}, _n = ({ alerts: e, expanded: t, onToggle: n }) => {
+}, vn = ({ alerts: e, expanded: t, onToggle: n }) => {
 	let r = e.reduce((e, t) => Math.max(e, Number(t.severity_level) || 0), 0);
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "schedAlertsBox",
@@ -14721,7 +14752,7 @@ var gn = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 			}, e.id))
 		}) : null]
 	});
-}, vn = ({ health: e }) => {
+}, yn = ({ health: e }) => {
 	if (!e) return null;
 	let t = e.schedule?.ageDays;
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -14793,7 +14824,7 @@ var gn = ({ data: e, expanded: t, onToggle: n, resolvingId: r, onResolve: i, onM
 		]
 	});
 };
-function yn() {
+function bn() {
 	let [e, t] = (0, b.useState)([]), [n, r] = (0, b.useState)(""), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(""), [c, l] = (0, b.useState)(!1), [u, d] = (0, b.useState)(""), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(null), [g, _] = (0, b.useState)([]), [v, y] = (0, b.useState)({
 		total: 0,
 		items: []
@@ -14802,7 +14833,7 @@ function yn() {
 		stopRequested: !1,
 		active: !1
 	}), [I, te] = (0, b.useState)(null), [L, ne] = (0, b.useState)(null), [re, ie] = (0, b.useState)(gt.conditionsOpen), [R, ae] = (0, b.useState)(gt.alertsOpen), [oe, se] = (0, b.useState)(null), [ce, le] = (0, b.useState)({}), [ue, de] = (0, b.useState)(""), [fe, pe] = (0, b.useState)({}), [me, he] = (0, b.useState)(gt.view), [ge, _e] = (0, b.useState)(gt.onlyLate), [ve, ye] = (0, b.useState)(""), [be, xe] = (0, b.useState)(gt.showLateLines), [Se, Ce] = (0, b.useState)(gt.showAsOfMarker), [we, z] = (0, b.useState)(null), [Te, Ee] = (0, b.useState)(!1), [De, Oe] = (0, b.useState)(!1), [ke, Ae] = (0, b.useState)(""), [je, Me] = (0, b.useState)([]), Ne = (0, b.useCallback)(async () => {
-		let e = await Xt("/api/schedule/projects", { timeoutMs: 45e3 });
+		let e = await Zt("/api/schedule/projects", { timeoutMs: 45e3 });
 		return t(e.projects ?? []), e.projects ?? [];
 	}, []), B = (0, b.useCallback)(async (e, t, n = "") => {
 		if (e) {
@@ -14825,8 +14856,8 @@ function yn() {
 						};
 					}
 				}, [o, s, c, l, u, d, f] = await Promise.all([
-					a(Xt(`/api/schedule/health?projectId=${encodeURIComponent(e)}${i}`, { timeoutMs: 45e3 }), null, "טעינת מדדי מצב"),
-					a(Xt("/api/schedule/sweep", {
+					a(Zt(`/api/schedule/health?projectId=${encodeURIComponent(e)}${i}`, { timeoutMs: 45e3 }), null, "טעינת מדדי מצב"),
+					a(Zt("/api/schedule/sweep", {
 						method: "POST",
 						body: {
 							projectId: e,
@@ -14839,19 +14870,19 @@ function yn() {
 						indicators: [],
 						warnings: []
 					}, "חישוב לוח הזמנים"),
-					a(Xt(`/api/schedule/alerts?projectId=${encodeURIComponent(e)}&baselined=false&lifecycle=open,updated`, { timeoutMs: 45e3 }), { alerts: [] }, "טעינת התראות"),
-					a(Xt(`/api/schedule/alerts?projectId=${encodeURIComponent(e)}&baselined=true`, { timeoutMs: 45e3 }), { count: 0 }, "טעינת היסטוריית התראות"),
-					a(Xt(`/api/schedule/conditions?projectId=${encodeURIComponent(e)}&status=pending,resolved`, { timeoutMs: 45e3 }), { conditions: [] }, "טעינת אבני דרך חוזיות"),
-					a(Xt(`/api/schedule/activity-updates?projectId=${encodeURIComponent(e)}`, { timeoutMs: 45e3 }), {
+					a(Zt(`/api/schedule/alerts?projectId=${encodeURIComponent(e)}&baselined=false&lifecycle=open,updated`, { timeoutMs: 45e3 }), { alerts: [] }, "טעינת התראות"),
+					a(Zt(`/api/schedule/alerts?projectId=${encodeURIComponent(e)}&baselined=true`, { timeoutMs: 45e3 }), { count: 0 }, "טעינת היסטוריית התראות"),
+					a(Zt(`/api/schedule/conditions?projectId=${encodeURIComponent(e)}&status=pending,resolved`, { timeoutMs: 45e3 }), { conditions: [] }, "טעינת אבני דרך חוזיות"),
+					a(Zt(`/api/schedule/activity-updates?projectId=${encodeURIComponent(e)}`, { timeoutMs: 45e3 }), {
 						total: 0,
 						items: []
 					}, "טעינת עדכונים והתראות"),
-					a(Xt(`/api/schedule/activity-updates/assignment-agent/reviews?projectId=${encodeURIComponent(e)}&status=pending`, { cache: "no-store" }), { reviews: [] }, "טעינת החלטות צוות")
+					a(Zt(`/api/schedule/activity-updates/assignment-agent/reviews?projectId=${encodeURIComponent(e)}&status=pending`, { cache: "no-store" }), { reviews: [] }, "טעינת החלטות צוות")
 				]), m = o.value, g = s.value, v = c.value, b = l.value, x = u.value, S = d.value, C = f.value;
 				k(C.labelCoverage || null);
 				let w = [o, s].filter((e) => e.error);
-				w.length && Ae(Zt(w)), p(m), h(g), _(v.alerts ?? []), te(b.count ?? 0), ne(x);
-				let T = Ut(S.items, C.reviews);
+				w.length && Ae(Qt(w)), p(m), h(g), _(v.alerts ?? []), te(b.count ?? 0), ne(x);
+				let T = Wt(S.items, C.reviews);
 				y({
 					total: T.items.length,
 					items: T.items
@@ -14876,7 +14907,7 @@ function yn() {
 		if (n) {
 			l(!0), d(""), Ae("");
 			try {
-				let e = (await Xt("/api/schedule/project-end-date", {
+				let e = (await Zt("/api/schedule/project-end-date", {
 					method: "POST",
 					body: {
 						projectId: n,
@@ -14902,7 +14933,7 @@ function yn() {
 		if (!(!n || !e?.id)) {
 			C(e.id), Ae("");
 			try {
-				let r = await Xt("/api/schedule/activity-updates/assign", {
+				let r = await Zt("/api/schedule/activity-updates/assign", {
 					method: "POST",
 					body: {
 						projectId: n,
@@ -14934,7 +14965,7 @@ function yn() {
 			[e.id]: null
 		}));
 		try {
-			let i = await Xt("/api/schedule/activity-updates/assignment-agent/run", {
+			let i = await Zt("/api/schedule/activity-updates/assignment-agent/run", {
 				method: "POST",
 				body: {
 					projectId: n,
@@ -15028,7 +15059,7 @@ function yn() {
 				reviewOnly: !0
 			});
 			if (F.current.token !== i) return;
-			a = It(a, t);
+			a = Lt(a, t);
 			let s = n + 1;
 			if (F.current.stopRequested) {
 				F.current.active = !1, j(At({
@@ -15089,7 +15120,7 @@ function yn() {
 		if (!(!n || !t?.runId || !r?.activityKey)) {
 			T(e.id), Ae("");
 			try {
-				let i = !!(t.persistedReview && t.detachedFromCurrentFeed), a = await Xt(i ? "/api/schedule/activity-updates/assignment-agent/review-label" : "/api/schedule/activity-updates/assignment-agent/confirm", {
+				let i = !!(t.persistedReview && t.detachedFromCurrentFeed), a = await Zt(i ? "/api/schedule/activity-updates/assignment-agent/review-label" : "/api/schedule/activity-updates/assignment-agent/confirm", {
 					method: "POST",
 					body: {
 						projectId: n,
@@ -15138,11 +15169,11 @@ function yn() {
 				T(null);
 			}
 		}
-	}, [n]), Ue = (0, b.useCallback)(async (e, t, r = Bt[0]) => {
+	}, [n]), Ue = (0, b.useCallback)(async (e, t, r = Vt[0]) => {
 		if (!(!n || !t?.runId)) {
 			T(e.id), Ae("");
 			try {
-				let i = await Xt(t.auditPersisted && !t.detachedFromCurrentFeed ? "/api/schedule/activity-updates/assignment-agent/reject" : "/api/schedule/activity-updates/assignment-agent/review-label", {
+				let i = await Zt(t.auditPersisted && !t.detachedFromCurrentFeed ? "/api/schedule/activity-updates/assignment-agent/reject" : "/api/schedule/activity-updates/assignment-agent/review-label", {
 					method: "POST",
 					body: {
 						projectId: n,
@@ -15181,7 +15212,7 @@ function yn() {
 		if (n) {
 			Oe(!0), Ae("");
 			try {
-				await Xt("/api/schedule/alert-scan", {
+				await Zt("/api/schedule/alert-scan", {
 					method: "POST",
 					body: {
 						projectId: n,
@@ -15204,7 +15235,7 @@ function yn() {
 		if (!(!n || !e?.id)) {
 			se(e.id), Ae(""), de("");
 			try {
-				let r = (await Xt("/api/schedule/conditions/resolve", {
+				let r = (await Zt("/api/schedule/conditions/resolve", {
 					method: "POST",
 					body: {
 						projectId: n,
@@ -15294,7 +15325,7 @@ function yn() {
 			stale: 1,
 			missing: 0
 		}, n = {};
-		for (let r of Object.keys(qt)) r === "scheduleVersions" ? n[r] = Math.max(...e.map((e) => Number(e.gates?.scheduleVersions) || 0)) : n[r] = e.reduce((e, n) => (t[n.gates?.[r]] ?? 0) > (t[e] ?? 0) ? n.gates[r] : e, "missing");
+		for (let r of Object.keys(Jt)) r === "scheduleVersions" ? n[r] = Math.max(...e.map((e) => Number(e.gates?.scheduleVersions) || 0)) : n[r] = e.reduce((e, n) => (t[n.gates?.[r]] ?? 0) > (t[e] ?? 0) ? n.gates[r] : e, "missing");
 		return n;
 	}, [m]);
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -15406,7 +15437,7 @@ function yn() {
 					}) : null
 				]
 			}),
-			Ye ? /* @__PURE__ */ (0, x.jsx)(nn, {
+			Ye ? /* @__PURE__ */ (0, x.jsx)(rn, {
 				gates: Ye,
 				compact: !0
 			}) : null,
@@ -15425,8 +15456,8 @@ function yn() {
 				className: "schedWarnings",
 				children: je.map((e) => /* @__PURE__ */ (0, x.jsxs)("div", { children: ["⚠ ", e] }, e))
 			}) : null,
-			/* @__PURE__ */ (0, x.jsx)(vn, { health: f }),
-			g.length ? /* @__PURE__ */ (0, x.jsx)(_n, {
+			/* @__PURE__ */ (0, x.jsx)(yn, { health: f }),
+			g.length ? /* @__PURE__ */ (0, x.jsx)(vn, {
 				alerts: g,
 				expanded: R,
 				onToggle: () => ae((e) => !e)
@@ -15440,7 +15471,7 @@ function yn() {
 				role: "status",
 				children: ue
 			}) : null,
-			/* @__PURE__ */ (0, x.jsx)(gn, {
+			/* @__PURE__ */ (0, x.jsx)(_n, {
 				data: L,
 				expanded: re,
 				onToggle: () => ie((e) => !e),
@@ -15505,7 +15536,7 @@ function yn() {
 					})
 				]
 			}),
-			me === "axes" ? /* @__PURE__ */ (0, x.jsx)(sn, {
+			me === "axes" ? /* @__PURE__ */ (0, x.jsx)(cn, {
 				indicators: Ke,
 				allIndicators: m?.indicators,
 				pendingConditions: L?.conditions,
@@ -15535,14 +15566,14 @@ function yn() {
 								className: "schedName",
 								children: [e.subject.name, e.subject.isMilestone ? " ◆" : ""]
 							}),
-							/* @__PURE__ */ (0, x.jsx)("td", { children: /* @__PURE__ */ (0, x.jsx)(en, { status: e.status }) }),
-							/* @__PURE__ */ (0, x.jsx)("td", { children: Qt(e.lateness) }),
+							/* @__PURE__ */ (0, x.jsx)("td", { children: /* @__PURE__ */ (0, x.jsx)(tn, { status: e.status }) }),
+							/* @__PURE__ */ (0, x.jsx)("td", { children: $t(e.lateness) }),
 							/* @__PURE__ */ (0, x.jsx)("td", {
 								className: "schedBasis",
-								children: $t(e.lateness)
+								children: en(e.lateness)
 							}),
 							/* @__PURE__ */ (0, x.jsx)("td", { children: e.timing?.percentComplete ?? "—" }),
-							/* @__PURE__ */ (0, x.jsx)("td", { children: /* @__PURE__ */ (0, x.jsx)(tn, { confidence: e.confidence }) }),
+							/* @__PURE__ */ (0, x.jsx)("td", { children: /* @__PURE__ */ (0, x.jsx)(nn, { confidence: e.confidence }) }),
 							/* @__PURE__ */ (0, x.jsx)("td", { children: e.severity ?? "—" })
 						]
 					}, xt(e))), !Ke.length && !Te ? /* @__PURE__ */ (0, x.jsx)("tr", { children: /* @__PURE__ */ (0, x.jsx)("td", {
@@ -15552,11 +15583,11 @@ function yn() {
 					}) }) : null] })]
 				})
 			}),
-			/* @__PURE__ */ (0, x.jsx)(un, {
+			/* @__PURE__ */ (0, x.jsx)(dn, {
 				indicator: we,
 				onClose: () => z(null)
 			}),
-			/* @__PURE__ */ (0, x.jsx)(ln, {
+			/* @__PURE__ */ (0, x.jsx)(un, {
 				items: v.items,
 				activities: Je,
 				busyId: S,
@@ -15582,34 +15613,34 @@ function yn() {
 }
 //#endregion
 //#region src/contracts/reviewMode.js
-var bn = Object.freeze({
+var xn = Object.freeze({
 	promotion: "promotion",
 	reviewOnly: "review_only",
 	blocked: "blocked"
 });
-function xn(e) {
-	if (!e || typeof e != "object") return bn.blocked;
+function Sn(e) {
+	if (!e || typeof e != "object") return xn.blocked;
 	let t = Array.isArray(e.globalBlockers) ? e.globalBlockers : [], n = Array.isArray(e.candidatePlans) ? e.candidatePlans : [];
-	if (t.length || n.length === 0) return bn.blocked;
+	if (t.length || n.length === 0) return xn.blocked;
 	if (e.transactionReady === !0) {
 		let e = n.some((e) => e?.status === "transaction_ready"), t = n.some((e) => !["transaction_ready", "rejected"].includes(e?.status));
-		return e && !t ? bn.promotion : bn.blocked;
+		return e && !t ? xn.promotion : xn.blocked;
 	}
-	return n.every((e) => e?.status === "rejected") ? bn.reviewOnly : bn.blocked;
+	return n.every((e) => e?.status === "rejected") ? xn.reviewOnly : xn.blocked;
 }
 //#endregion
 //#region src/contracts/clausePresentation.js
-var Sn = "contracts-clause-presentation.r3.3.v1", Cn = "contracts-relationships-input-boundary.r3.3.v1", wn = Object.freeze({
+var Cn = "contracts-clause-presentation.r3.3.v1", wn = "contracts-relationships-input-boundary.r3.3.v1", Tn = Object.freeze({
 	document_context: "הקשר מסמך",
 	clause: "סעיף ראשי",
 	subclause: "תת־סעיף",
 	appendix_item: "פריט נספח"
-}), Tn = Object.freeze({
+}), En = Object.freeze({
 	heading: "כותרת מבנית",
 	operative: "הוראה חוזית",
 	definition: "הגדרה חוזית",
 	context: "הקשר מסמך"
-}), En = Object.freeze({
+}), Dn = Object.freeze({
 	appendix: "נספח",
 	approval: "אישור",
 	authorization: "הסמכה",
@@ -15644,7 +15675,7 @@ var Sn = "contracts-clause-presentation.r3.3.v1", Cn = "contracts-relationships-
 	storage: "אחסון",
 	termination: "סיום ההסכם",
 	warranty: "אחריות בדק"
-}), Dn = Object.freeze({
+}), On = Object.freeze({
 	a: "א׳",
 	b: "ב׳",
 	c: "ג׳",
@@ -15668,60 +15699,60 @@ var Sn = "contracts-clause-presentation.r3.3.v1", Cn = "contracts-relationships-
 	u: "ש׳",
 	v: "ת׳"
 });
-function On(e) {
-	return wn[e] || "רשומת חוזה";
-}
 function kn(e) {
 	return Tn[e] || "רשומת חוזה";
 }
 function An(e) {
-	let t = String(e || "").trim();
-	return En[t] ? En[t] : /[\u0590-\u05ff]/u.test(t) ? t : "תגית חוזית";
+	return En[e] || "רשומת חוזה";
 }
-function jn(e, t = null) {
+function jn(e) {
+	let t = String(e || "").trim();
+	return Dn[t] ? Dn[t] : /[\u0590-\u05ff]/u.test(t) ? t : "תגית חוזית";
+}
+function Mn(e, t = null) {
 	let n = String(e || "").trim(), r = n.match(/^appendix_([a-v])(?:\.(heading|.+))?$/u);
 	if (r) {
-		let e = Dn[r[1]] || r[1].toUpperCase();
+		let e = On[r[1]] || r[1].toUpperCase();
 		return !r[2] || r[2] === "heading" ? `כותרת נספח ${e}` : `נספח ${e}, סעיף ${r[2]}`;
 	}
 	return /^\d+(?:\.\d+)*$/u.test(n) ? `סעיף ${n}` : n.includes(".context.") ? t || "הקשר המסמך" : t || "רשומת חוזה";
 }
-function Mn(e) {
-	return jn(e);
+function Nn(e) {
+	return Mn(e);
 }
-function Nn(e = []) {
+function Pn(e = []) {
 	let t = Array.isArray(e) ? e : [], n = /* @__PURE__ */ new Map();
 	for (let e of t) {
 		let t = String(e?.parentClauseKey || "").trim();
 		t && n.set(t, (n.get(t) || 0) + 1);
 	}
 	return t.map((e) => {
-		let t = Array.isArray(e?.hashtags) ? e.hashtags : [], r = n.get(String(e?.clauseKey || "")) || 0, i = In(e, {
+		let t = Array.isArray(e?.hashtags) ? e.hashtags : [], r = n.get(String(e?.clauseKey || "")) || 0, i = Ln(e, {
 			childCount: r,
 			hashtags: t
-		}), a = i === "heading" ? Rn(e) : null, o = t.map(An), s = (Array.isArray(e?.crossReferences) ? e.crossReferences : []).map((e) => ({
+		}), a = i === "heading" ? zn(e) : null, o = t.map(jn), s = (Array.isArray(e?.crossReferences) ? e.crossReferences : []).map((e) => ({
 			...e,
-			targetLabelHe: Mn(e?.targetClauseKey)
+			targetLabelHe: Nn(e?.targetClauseKey)
 		})), c = {
 			...e,
 			childCount: r,
 			structuralRole: i,
-			structuralRoleLabelHe: kn(i),
+			structuralRoleLabelHe: An(i),
 			structuralLeadHe: a,
 			relationshipEligible: i === "operative",
-			clauseTypeLabelHe: On(e?.clauseType),
-			displayLabelHe: jn(e?.clauseKey, e?.clauseTitle),
+			clauseTypeLabelHe: kn(e?.clauseType),
+			displayLabelHe: Mn(e?.clauseKey, e?.clauseTitle),
 			tagLabelsHe: o,
 			crossReferences: s
 		};
 		return {
 			...c,
-			displayContentHe: Fn(c)
+			displayContentHe: In(c)
 		};
 	});
 }
-function Pn(e = {}) {
-	let t = Nn(e?.clauses), n = t.reduce((e, t) => (e[t.structuralRole] = (e[t.structuralRole] || 0) + 1, e), {
+function Fn(e = {}) {
+	let t = Pn(e?.clauses), n = t.reduce((e, t) => (e[t.structuralRole] = (e[t.structuralRole] || 0) + 1, e), {
 		heading: 0,
 		operative: 0,
 		definition: 0,
@@ -15733,7 +15764,7 @@ function Pn(e = {}) {
 	].map((e) => [e, t.filter((t) => t.structuralRole === e).map((e) => e.clauseKey)]));
 	return {
 		...e,
-		presentationVersion: Sn,
+		presentationVersion: Cn,
 		clauses: t,
 		coverage: {
 			...e?.coverage || {},
@@ -15747,19 +15778,19 @@ function Pn(e = {}) {
 			roleCounts: n
 		},
 		relationshipsInputBoundary: {
-			version: Cn,
+			version: wn,
 			eligibleClauseKeys: t.filter((e) => e.relationshipEligible).map((e) => e.clauseKey),
 			excludedClauseKeysByRole: r
 		}
 	};
 }
-function Fn(e = {}) {
+function In(e = {}) {
 	let t = e.pageStart === e.pageEnd ? `עמוד ${e.pageStart}` : `עמודים ${e.pageStart}–${e.pageEnd}`;
 	return [
 		"מקור: מסמכי החוזה",
-		e.displayLabelHe || jn(e.clauseKey, e.clauseTitle),
-		`סוג רשומה: ${e.clauseTypeLabelHe || On(e.clauseType)}`,
-		`תפקיד במסמך: ${e.structuralRoleLabelHe || kn(e.structuralRole)}`,
+		e.displayLabelHe || Mn(e.clauseKey, e.clauseTitle),
+		`סוג רשומה: ${e.clauseTypeLabelHe || kn(e.clauseType)}`,
+		`תפקיד במסמך: ${e.structuralRoleLabelHe || An(e.structuralRole)}`,
 		t,
 		e.clauseTitle ? `כותרת: ${e.clauseTitle}` : null,
 		e.summaryHe ? `תקציר: ${e.summaryHe}` : null,
@@ -15768,20 +15799,20 @@ function Fn(e = {}) {
 		e.rawText ? `טקסט מקורי:\n${e.rawText}` : null
 	].filter(Boolean).join("\n");
 }
-function In(e, { childCount: t, hashtags: n }) {
+function Ln(e, { childCount: t, hashtags: n }) {
 	let r = String(e?.clauseType || "");
-	return String(e?.clauseKey || "").endsWith(".heading") ? "heading" : r === "document_context" ? "context" : Ln(e, t) ? "heading" : n.includes("definitions") ? "definition" : "operative";
+	return String(e?.clauseKey || "").endsWith(".heading") ? "heading" : r === "document_context" ? "context" : Rn(e, t) ? "heading" : n.includes("definitions") ? "definition" : "operative";
 }
-function Ln(e, t) {
+function Rn(e, t) {
 	return e?.clauseType === "clause" && t > 0 && !!String(e?.clauseTitle || "").trim();
 }
-function Rn(e) {
+function zn(e) {
 	let t = String(e?.rawText || "").split(/\r?\n/u).map((e) => e.trim()).filter(Boolean);
 	return t.length > 1 ? t.slice(1).join(" ") : null;
 }
 //#endregion
 //#region src/contracts/relationshipProposals.js
-var zn = "contracts-relationships-agent.r4.0.v1", Bn = "contracts-relationships-explicit-reference.r4.0.v1", Vn = Object.freeze({
+var Bn = "contracts-relationships-agent.r4.0.v1", Vn = "contracts-relationships-explicit-reference.r4.0.v1", Hn = Object.freeze({
 	cross_reference: "הפניה מפורשת",
 	supports_same_decision: "תומך באותה החלטה",
 	depends_on: "תלוי ב־",
@@ -15792,13 +15823,13 @@ var zn = "contracts-relationships-agent.r4.0.v1", Bn = "contracts-relationships-
 	conflicts_with: "סותר את",
 	split_into: "פוצלה אל",
 	merged_into: "מוזגה אל"
-}), Hn = Object.freeze({
+}), Un = Object.freeze({
 	explicit_reference: "הפניה שכתובה בחוזה",
 	deterministic: "כלל דטרמיניסטי",
 	model: "הצעת מודל",
 	human: "החלטת סוקר",
 	system: "פעולת מערכת"
-}), Un = Object.freeze({
+}), Wn = Object.freeze({
 	proposed: "מוצע לסקירה",
 	approved: "אושר",
 	corrected: "תוקן ואושר",
@@ -15806,26 +15837,26 @@ var zn = "contracts-relationships-agent.r4.0.v1", Bn = "contracts-relationships-
 	superseded: "הוחלף",
 	unresolved: "לא פתור"
 });
-function Wn(e) {
-	return Vn[e] || "קשר חוזי";
-}
 function Gn(e) {
-	return Hn[e] || "מקור קשר לא ידוע";
+	return Hn[e] || "קשר חוזי";
 }
 function Kn(e) {
-	return Un[e] || "ממתין לסקירה";
+	return Un[e] || "מקור קשר לא ידוע";
 }
-function qn(e = {}) {
-	let t = Nn(e?.clauses), n = new Map(t.map((e) => [String(e.clauseKey || ""), e])), r = /* @__PURE__ */ new Map(), i = [], a = 0;
+function qn(e) {
+	return Wn[e] || "ממתין לסקירה";
+}
+function Jn(e = {}) {
+	let t = Pn(e?.clauses), n = new Map(t.map((e) => [String(e.clauseKey || ""), e])), r = /* @__PURE__ */ new Map(), i = [], a = 0;
 	for (let e of t) for (let t of Array.isArray(e.crossReferences) ? e.crossReferences : []) {
 		a += 1;
 		let o = String(t?.targetClauseKey || "").trim(), s = n.get(o);
 		if (t?.resolution !== "resolved" || !s || o === e.clauseKey) {
 			i.push({
 				sourceClauseKey: e.clauseKey,
-				sourceLabelHe: e.displayLabelHe || jn(e.clauseKey, e.clauseTitle),
+				sourceLabelHe: e.displayLabelHe || Mn(e.clauseKey, e.clauseTitle),
 				targetClauseKey: o,
-				targetLabelHe: t?.targetLabelHe || Mn(o),
+				targetLabelHe: t?.targetLabelHe || Nn(o),
 				referenceText: String(t?.referenceText || "").trim(),
 				referenceKind: t?.referenceKind || "clause",
 				reason: o === e.clauseKey ? "self_reference" : "target_missing",
@@ -15841,21 +15872,21 @@ function qn(e = {}) {
 		r.set(c, {
 			proposalKey: c,
 			relationshipType: "cross_reference",
-			relationshipTypeLabelHe: Wn("cross_reference"),
+			relationshipTypeLabelHe: Gn("cross_reference"),
 			origin: "explicit_reference",
-			originLabelHe: Gn("explicit_reference"),
+			originLabelHe: Kn("explicit_reference"),
 			confidence: null,
 			reviewStatus: "proposed",
-			reviewStatusLabelHe: Kn("proposed"),
+			reviewStatusLabelHe: qn("proposed"),
 			sourceClauseKey: e.clauseKey,
-			sourceLabelHe: e.displayLabelHe || jn(e.clauseKey, e.clauseTitle),
+			sourceLabelHe: e.displayLabelHe || Mn(e.clauseKey, e.clauseTitle),
 			sourceSummaryHe: e.summaryHe,
 			sourcePageStart: e.pageStart,
 			sourcePageEnd: e.pageEnd,
 			sourceRawText: e.rawText,
 			sourceRawTextSha256: e.rawTextSha256,
 			targetClauseKey: s.clauseKey,
-			targetLabelHe: s.displayLabelHe || jn(s.clauseKey, s.clauseTitle),
+			targetLabelHe: s.displayLabelHe || Mn(s.clauseKey, s.clauseTitle),
 			targetSummaryHe: s.summaryHe,
 			targetPageStart: s.pageStart,
 			targetPageEnd: s.pageEnd,
@@ -15863,7 +15894,7 @@ function qn(e = {}) {
 			targetRawTextSha256: s.rawTextSha256,
 			referenceTexts: [t.referenceText],
 			referenceKinds: [t.referenceKind],
-			rationaleHe: `ב${e.displayLabelHe || jn(e.clauseKey, e.clauseTitle)} נמצאה הפניה מפורשת אל ${s.displayLabelHe || jn(s.clauseKey, s.clauseTitle)}. הקשר מתעד את ההפניה בלבד ואינו מוכיח ששתי הרשומות שייכות לאותה החלטה.`
+			rationaleHe: `ב${e.displayLabelHe || Mn(e.clauseKey, e.clauseTitle)} נמצאה הפניה מפורשת אל ${s.displayLabelHe || Mn(s.clauseKey, s.clauseTitle)}. הקשר מתעד את ההפניה בלבד ואינו מוכיח ששתי הרשומות שייכות לאותה החלטה.`
 		});
 	}
 	let o = [...r.values()].map((e) => ({
@@ -15872,8 +15903,8 @@ function qn(e = {}) {
 		referenceKinds: [...e.referenceKinds].sort()
 	}));
 	return {
-		agentVersion: zn,
-		relationshipPolicyVersion: Bn,
+		agentVersion: Bn,
+		relationshipPolicyVersion: Vn,
 		scope: "explicit_references_only",
 		proposals: o,
 		unresolvedReferences: i,
@@ -15895,7 +15926,7 @@ function qn(e = {}) {
 }
 //#endregion
 //#region src/react/contractsHebrew.js
-var Jn = Object.freeze({
+var Yn = Object.freeze({
 	contractual_completion: "השלמת ומסירת העבודות",
 	contractual_commencement: "תחילת העבודה החוזית",
 	contractual_obligation: "התחייבות חוזית",
@@ -15911,7 +15942,7 @@ var Jn = Object.freeze({
 	performance_bond_delivery: "מסירת ערבות ביצוע",
 	performance_bond_renewal: "הארכת ערבות ביצוע",
 	notice_service: "מועד קבלת הודעה לפי אופן המסירה"
-}), Yn = Object.freeze({
+}), Xn = Object.freeze({
 	contractual_completion: "השלם ומסור את העבודות",
 	contractual_commencement: "התחל את העבודות במועד החוזי",
 	contractual_obligation: "בצע את ההתחייבות החוזית",
@@ -15927,7 +15958,7 @@ var Jn = Object.freeze({
 	performance_bond_delivery: "מסור את ערבות הביצוע",
 	performance_bond_renewal: "הארך את ערבות הביצוע לפני פקיעתה",
 	notice_service: "קבע את מועד קבלת ההודעה לפי אופן המסירה"
-}), Xn = Object.freeze({
+}), Zn = Object.freeze({
 	authority_unverified: "סמכות המסמך טרם אומתה",
 	human_review_required: "נדרשת סקירה אנושית",
 	project_binding_unreviewed: "קישור הפרויקט טרם נבדק",
@@ -15959,7 +15990,7 @@ var Jn = Object.freeze({
 	responsible_party_unverified: "זהות הגורם האחראי טרם אומתה",
 	beneficiary_unverified: "זהות הגורם הזכאי טרם אומתה",
 	unreadable_pdf_page: "עמוד בחוזה אינו קריא"
-}), Zn = Object.freeze({
+}), Qn = Object.freeze({
 	human_review_required: "נדרשת סקירה אנושית",
 	project_mapping_inactive: "קישור הפרויקט אינו פעיל",
 	schedule_version_conflict: "קיימת סתירה בגרסת לוח הזמנים",
@@ -15975,7 +16006,7 @@ var Jn = Object.freeze({
 	identity_continuity_requires_review: "רציפות זהות הפעילות דורשת סקירה",
 	summary_activity_requires_review: "פעילות סיכום דורשת סקירה מפורשת",
 	prior_mapping_confidence_below_continuity_gate: "רמת הביטחון הקודמת נמוכה מסף הרציפות"
-}), Qn = Object.freeze({
+}), $n = Object.freeze({
 	schema_reuse_not_approved: "שימוש חוזר במבנה הנתונים טרם אושר",
 	project_namespace_not_approved: "מרחב מזהי הפרויקט טרם אושר",
 	review_audit_persistence_not_approved: "שמירת יומן הסקירה טרם אושרה",
@@ -16015,7 +16046,7 @@ var Jn = Object.freeze({
 	extension_milestone_identity_missing: "חסרה אבן הדרך שאליה שייכת ההארכה",
 	review_decision_missing: "חסרה החלטת סוקר",
 	transaction_batch_blocked: "קבוצת הקידום חסומה"
-}), $n = Object.freeze({
+}), er = Object.freeze({
 	reviewed_indicator_impact: "החלטה חוזית שנבדקה וסומנה כרלוונטית ל־Indicator",
 	no_indicator_impact: "החלטה חוזית שנבדקה ואינה דורשת טיפול של Indicator",
 	indicator_suitability_unknown: "ההתאמה ל־Indicator טרם הוכרעה בסקירת ההחלטה",
@@ -16025,7 +16056,7 @@ var Jn = Object.freeze({
 	decision_inactive: "החלטה שנדחתה, פוצלה, מוזגה או הוחלפה אינה נמסרת ל־Indicator",
 	decision_conflict_unresolved: "ההחלטה מכילה סתירה שלא הוכרעה",
 	decision_conflict_not_reviewed: "זוהתה סתירה שטרם סומנה כבדוקה"
-}), er = Object.freeze({
+}), tr = Object.freeze({
 	contracts_model_provider_timeout: "ספק הבינה המלאכותית לא השלים את החילוץ בזמן. לא נשמרה תוצאה חלקית; בניסיון הבא המערכת תשתמש מחדש רק בחלקים שכבר אומתו.",
 	contracts_model_time_budget_exceeded: "חילוץ החוזה חרג ממגבלת הזמן הכוללת. לא נשמרה תוצאה חלקית; אפשר לנסות שוב.",
 	contracts_model_provider_failed: "ספק הבינה המלאכותית לא הצליח להשלים את חילוץ החוזה. לא נשמרה תוצאה חלקית; אפשר לנסות שוב.",
@@ -16139,12 +16170,12 @@ var Jn = Object.freeze({
 	contracts_semantic_relationships_verifier_json_invalid: "הבדיקה הספקנית החזירה תשובה לא תקינה. הזוגות שלא אומתו הושמטו בבטחה מהתצוגה.",
 	contracts_semantic_relationships_verifier_schema_invalid: "הבדיקה הספקנית החזירה מבנה לא תקין. הזוגות שלא אומתו הושמטו בבטחה מהתצוגה.",
 	contracts_semantic_relationships_response_invalid: "תוצאת סוכן הקשרים חרגה מגבולות הבטיחות של R4.1 ולכן נדחתה ולא נשמרה."
-}), tr = Object.freeze({
+}), nr = Object.freeze({
 	candidate_for_schedule_contract_milestones: "מועמד לאבן דרך חוזית",
 	candidate_for_schedule_contract_extensions: "מועמד להארכת מועד חוזית",
 	candidate_for_schedule_contract_conditions: "מועמד לתנאי חוזי ממתין",
 	dry_run_only: "סקירה בלבד — ללא יעד תפעולי"
-}), nr = Object.freeze({
+}), rr = Object.freeze({
 	contract_source: "ציטוט מדויק מן החוזה",
 	preferred_activity_key_exact: "התאמה מלאה למזהה פעילות מועדף",
 	preferred_task_uid_exact: "התאמה מלאה למזהה משימה",
@@ -16156,7 +16187,7 @@ var Jn = Object.freeze({
 	confirmed_alias_owner: "זהות פעילות שכבר אושרה",
 	conflicting_alias_owners: "סתירה בין זהויות פעילות קיימות",
 	invalid_canonical_owner: "זהות פעילות קיימת אינה תקינה"
-}), rr = Object.freeze({
+}), ir = Object.freeze({
 	day: "ימים",
 	calendar_day: "ימים קלנדריים",
 	calendar_days: "ימים קלנדריים",
@@ -16168,40 +16199,40 @@ var Jn = Object.freeze({
 	months: "חודשים",
 	hour: "שעות",
 	hours: "שעות"
-}), ir = Object.freeze({
+}), ar = Object.freeze({
 	after: "לאחר האירוע המפעיל",
 	before: "לפני האירוע המפעיל"
 });
-function ar(e) {
-	return Jn[e] || "עובדה חוזית הדורשת סקירה";
-}
 function or(e) {
-	return Yn[typeof e == "string" ? e : e?.role] || "בדוק את העובדה החוזית מול הראיה המקורית";
+	return Yn[e] || "עובדה חוזית הדורשת סקירה";
 }
 function sr(e) {
-	return Xn[e] || "נדרש בירור נוסף לפני קידום";
+	return Xn[typeof e == "string" ? e : e?.role] || "בדוק את העובדה החוזית מול הראיה המקורית";
 }
 function cr(e) {
-	return Zn[e] || sr(e);
+	return Zn[e] || "נדרש בירור נוסף לפני קידום";
 }
 function lr(e) {
-	let t = String(e || "");
-	return t.startsWith("review_gate_unresolved:") ? `חסם סקירה טרם נפתר: ${sr(t.slice(23))}` : t.startsWith("unknown_review_candidate:") ? "התקבלה החלטה עבור מועמד שאינו קיים בחילוץ הנוכחי" : t.startsWith("duplicate_review_decision:") ? "נמצאו כמה החלטות עבור אותו מועמד" : Qn[t] || "הקידום חסום ונדרשת בדיקה נוספת";
+	return Qn[e] || cr(e);
 }
 function ur(e) {
-	return $n[String(e || "")] || "נדרשת בדיקה נוספת לפני מסירה ל־Indicator";
+	let t = String(e || "");
+	return t.startsWith("review_gate_unresolved:") ? `חסם סקירה טרם נפתר: ${cr(t.slice(23))}` : t.startsWith("unknown_review_candidate:") ? "התקבלה החלטה עבור מועמד שאינו קיים בחילוץ הנוכחי" : t.startsWith("duplicate_review_decision:") ? "נמצאו כמה החלטות עבור אותו מועמד" : $n[t] || "הקידום חסום ונדרשת בדיקה נוספת";
 }
 function dr(e) {
+	return er[String(e || "")] || "נדרשת בדיקה נוספת לפני מסירה ל־Indicator";
+}
+function fr(e) {
 	return {
 		suitable: "מתאימה למסירה ל־Indicator",
 		not_suitable: "אינה מתאימה למסירה",
 		requires_review: "דורשת סקירה חוזית"
 	}[e] || "מצב מסירה לא ידוע";
 }
-function fr(e) {
-	return tr[e] || "אין יעד תפעולי מאושר בשלב זה";
-}
 function pr(e) {
+	return nr[e] || "אין יעד תפעולי מאושר בשלב זה";
+}
+function mr(e) {
 	return {
 		confirm: "אישור",
 		reject: "דחייה",
@@ -16209,7 +16240,7 @@ function pr(e) {
 		unmapped: "ללא מיפוי"
 	}[e] || "החלטת סקירה";
 }
-function mr(e) {
+function hr(e) {
 	return {
 		suggested: "הוצעו חלופות לסקירה",
 		blocked: "חסום עד לפתרון מפורש",
@@ -16221,23 +16252,23 @@ function mr(e) {
 		rejected: "נדחה"
 	}[e] || "מצב דורש בדיקה";
 }
-function hr(e) {
+function gr(e) {
 	return {
 		transaction_ready: "מוכן לטרנזקציה",
 		blocked: "חסום",
 		rejected: "נדחה"
 	}[e] || "מצב טרם נקבע";
 }
-function gr(e) {
-	return nr[e] || "ראיית התאמה ללוח הזמנים";
-}
 function _r(e) {
-	return rr[e] || "יחידות זמן";
+	return rr[e] || "ראיית התאמה ללוח הזמנים";
 }
 function vr(e) {
-	return ir[e] || "ביחס לאירוע המפעיל";
+	return ir[e] || "יחידות זמן";
 }
 function yr(e) {
+	return ar[e] || "ביחס לאירוע המפעיל";
+}
+function br(e) {
 	return {
 		scope_and_execution: "היקף וביצוע",
 		commencement_and_completion: "תחילה והשלמה",
@@ -16254,7 +16285,7 @@ function yr(e) {
 		other: "אחר"
 	}[e] || "קטגוריה לא ידועה";
 }
-function br(e) {
+function xr(e) {
 	return {
 		proposed: "ממתינה לסקירה",
 		approved: "אושרה",
@@ -16266,14 +16297,14 @@ function br(e) {
 		superseded: "הוחלפה בגרסה חדשה"
 	}[e] || "מצב סקירה לא ידוע";
 }
-function xr(e) {
+function Sr(e) {
 	return {
 		yes: "עשויה להשפיע על לוח הזמנים",
 		no: "ללא השפעה על לוח הזמנים",
 		unknown: "השפעה על לוח הזמנים טרם הוכרעה"
 	}[e] || "השפעה לא ידועה";
 }
-function Sr(e) {
+function Cr(e) {
 	return {
 		none: "ללא כלל זמן",
 		fixed: "מועד קבוע",
@@ -16283,7 +16314,7 @@ function Sr(e) {
 		consequence: "תוצאה של איחור"
 	}[e] || "סוג זמן לא ידוע";
 }
-function Cr(e) {
+function wr(e) {
 	if (!e) return "מועד לא זמין";
 	let t = new Date(e);
 	return Number.isNaN(t.getTime()) ? "מועד לא זמין" : new Intl.DateTimeFormat("he-IL", {
@@ -16292,11 +16323,11 @@ function Cr(e) {
 	}).format(t);
 }
 function W(e) {
-	return e?.name === "AbortError" ? "הפעולה חרגה ממגבלת הזמן. אפשר לנסות שוב." : er[e?.code] || "הפעולה נכשלה. אפשר לנסות שוב או לבדוק את הגדרות השרת.";
+	return e?.name === "AbortError" ? "הפעולה חרגה ממגבלת הזמן. אפשר לנסות שוב." : tr[e?.code] || "הפעולה נכשלה. אפשר לנסות שוב או לבדוק את הגדרות השרת.";
 }
 //#endregion
 //#region src/react/ContractsPage.jsx
-var wr = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", Tr = "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5", Er = [
+var Tr = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", Er = "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5", Dr = [
 	"scope_and_execution",
 	"commencement_and_completion",
 	"stage_acceptance_and_handover",
@@ -16310,7 +16341,7 @@ var wr = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", Tr = "81b1cbac-8fcf-43c1-acdc-6
 	"termination_and_remedy",
 	"document_and_information_obligation",
 	"other"
-], Dr = Object.freeze([
+], Or = Object.freeze([
 	{
 		id: "clauses",
 		label: "תוכן החוזה",
@@ -16332,19 +16363,19 @@ var wr = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", Tr = "81b1cbac-8fcf-43c1-acdc-6
 		description: "ערכת החלטות מאושרת"
 	}
 ]);
-function Or({ activeTab: e, onChange: t }) {
+function kr({ activeTab: e, onChange: t }) {
 	function n(e, n) {
 		let r = null;
-		if (e.key === "ArrowLeft" && (r = (n + 1) % Dr.length), e.key === "ArrowRight" && (r = (n - 1 + Dr.length) % Dr.length), e.key === "Home" && (r = 0), e.key === "End" && (r = Dr.length - 1), r === null) return;
+		if (e.key === "ArrowLeft" && (r = (n + 1) % Or.length), e.key === "ArrowRight" && (r = (n - 1 + Or.length) % Or.length), e.key === "Home" && (r = 0), e.key === "End" && (r = Or.length - 1), r === null) return;
 		e.preventDefault();
-		let i = Dr[r];
+		let i = Or[r];
 		t(i.id), requestAnimationFrame(() => document.getElementById(`contracts-workspace-tab-${i.id}`)?.focus());
 	}
 	return /* @__PURE__ */ (0, x.jsx)("nav", {
 		className: "contractsWorkspaceTabs",
 		role: "tablist",
 		"aria-label": "שלבי העבודה בחוזה הפתוח",
-		children: Dr.map((r, i) => /* @__PURE__ */ (0, x.jsxs)("button", {
+		children: Or.map((r, i) => /* @__PURE__ */ (0, x.jsxs)("button", {
 			id: `contracts-workspace-tab-${r.id}`,
 			type: "button",
 			role: "tab",
@@ -16358,7 +16389,7 @@ function Or({ activeTab: e, onChange: t }) {
 		}, r.id))
 	});
 }
-function kr({ id: e, activeTab: t, children: n }) {
+function Ar({ id: e, activeTab: t, children: n }) {
 	let r = t === e;
 	return /* @__PURE__ */ (0, x.jsx)("div", {
 		id: `contracts-workspace-panel-${e}`,
@@ -16389,12 +16420,12 @@ async function G(e, { method: t = "GET", body: n = null, timeoutMs: r = 12e4 } =
 		clearTimeout(a);
 	}
 }
-async function Ar(e) {
+async function jr(e) {
 	let t = new Uint8Array(await e.arrayBuffer()), n = "", r = 32768;
 	for (let e = 0; e < t.length; e += r) n += String.fromCharCode(...t.subarray(e, e + r));
 	return btoa(n);
 }
-function jr(e) {
+function Mr(e) {
 	return {
 		action: "reject",
 		reason: "",
@@ -16405,13 +16436,13 @@ function jr(e) {
 		conflictReason: ""
 	};
 }
-function Mr(e) {
-	return e.fixedDate ? `מועד קבוע: ${e.fixedDate}` : e.offset ? `${e.offset.value} ${_r(e.offset.unit)} ${vr(e.offset.direction)}` : e.metadata?.extensionAmount ? `הארכה: ${e.metadata.extensionAmount} ${_r(e.metadata.extensionUnit)}` : "ללא ערך זמן סופי";
-}
 function Nr(e) {
-	return [e.pdfPage ? `עמוד ${e.pdfPage}` : null, e.clause ? `סעיף ${e.clause}` : null].filter(Boolean).join(" · ") || "מיקום מקור לא צוין";
+	return e.fixedDate ? `מועד קבוע: ${e.fixedDate}` : e.offset ? `${e.offset.value} ${vr(e.offset.unit)} ${yr(e.offset.direction)}` : e.metadata?.extensionAmount ? `הארכה: ${e.metadata.extensionAmount} ${vr(e.metadata.extensionUnit)}` : "ללא ערך זמן סופי";
 }
 function Pr(e) {
+	return [e.pdfPage ? `עמוד ${e.pdfPage}` : null, e.clause ? `סעיף ${e.clause}` : null].filter(Boolean).join(" · ") || "מיקום מקור לא צוין";
+}
+function Fr(e) {
 	return {
 		mappingRequirement: "required",
 		conditionStatus: e.type === "relative_condition" ? "pending" : "not_applicable",
@@ -16426,10 +16457,10 @@ function Pr(e) {
 		reviewRequestId: crypto.randomUUID()
 	};
 }
-function Fr(e, t = null) {
+function Ir(e, t = null) {
 	return {
 		decisions: Object.fromEntries((e.candidates || []).map((e) => [e.candidateKey, {
-			...jr(e),
+			...Mr(e),
 			...t?.decisions?.[e.candidateKey] || {}
 		}])),
 		reviewReason: t?.reviewReason || "",
@@ -16438,7 +16469,7 @@ function Fr(e, t = null) {
 		mappingDraft: t?.mappingDraft || null
 	};
 }
-function Ir({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingDraft: i }) {
+function Lr({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingDraft: i }) {
 	return {
 		decisions: e,
 		reviewReason: t,
@@ -16447,14 +16478,14 @@ function Ir({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingD
 		mappingDraft: i
 	};
 }
-function Lr(e) {
+function Rr(e) {
 	return JSON.stringify(e);
 }
-function Rr(e) {
+function zr(e) {
 	let t = Number(e?.revision ?? 0);
 	return Number.isSafeInteger(t) && t >= 0 ? t : 0;
 }
-function zr(e, t, n) {
+function Br(e, t, n) {
 	return {
 		documentVersionId: e.document.documentVersionId,
 		candidateKey: t.candidateKey,
@@ -16476,11 +16507,11 @@ function zr(e, t, n) {
 		}))
 	};
 }
-function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, savedState: i = null, savedStateKey: a = "", onDraftStateChange: o = null }) {
+function Vr({ extraction: e, sourceProjectId: t, status: n, statusError: r, savedState: i = null, savedStateKey: a = "", onDraftStateChange: o = null }) {
 	let [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(null), [d, f] = (0, b.useState)(null), [p, m] = (0, b.useState)([]), [h, g] = (0, b.useState)(""), [_, v] = (0, b.useState)(""), [y, S] = (0, b.useState)(""), [C, w] = (0, b.useState)(null), T = (0, b.useRef)(null), E = (e.candidates || []).find((e) => e.candidateKey === s) || null, D = p.filter((e) => e.selectedCanonicalKey);
 	(0, b.useEffect)(() => {
 		let t = (e.candidates || []).find((e) => e.candidateKey === i?.candidateKey) || null, n = t && i?.draft ? {
-			...Pr(t),
+			...Fr(t),
 			...i.draft
 		} : null;
 		c(t?.candidateKey || ""), u(n), f(null), m([]), g(""), S(""), w(null);
@@ -16524,7 +16555,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 		}
 	}
 	async function M(n) {
-		let r = Pr(n);
+		let r = Fr(n);
 		c(n.candidateKey), u(r), o?.({
 			candidateKey: n.candidateKey,
 			draft: r
@@ -16534,7 +16565,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 				method: "POST",
 				body: {
 					sourceProjectId: t,
-					obligation: zr(e, n, r)
+					obligation: Br(e, n, r)
 				}
 			})).candidateBundle, a = i?.candidates?.[0]?.activityKey || "";
 			f(i), u((e) => ({
@@ -16563,7 +16594,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 					method: "POST",
 					body: {
 						sourceProjectId: t,
-						obligation: zr(e, E, l)
+						obligation: Br(e, E, l)
 					}
 				})).candidateBundle, r = n.candidates.some((e) => e.activityKey === l.selectedActivityKey) ? l.selectedActivityKey : n.candidates[0]?.activityKey || "";
 				f(n), u((e) => ({
@@ -16605,7 +16636,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 				method: "POST",
 				body: {
 					sourceProjectId: t,
-					obligation: zr(e, E, l),
+					obligation: Br(e, E, l),
 					action: l.action,
 					selectedActivityKey: ["confirm", "correct"].includes(l.action) ? l.selectedActivityKey : null,
 					reason: l.reason.trim(),
@@ -16652,8 +16683,8 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 					onClick: () => M(e),
 					disabled: !!_,
 					children: [
-						/* @__PURE__ */ (0, x.jsx)("span", { children: ar(e.role) }),
-						/* @__PURE__ */ (0, x.jsx)("strong", { children: or(e) }),
+						/* @__PURE__ */ (0, x.jsx)("span", { children: or(e.role) }),
+						/* @__PURE__ */ (0, x.jsx)("strong", { children: sr(e) }),
 						/* @__PURE__ */ (0, x.jsx)("small", { children: s === e.candidateKey && _ === "candidates" ? "טוען חלופות…" : "בדוק התאמה ללוח" })
 					]
 				}, e.candidateKey))
@@ -16745,7 +16776,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsMappingSummary",
 							children: [
-								/* @__PURE__ */ (0, x.jsxs)("span", { children: ["מצב ", /* @__PURE__ */ (0, x.jsx)("strong", { children: mr(d.decisionState) })] }),
+								/* @__PURE__ */ (0, x.jsxs)("span", { children: ["מצב ", /* @__PURE__ */ (0, x.jsx)("strong", { children: hr(d.decisionState) })] }),
 								/* @__PURE__ */ (0, x.jsxs)("span", { children: ["גרסת לוח ", /* @__PURE__ */ (0, x.jsx)("strong", {
 									dir: "ltr",
 									children: d.scheduleVersion.fileId
@@ -16757,11 +16788,11 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 						(d.blockers || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
 							className: "contractsGateList",
 							"aria-label": "חסמי מיפוי",
-							children: d.blockers.map((e) => /* @__PURE__ */ (0, x.jsx)("span", { children: cr(e) }, e))
+							children: d.blockers.map((e) => /* @__PURE__ */ (0, x.jsx)("span", { children: lr(e) }, e))
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsMappingEvidence",
-							children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "ראיה חוזית מדויקת — הציטוט נשמר בשפת המקור" }), (d.obligation.sourceEvidence || []).map((e) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Nr(e) }), /* @__PURE__ */ (0, x.jsx)("p", { children: e.sourceText })] }, e.evidenceId))]
+							children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "ראיה חוזית מדויקת — הציטוט נשמר בשפת המקור" }), (d.obligation.sourceEvidence || []).map((e) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Pr(e) }), /* @__PURE__ */ (0, x.jsx)("p", { children: e.sourceText })] }, e.evidenceId))]
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsAlternativeList",
@@ -16807,7 +16838,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 									/* @__PURE__ */ (0, x.jsxs)("details", { children: [
 										/* @__PURE__ */ (0, x.jsx)("summary", { children: "ראיות וחסמים" }),
 										(e.evidence || []).map((t, n) => /* @__PURE__ */ (0, x.jsxs)("p", { children: [
-											/* @__PURE__ */ (0, x.jsxs)("strong", { children: [gr(t.kind), ":"] }),
+											/* @__PURE__ */ (0, x.jsxs)("strong", { children: [_r(t.kind), ":"] }),
 											" ",
 											/* @__PURE__ */ (0, x.jsx)("span", {
 												dir: "auto",
@@ -16816,7 +16847,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 										] }, `${e.activityKey}-${n}`)),
 										(e.blockers || []).map((e) => /* @__PURE__ */ (0, x.jsx)("p", {
 											className: "is-blocker",
-											children: cr(e)
+											children: lr(e)
 										}, e))
 									] })
 								]
@@ -16828,7 +16859,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 						d.conflict && /* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsConflictBox",
 							children: [
-								/* @__PURE__ */ (0, x.jsxs)("strong", { children: ["נמצאה סתירה: ", cr(d.conflict.type)] }),
+								/* @__PURE__ */ (0, x.jsxs)("strong", { children: ["נמצאה סתירה: ", lr(d.conflict.type)] }),
 								/* @__PURE__ */ (0, x.jsx)("p", { children: "אישור אינו אומר שהסעיף תקין; הוא רק בוחר במפורש את הפעילות המתאימה מתוך החלופות הנוכחיות." }),
 								/* @__PURE__ */ (0, x.jsxs)("label", {
 									className: "contractsCheck",
@@ -16880,9 +16911,9 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 							}), D.map((e) => /* @__PURE__ */ (0, x.jsxs)("option", {
 								value: e.eventId,
 								children: [
-									pr(e.action),
+									mr(e.action),
 									" · ",
-									Cr(e.reviewedAt),
+									wr(e.reviewedAt),
 									" · ",
 									e.selectedActivityKey || e.selectedCanonicalKey
 								]
@@ -16898,7 +16929,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 							className: "contractsCommit",
 							disabled: !!_ || !n?.reviewApplyApproved,
 							onClick: I,
-							children: _ === "review" ? "שומר אירוע ביקורת אטומי…" : `שמור ${pr(l.action)}`
+							children: _ === "review" ? "שומר אירוע ביקורת אטומי…" : `שמור ${mr(l.action)}`
 						})
 					] }),
 					y && /* @__PURE__ */ (0, x.jsx)("div", {
@@ -16931,9 +16962,9 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 								children: "אין עדיין החלטות שמורות לעובדה זו."
 							}),
 							p.map((e) => /* @__PURE__ */ (0, x.jsxs)("article", { children: [
-								/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: pr(e.action) }), /* @__PURE__ */ (0, x.jsx)("time", {
+								/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: mr(e.action) }), /* @__PURE__ */ (0, x.jsx)("time", {
 									dateTime: e.reviewedAt,
-									children: Cr(e.reviewedAt)
+									children: wr(e.reviewedAt)
 								})] }),
 								/* @__PURE__ */ (0, x.jsx)("p", { children: e.reason }),
 								/* @__PURE__ */ (0, x.jsxs)("small", { children: ["סוקר: ", /* @__PURE__ */ (0, x.jsx)("span", {
@@ -16956,7 +16987,7 @@ function Br({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 		]
 	});
 }
-function Vr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewedAt: i, sourceProjectId: a, scheduleProjectId: o }) {
+function Hr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewedAt: i, sourceProjectId: a, scheduleProjectId: o }) {
 	return {
 		extraction: e,
 		reviewBatch: {
@@ -16966,7 +16997,7 @@ function Vr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewed
 			documentAuthority: "authoritative",
 			extractorVersion: e.extractorVersion || "contracts-agent.phase1.v1",
 			decisions: e.candidates.map((e) => {
-				let n = t[e.candidateKey] || jr(e), r = n.action === "approve";
+				let n = t[e.candidateKey] || Mr(e), r = n.action === "approve";
 				return {
 					candidateKey: e.candidateKey,
 					action: n.action,
@@ -16989,30 +17020,30 @@ function Vr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewed
 		}
 	};
 }
-function Hr({ candidate: e, decision: t, onChange: n }) {
-	let r = t.action === "approve", i = fr(e.storageDisposition), a = e.storageDisposition === "candidate_for_schedule_contract_extensions", o = e.offset?.unit === "day";
+function Ur({ candidate: e, decision: t, onChange: n }) {
+	let r = t.action === "approve", i = pr(e.storageDisposition), a = e.storageDisposition === "candidate_for_schedule_contract_extensions", o = e.offset?.unit === "day";
 	return /* @__PURE__ */ (0, x.jsxs)("article", {
 		className: `contractsCandidate ${r ? "is-approved" : "is-rejected"}`,
 		children: [
 			/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [
 				/* @__PURE__ */ (0, x.jsx)("span", {
 					className: "contractsCandidateRole",
-					children: ar(e.role)
+					children: or(e.role)
 				}),
-				/* @__PURE__ */ (0, x.jsx)("h3", { children: or(e) }),
-				/* @__PURE__ */ (0, x.jsx)("p", { children: Mr(e) })
+				/* @__PURE__ */ (0, x.jsx)("h3", { children: sr(e) }),
+				/* @__PURE__ */ (0, x.jsx)("p", { children: Nr(e) })
 			] }), /* @__PURE__ */ (0, x.jsx)("span", {
 				className: "contractsTarget",
 				children: i
 			})] }),
 			/* @__PURE__ */ (0, x.jsx)("div", {
 				className: "contractsEvidenceList",
-				children: (e.sourceEvidence || []).map((t, n) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Nr(t) }), /* @__PURE__ */ (0, x.jsx)("p", { children: t.sourceText })] }, `${e.candidateKey}-evidence-${n}`))
+				children: (e.sourceEvidence || []).map((t, n) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Pr(t) }), /* @__PURE__ */ (0, x.jsx)("p", { children: t.sourceText })] }, `${e.candidateKey}-evidence-${n}`))
 			}),
 			(e.gates || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
 				className: "contractsGateList",
 				"aria-label": "חסמי קידום",
-				children: (e.gates || []).map((e) => /* @__PURE__ */ (0, x.jsx)("span", { children: sr(e) }, e))
+				children: (e.gates || []).map((e) => /* @__PURE__ */ (0, x.jsx)("span", { children: cr(e) }, e))
 			}),
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsDecisionRow",
@@ -17077,8 +17108,8 @@ function Hr({ candidate: e, decision: t, onChange: n }) {
 		]
 	});
 }
-function Ur({ preview: e, classicDocumentVersionId: t = "" }) {
-	let [n, r] = (0, b.useState)(""), [i, a] = (0, b.useState)("operative"), [o, s] = (0, b.useState)("all"), [c, l] = (0, b.useState)("all"), [u, d] = (0, b.useState)(!1), f = (0, b.useMemo)(() => Pn(e), [e]), p = f.clauses || [], m = (0, b.useMemo)(() => [...new Set(p.map((e) => e.clauseType))].sort(), [p]), h = (0, b.useMemo)(() => [...new Set(p.flatMap((e) => e.hashtags || []))].sort(), [p]), g = (0, b.useMemo)(() => new Map(p.map((e) => [e.clauseKey, e])), [p]), _ = n.trim().toLocaleLowerCase("he"), v = (0, b.useMemo)(() => p.filter((e) => i !== "all" && e.structuralRole !== i || o !== "all" && e.clauseType !== o || c !== "all" && !(e.hashtags || []).includes(c) || u && !(e.crossReferences || []).length ? !1 : _ ? [
+function Wr({ preview: e, classicDocumentVersionId: t = "" }) {
+	let [n, r] = (0, b.useState)(""), [i, a] = (0, b.useState)("operative"), [o, s] = (0, b.useState)("all"), [c, l] = (0, b.useState)("all"), [u, d] = (0, b.useState)(!1), f = (0, b.useMemo)(() => Fn(e), [e]), p = f.clauses || [], m = (0, b.useMemo)(() => [...new Set(p.map((e) => e.clauseType))].sort(), [p]), h = (0, b.useMemo)(() => [...new Set(p.flatMap((e) => e.hashtags || []))].sort(), [p]), g = (0, b.useMemo)(() => new Map(p.map((e) => [e.clauseKey, e])), [p]), _ = n.trim().toLocaleLowerCase("he"), v = (0, b.useMemo)(() => p.filter((e) => i !== "all" && e.structuralRole !== i || o !== "all" && e.clauseType !== o || c !== "all" && !(e.hashtags || []).includes(c) || u && !(e.crossReferences || []).length ? !1 : _ ? [
 		e.clauseKey,
 		e.parentClauseKey,
 		e.clauseTitle,
@@ -17211,7 +17242,7 @@ function Ur({ preview: e, classicDocumentVersionId: t = "" }) {
 							children: "כל הסוגים"
 						}), m.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 							value: e,
-							children: On(e)
+							children: kn(e)
 						}, e))]
 					})] }),
 					/* @__PURE__ */ (0, x.jsxs)("label", { children: ["תגית", /* @__PURE__ */ (0, x.jsxs)("select", {
@@ -17222,7 +17253,7 @@ function Ur({ preview: e, classicDocumentVersionId: t = "" }) {
 							children: "כל התגיות"
 						}), h.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 							value: e,
-							children: An(e)
+							children: jn(e)
 						}, e))]
 					})] }),
 					/* @__PURE__ */ (0, x.jsxs)("label", {
@@ -17283,7 +17314,7 @@ function Ur({ preview: e, classicDocumentVersionId: t = "" }) {
 						}),
 						/* @__PURE__ */ (0, x.jsx)("span", {
 							className: "contractsClauseTags",
-							children: (e.clause.hashtags || []).map((e) => /* @__PURE__ */ (0, x.jsx)("i", { children: An(e) }, e))
+							children: (e.clause.hashtags || []).map((e) => /* @__PURE__ */ (0, x.jsx)("i", { children: jn(e) }, e))
 						})
 					] }), /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsClauseBody",
@@ -17297,7 +17328,7 @@ function Ur({ preview: e, classicDocumentVersionId: t = "" }) {
 								children: [
 									/* @__PURE__ */ (0, x.jsx)("strong", { children: "תוצאת סוכן החוזים" }),
 									/* @__PURE__ */ (0, x.jsx)("p", { children: e.clause.summaryHe }),
-									/* @__PURE__ */ (0, x.jsxs)("small", { children: ["סיווג: ", kn(e.clause.structuralRole)] })
+									/* @__PURE__ */ (0, x.jsxs)("small", { children: ["סיווג: ", An(e.clause.structuralRole)] })
 								]
 							}),
 							(e.clause.crossReferences || []).length > 0 && /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -17368,11 +17399,11 @@ function Ur({ preview: e, classicDocumentVersionId: t = "" }) {
 		]
 	});
 }
-function Wr(e) {
+function Gr(e) {
 	let t = Number(e || 0);
 	return t >= .97 ? "גבוה מאוד" : t >= .9 ? "גבוה" : "בינוני";
 }
-var Gr = Object.freeze([
+var Kr = Object.freeze([
 	"supports_same_decision",
 	"depends_on",
 	"condition_of",
@@ -17381,7 +17412,7 @@ var Gr = Object.freeze([
 	"duplicates",
 	"conflicts_with"
 ]);
-function Kr({ item: e, busy: t = !1, onReview: n }) {
+function qr({ item: e, busy: t = !1, onReview: n }) {
 	let [r, i] = (0, b.useState)(""), [a, o] = (0, b.useState)(e.relationshipType), [s, c] = (0, b.useState)(!1), l = e.reviewStatus === "proposed", u = r.trim().length >= 10 && /[\u0590-\u05ff]/u.test(r), d = ["duplicates", "conflicts_with"].includes(a), f = a !== e.relationshipType || !d && s, p = s && !d ? e.targetClauseKey : e.sourceClauseKey, m = s && !d ? e.sourceClauseKey : e.targetClauseKey, h = Array.isArray(e.evidence?.excerpts) ? e.evidence.excerpts : [], g = e.evidence?.signals?.autoReview, _ = g?.mode === "model_auto_approval";
 	function v(t) {
 		let i = { reasonHe: r.trim() };
@@ -17423,16 +17454,16 @@ function Kr({ item: e, busy: t = !1, onReview: n }) {
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsRelationshipMeta",
 				children: [
-					/* @__PURE__ */ (0, x.jsx)("i", { children: Wn(e.relationshipType) }),
-					/* @__PURE__ */ (0, x.jsx)("i", { children: Gn(e.origin) }),
-					/* @__PURE__ */ (0, x.jsx)("i", { children: Kn(e.reviewStatus) }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: Gn(e.relationshipType) }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: Kn(e.origin) }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: qn(e.reviewStatus) }),
 					_ && /* @__PURE__ */ (0, x.jsx)("i", {
 						title: `מדיניות: ${g.policyVersion}`,
 						children: "אושר אוטומטית בידי המודל"
 					}),
 					e.confidence !== null && e.confidence !== void 0 && /* @__PURE__ */ (0, x.jsxs)("i", {
 						title: "ביטחון הסיווג של המודל; אינו ודאות משפטית",
-						children: ["ביטחון סיווג: ", Wr(e.confidence)]
+						children: ["ביטחון סיווג: ", Gr(e.confidence)]
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("span", { children: ["גרסה ", e.revision] })
 				]
@@ -17477,9 +17508,9 @@ function Kr({ item: e, busy: t = !1, onReview: n }) {
 								value: a,
 								onChange: (e) => o(e.target.value),
 								disabled: t,
-								children: Gr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+								children: Kr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 									value: e,
-									children: Wn(e)
+									children: Gn(e)
 								}, e))
 							})] }),
 							/* @__PURE__ */ (0, x.jsxs)("label", {
@@ -17517,20 +17548,20 @@ function Kr({ item: e, busy: t = !1, onReview: n }) {
 				className: "contractsRelationshipReviewedState",
 				role: "status",
 				children: [
-					/* @__PURE__ */ (0, x.jsx)("strong", { children: Kn(e.reviewStatus) }),
+					/* @__PURE__ */ (0, x.jsx)("strong", { children: qn(e.reviewStatus) }),
 					_ && /* @__PURE__ */ (0, x.jsx)("p", { children: "האישור בוצע אוטומטית לאחר הסכמה בין המסווג לבודק העצמאי ועמידה בכללי הבטיחות." }),
 					e.reviewReason && /* @__PURE__ */ (0, x.jsx)("p", { children: e.reviewReason }),
 					e.reviewedAt && /* @__PURE__ */ (0, x.jsx)("time", {
 						dateTime: e.reviewedAt,
-						children: Cr(e.reviewedAt)
+						children: wr(e.reviewedAt)
 					})
 				]
 			})
 		]
 	});
 }
-function qr({ preview: e, workspaceId: t = "", persistenceStatus: n = null, persistenceResult: r = null, persistenceError: i = "", persistenceBusy: a = !1, onPersist: o, semanticStatus: s = null, semanticResult: c = null, semanticError: l = "", semanticBusy: u = !1, onRunSemantic: d, reviewStatus: f = null, reviewResult: p = null, reviewError: m = "", reviewBusyId: h = "", onReview: g, autoReviewStatus: _ = null, autoReviewResult: v = null, autoReviewError: y = "", autoReviewBusy: S = !1, onAutoReview: C }) {
-	let w = (0, b.useMemo)(() => qn(e), [e]), T = Number(r?.metrics?.explicitRelationshipCount || 0), E = Number(p?.metrics?.currentRelationshipCount || 0), D = Number(p?.metrics?.proposedCount || 0), O = !!(n?.ready && t && !a && !u), k = !!(s?.ready && t && !u && !a), A = !!(_?.ready && D > 0 && !S && !u && !a), j = T === w.metrics.explicitRelationshipCount && w.metrics.explicitRelationshipCount > 0, M = Number(c?.metrics?.classificationFailedPairCount || 0), N = Number(c?.metrics?.verificationFailedPairCount || 0), ee = c?.metrics?.classificationComplete !== !1 && c?.metrics?.verificationComplete !== !1;
+function Jr({ preview: e, workspaceId: t = "", persistenceStatus: n = null, persistenceResult: r = null, persistenceError: i = "", persistenceBusy: a = !1, onPersist: o, semanticStatus: s = null, semanticResult: c = null, semanticError: l = "", semanticBusy: u = !1, onRunSemantic: d, reviewStatus: f = null, reviewResult: p = null, reviewError: m = "", reviewBusyId: h = "", onReview: g, autoReviewStatus: _ = null, autoReviewResult: v = null, autoReviewError: y = "", autoReviewBusy: S = !1, onAutoReview: C }) {
+	let w = (0, b.useMemo)(() => Jn(e), [e]), T = Number(r?.metrics?.explicitRelationshipCount || 0), E = Number(p?.metrics?.currentRelationshipCount || 0), D = Number(p?.metrics?.proposedCount || 0), O = !!(n?.ready && t && !a && !u), k = !!(s?.ready && t && !u && !a), A = !!(_?.ready && D > 0 && !S && !u && !a), j = T === w.metrics.explicitRelationshipCount && w.metrics.explicitRelationshipCount > 0, M = Number(c?.metrics?.classificationFailedPairCount || 0), N = Number(c?.metrics?.verificationFailedPairCount || 0), ee = c?.metrics?.classificationComplete !== !1 && c?.metrics?.verificationComplete !== !1;
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "contractsPanel contractsRelationshipsPanel",
 		"aria-labelledby": "contracts-relationships-title",
@@ -17633,9 +17664,9 @@ function qr({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsRelationshipMeta",
 							children: [
-								/* @__PURE__ */ (0, x.jsx)("i", { children: Wn(e.relationshipType) }),
-								/* @__PURE__ */ (0, x.jsx)("i", { children: Gn(e.origin) }),
-								/* @__PURE__ */ (0, x.jsx)("i", { children: Kn(e.reviewStatus) }),
+								/* @__PURE__ */ (0, x.jsx)("i", { children: Gn(e.relationshipType) }),
+								/* @__PURE__ */ (0, x.jsx)("i", { children: Kn(e.origin) }),
+								/* @__PURE__ */ (0, x.jsx)("i", { children: qn(e.reviewStatus) }),
 								/* @__PURE__ */ (0, x.jsxs)("span", { children: ["הטקסט המפנה: ", e.referenceTexts.map((e) => `“${e}”`).join(" · ")] })
 							]
 						}),
@@ -17779,12 +17810,12 @@ function qr({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 									/* @__PURE__ */ (0, x.jsxs)("div", {
 										className: "contractsRelationshipMeta",
 										children: [
-											/* @__PURE__ */ (0, x.jsx)("i", { children: Wn(e.relationshipType) }),
-											/* @__PURE__ */ (0, x.jsx)("i", { children: Gn(e.origin) }),
-											/* @__PURE__ */ (0, x.jsx)("i", { children: Kn(e.reviewStatus) }),
+											/* @__PURE__ */ (0, x.jsx)("i", { children: Gn(e.relationshipType) }),
+											/* @__PURE__ */ (0, x.jsx)("i", { children: Kn(e.origin) }),
+											/* @__PURE__ */ (0, x.jsx)("i", { children: qn(e.reviewStatus) }),
 											/* @__PURE__ */ (0, x.jsxs)("i", {
 												title: "ביטחון סיווג של המודל לאחר בדיקה ספקנית; אינו ודאות משפטית",
-												children: ["ביטחון סיווג: ", Wr(e.confidence)]
+												children: ["ביטחון סיווג: ", Gr(e.confidence)]
 											})
 										]
 									}),
@@ -17873,7 +17904,7 @@ function qr({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 							}),
 							/* @__PURE__ */ (0, x.jsx)("div", {
 								className: "contractsRelationshipList",
-								children: (p.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(Kr, {
+								children: (p.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(qr, {
 									item: e,
 									busy: h === e.relationshipId,
 									onReview: g
@@ -17891,8 +17922,8 @@ function qr({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 		]
 	});
 }
-function Jr(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: r = null, summaryHe: i = null, decisionTextHe: a = null, decisionCategory: o = null, scheduleImpact: s = null, responsibleParty: c = void 0, beneficiary: l = void 0 } = {}) {
-	let u = (t || e.sourceEvidence?.map((e) => e.clauseId) || []).filter(Boolean), d = [...new Set((Array.isArray(e.tags) ? e.tags : []).map((e) => String(e || "").trim()).filter(Boolean).map((e) => /[\u0590-\u05ff]/u.test(e) ? e : An(e)))].slice(0, 12);
+function Yr(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: r = null, summaryHe: i = null, decisionTextHe: a = null, decisionCategory: o = null, scheduleImpact: s = null, responsibleParty: c = void 0, beneficiary: l = void 0 } = {}) {
+	let u = (t || e.sourceEvidence?.map((e) => e.clauseId) || []).filter(Boolean), d = [...new Set((Array.isArray(e.tags) ? e.tags : []).map((e) => String(e || "").trim()).filter(Boolean).map((e) => /[\u0590-\u05ff]/u.test(e) ? e : jn(e)))].slice(0, 12);
 	return {
 		primaryClauseId: n || u[0],
 		sourceClauseIds: u,
@@ -17915,7 +17946,7 @@ function Jr(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: 
 		recurring: !!e.recurring
 	};
 }
-function Yr(e, t) {
+function Xr(e, t) {
 	let n = (e.sourceEvidence || []).map((e) => e.clauseId).filter(Boolean);
 	return {
 		id: `${e.decisionId}:split:${t}:${Date.now()}`,
@@ -17928,8 +17959,8 @@ function Yr(e, t) {
 		primaryClauseId: n[0] || ""
 	};
 }
-function Xr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
-	let [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(() => [Yr(e, 0), Yr(e, 1)]), c = Array.isArray(e.sourceEvidence) ? e.sourceEvidence : [], l = c.map((e) => e.clauseId).filter(Boolean);
+function Zr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
+	let [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(() => [Xr(e, 0), Xr(e, 1)]), c = Array.isArray(e.sourceEvidence) ? e.sourceEvidence : [], l = c.map((e) => e.clauseId).filter(Boolean);
 	function u(e, t) {
 		s((n) => n.map((n, r) => r === e ? {
 			...n,
@@ -17948,7 +17979,7 @@ function Xr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 		r(e, {
 			expectedRevision: e.revision,
 			reasonHe: i.trim(),
-			outputs: o.map((t) => Jr(e, t))
+			outputs: o.map((t) => Yr(e, t))
 		});
 	}
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -17992,9 +18023,9 @@ function Xr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 								value: e.decisionCategory,
 								onChange: (e) => u(n, { decisionCategory: e.target.value }),
 								disabled: t,
-								children: Er.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+								children: Dr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 									value: e,
-									children: yr(e)
+									children: br(e)
 								}, e))
 							})] }), /* @__PURE__ */ (0, x.jsxs)("label", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "השפעה אפשרית על לוח הזמנים" }), /* @__PURE__ */ (0, x.jsxs)("select", {
 								value: e.scheduleImpact,
@@ -18041,7 +18072,7 @@ function Xr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 			}),
 			o.length < 10 && /* @__PURE__ */ (0, x.jsx)("button", {
 				type: "button",
-				onClick: () => s((t) => [...t, Yr(e, t.length)]),
+				onClick: () => s((t) => [...t, Xr(e, t.length)]),
 				disabled: t,
 				children: "הוסף החלטה לפיצול"
 			}),
@@ -18065,7 +18096,7 @@ function Xr({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 		]
 	});
 }
-function Zr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
+function Qr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 	let [i, a] = (0, b.useState)(e[0]?.decisionId || ""), o = e.find((e) => e.decisionId === i) || e[0], [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(o?.titleHe || ""), [d, f] = (0, b.useState)(o?.summaryHe || ""), [p, m] = (0, b.useState)(o?.decisionTextHe || ""), [h, g] = (0, b.useState)(o?.decisionCategory || "other"), [_, v] = (0, b.useState)(o?.scheduleImpact || "unknown"), y = /* @__PURE__ */ new Map();
 	for (let t of e) for (let e of t.sourceEvidence || []) y.set(e.clauseId, e);
 	let S = [...y.values()], C = [...new Set(e.flatMap((e) => Array.isArray(e.tags) ? e.tags : []))].slice(0, 12), w = e.some((e) => e.conflictStatus === "unresolved"), T = e.length >= 2 && s.trim().length >= 10 && /[א-ת]/u.test(s) && l.trim().length >= 5 && /[א-ת]/u.test(l) && d.trim().length >= 10 && /[א-ת]/u.test(d) && p.trim().length >= 10 && /[א-ת]/u.test(p) && S.length > 0;
@@ -18074,7 +18105,7 @@ function Zr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 		a(t), u(n?.titleHe || ""), f(n?.summaryHe || ""), m(n?.decisionTextHe || ""), g(n?.decisionCategory || "other"), v(n?.scheduleImpact || "unknown");
 	}
 	function D() {
-		let t = Jr({
+		let t = Yr({
 			...o,
 			tags: C,
 			conflictStatus: w ? "unresolved" : o.conflictStatus
@@ -18133,9 +18164,9 @@ function Zr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 						value: h,
 						onChange: (e) => g(e.target.value),
 						disabled: t,
-						children: Er.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+						children: Dr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 							value: e,
-							children: yr(e)
+							children: br(e)
 						}, e))
 					})] }),
 					/* @__PURE__ */ (0, x.jsxs)("label", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "השפעה אפשרית על לוח הזמנים" }), /* @__PURE__ */ (0, x.jsxs)("select", {
@@ -18201,7 +18232,7 @@ function Zr({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 		]
 	});
 }
-function Qr({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r = !1, onToggleMerge: i, onSplit: a, onReview: o }) {
+function $r({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r = !1, onToggleMerge: i, onSplit: a, onReview: o }) {
 	let [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(!1), [d, f] = (0, b.useState)(!1), [p, m] = (0, b.useState)(() => ({
 		titleHe: e.titleHe || "",
 		summaryHe: e.summaryHe || "",
@@ -18245,12 +18276,12 @@ function Qr({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsDecisionCardHeader",
 				children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsxs)("small", { children: [
-					yr(e.decisionCategory),
+					br(e.decisionCategory),
 					" · גרסה ",
 					e.revision
 				] }), /* @__PURE__ */ (0, x.jsx)("h4", { children: e.titleHe })] }), /* @__PURE__ */ (0, x.jsx)("span", {
 					className: "contractsPlanReady",
-					children: br(e.reviewStatus)
+					children: xr(e.reviewStatus)
 				})]
 			}),
 			/* @__PURE__ */ (0, x.jsx)("p", {
@@ -18264,8 +18295,8 @@ function Qr({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsRelationshipMeta",
 				children: [
-					/* @__PURE__ */ (0, x.jsx)("i", { children: xr(e.scheduleImpact) }),
-					/* @__PURE__ */ (0, x.jsx)("i", { children: Sr(e.temporalKind) }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: Sr(e.scheduleImpact) }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: Cr(e.temporalKind) }),
 					e.responsibleParty && /* @__PURE__ */ (0, x.jsxs)("i", { children: ["אחראי: ", e.responsibleParty] }),
 					e.beneficiary && /* @__PURE__ */ (0, x.jsxs)("i", { children: ["זכאי: ", e.beneficiary] }),
 					e.conflictStatus === "unresolved" && /* @__PURE__ */ (0, x.jsx)("i", { children: "סתירה לא פתורה · לא נבחרה חלופה" })
@@ -18283,7 +18314,7 @@ function Qr({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 						"מרווח מקור: ",
 						e.offsetValue,
 						" ",
-						_r(e.offsetUnit)
+						vr(e.offsetUnit)
 					] })
 				]
 			}),
@@ -18311,7 +18342,7 @@ function Qr({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 					disabled: t
 				}), "בחר למיזוג"] })]
 			}),
-			d && g && /* @__PURE__ */ (0, x.jsx)(Xr, {
+			d && g && /* @__PURE__ */ (0, x.jsx)(Zr, {
 				item: e,
 				busy: t,
 				onCancel: () => f(!1),
@@ -18396,9 +18427,9 @@ function Qr({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 									decisionCategory: e.target.value
 								})),
 								disabled: t,
-								children: Er.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+								children: Dr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 									value: e,
-									children: yr(e)
+									children: br(e)
 								}, e))
 							})] }),
 							/* @__PURE__ */ (0, x.jsxs)("label", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "השפעה חוזית אפשרית על לוח הזמנים" }), /* @__PURE__ */ (0, x.jsxs)("select", {
@@ -18453,18 +18484,18 @@ function Qr({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 				className: "contractsRelationshipReviewedState",
 				role: "status",
 				children: [
-					/* @__PURE__ */ (0, x.jsx)("strong", { children: br(e.reviewStatus) }),
+					/* @__PURE__ */ (0, x.jsx)("strong", { children: xr(e.reviewStatus) }),
 					e.reviewReason && /* @__PURE__ */ (0, x.jsx)("p", { children: e.reviewReason }),
 					e.reviewedAt && /* @__PURE__ */ (0, x.jsx)("time", {
 						dateTime: e.reviewedAt,
-						children: Cr(e.reviewedAt)
+						children: wr(e.reviewedAt)
 					})
 				]
 			})
 		]
 	});
 }
-function $r({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoReviewResult: i, autoReviewError: a = "", autoReviewBusy: o = !1, relationshipPendingCount: s = 0, error: c = "", generationBusy: l = !1, reviewBusyId: u = "", onGenerate: d, onAutoReview: f, onSplit: p, onMerge: m, onReview: h }) {
+function ei({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoReviewResult: i, autoReviewError: a = "", autoReviewBusy: o = !1, relationshipPendingCount: s = 0, error: c = "", generationBusy: l = !1, reviewBusyId: u = "", onGenerate: d, onAutoReview: f, onSplit: p, onMerge: m, onReview: h }) {
 	let [g, _] = (0, b.useState)([]), v = Number(n?.metrics?.pendingRelationshipCount ?? s ?? 0), y = Number(n?.metrics?.currentDecisionCount || 0), S = Number(n?.lineage?.metrics?.activeDecisionCount ?? y), C = Number(n?.metrics?.proposedCount || 0), w = !!(t?.ready && n?.lineage?.gates?.splitEnabled && n?.lineage?.gates?.mergeEnabled), T = new Map((n?.items || []).map((e) => [e.decisionId, e])), E = g.map((e) => T.get(e)).filter(Boolean), D = !!(e?.ready && n?.workspace?.workspaceId && v === 0 && y === 0 && !l), O = !!(r?.ready && C > 0 && !l && !o && !u), k = i?.plan?.metrics;
 	function A(e) {
 		_((t) => t.includes(e.decisionId) ? t.filter((t) => t !== e.decisionId) : t.length < 10 ? [...t, e.decisionId] : t);
@@ -18592,7 +18623,7 @@ function $r({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 					role: "status",
 					children: "נבחרה החלטה אחת למיזוג. יש לבחור לפחות החלטה נוספת."
 				}),
-				w && E.length >= 2 && /* @__PURE__ */ (0, x.jsx)(Zr, {
+				w && E.length >= 2 && /* @__PURE__ */ (0, x.jsx)(Qr, {
 					items: E,
 					busy: u === "lineage:merge",
 					onCancel: () => _([]),
@@ -18600,7 +18631,7 @@ function $r({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 				}, E.map((e) => e.decisionId).join(":")),
 				/* @__PURE__ */ (0, x.jsx)("div", {
 					className: "contractsDecisionList",
-					children: (n.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(Qr, {
+					children: (n.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)($r, {
 						item: e,
 						busy: u === e.decisionId || u === `lineage:${e.decisionId}` || u === "lineage:merge",
 						lineageEnabled: w,
@@ -18631,7 +18662,7 @@ function $r({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 						children: (n.lineage.links || []).map((e) => {
 							let t = T.get(e.sourceDecisionId), n = T.get(e.targetDecisionId);
 							return /* @__PURE__ */ (0, x.jsxs)("article", { children: [
-								/* @__PURE__ */ (0, x.jsx)("strong", { children: Wn(e.relationshipType) }),
+								/* @__PURE__ */ (0, x.jsx)("strong", { children: Gn(e.relationshipType) }),
 								/* @__PURE__ */ (0, x.jsxs)("p", { children: [
 									t?.titleHe || e.sourceDecisionId,
 									" ← ",
@@ -18640,7 +18671,7 @@ function $r({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 								/* @__PURE__ */ (0, x.jsxs)("small", { children: [
 									e.reviewReason,
 									" · ",
-									Cr(e.reviewedAt)
+									wr(e.reviewedAt)
 								] })
 							] }, e.relationshipId);
 						})
@@ -18650,23 +18681,23 @@ function $r({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 		]
 	});
 }
-function ei({ item: e }) {
+function ti({ item: e }) {
 	return /* @__PURE__ */ (0, x.jsxs)("article", {
 		className: `contractsScheduleProjectionCard is-${e.handoffStatus}`,
 		children: [
-			/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: dr(e.handoffStatus) }), /* @__PURE__ */ (0, x.jsx)("h3", { children: e.titleHe })] }), /* @__PURE__ */ (0, x.jsx)("span", { children: e.reviewStatus || br(e.reviewStatusCode) })] }),
+			/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: fr(e.handoffStatus) }), /* @__PURE__ */ (0, x.jsx)("h3", { children: e.titleHe })] }), /* @__PURE__ */ (0, x.jsx)("span", { children: e.reviewStatus || xr(e.reviewStatusCode) })] }),
 			/* @__PURE__ */ (0, x.jsx)("p", { children: e.summaryHe }),
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsRelationshipMeta",
 				children: [
-					/* @__PURE__ */ (0, x.jsx)("i", { children: e.categoryHe || yr("other") }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: e.categoryHe || br("other") }),
 					/* @__PURE__ */ (0, x.jsx)("i", { children: e.indicatorSuitability || "נדרשת בדיקה" }),
-					/* @__PURE__ */ (0, x.jsx)("i", { children: Sr(e.timing?.kind || "none") })
+					/* @__PURE__ */ (0, x.jsx)("i", { children: Cr(e.timing?.kind || "none") })
 				]
 			}),
 			/* @__PURE__ */ (0, x.jsx)("ul", {
 				className: "contractsScheduleProjectionBlockers",
-				children: (e.reasonCodes || []).map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: ur(e) }, e))
+				children: (e.reasonCodes || []).map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: dr(e) }, e))
 			}),
 			e.sourceEvidence?.length > 0 && /* @__PURE__ */ (0, x.jsxs)("details", {
 				className: "contractsRelationshipEvidence",
@@ -18684,7 +18715,7 @@ function ei({ item: e }) {
 		]
 	});
 }
-function ti({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !1, onRun: a }) {
+function ni({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !1, onRun: a }) {
 	let o = t?.metrics || {}, s = (t?.items || []).filter((e) => e.handoffStatus === "suitable"), c = (t?.items || []).filter((e) => e.handoffStatus === "requires_review"), l = (t?.items || []).filter((e) => e.handoffStatus === "not_suitable"), u = !!(e?.ready && e?.mode === "indicator_handoff_read_only");
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "contractsPanel contractsScheduleProjectionPanel",
@@ -18771,7 +18802,7 @@ function ti({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						})]
 					}), /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: s.map((e) => /* @__PURE__ */ (0, x.jsx)(ei, { item: e }, e.decisionId))
+						children: s.map((e) => /* @__PURE__ */ (0, x.jsx)(ti, { item: e }, e.decisionId))
 					})]
 				}),
 				/* @__PURE__ */ (0, x.jsxs)("section", {
@@ -18788,7 +18819,7 @@ function ti({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						})]
 					}), c.length ? /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: c.map((e) => /* @__PURE__ */ (0, x.jsx)(ei, { item: e }, e.decisionId))
+						children: c.map((e) => /* @__PURE__ */ (0, x.jsx)(ti, { item: e }, e.decisionId))
 					}) : /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsMessage is-success",
 						role: "status",
@@ -18803,15 +18834,15 @@ function ti({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						" החלטות שאינן מתאימות למסירה"
 					] }), /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: l.map((e) => /* @__PURE__ */ (0, x.jsx)(ei, { item: e }, e.decisionId))
+						children: l.map((e) => /* @__PURE__ */ (0, x.jsx)(ti, { item: e }, e.decisionId))
 					})]
 				})
 			] })
 		]
 	});
 }
-function ni() {
-	let [e, t] = (0, b.useState)(null), [n, r] = (0, b.useState)(null), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(""), [u, d] = (0, b.useState)([]), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(""), [g, _] = (0, b.useState)([]), [v, y] = (0, b.useState)(null), [S, C] = (0, b.useState)(""), [w, T] = (0, b.useState)(null), [E, D] = (0, b.useState)(null), [O, k] = (0, b.useState)(""), [A, j] = (0, b.useState)(null), [M, N] = (0, b.useState)(null), [ee, P] = (0, b.useState)(null), [F, I] = (0, b.useState)(""), [te, L] = (0, b.useState)(null), [ne, re] = (0, b.useState)(null), [ie, R] = (0, b.useState)(""), [ae, oe] = (0, b.useState)(null), [se, ce] = (0, b.useState)(null), [le, ue] = (0, b.useState)(null), [de, fe] = (0, b.useState)(""), [pe, me] = (0, b.useState)(null), [he, ge] = (0, b.useState)(null), [_e, ve] = (0, b.useState)(""), [ye, be] = (0, b.useState)(null), [xe, Se] = (0, b.useState)(null), [Ce, we] = (0, b.useState)(""), [z, Te] = (0, b.useState)(""), [Ee, De] = (0, b.useState)(null), [Oe, ke] = (0, b.useState)(""), [Ae, je] = (0, b.useState)("idle"), [Me, Ne] = (0, b.useState)(""), [B, Pe] = (0, b.useState)(null), [Fe, Ie] = (0, b.useState)(null), [Le, Re] = (0, b.useState)(wr), [ze, Be] = (0, b.useState)(Tr), [Ve, He] = (0, b.useState)("אולם תצוגה הרצליה"), [V, Ue] = (0, b.useState)(null), [We, Ge] = (0, b.useState)(null), [Ke, qe] = (0, b.useState)("clauses"), [Je, Ye] = (0, b.useState)({}), [Xe, Ze] = (0, b.useState)(""), [Qe, $e] = (0, b.useState)(""), [et, tt] = (0, b.useState)(""), [nt, rt] = (0, b.useState)(null), [it, at] = (0, b.useState)(null), [H, U] = (0, b.useState)(""), [ot, st] = (0, b.useState)(""), ct = (0, b.useRef)(0), lt = (0, b.useRef)(null), ut = (0, b.useRef)(null), dt = (0, b.useRef)(null), ft = (0, b.useRef)(""), pt = (0, b.useRef)(0), mt = (0, b.useRef)(""), ht = (0, b.useRef)(!1);
+function ri() {
+	let [e, t] = (0, b.useState)(null), [n, r] = (0, b.useState)(null), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(""), [u, d] = (0, b.useState)([]), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(""), [g, _] = (0, b.useState)([]), [v, y] = (0, b.useState)(null), [S, C] = (0, b.useState)(""), [w, T] = (0, b.useState)(null), [E, D] = (0, b.useState)(null), [O, k] = (0, b.useState)(""), [A, j] = (0, b.useState)(null), [M, N] = (0, b.useState)(null), [ee, P] = (0, b.useState)(null), [F, I] = (0, b.useState)(""), [te, L] = (0, b.useState)(null), [ne, re] = (0, b.useState)(null), [ie, R] = (0, b.useState)(""), [ae, oe] = (0, b.useState)(null), [se, ce] = (0, b.useState)(null), [le, ue] = (0, b.useState)(null), [de, fe] = (0, b.useState)(""), [pe, me] = (0, b.useState)(null), [he, ge] = (0, b.useState)(null), [_e, ve] = (0, b.useState)(""), [ye, be] = (0, b.useState)(null), [xe, Se] = (0, b.useState)(null), [Ce, we] = (0, b.useState)(""), [z, Te] = (0, b.useState)(""), [Ee, De] = (0, b.useState)(null), [Oe, ke] = (0, b.useState)(""), [Ae, je] = (0, b.useState)("idle"), [Me, Ne] = (0, b.useState)(""), [B, Pe] = (0, b.useState)(null), [Fe, Ie] = (0, b.useState)(null), [Le, Re] = (0, b.useState)(Tr), [ze, Be] = (0, b.useState)(Er), [Ve, He] = (0, b.useState)("אולם תצוגה הרצליה"), [V, Ue] = (0, b.useState)(null), [We, Ge] = (0, b.useState)(null), [Ke, qe] = (0, b.useState)("clauses"), [Je, Ye] = (0, b.useState)({}), [Xe, Ze] = (0, b.useState)(""), [Qe, $e] = (0, b.useState)(""), [et, tt] = (0, b.useState)(""), [nt, rt] = (0, b.useState)(null), [it, at] = (0, b.useState)(null), [H, U] = (0, b.useState)(""), [ot, st] = (0, b.useState)(""), ct = (0, b.useRef)(0), lt = (0, b.useRef)(null), ut = (0, b.useRef)(null), dt = (0, b.useRef)(null), ft = (0, b.useRef)(""), pt = (0, b.useRef)(0), mt = (0, b.useRef)(""), ht = (0, b.useRef)(!1);
 	function gt(e) {
 		return !!(e && e.epoch === ct.current && e.workspaceId === ft.current);
 	}
@@ -18908,13 +18939,13 @@ function ni() {
 		Se(null), we(""), re(null), R(""), ge(null), ve("");
 	}, [z]), (0, b.useEffect)(() => {
 		if (!o?.ready || !Ee?.workspaceId || !V || !Qe || !et || ht.current) return;
-		let e = Ir({
+		let e = Lr({
 			decisions: Je,
 			reviewReason: Xe,
 			batchId: Qe,
 			reviewedAt: et,
 			mappingDraft: B
-		}), t = Lr(e), n = ut.current;
+		}), t = Rr(e), n = ut.current;
 		if (t === mt.current && !gt(n)) {
 			dt.current = null, _t(), je(Ee.draft ? "saved" : "idle"), Ne("");
 			return;
@@ -18939,7 +18970,7 @@ function ni() {
 	]), (0, b.useEffect)(() => () => {
 		ct.current += 1, dt.current = null, _t();
 	}, []);
-	let bt = V?.candidates?.length || 0, xt = V?.document?.documentVersionId || "", St = (0, b.useMemo)(() => Object.values(Je).filter((e) => e.action === "approve").length, [Je]), Ct = bt - St, wt = xn(nt?.plan);
+	let bt = V?.candidates?.length || 0, xt = V?.document?.documentVersionId || "", St = (0, b.useMemo)(() => Object.values(Je).filter((e) => e.action === "approve").length, [Je]), Ct = bt - St, wt = Sn(nt?.plan);
 	async function Tt(e = o) {
 		if (!(!e?.ready || !/^[0-9a-f-]{36}$/iu.test(Le.trim()))) try {
 			d((await G(`/api/contracts/workspaces?${new URLSearchParams({
@@ -19159,8 +19190,8 @@ function ni() {
 		}
 	}
 	function Vt(e, t = "", { autosaveConflictMessage: n = "", preserveClausePreview: r = !1, preserveFile: i = !1 } = {}) {
-		let a = e.extraction, o = Fr(a, e.draft), s = Ir(o);
-		_t(), ct.current += 1, dt.current = null, ht.current = !!n, ft.current = e.workspaceId, pt.current = Rr(e.draft), mt.current = Lr(s), je(n ? "conflict" : e.draft ? "saved" : "idle"), Ne(n), Ue(a), Ye(o.decisions), Ze(o.reviewReason), $e(o.batchId), tt(o.reviewedAt), Pe(o.mappingDraft), Re(e.sourceProjectId || a.projectBinding?.projectId || wr), Be(e.scheduleProjectId || Tr), He(e.projectSite || a.projectBinding?.projectSite || ""), De(e), ke(t), rt(null), at(null), st(""), r || Ge(null), i || Ie(null);
+		let a = e.extraction, o = Ir(a, e.draft), s = Lr(o);
+		_t(), ct.current += 1, dt.current = null, ht.current = !!n, ft.current = e.workspaceId, pt.current = zr(e.draft), mt.current = Rr(s), je(n ? "conflict" : e.draft ? "saved" : "idle"), Ne(n), Ue(a), Ye(o.decisions), Ze(o.reviewReason), $e(o.batchId), tt(o.reviewedAt), Pe(o.mappingDraft), Re(e.sourceProjectId || a.projectBinding?.projectId || Tr), Be(e.scheduleProjectId || Er), He(e.projectSite || a.projectBinding?.projectSite || ""), De(e), ke(t), rt(null), at(null), st(""), r || Ge(null), i || Ie(null);
 	}
 	async function Ht(e) {
 		U("open-workspace"), l("");
@@ -19196,7 +19227,7 @@ function ni() {
 		if (!Fe) return st("יש לבחור קובץ PDF.");
 		U("extract"), st(""), l(""), ke(""), rt(null), at(null);
 		try {
-			let e = await Ar(Fe), t = {
+			let e = await jr(Fe), t = {
 				filename: Fe.name,
 				mediaType: "application/pdf",
 				pdfBase64: e,
@@ -19217,7 +19248,7 @@ function ni() {
 				method: "POST",
 				timeoutMs: 3e5,
 				body: t
-			}), r = n.extraction || n, i = Fr(r, n.draft);
+			}), r = n.extraction || n, i = Ir(r, n.draft);
 			if (o?.ready) {
 				let e = n.reused ? "החוזה כבר היה שמור: החילוץ והטיוטה נטענו ללא קריאת מודל וללא עלות טוקנים נוספת." : "החוזה, ה-PDF ותוצאת החילוץ נשמרו. השינויים בהחלטות יישמרו אוטומטית.";
 				Vt({
@@ -19240,7 +19271,7 @@ function ni() {
 		if (!f?.ready) return st("שמירת תוצאת סוכן החוזים עדיין אינה מופעלת בשרת.");
 		U("clause-persist"), st(""), ke("");
 		try {
-			let e = await Ar(Fe), t = await G("/api/contracts/clauses/workspaces/extract", {
+			let e = await jr(Fe), t = await G("/api/contracts/clauses/workspaces/extract", {
 				method: "POST",
 				timeoutMs: 3e5,
 				body: {
@@ -19269,7 +19300,7 @@ function ni() {
 		try {
 			rt(await G("/api/contracts/review/plan", {
 				method: "POST",
-				body: Vr({
+				body: Hr({
 					extraction: V,
 					decisions: Je,
 					reviewReason: Xe,
@@ -19287,11 +19318,11 @@ function ni() {
 	}
 	async function Jt(e) {
 		if (!nt) return st("יש להכין ולאמת את תוכנית הסקירה לפני השמירה או הקידום.");
-		if (e !== wt || e === bn.blocked) return st("תוכנית הסקירה אינה מוכנה לפעולה בטוחה.");
-		let t = e === bn.reviewOnly;
+		if (e !== wt || e === xn.blocked) return st("תוכנית הסקירה אינה מוכנה לפעולה בטוחה.");
+		let t = e === xn.reviewOnly;
 		U(t ? "save-review" : "commit"), st("");
 		try {
-			let e = Vr({
+			let e = Hr({
 				extraction: V,
 				decisions: Je,
 				reviewReason: Xe,
@@ -19381,7 +19412,7 @@ function ni() {
 								e.pageCount,
 								" עמודים"
 							] }),
-							/* @__PURE__ */ (0, x.jsxs)("small", { children: ["נשמר ", Cr(e.createdAt)] }),
+							/* @__PURE__ */ (0, x.jsxs)("small", { children: ["נשמר ", wr(e.createdAt)] }),
 							/* @__PURE__ */ (0, x.jsx)("small", {
 								dir: "ltr",
 								children: e.documentVersionId
@@ -19429,7 +19460,7 @@ function ni() {
 								e.candidateCount,
 								" מועמדים"
 							] }),
-							/* @__PURE__ */ (0, x.jsx)("small", { children: e.draft ? `${e.draft.reviewedCount}/${e.candidateCount} החלטות עם נימוק · נשמר ${Cr(e.draft.updatedAt)}` : `טרם נשמרה טיוטת החלטות · נוצר ${Cr(e.createdAt)}` }),
+							/* @__PURE__ */ (0, x.jsx)("small", { children: e.draft ? `${e.draft.reviewedCount}/${e.candidateCount} החלטות עם נימוק · נשמר ${wr(e.draft.updatedAt)}` : `טרם נשמרה טיוטת החלטות · נוצר ${wr(e.createdAt)}` }),
 							/* @__PURE__ */ (0, x.jsxs)("small", { children: ["מזהה פרויקט לוח זמנים: ", /* @__PURE__ */ (0, x.jsx)("bdi", {
 								dir: "ltr",
 								children: e.scheduleProjectId || "לא שויך"
@@ -19530,22 +19561,22 @@ function ni() {
 							children: "החילוץ השמור נשאר טעון בעת מעבר בין הכרטיסיות"
 						})]
 					}),
-					/* @__PURE__ */ (0, x.jsx)(Or, {
+					/* @__PURE__ */ (0, x.jsx)(kr, {
 						activeTab: Ke,
 						onChange: qe
 					}),
-					/* @__PURE__ */ (0, x.jsx)(kr, {
+					/* @__PURE__ */ (0, x.jsx)(Ar, {
 						id: "clauses",
 						activeTab: Ke,
-						children: /* @__PURE__ */ (0, x.jsx)(Ur, {
+						children: /* @__PURE__ */ (0, x.jsx)(Wr, {
 							preview: We,
 							classicDocumentVersionId: xt
 						})
 					}),
-					/* @__PURE__ */ (0, x.jsx)(kr, {
+					/* @__PURE__ */ (0, x.jsx)(Ar, {
 						id: "relationships",
 						activeTab: Ke,
-						children: /* @__PURE__ */ (0, x.jsx)(qr, {
+						children: /* @__PURE__ */ (0, x.jsx)(Jr, {
 							preview: We,
 							workspaceId: z,
 							persistenceStatus: v,
@@ -19570,10 +19601,10 @@ function ni() {
 							onAutoReview: Ft
 						})
 					}),
-					/* @__PURE__ */ (0, x.jsx)(kr, {
+					/* @__PURE__ */ (0, x.jsx)(Ar, {
 						id: "decisions",
 						activeTab: Ke,
-						children: /* @__PURE__ */ (0, x.jsx)($r, {
+						children: /* @__PURE__ */ (0, x.jsx)(ei, {
 							status: ae,
 							lineageStatus: se,
 							result: le,
@@ -19592,10 +19623,10 @@ function ni() {
 							onReview: Rt
 						})
 					}),
-					/* @__PURE__ */ (0, x.jsx)(kr, {
+					/* @__PURE__ */ (0, x.jsx)(Ar, {
 						id: "indicator",
 						activeTab: Ke,
-						children: /* @__PURE__ */ (0, x.jsx)(ti, {
+						children: /* @__PURE__ */ (0, x.jsx)(ni, {
 							status: ye,
 							result: xe,
 							error: Ce,
@@ -19644,7 +19675,7 @@ function ni() {
 					}),
 					/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsCandidateList",
-						children: (V.candidates || []).map((e) => /* @__PURE__ */ (0, x.jsx)(Hr, {
+						children: (V.candidates || []).map((e) => /* @__PURE__ */ (0, x.jsx)(Ur, {
 							candidate: e,
 							decision: Je[e.candidateKey],
 							onChange: (t) => Ut(e.candidateKey, t)
@@ -19676,17 +19707,17 @@ function ni() {
 						className: "contractsSectionHeader",
 						children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("h2", { children: "3. תוכנית טרנזקציה" }), /* @__PURE__ */ (0, x.jsxs)("p", { children: [
 							"מצב: ",
-							hr(nt.plan?.status),
+							gr(nt.plan?.status),
 							" · פעולה בטוחה: ",
-							wt === bn.promotion ? "קידום עובדות מאושרות" : wt === bn.reviewOnly ? "שמירת סקירה בלבד" : "אין"
+							wt === xn.promotion ? "קידום עובדות מאושרות" : wt === xn.reviewOnly ? "שמירת סקירה בלבד" : "אין"
 						] })] }), /* @__PURE__ */ (0, x.jsx)("span", {
-							className: wt === bn.blocked ? "contractsPlanBlocked" : "contractsPlanReady",
-							children: wt === bn.promotion ? "מוכן לקידום" : wt === bn.reviewOnly ? "מוכן לשמירת סקירה" : "חסום"
+							className: wt === xn.blocked ? "contractsPlanBlocked" : "contractsPlanReady",
+							children: wt === xn.promotion ? "מוכן לקידום" : wt === xn.reviewOnly ? "מוכן לשמירת סקירה" : "חסום"
 						})]
 					}),
 					(nt.plan?.globalBlockers || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("ul", {
 						className: "contractsBlockers",
-						children: nt.plan.globalBlockers.map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: lr(e) }, e))
+						children: nt.plan.globalBlockers.map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: ur(e) }, e))
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsPlanCounts",
@@ -19696,7 +19727,7 @@ function ni() {
 							/* @__PURE__ */ (0, x.jsxs)("span", { children: ["תנאים ", /* @__PURE__ */ (0, x.jsx)("strong", { children: nt.plan?.rowsByTable?.schedule_contract_conditions?.length || 0 })] })
 						]
 					}),
-					wt === bn.reviewOnly && /* @__PURE__ */ (0, x.jsxs)("div", {
+					wt === xn.reviewOnly && /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsActionBlock",
 						children: [
 							/* @__PURE__ */ (0, x.jsx)("p", { children: "כל המועמדים נדחו. הפעולה תשמור ביקורת בלתי־ניתנת לשינוי בלבד ותיצור אפס רשומות לו״ז." }),
@@ -19708,12 +19739,12 @@ function ni() {
 								type: "button",
 								className: "contractsCommit contractsReviewOnlyAction",
 								disabled: !!H || !e?.applyApproved,
-								onClick: () => Jt(bn.reviewOnly),
+								onClick: () => Jt(xn.reviewOnly),
 								children: H === "save-review" ? "שומר סקירה ללא קידום…" : "שמור סקירה ללא קידום"
 							})
 						]
 					}),
-					wt === bn.promotion && /* @__PURE__ */ (0, x.jsxs)("div", {
+					wt === xn.promotion && /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsActionBlock",
 						children: [
 							/* @__PURE__ */ (0, x.jsx)("p", { children: "רק העובדות שאושרו ועמדו בכל החסמים ייכתבו אטומית לטבלאות הלו״ז הקיימות." }),
@@ -19725,12 +19756,12 @@ function ni() {
 								type: "button",
 								className: "contractsCommit",
 								disabled: !!H || !e?.applyApproved,
-								onClick: () => Jt(bn.promotion),
+								onClick: () => Jt(xn.promotion),
 								children: H === "commit" ? "מבצע קידום אטומי…" : "קדם עובדות מאושרות"
 							})
 						]
 					}),
-					wt === bn.blocked && /* @__PURE__ */ (0, x.jsxs)("div", {
+					wt === xn.blocked && /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsActionBlock",
 						children: [/* @__PURE__ */ (0, x.jsx)("p", {
 							className: "contractsActivationNotice",
@@ -19744,7 +19775,7 @@ function ni() {
 					})
 				]
 			}),
-			V && /* @__PURE__ */ (0, x.jsx)(Br, {
+			V && /* @__PURE__ */ (0, x.jsx)(Vr, {
 				extraction: V,
 				sourceProjectId: Le.trim(),
 				status: n,
@@ -19767,35 +19798,35 @@ function ni() {
 }
 //#endregion
 //#region src/react/main.jsx
-var ri = /* @__PURE__ */ new WeakMap();
-function ii({ label: e = "React bridge ready" }) {
+var ii = /* @__PURE__ */ new WeakMap();
+function ai({ label: e = "React bridge ready" }) {
 	return /* @__PURE__ */ (0, x.jsx)("span", {
 		className: "reactBridgeStatus",
 		"data-react-ready": "true",
 		children: e
 	});
 }
-var ai = {
-	status: ii,
+var oi = {
+	status: ai,
 	settings: B,
 	workflow: ze,
 	insights: tt,
-	schedule: yn,
-	contracts: ni
+	schedule: bn,
+	contracts: ri
 };
-function oi(e) {
-	let t = ai[e.dataset.reactIsland];
-	if (!t || ri.has(e)) return !1;
+function si(e) {
+	let t = oi[e.dataset.reactIsland];
+	if (!t || ii.has(e)) return !1;
 	let n = e.dataset.reactProps ? JSON.parse(e.dataset.reactProps) : {}, r = (0, y.createRoot)(e);
-	return r.render(/* @__PURE__ */ (0, x.jsx)(b.StrictMode, { children: /* @__PURE__ */ (0, x.jsx)(t, { ...n }) })), ri.set(e, r), !0;
+	return r.render(/* @__PURE__ */ (0, x.jsx)(b.StrictMode, { children: /* @__PURE__ */ (0, x.jsx)(t, { ...n }) })), ii.set(e, r), !0;
 }
-function si(e = document) {
-	return Array.from(e.querySelectorAll("[data-react-island]")).reduce((e, t) => e + +!!oi(t), 0);
+function ci(e = document) {
+	return Array.from(e.querySelectorAll("[data-react-island]")).reduce((e, t) => e + +!!si(t), 0);
 }
 typeof window < "u" && (window.BiDocReact = {
-	islands: Object.keys(ai),
-	mountReactIslands: si,
+	islands: Object.keys(oi),
+	mountReactIslands: ci,
 	version: "0.1.0"
-}, document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => si(), { once: !0 }) : si());
+}, document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => ci(), { once: !0 }) : ci());
 //#endregion
-export { si as mountReactIslands };
+export { ci as mountReactIslands };

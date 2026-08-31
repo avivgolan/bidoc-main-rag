@@ -35,6 +35,7 @@ import {
   ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
   activityAssignmentBatchConfirmationText,
   activityAssignmentReviewCandidates,
+  activityAssignmentReviewHeader,
   activityAssignmentBatchStatusText,
   activityAssignmentMethodPresentation,
   applyActivityAssignmentBatchOutcome,
@@ -291,6 +292,20 @@ test("schedule assignment shared review: persists only actionable decisions and 
   assert.equal(hydrated.auditPersisted, true);
   assert.deepEqual(hydrated.candidates.map((candidate) => candidate.activityKey), ["gantt:file:1", "gantt:file:2"]);
   assert.deepEqual(hydrated.warnings, ["כרטיס הבדיקה נשמר וממתין להחלטת הצוות."]);
+});
+
+test("schedule assignment shared review: card header separates the source alert from the model recommendation", () => {
+  assert.deepEqual(activityAssignmentReviewHeader(
+    { title: "האם יש דרישות לביטוח הפרויקט?" },
+    { decision: { selectedActivityName: "סגירת ביטוח וחוזה מול היזם", autoAssigned: false } }
+  ), {
+    alertTitle: "האם יש דרישות לביטוח הפרויקט?",
+    recommendation: "סגירת ביטוח וחוזה מול היזם"
+  });
+  const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
+  assert.match(page, /ההתראה שנבדקת/u);
+  assert.match(page, /הצעת הסוכן המובילה/u);
+  assert.match(page, /אפשרות \{index \+ 1\}/u);
 });
 
 test("schedule assignment shared review: missing source rows remain visible as pinned label-only snapshots", () => {

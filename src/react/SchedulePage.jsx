@@ -5,6 +5,7 @@ import {
   ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
   activityAssignmentBatchConfirmationText,
   activityAssignmentReviewCandidates,
+  activityAssignmentReviewHeader,
   activityAssignmentBatchStatusText,
   activityAssignmentMethodPresentation,
   applyActivityAssignmentBatchOutcome,
@@ -608,6 +609,7 @@ function ActivityUpdatesTable({
               const agentResult = agentResults?.[item.id];
               const isAgentBusy = agentBusyId === item.id;
               const reviewCandidates = activityAssignmentReviewCandidates(agentResult);
+              const reviewHeader = activityAssignmentReviewHeader(item, agentResult);
               const reviewChoiceBusy = isAgentBusy || busyId === item.id || batchActive;
               const hasPersistedAuditRun = Boolean(agentResult?.runId && agentResult?.auditPersisted);
               const canRecordReviewedLabel = Boolean(agentResult?.persistedReview && agentResult?.reviewId);
@@ -648,8 +650,12 @@ function ActivityUpdatesTable({
                         ) : (
                           <div className={`activityAgentResult ${agentResult.decision?.autoAssigned ? "is-auto" : ""}`}>
                             <div className="activityAgentResultHead">
-                              <strong>{agentResult.decision?.autoAssigned ? "שויך אוטומטית" : agentResult.decision?.selectedActivityName || "לא נמצאה התאמה חד־משמעית"}</strong>
-                              <span>
+                              <div className="activityAgentResultIdentity">
+                                <small>ההתראה שנבדקת</small>
+                                <strong title={reviewHeader.alertTitle}>{reviewHeader.alertTitle}</strong>
+                                <span><b>הצעת הסוכן המובילה:</b> {reviewHeader.recommendation}</span>
+                              </div>
+                              <span className="activityAgentResultScore">
                                 ציון התאמה {agentResult.decision?.rankingScore ?? agentResult.decision?.confidence ?? 0}
                                 {` · פער ${agentResult.decision?.rankingGap ?? agentResult.decision?.margin ?? 0}`}
                                 {Number.isFinite(agentResult.decision?.calibratedProbability)
@@ -670,11 +676,12 @@ function ActivityUpdatesTable({
                               <div className="activityAgentReview" aria-label="בחירת פעילות מתוך הצעות הסוכן">
                                 <strong className="activityAgentReviewPrompt">נדרשת החלטה שלך - בחר את הפעילות המתאימה:</strong>
                                 <div className="activityAgentCandidates" role="group" aria-label="פעילויות מוצעות">
-                                  {reviewCandidates.map(candidate => (
+                                  {reviewCandidates.map((candidate, index) => (
                                     <button type="button" key={candidate.activityKey} disabled={reviewChoiceBusy}
                                       onClick={() => canRecordReviewedLabel || hasPersistedAuditRun
                                         ? onConfirmAgent(item, agentResult, candidate)
                                         : onAssign(item, candidate.activityKey)}>
+                                      <em>אפשרות {index + 1}{index === 0 ? " · הצעת הסוכן המובילה" : ""}</em>
                                       <span>{candidate.name}</span><small>ציון התאמה {candidate.finalScore} · {candidate.plannedStart || "?"}–{candidate.plannedFinish || "?"}</small>
                                     </button>
                                   ))}
