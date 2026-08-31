@@ -436,6 +436,8 @@ The additive backend-only migration is applied in MAIN. Production build `4a102c
 
 The 2026-08-31 bounded collection update replaces the ambiguous all-row action with a 10, 25, or 50 row review-only batch. The batch cannot write automatic links, the full eligible count is identified as a waiting queue, and assigned rows display persisted assignment provenance. Its checkpoint is `BIDoc_Schedule_Activity_Assignment_Phase_3_1_Bounded_Collection_UI_Checkpoint_2026-08-31.md`.
 
+The 2026-08-31 read-only refresh found and corrected two preparation gaps: labels are now loaded across the requested, mapped source, and mapped Schedule project IDs, and resolved historical cards can fall back to their durable bounded event snapshots when the live alert is gone. The valid frozen dataset now contains 36 usable cases: 35 `confirmed_match` and 1 `no_match`. Another 64 cases are required, and `rejected_match`, `stale_activity`, `irrelevant_alert`, and `ambiguous` remain absent. The checkpoint is `BIDoc_Schedule_Activity_Assignment_Phase_3_1_Evidence_Refresh_Checkpoint_2026-08-31.md`.
+
 The expanded dataset must be frozen and reviewed before calibration and Phase 4 policy selection are rerun. Collection-path activation does not authorize an automatic policy, shadow mode, or Phase 5 work.
 
 ## 10. Phase 4 - Automatic decision policy calibration

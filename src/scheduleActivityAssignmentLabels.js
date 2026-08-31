@@ -51,6 +51,33 @@ function safeActivityKeys(values = []) {
     .filter((value) => value.startsWith("gantt:")))];
 }
 
+function scheduleAssignmentReviewSnapshotSource(row = {}, sourceId = "") {
+  const event = row.event_snapshot && typeof row.event_snapshot === "object" ? row.event_snapshot : {};
+  const date = safeText(event.date, 30).match(/^\d{4}-\d{2}-\d{2}/u)?.[0] || null;
+  if (!sourceId || !date) return null;
+  const title = safeText(event.title, 3000);
+  const description = safeText(event.description, 3000);
+  const severity = event.severity == null ? null : Number(event.severity);
+  return {
+    id: sourceId,
+    created_at: safeText(row.created_at, 100) || null,
+    data_date: date,
+    alert_type: safeText(event.alertType, 300) || "עדכון",
+    severity_level: Number.isFinite(severity) ? severity : null,
+    item_status: safeText(event.status, 160) || null,
+    lifecycle_status: null,
+    status: null,
+    summary: title || description,
+    alert_description: description || title,
+    question: safeText(event.question, 1500),
+    answer: safeText(event.answer, 1500),
+    content: title || description,
+    data_link: null,
+    hashtags: Array.isArray(event.hashtags) ? event.hashtags.map((item) => safeText(item, 160)).filter(Boolean).slice(0, 20) : [],
+    metadata: { evaluation_record_origin: "schedule_assignment_review_snapshot" }
+  };
+}
+
 export function normalizeScheduleAssignmentReviewLabel({
   labelType,
   expectedActivityKey = null,
@@ -91,6 +118,7 @@ export function scheduleAssignmentReviewRowToEvaluationCase(row = {}) {
   });
   const sourceId = safeText(row.source_id, 160);
   if (!sourceId) throw new Error("reviewed Schedule assignment label requires source_id");
+  const source = scheduleAssignmentReviewSnapshotSource(row, sourceId);
   return {
     id: `shared-review:${safeText(row.id || row.run_id, 500)}`,
     projectId: safeText(row.source_project_id, 500) || null,
@@ -110,7 +138,8 @@ export function scheduleAssignmentReviewRowToEvaluationCase(row = {}) {
       assignmentMethod: label.type === SCHEDULE_ASSIGNMENT_LABEL_TYPES.CONFIRMED_MATCH ? "review_label" : null,
       reviewer: safeText(row.labelled_by || row.resolved_by, 300) || null,
       runId: safeText(row.run_id, 500) || null
-    }
+    },
+    source
   };
 }
 
@@ -127,6 +156,33 @@ export function summarizeScheduleAssignmentLabelCoverage(cases = [], { minimumCa
     missingLabelTypes,
     minimumCoverageMet: rows.length >= minimumCaseCount && missingLabelTypes.length === 0
   };
+}
+
+export function mergeScheduleAssignmentEvaluationLabelResults(results = []) {
+  const casesByReview = new Map();
+  for (const result of Array.isArray(results) ? results : []) {
+    for (const item of Array.isArray(result?.cases) ? result.cases : []) {
+      const reviewId = safeText(item?.provenance?.linkId, 500);
+      const fallbackKey = JSON.stringify([
+        safeText(item?.sourceId, 160),
+        safeText(item?.label?.type, 80),
+        safeText(item?.provenance?.reviewedAt, 100)
+      ]);
+      casesByReview.set(reviewId || fallbackKey, item);
+    }
+  }
+  const cases = [...casesByReview.values()];
+  return {
+    count: cases.length,
+    cases,
+    coverage: summarizeScheduleAssignmentLabelCoverage(cases)
+  };
+}
+
+export function scheduleAssignmentReviewProjectIds({ requestedProjectId, sourceProjectId, scheduleProjectId } = {}) {
+  return [...new Set([requestedProjectId, sourceProjectId, scheduleProjectId]
+    .map((value) => safeText(value, 500))
+    .filter(Boolean))];
 }
 
 function reviewedLabelSignature(item = {}) {

@@ -52,10 +52,12 @@ import {
   sharedReviewRowToAgentResult
 } from "../src/subagents/scheduleActivityAssignmentReviewQueue.js";
 import {
+  mergeScheduleAssignmentEvaluationLabelResults,
   normalizeScheduleAssignmentReviewLabel,
   reconcileScheduleAssignmentReviewLabels,
   SCHEDULE_ASSIGNMENT_LABEL_TYPES,
   SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS,
+  scheduleAssignmentReviewProjectIds,
   scheduleAssignmentReviewRowToEvaluationCase,
   summarizeScheduleAssignmentLabelCoverage
 } from "../src/scheduleActivityAssignmentLabels.js";
@@ -347,7 +349,17 @@ test("schedule assignment labels: resolved shared rows become provenance-rich ev
     evaluation_label_reason: "Two activities remain plausible.",
     labelled_by: "reviewer-1",
     labelled_at: "2026-08-30T12:00:00Z",
-    event_snapshot: { recordOrigin: "alerts" },
+    event_snapshot: {
+      id: "alert-9",
+      title: "Saved historical alert",
+      description: "Snapshot description",
+      alertType: "עיכוב",
+      date: "2026-08-29",
+      severity: 3,
+      status: "open",
+      hashtags: ["schedule"],
+      recordOrigin: "alerts"
+    },
     decision_snapshot: { scheduleVersionId: "file-a" }
   };
   const evaluationCase = scheduleAssignmentReviewRowToEvaluationCase(row);
@@ -355,10 +367,37 @@ test("schedule assignment labels: resolved shared rows become provenance-rich ev
   assert.equal(evaluationCase.scheduleVersionId, "file-a");
   assert.equal(evaluationCase.provenance.source, "schedule_activity_assignment_reviews");
   assert.equal(evaluationCase.provenance.reviewer, "reviewer-1");
+  assert.equal(evaluationCase.source.data_date, "2026-08-29");
+  assert.equal(evaluationCase.source.alert_description, "Snapshot description");
+  assert.equal(evaluationCase.source.metadata.evaluation_record_origin, "schedule_assignment_review_snapshot");
   const coverage = summarizeScheduleAssignmentLabelCoverage([evaluationCase]);
   assert.equal(coverage.caseCount, 1);
   assert.equal(coverage.remainingCaseCount, 99);
   assert.ok(coverage.missingLabelTypes.includes("no_match"));
+});
+
+test("schedule assignment labels: mapped project review results merge without duplicating a review", () => {
+  assert.deepEqual(scheduleAssignmentReviewProjectIds({
+    requestedProjectId: "schedule-project",
+    sourceProjectId: "source-project",
+    scheduleProjectId: "schedule-project"
+  }), ["schedule-project", "source-project"]);
+  const labelledCase = {
+    sourceId: "alert-9",
+    label: { type: "ambiguous" },
+    provenance: { linkId: "review-1", reviewedAt: "2026-08-31T08:00:00Z" }
+  };
+  const merged = mergeScheduleAssignmentEvaluationLabelResults([
+    { cases: [labelledCase] },
+    { cases: [labelledCase, {
+      sourceId: "alert-10",
+      label: { type: "no_match" },
+      provenance: { linkId: "review-2", reviewedAt: "2026-08-31T08:01:00Z" }
+    }] }
+  ]);
+  assert.equal(merged.count, 2);
+  assert.equal(merged.coverage.labelBreakdown.ambiguous, 1);
+  assert.equal(merged.coverage.labelBreakdown.no_match, 1);
 });
 
 test("schedule assignment labels: canonical links win and conflicting repeated reviews are excluded", () => {

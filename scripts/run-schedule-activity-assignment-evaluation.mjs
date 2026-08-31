@@ -12,7 +12,12 @@ import { resolveIndicatorProjectContext } from "../src/indicator/contractConditi
 import { runScheduleActivityAssignmentAgent } from "../src/subagents/scheduleActivityAssignmentAgent.js";
 import { listSharedScheduleAssignmentEvaluationLabels } from "../src/subagents/scheduleActivityAssignmentReviewQueue.js";
 import { loadScheduleAssignmentEvaluationSources } from "../src/subagents/schedule.js";
-import { reconcileScheduleAssignmentReviewLabels, summarizeScheduleAssignmentLabelCoverage } from "../src/scheduleActivityAssignmentLabels.js";
+import {
+  mergeScheduleAssignmentEvaluationLabelResults,
+  reconcileScheduleAssignmentReviewLabels,
+  scheduleAssignmentReviewProjectIds,
+  summarizeScheduleAssignmentLabelCoverage
+} from "../src/scheduleActivityAssignmentLabels.js";
 
 const args = process.argv.slice(2);
 const hasFlag = (name) => args.includes(name);
@@ -62,6 +67,11 @@ async function prepareDataset() {
   const context = explicitScheduleProjectId
     ? { sourceProjectId: projectId, scheduleProjectId: explicitScheduleProjectId }
     : await resolveIndicatorProjectContext({ projectId, config, settings });
+  const reviewProjectIds = scheduleAssignmentReviewProjectIds({
+    requestedProjectId: projectId,
+    sourceProjectId: context.sourceProjectId,
+    scheduleProjectId: context.scheduleProjectId
+  });
   const scheduleSource = await loadScheduleSource({ config, projectId, settings, fetchImpl: timeoutFetch });
   const inputs = { tasks: scheduleSource.tasks, scheduleMeta: scheduleSource.scheduleMeta };
   const cutoffMs = Date.parse(dataCutoff);
@@ -78,11 +88,12 @@ async function prepareDataset() {
       fetchImpl: timeoutFetch,
       path: `/rest/v1/schedule_activity_assignment_runs?select=id,project_id,source_id,schedule_version_id,status,selected_activity_key,review_reason,reviewed_at&project_id=eq.${encodeURIComponent(context.scheduleProjectId)}&status=eq.rejected&limit=1000`
     }).catch(() => []),
-    listSharedScheduleAssignmentEvaluationLabels({
-      projectId: context.sourceProjectId,
+    Promise.all(reviewProjectIds.map((reviewProjectId) => listSharedScheduleAssignmentEvaluationLabels({
+      projectId: reviewProjectId,
       config,
       fetchImpl: timeoutFetch
-    }).catch(() => ({ count: 0, cases: [], coverage: null }))
+    }).catch(() => ({ count: 0, cases: [], coverage: null }))))
+      .then(mergeScheduleAssignmentEvaluationLabelResults)
   ]);
   const links = rawLinks
     .filter((row) => ["manual", "agent_approved"].includes(String(row.assignment_method || "manual")))
@@ -142,6 +153,7 @@ async function prepareDataset() {
   });
   const evidenceExclusions = [...reconciledReviewLabels.exclusions];
   const blockedReviewSourceIds = new Set(reconciledReviewLabels.blockedSourceIds);
+  const reviewSnapshotRecoveredSourceIds = new Set();
   for (const labelledCase of reconciledReviewLabels.selectedCases) {
     const sourceId = String(labelledCase.sourceId || "");
     if (!sourceId) continue;
@@ -153,7 +165,13 @@ async function prepareDataset() {
       });
       continue;
     }
-    const recoveredSource = recoveredSourceById.get(sourceId);
+    const recoveredSource = recoveredSourceById.get(sourceId) || (labelledCase.source?.data_date
+      ? {
+          sourceId,
+          recordOrigin: "schedule_assignment_review_snapshot",
+          source: labelledCase.source
+        }
+      : null);
     if (!recoveredSource) {
       evidenceExclusions.push({
         sourceId,
@@ -161,6 +179,9 @@ async function prepareDataset() {
         reason: "review_label_source_not_recovered"
       });
       continue;
+    }
+    if (recoveredSource.recordOrigin === "schedule_assignment_review_snapshot") {
+      reviewSnapshotRecoveredSourceIds.add(sourceId);
     }
     casesBySource.set(sourceId, {
       ...labelledCase,
@@ -199,7 +220,7 @@ async function prepareDataset() {
   const cases = [...casesBySource.values()];
   const includedSourceIds = new Set(cases.map((item) => item.sourceId));
   const exclusions = [
-    ...sourceRecovery.exclusions,
+    ...sourceRecovery.exclusions.filter((item) => !reviewSnapshotRecoveredSourceIds.has(String(item.sourceId || ""))),
     ...evidenceExclusions,
     ...links
       .filter((row) => !includedSourceIds.has(String(row.source_id || "")))
@@ -223,9 +244,11 @@ async function prepareDataset() {
       requestedCount: sourceRecovery.requestedCount,
       currentCount: sourceRecovery.currentCount,
       recoveredLegacyCount: sourceRecovery.recoveredLegacyCount,
+      recoveredReviewSnapshotCount: reviewSnapshotRecoveredSourceIds.size,
       eligibleLinkCount: links.length,
       eligibleRejectedRunCount: rejectedRuns.filter((row) => row.selected_activity_key).length,
       eligibleSharedReviewLabelCount: sharedLabelCases.length,
+      queriedReviewProjectIds: reviewProjectIds,
       includedCaseCount: cases.length,
       exclusions
     },
