@@ -48,12 +48,18 @@ import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigate
 import { cleanChatUrl, renderChatMarkdown } from "../public/chatMarkdown.js";
 import { registerContractsAgentTests } from "./contracts-agent.tests.js";
 import { registerQaPhase1Tests } from "./qa-phase1.tests.js";
+import { registerChatQualityTests } from "./chat-quality.tests.js";
+import { registerChatCompletionIntegrityTests } from "./chat-completion-integrity.tests.js";
+import { registerMainEvidenceTests } from "./main-evidence.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 registerContractsAgentTests(test);
 registerQaPhase1Tests(test);
+registerChatQualityTests(test);
+registerChatCompletionIntegrityTests(test);
+registerMainEvidenceTests(test);
 const testJwt = (claims) => [
   Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
   Buffer.from(JSON.stringify(claims)).toString("base64url"),
@@ -5936,7 +5942,8 @@ test("QA prompts require structured full-run audit contract", () => {
       assert.ok(prompt.includes(term), `QA prompt missing ${term}`);
     }
     assert.match(prompt, /Audit every meaningful item in qa_run_summary\.agent_steps/);
-    assert.match(prompt, /"done" \| "skipped" \| "error"/);
+    assert.match(prompt, /"done" \| "retried" \| "fallback" \| "warning" \| "truncated" \| "skipped" \| "error"/);
+    assert.match(prompt, /Do not normalize them to "done"/);
     assert.match(prompt, /"good" \| "questionable" \| "bad" \| "not_applicable"/);
     assert.match(prompt, /"good" \| "partial" \| "poor" \| "not_applicable"/);
   }
@@ -11700,7 +11707,9 @@ test("data query Phase 4D isolates pure meeting semantics and fails closed witho
   const retryEnd = agentSource.indexOf("trace.push({ step: \"mainAgent\"", retryStart);
   const retrySource = agentSource.slice(retryStart, retryEnd);
   assert.ok(retryStart >= 0 && retryEnd > retryStart);
-  assert.match(retrySource, /tool_results:\s*compactToolCallsForMainRetry\(/);
+  assert.match(retrySource, /content:\s*safeJsonStringify\(retryBuild\.payload\)/);
+  assert.match(agentSource, /const retryBuild = buildCompactMainPayload\([\s\S]*?toolResults:\s*projectedToolResults/);
+  assert.match(agentSource, /toolDetail:\s*listIntent \? "minimal" : "full"/);
   assert.doesNotMatch(retrySource, /tool_results:\s*toolCalls\s*\.\s*filter/);
   assert.match(agentSource, /allowedTables:\s*dataQuerySettings\(config\)\.allowedTables/);
   assert.match(agentSource, /const investigationPlan = structuredDataQueryRoute\s*\? null/);

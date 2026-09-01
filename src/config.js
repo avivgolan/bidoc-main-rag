@@ -26,7 +26,12 @@ const DEFAULT_AI_SETTINGS = {
 const DEFAULT_RAG_SETTINGS = {
   contextRecordsLimit: 12,
   chunkTextLimit: 1800,
-  plannerExtraQueriesLimit: 2
+  plannerExtraQueriesLimit: 2,
+  mainCompactEvidence: false,
+  mainInputBudgetTokens: 24_000,
+  mainEvidenceRecordsLimit: 12,
+  mainBroadEvidenceRecordsLimit: 18,
+  mainEvidenceExcerptLimit: 900
 };
 const DEFAULT_GRAPH_SETTINGS = {
   enabled: true,
@@ -579,9 +584,19 @@ export function getConfig(settingsOverride = null) {
     fallbackSupabaseServiceRoleKey: appSupabaseServiceRoleKey,
     fallbackHybridRpcName: settings.retrieval?.rpcName || process.env.HYBRID_RPC_NAME || DEFAULT_HYBRID_RPC_NAME
   });
+  const compactEvidenceEnv = process.env.MAIN_COMPACT_EVIDENCE_ENABLED;
+  const ragSettings = normalizeRagSettings({
+    ...(settings.rag || {}),
+    ...(compactEvidenceEnv === undefined
+      ? {}
+      : { mainCompactEvidence: ["1", "true", "on", "yes"].includes(String(compactEvidenceEnv).trim().toLowerCase()) })
+  });
   return {
     port: Number(process.env.PORT || 4000),
     openRouterApiKey: resolveOpenRouterKey(secrets.openRouterApiKey, process.env.OPENROUTER_API_KEY),
+    mainCompletionIntegrityEnabled: !["0", "false", "off"].includes(
+      String(process.env.MAIN_COMPLETION_INTEGRITY_ENABLED || "true").trim().toLowerCase()
+    ),
     openAiApiKey: "",
     supabaseUrl: appSupabaseUrl,
     supabaseServiceRoleKey: appSupabaseServiceRoleKey,
@@ -627,7 +642,7 @@ export function getConfig(settingsOverride = null) {
       timelineDaysBack: clampNumber(settings.retrieval?.timelineDaysBack, 1, 3650, 1825)
     },
     ai: normalizeAiSettings(settings.ai),
-    rag: normalizeRagSettings(settings.rag),
+    rag: ragSettings,
     graph: normalizeGraphSettings(settings.graph),
     cache: normalizeCacheSettings(settings.cache, {
       redisUrl: resolveSecret(settings.cache?.redisUrl, process.env.REDIS_URL || process.env.UPSTASH_REDIS_URL)
@@ -794,7 +809,12 @@ function normalizeRagSettings(value = {}) {
   return {
     contextRecordsLimit: clampNumber(raw.contextRecordsLimit, 1, 50, DEFAULT_RAG_SETTINGS.contextRecordsLimit),
     chunkTextLimit: clampNumber(raw.chunkTextLimit, 300, 6000, DEFAULT_RAG_SETTINGS.chunkTextLimit),
-    plannerExtraQueriesLimit: clampNumber(raw.plannerExtraQueriesLimit, 0, 6, DEFAULT_RAG_SETTINGS.plannerExtraQueriesLimit)
+    plannerExtraQueriesLimit: clampNumber(raw.plannerExtraQueriesLimit, 0, 6, DEFAULT_RAG_SETTINGS.plannerExtraQueriesLimit),
+    mainCompactEvidence: raw.mainCompactEvidence === true,
+    mainInputBudgetTokens: clampNumber(raw.mainInputBudgetTokens, 4_000, 200_000, DEFAULT_RAG_SETTINGS.mainInputBudgetTokens),
+    mainEvidenceRecordsLimit: clampNumber(raw.mainEvidenceRecordsLimit, 1, 50, DEFAULT_RAG_SETTINGS.mainEvidenceRecordsLimit),
+    mainBroadEvidenceRecordsLimit: clampNumber(raw.mainBroadEvidenceRecordsLimit, 1, 50, DEFAULT_RAG_SETTINGS.mainBroadEvidenceRecordsLimit),
+    mainEvidenceExcerptLimit: clampNumber(raw.mainEvidenceExcerptLimit, 240, 2400, DEFAULT_RAG_SETTINGS.mainEvidenceExcerptLimit)
   };
 }
 

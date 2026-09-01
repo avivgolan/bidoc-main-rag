@@ -2,7 +2,7 @@
 note_type: durable-memory-root
 project: bidoc agent
 status: active
-last_updated: 2026-08-22
+last_updated: 2026-09-01
 tags:
   - bedrock
   - memory
@@ -34,6 +34,9 @@ the right branch notes.
 - 2026-06-24 - Added delay claim infrastructure memory after Stage 1 implementation.
 - 2026-06-24 - Added Insights memory after resetting the product direction from claim files to AI project insights.
 - 2026-08-22 - Added and deployed the Phase 1 QA & Tuning MCP service, schema, local stdio tools, and isolated execution memory.
+- 2026-08-31 - Added the local Phase 0 chat-quality smoke harness and reproducible baseline report.
+- 2026-08-31 - Completed local Chat Improvement Phase 1 with truncation-safe Main completion handling, one bounded retry, cache-safe validation, truthful workflow states, and 9 focused passing tests. No deployment was performed.
+- 2026-09-01 - Completed controlled local Chat Improvement Phase 2 verification. Fixed failure-path payload telemetry scope, reduced broad Main prompt duplication, preserved an exact Data Query/Main-skip route, and reached complete semantic and broad answers with 9 payload plus 10 integrity tests. Direct semantic citation links remain open; the code default stays off and no deployment was performed.
 
 ## Decisions
 
@@ -54,4 +57,4 @@ the right branch notes.
 - [insights.md](insights.md) - AI project insights direction, index-first analysis endpoint, and current UI behavior.
 - [n8n-migration.md](n8n-migration.md) - n8n phase-out mapping, migration spec, and the internal indexing agent.
 - [schedule.md](schedule.md) - Schedule engine, contractual milestones, pending-condition resolution through chat RAG, and evidence gates.
-- [qa-tuning.md](qa-tuning.md) - Phase 1 QA harness, local MCP tools, isolated execution, traces, evaluation, and deferred experiment/promotion phases.
+- [qa-tuning.md](qa-tuning.md) - Phase 1 QA harness, local MCP tools, isolated execution, chat-quality smoke baseline, and deferred experiment/promotion phases.

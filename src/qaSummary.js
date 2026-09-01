@@ -157,8 +157,20 @@ function buildGroundingInputs(nodes = [], aiResponse = "") {
   return {
     answer_mode: cleanText(main?.input?.answer_mode || "", 80),
     retrieval_records: numberOrNull(main?.input?.retrieval_records),
+    evidence_records: numberOrNull(main?.input?.evidence_records),
     graph_relationships: numberOrNull(main?.input?.graph_relationships),
     tool_calls: numberOrNull(main?.input?.tool_calls),
+    payload_mode: cleanText(main?.input?.payload_mode || "", 40),
+    payload_contract: cleanText(main?.input?.payload_contract || main?.output?.completion?.payload?.contract || "", 80),
+    estimated_input_tokens: numberOrNull(main?.input?.estimated_input_tokens),
+    input_budget_ok: typeof main?.input?.input_budget_ok === "boolean" ? main.input.input_budget_ok : null,
+    duplicates_removed: numberOrNull(main?.input?.duplicate_records_removed ?? main?.output?.completion?.payload?.evidence?.duplicates_removed),
+    retry_estimated_input_tokens: numberOrNull(main?.input?.retry_estimated_input_tokens ?? main?.output?.completion?.retryPayload?.total?.estimated_tokens),
+    retry_input_budget_ok: typeof main?.input?.retry_input_budget_ok === "boolean"
+      ? main.input.retry_input_budget_ok
+      : typeof main?.output?.completion?.retryPayload?.within_budget === "boolean"
+        ? main.output.completion.retryPayload.within_budget
+        : null,
     source_count: asArray(main?.output?.sources).length,
     sources: asArray(main?.output?.sources).slice(0, MAX_EVIDENCE_ITEMS).map((source) => ({
       title: cleanText(source.title || source.label || "", 180),
@@ -255,6 +267,9 @@ function evidenceForNode(node = {}) {
 
 function visibleIssue(node = {}) {
   if (node.status === "error") return cleanText(node.output?.error || node.input?.error || "Step status is error.", 700);
+  if (node.status === "truncated") return "Step output was truncated and was not accepted as complete.";
+  if (node.status === "fallback") return cleanText(node.output?.completion?.reason || "Step used a safe fallback.", 700);
+  if (node.status === "warning") return cleanText(node.output?.conflicts?.length ? "Conflicting evidence requires review." : "Step completed with a warning.", 700);
   if (node.output?.fallback) return cleanText(node.output?.error || "Step used fallback behavior.", 700);
   if (node.status === "skipped" && node.id === "knowledge_planner") return cleanText(node.output?.reason || "Knowledge planner skipped.", 700);
   return null;

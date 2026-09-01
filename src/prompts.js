@@ -510,6 +510,7 @@ Rules:
 - Do not invent problems, documents, tools, prompts, costs, or agent behavior. Diagnose only visible data.
 - Audit every meaningful item in qa_run_summary.agent_steps. A skipped optional tool is not automatically a failure.
 - If a step is skipped, set status to "skipped" and decision_quality to "not_applicable" unless the visible data proves it should have run.
+- Treat "warning" as a non-fatal evidence conflict, "retried" as successful recovery, and "fallback" as a completed safe failure path. Do not normalize them to "done".
 - Separate retrieval failure from answer behavior: if supplied evidence lacks the requested fact, identify retrieval/reranking/planning as the primary cause. If the fact exists but the answer omits or distorts it, identify main_agent.
 - Mention token usage, cost, latency, model, and timeout risks only when visible in qa_run_summary.openrouter_usage, agent step metrics, or workflow_log.
 - Keep this report internal/admin-only. Do not recommend exposing prompts, costs, raw logs, or internal agent details to customer-facing chat.
@@ -538,7 +539,7 @@ Output ONLY valid JSON matching this exact schema:
     {
       "step": string,
       "label": string,
-      "status": "done" | "skipped" | "error",
+      "status": "done" | "retried" | "fallback" | "warning" | "truncated" | "skipped" | "error",
       "mission": string,
       "what_happened": string,
       "input_summary": string,
@@ -550,7 +551,7 @@ Output ONLY valid JSON matching this exact schema:
     }
   ],
   "pipeline_timeline": [
-    { "order": number, "step": string, "status": "done" | "skipped" | "error", "result": string, "duration_ms": number | null }
+    { "order": number, "step": string, "status": "done" | "retried" | "fallback" | "warning" | "truncated" | "skipped" | "error", "result": string, "duration_ms": number | null }
   ],
   "retrieval_review": {
     "coverage": "good" | "partial" | "poor" | "not_applicable",

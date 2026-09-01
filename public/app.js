@@ -2778,9 +2778,13 @@ function nodeIconMeta(kind, label) {
 function getNodeCardAccentColor(node, compareState, regression) {
   if (regression) return "#e05555";
   if (node.status === "error") return "#e05555";
+  if (node.status === "truncated") return "#e05555";
   if (compareState === "added") return "#22c27a";
   if (compareState === "changed") return "#e0a020";
   if (node.status === "skipped") return "#9aaa96";
+  if (node.status === "retried") return "#e0a020";
+  if (node.status === "fallback") return "#e08a20";
+  if (node.status === "warning") return "#d69e2e";
   if (workflowNodeHasFallback(node)) return "#e08a20";
   if (node.status === "done") return "#22c27a";
   return nodeIconMeta(node.kind, node.label).color;
@@ -2857,6 +2861,14 @@ function generateNodeCardSvg(node, expanded, compareState = "", regression = fal
     badgeText = "FAILED"; badgeBg = "#fdecea"; badgeFg = "#c0392b";
   } else if (node.status === "skipped") {
     badgeText = "SKIPPED"; badgeBg = "#f5f5f5"; badgeFg = "#757575";
+  } else if (node.status === "retried") {
+    badgeText = "RETRIED"; badgeBg = "#fff8e1"; badgeFg = "#9a6700";
+  } else if (node.status === "fallback") {
+    badgeText = "FALLBACK"; badgeBg = "#fff3e0"; badgeFg = "#b85c00";
+  } else if (node.status === "warning") {
+    badgeText = "WARNING"; badgeBg = "#fff8e1"; badgeFg = "#9a6700";
+  } else if (node.status === "truncated") {
+    badgeText = "TRUNCATED"; badgeBg = "#fdecea"; badgeFg = "#c0392b";
   } else {
     badgeBg = "#fff8e1"; badgeFg = "#b07d1a";
   }
@@ -5818,6 +5830,10 @@ function statusLabel(status) {
   return {
     idle: "ממתין",
     done: "בוצע",
+    retried: "הושלם בניסיון חוזר",
+    fallback: "תשובת גיבוי",
+    warning: "אזהרה",
+    truncated: "נקטע",
     error: "שגיאה",
     skipped: "דולג",
     disconnected: "לא מחובר"

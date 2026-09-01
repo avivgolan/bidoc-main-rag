@@ -1,6 +1,8 @@
 # BiDoc Chat Improvement Master Implementation Plan
 
-Status: proposed for phased implementation  
+Status: implementation in progress. Phases 0 and 1 completed locally. Phase 2
+completed local automated and controlled live payload verification; direct
+semantic citation links remain open. No deployment or production change occurred.
 Prepared: 2026-08-22  
 Repository: `main-rag-backend/bidoc-main-rag`
 
@@ -227,6 +229,15 @@ flag. Do not remove the detailed telemetry contract after data has begun using i
 
 ## 8. Phase 2 - Main Payload Measurement and Compaction
 
+Implementation checkpoint, 2026-09-01: the compact payload builder, content-free
+section telemetry, deterministic 24K preflight budget, compact retry payload,
+Workflow/QA measurements, rollback flag, and focused tests are implemented
+locally. The flag remains disabled by default. Automated checks pass, including
+a 93.9 percent reduction on the deterministic size fixture. Live provider-token,
+answer-quality, and citation comparison remain required before this phase is
+approved for enablement. See
+`docs/evaluations/chat-main-payload-compaction-phase2-2026-09-01.md`.
+
 ### Objective
 
 Give Main one compact, deduplicated evidence representation with predictable
@@ -277,6 +288,21 @@ input size and enough room to produce a complete answer.
 - Evidence recall does not materially regress against the Phase 0 baseline.
 - No new truncation, grounding, or citation regression occurs.
 - The compact flag can be disabled without a deployment rollback.
+
+### Local checkpoint, 2026-09-01
+
+- Semantic responsibility answer completed with 23,128 actual Main prompt
+  tokens and `finish_reason=stop`.
+- The first broad report exposed a Main timeout followed by a truncated retry.
+  Broad/list payloads now omit duplicate bulky tool details, and broad timeout
+  retries can use the configured 8,092-token output allowance.
+- The final broad report completed with 17,038 actual Main prompt tokens,
+  18 evidence records, `finish_reason=stop`, and no retry.
+- Latest invoice remained exact: Data Query `done`, Main `skipped`, one document
+  link, and 5.65-second end-to-end latency.
+- Structured sources were present, but the broad answer rendered no clickable
+  inline source links. This blocks rollout and is carried into the answer and
+  citation phase.
 
 ### Rollback
 

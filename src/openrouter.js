@@ -7,7 +7,24 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 30_000) {
     .finally(() => clearTimeout(id));
 }
 
-export async function chatCompletion({
+export class ChatCompletionIntegrityError extends Error {
+  constructor(message, { reasonCode, integrityStatus, finishReason = null, nativeFinishReason = null } = {}) {
+    super(message);
+    this.name = "ChatCompletionIntegrityError";
+    this.code = reasonCode || "completion_invalid";
+    this.reasonCode = reasonCode || "completion_invalid";
+    this.integrityStatus = integrityStatus || "malformed";
+    this.finishReason = finishReason;
+    this.nativeFinishReason = nativeFinishReason;
+  }
+}
+
+export async function chatCompletion(options) {
+  const completion = await chatCompletionDetailed(options);
+  return completion.content;
+}
+
+export async function chatCompletionDetailed({
   apiKey,
   model,
   messages,
@@ -86,14 +103,16 @@ export async function chatCompletion({
       }
       throw providerError;
     }
+    const completion = buildDetailedChatCompletion(data);
     recordTelemetry(telemetry, buildTelemetryEntry({
       kind: "chat",
       requestedModel: model,
       data,
       durationMs: Date.now() - startedAt,
-      status: "done"
+      status: "done",
+      completionStatus: classifyChatCompletion(completion).status
     }));
-    return data.choices?.[0]?.message?.content || "";
+    return completion;
   } catch (error) {
     const reportedError = controller.signal.aborted && abortError ? abortError : error;
     recordTelemetry(telemetry, buildTelemetryEntry({
@@ -110,6 +129,85 @@ export async function chatCompletion({
     clearTimeout(abortTimer);
     externalSignal?.removeEventListener("abort", abortFromExternal);
   }
+}
+
+function buildDetailedChatCompletion(data = {}) {
+  const choice = Array.isArray(data?.choices) ? data.choices[0] : null;
+  const message = choice?.message;
+  const contentIsString = typeof message?.content === "string";
+  return {
+    content: contentIsString ? message.content : "",
+    finishReason: choice?.finish_reason ?? null,
+    nativeFinishReason: choice?.native_finish_reason ?? null,
+    usage: data?.usage && typeof data.usage === "object" ? data.usage : null,
+    model: data?.model || null,
+    callId: data?.id || null,
+    provider: data?.provider || null,
+    malformed: !choice || !message || !contentIsString
+  };
+}
+
+export function classifyChatCompletion(completion) {
+  if (!completion || typeof completion !== "object" || completion.malformed || typeof completion.content !== "string") {
+    return { status: "malformed", reasonCode: "completion_malformed" };
+  }
+  const finishReason = normalizeFinishReason(completion.finishReason);
+  const nativeFinishReason = normalizeFinishReason(completion.nativeFinishReason);
+  const finishReasons = [finishReason, nativeFinishReason].filter(Boolean);
+  if (finishReasons.some(isTruncationFinishReason)) {
+    return { status: "truncated", reasonCode: "completion_truncated" };
+  }
+  if (!completion.content.trim()) {
+    return { status: "empty", reasonCode: "completion_empty" };
+  }
+  if (!finishReasons.length) {
+    return { status: "missing_finish", reasonCode: "completion_missing_finish" };
+  }
+  if (finishReasons.some(isFailureFinishReason)) {
+    return { status: "failed_finish", reasonCode: "completion_failed_finish" };
+  }
+  return { status: "complete", reasonCode: "completion_complete" };
+}
+
+export function requireCompleteChatCompletion(completion) {
+  const integrity = classifyChatCompletion(completion);
+  if (integrity.status === "complete") return completion.content;
+  throw new ChatCompletionIntegrityError(
+    `Chat completion integrity check failed: ${integrity.status}`,
+    {
+      reasonCode: integrity.reasonCode,
+      integrityStatus: integrity.status,
+      finishReason: completion?.finishReason ?? null,
+      nativeFinishReason: completion?.nativeFinishReason ?? null
+    }
+  );
+}
+
+function normalizeFinishReason(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function isTruncationFinishReason(value) {
+  return value === "length"
+    || value === "max_tokens"
+    || value === "max_token"
+    || value === "max_output_tokens"
+    || value.includes("max_tokens");
+}
+
+function isFailureFinishReason(value) {
+  return [
+    "error",
+    "failed",
+    "cancelled",
+    "canceled",
+    "content_filter",
+    "blocked",
+    "safety"
+  ].includes(value);
 }
 
 export async function listOpenRouterModels({ apiKey = "" } = {}) {
@@ -305,7 +403,8 @@ function buildTelemetryEntry({
   durationMs = 0,
   status = "done",
   error = null,
-  httpStatus = null
+  httpStatus = null,
+  completionStatus = null
 }) {
   const usage = data?.usage || {};
   const promptTokens = numberOrNull(usage.prompt_tokens ?? usage.input_tokens);
@@ -334,6 +433,7 @@ function buildTelemetryEntry({
     tokens_per_second: tokensPerSecond,
     finish_reason: data?.choices?.[0]?.finish_reason || null,
     native_finish_reason: data?.choices?.[0]?.native_finish_reason || null,
+    completion_status: completionStatus,
     http_status: httpStatus,
     error: error || null
   };

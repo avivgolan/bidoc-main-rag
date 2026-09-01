@@ -2,7 +2,7 @@
 note_type: durable-memory-branch
 project: bidoc agent
 branch: chat
-last_updated: 2026-08-14
+last_updated: 2026-09-01
 tags:
   - chat
   - rag
@@ -55,9 +55,21 @@ tags:
 - Main RAG answers attach each source link directly to the factual bullet it supports and prohibit a consolidated sources footer; retrieval context includes each record's own `source_url` to enable correct claim-to-source matching.
 - Workflow rendering falls back from the optional CDN-provided Dagre layout to Cytoscape's built-in breadth-first layout when Dagre is unavailable.
 - Knowledge Base paths are derived directly from `src/knowledge.js` via `import.meta.url`, not from the server process working directory or the settings module. Listing/searching optional uploaded documents is read-only and treats a missing `data/knowledge-base` directory as an empty upload set; only an actual upload creates directories.
+- Main completion integrity is enforced through `chatCompletionDetailed()` plus `runBoundedMainCompletion()`. Main rejects truncation, empty content, malformed responses, missing finish metadata, and explicit failure finishes; invalid results are validated before final-answer cache writes.
+- Main permits one bounded compact retry only for truncation, timeout, or supported provider-capacity failures. Authentication, invalid request, empty, and malformed results use the safe fallback without a context retry.
+- Workflow diagnostics preserve Main `done`, `retried`, `fallback`, `truncated`, `error`, or `skipped` outcomes. Evidence conflicts are `warning`, not execution errors, and Main/Data Query failures use content-free reason codes.
+- `MAIN_COMPLETION_INTEGRITY_ENABLED=false` is the server-side rollback switch for legacy non-empty Main acceptance. The default is enabled.
+- Main payload compaction is implemented in `src/mainEvidence.js` behind `rag.mainCompactEvidence` or `MAIN_COMPACT_EVIDENCE_ENABLED=true`; controlled local payload verification passed, but the default remains off pending direct semantic citation-link work and rollout approval.
+- Compact mode sends one `canonical_evidence.v1` retrieval representation, one compact graph, compact verified tool facts, and one source map. It removes raw retrieval rows, duplicate global sources, full graph objects, embeddings, and internal payload fields from the first Main request.
+- Compact evidence defaults to 12 records, permits 18 for broad-list mode, and trims deterministically against a 24,000 estimated-token preflight budget without trimming the user question or authoritative Data Query machine facts.
+- Workflow and QA expose content-free payload mode, section sizes, estimated input tokens, evidence counts, deduplication, budget state, and retry-payload measurements.
+- Broad/list Main requests retain tool status and source references while omitting duplicate bulky tool details. Broad timeout retries use up to the configured 8,092 output tokens; ordinary timeout retries remain capped at 1,600.
+- The final local broad run completed with 17,038 actual Main prompt tokens, 18 evidence records, `finish_reason=stop`, and no retry. Its three structured sources were not rendered as clickable inline answer links, which remains an explicit answer/citation-phase blocker.
 
 ## Recent Changes
 
+- 2026-09-01 -- Completed Phase 2 local live verification after fixing failure-path metric scope and broad tool duplication. Semantic and broad Main answers completed under the 24K prompt target, exact invoice stayed on Data Query with Main skipped, and 9 payload plus 10 integrity tests pass. Direct semantic citation links remain open; the default flag is still disabled and no deployment occurred.
+- 2026-08-31 -- Added Phase 1 completion integrity, one bounded retry, cache-safe rejection, truthful Main/conflict workflow states, stable failure codes, diagnostic UI badges, and focused tests. No model, routing, payload, database, or deployment change was made.
 - 2026-08-14 -- Added persistent session and cross-session agent memory with user isolation, semantic recall, standalone-query rewriting, explicit remember/forget, guarded automatic learning, separate Main/Lite budgets, safe debug metrics, memory APIs, and an advanced settings UI.
 - 2026-08-14 -- Applied the `chat_agent_memory` Supabase migration and verified RLS, service-role-only RPC execution, restart restoration, owner isolation, and Remember → Recall → Forget through the live smoke test.
 - 2026-08-14 -- Added persistent, rotated, privacy-redacted local JSONL diagnostics for conversational memory plus `npm run logs:memory -- <count>` for reading recent entries.

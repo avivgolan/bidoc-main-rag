@@ -1,7 +1,9 @@
 import { sanitizeMessage } from "./sanitize.js";
 import { classifyMessage, hintedTools } from "./classifier.js";
 import { heuristicClassification, isHebrew } from "./heuristics.js";
-import { chatCompletion, extractJsonObject, rerankWithLlm } from "./openrouter.js";
+import { chatCompletion, chatCompletionDetailed, extractJsonObject, rerankWithLlm } from "./openrouter.js";
+import { mainCompletionFailureCode, runBoundedMainCompletion, validateMainCompletion } from "./mainCompletion.js";
+import { buildCompactMainPayload, measureMainRequest } from "./mainEvidence.js";
 import { graphSearch, hybridSearch, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks, buildInternalSourceUrl, isInternalProjectTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
@@ -315,7 +317,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     progress: {
       completed: true,
       stages: (workflowLog.nodes || [])
-        .filter((node) => node.status === "done")
+        .filter((node) => ["done", "retried", "fallback", "warning"].includes(node.status))
         .map((node) => ({ id: node.id, label: node.label, status: node.status }))
     },
     toolCalls: projectChatToolCallsForClient(result.toolCalls, { question: sanitized }),
@@ -1079,8 +1081,10 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     const financialDocumentAnswer = Boolean(deterministicFinancialDocumentAnswer);
     const financialDataQueryFailureAnswer = Boolean(deterministicFinancialDataQueryFailureAnswer);
     const safetyAnswer = Boolean(deterministicSafetyAnswer);
+    const alertAnswer = Boolean(deterministicAlertAnswer);
     const emailAnswer = Boolean(deterministicEmailAnswer);
     const exceptionAnswer = Boolean(deterministicExceptionAnswer);
+    const consultantReportAnswer = Boolean(deterministicConsultantReportAnswer);
     const meetingAnswer = Boolean(
       deterministicMeetingAnswer ||
       deterministicMeetingDateDecisionAnswer ||
@@ -1090,6 +1094,29 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     const meetingEvidenceUnavailable = Boolean(deterministicMeetingEvidenceAnswer);
     const meetingDateDecisionAnswer = Boolean(deterministicMeetingDateDecisionAnswer);
     const meetingEvidenceFallback = Boolean(deterministicMeetingFallbackEvidenceAnswer);
+    const deterministicMainReason = invoiceAnswer
+      ? "exact_invoice_data_query_answer"
+      : financialDocumentAnswer
+        ? "exact_financial_document_data_query_answer"
+        : financialDataQueryFailureAnswer
+          ? "exact_financial_data_query_failed_closed"
+          : safetyAnswer
+            ? "exact_safety_report_data_query_answer"
+            : alertAnswer
+              ? "exact_alert_data_query_answer"
+              : emailAnswer
+                ? "exact_email_data_query_answer"
+                : exceptionAnswer
+                  ? "exact_exception_data_query_answer"
+                  : consultantReportAnswer
+                    ? "exact_consultant_report_data_query_answer"
+                    : meetingDateDecisionAnswer
+                      ? "meeting_date_decisions_answer"
+                      : meetingEvidenceFallback
+                        ? "meeting_semantic_fallback_answer"
+                        : meetingEvidenceUnavailable
+                          ? "meeting_evidence_unavailable"
+                          : "exact_meeting_data_query_answer";
     emitRunEvent(
       runId,
       "main_agent",
@@ -1115,27 +1142,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
                 ? "Main Agent skipped for deterministic meeting answer"
               : "Main Agent skipped for deterministic alert answer",
       {
-        reason: invoiceAnswer
-          ? "exact_invoice_data_query_answer"
-          : financialDocumentAnswer
-            ? "exact_financial_document_data_query_answer"
-            : financialDataQueryFailureAnswer
-              ? "exact_financial_data_query_failed_closed"
-            : safetyAnswer
-              ? "exact_safety_report_data_query_answer"
-              : emailAnswer
-                ? "exact_email_data_query_answer"
-              : exceptionAnswer
-                ? "exact_exception_data_query_answer"
-              : meetingDateDecisionAnswer
-                ? "meeting_date_decisions_answer"
-              : meetingEvidenceFallback
-                ? "meeting_semantic_fallback_answer"
-              : meetingEvidenceUnavailable
-                ? "meeting_evidence_unavailable"
-                : meetingAnswer
-                  ? "exact_meeting_data_query_answer"
-                : "exact_alert_data_query_answer",
+        reason: deterministicMainReason,
         intent: dataQueryRouting.intent,
         operation: dataQueryRouting.lookup?.operation || toolCalls
           .find((call) => call.toolName === "data_query")?.data?.plans?.[0]?.operation || null
@@ -1149,13 +1156,20 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
       investigationPlan,
       sourceQuality,
       conflicts,
-      graphContext
+      graphContext,
+      mainSynthesis: {
+        status: "skipped",
+        reason: deterministicMainReason,
+        integrityStatus: "not_applicable",
+        retryReason: null,
+        attempts: []
+      }
     };
   }
   const synthesisToolCalls = pureMeetingEvidenceRoute
     ? toolCalls.filter((call) => call?.toolName === "meeting_evidence_search")
     : toolCalls;
-  const synthesizedAnswer = await synthesizeAnswer({
+  const synthesis = await synthesizeAnswer({
     message,
     classification,
     memory: pureMeetingEvidenceRoute ? [] : memory,
@@ -1176,7 +1190,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     telemetryFor
   });
   const groundedAnswer = appendConflictWarnings(
-    appendExactInvoiceEnrichment(synthesizedAnswer, exactInvoiceEnrichment),
+    appendExactInvoiceEnrichment(synthesis.answer, exactInvoiceEnrichment),
     conflicts,
     { hebrew: isHebrew(message) }
   );
@@ -1195,7 +1209,17 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
         hebrew: isHebrew(message)
       })
     : meetingAnchoredAnswer;
-  return { answer, sources: uniqueSources, toolCalls, knowledgePlan, investigationPlan, sourceQuality, conflicts, graphContext };
+  return {
+    answer,
+    sources: uniqueSources,
+    toolCalls,
+    knowledgePlan,
+    investigationPlan,
+    sourceQuality,
+    conflicts,
+    graphContext,
+    mainSynthesis: synthesis.mainSynthesis
+  };
 }
 
 export function buildSafetyPrecheckTools({
@@ -2084,9 +2108,23 @@ export function buildMainDataQueryWorkflowProjection({
       machine_result: machineResult,
       tables_used: Array.isArray(data.tablesUsed) ? data.tablesUsed : [],
       warnings: summarizeDataQueryWarningsForWorkflow(data.warnings || []),
+      reason_code: dataQueryFailureReasonCode(dataQueryCall),
       error: dataQueryCall.error ? "data_query_failed" : null
     }
   };
+}
+
+export function dataQueryFailureReasonCode(dataQueryCall = {}) {
+  if (dataQueryCall?.ok === true) return null;
+  if (dataQueryCall?.skipped === true) return "data_query_skipped";
+  const data = dataQueryCall?.data && typeof dataQueryCall.data === "object" ? dataQueryCall.data : {};
+  const routingWarning = String(data.routing?.warning || "").trim();
+  if (/^[a-z0-9_]+$/i.test(routingWarning)) return `data_query_${routingWarning.toLowerCase()}`;
+  const status = String(data.status || "").trim().toLowerCase();
+  if (["needs_clarification", "not_computable", "partial", "error", "skipped"].includes(status)) {
+    return `data_query_${status}`;
+  }
+  return "data_query_execution_failed";
 }
 
 export function projectChatToolCallsForClient(toolCalls = [], { question = "" } = {}) {
@@ -2286,46 +2324,24 @@ function projectToolCallsForMain(toolCalls = []) {
     });
 }
 
-function compactToolCallsForMainRetry(toolCalls = []) {
-  return projectToolCallsForMain(toolCalls)
-    .map((call) => {
-      if (call?.toolName === "meeting_evidence_search") {
-        return {
-          ...call,
-          data: {
-            status: call.data?.status || null,
-            same_meeting_match: call.data?.same_meeting_match === true,
-            insufficient_evidence: call.data?.insufficient_evidence !== false,
-            evidence: (Array.isArray(call.data?.evidence) ? call.data.evidence : [])
-              .slice(0, 3)
-              .map((item) => ({
-                quote: String(item?.quote || "").slice(0, 500),
-                meeting_date: item?.meeting_date || null,
-                citation: item?.citation || null
-              }))
-          }
-        };
-      }
-      const serialized = safeJsonStringify(call);
-      if (serialized.length <= 3200) return call;
-      return {
-        toolName: call?.toolName || "project_source",
-        ok: call?.ok === true,
-        data: { status: call?.data?.status || null },
-        sources: []
-      };
-    });
-}
-
-export function mainSynthesisRetryPolicy(error, config = {}) {
+export function mainSynthesisRetryPolicy(error, config = {}, { broad = false } = {}) {
   const message = String(error?.message || "");
   const configuredMainTokens = Number(config.ai?.main?.maxTokens || 4096);
+  if (error?.integrityStatus === "truncated" || error?.reasonCode === "completion_truncated") {
+    return {
+      reason: "truncation",
+      model: config.models?.main,
+      maxTokens: configuredMainTokens,
+      recordLimit: 5,
+      chunkTextLimit: 700
+    };
+  }
   if (/timed out/i.test(message)) {
     return {
       reason: "timeout",
       model: config.models?.main,
-      maxTokens: Math.max(512, Math.min(1600, configuredMainTokens)),
-      recordLimit: 5,
+      maxTokens: Math.max(512, Math.min(broad ? 8192 : 1600, configuredMainTokens)),
+      recordLimit: broad ? 8 : 5,
       chunkTextLimit: 700
     };
   }
@@ -2365,23 +2381,31 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
   const retrievalLimit = contextRecordsLimitForQuestion({ config, listIntent, classification });
   const projectGraphFindings = buildProjectGraphFindings(graphContext, { listIntent });
   if (!config.openRouterApiKey) {
-    console.warn("[main_agent] OPENROUTER_API_KEY is missing — cannot call LLM, returning structured fallback.");
-    trace.push({ step: "mainAgent", ok: false, fallback: true, error: "OPENROUTER_API_KEY is missing" });
+    console.warn("[main_agent] OPENROUTER_API_KEY is missing. Returning structured fallback.");
+    const mainSynthesis = {
+      status: "fallback",
+      reason: "configuration_missing",
+      integrityStatus: "error",
+      retryReason: null,
+      attempts: []
+    };
+    trace.push({ step: "mainAgent", ok: false, fallback: true, reason_code: mainSynthesis.reason });
     emitRunEvent(runId, "main_agent", "Missing OpenRouter key, using fallback answer", {});
-    return fallbackRagAnswer({ successful, failed, skipped, sources, message, retrievalResults, config });
+    return {
+      answer: fallbackRagAnswer({ successful, failed, skipped, sources, message, retrievalResults, config }),
+      mainSynthesis
+    };
   }
 
+  let payloadMetrics = null;
+  let retryPayloadMetrics = null;
   try {
-    emitRunEvent(runId, "main_agent", "Calling Main Agent", {
-      model: config.models.main,
-      retrievalRecords: countRows(retrievalResults),
-      graphRelationships: graphContext.length,
-      answerMode: listIntent ? "ranked_entity_list" : "standard_grounded_answer",
-      toolCalls: toolCalls.length
-    });
-    const mainPayload = {
+    const answerMode = listIntent ? "ranked_entity_list" : "standard_grounded_answer";
+    const projectedToolResults = projectToolCallsForMain(toolCalls);
+    const systemPrompt = mainSystemPrompt(classification, config);
+    const legacyMainPayload = {
       user_message: message,
-      answer_mode: listIntent ? "ranked_entity_list" : "standard_grounded_answer",
+      answer_mode: answerMode,
       retrieval_context: formatRetrievalContext(retrievalResults, retrievalLimit, config.rag?.chunkTextLimit || 1800, config),
       retrieval_results: retrievalResults,
       graph_context: graphContext,
@@ -2391,80 +2415,146 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
       source_quality: sourceQuality,
       potential_conflicts: conflicts,
       exact_invoice_enrichment: exactInvoiceEnrichment,
-      tool_results: projectToolCallsForMain(toolCalls),
+      tool_results: projectedToolResults,
       skipped_tools: skipped.map((call) => call.toolName),
       sources
     };
-    const systemPrompt = mainSystemPrompt(classification, config);
-    const answer = await cachedOperation({
-      context: cacheContext,
-      type: "finalAnswer",
-      keyParts: {
-        user_question: message,
-        retrieved_context_hash: hashValue({
+    const compactEvidenceEnabled = config.rag?.mainCompactEvidence === true;
+    const compactBuild = compactEvidenceEnabled
+      ? buildCompactMainPayload({
+          userMessage: message,
+          answerMode,
           retrievalResults,
           graphContext,
-          toolResults: mainPayload.tool_results,
-          memorySummary,
-          memory
-        }),
-        model: config.models.main,
-        prompt_hash: hashValue(systemPrompt)
-      },
-      ttl: CACHE_TTL.finalAnswer,
-      savedCall: "model",
-      estimatedCost: 0.01,
-      operation: async () => {
-        const generated = await chatCompletion({
-          apiKey: config.openRouterApiKey,
-          model: config.models.main,
-          temperature: config.ai?.main?.temperature ?? 0.2,
-          maxTokens: config.ai?.main?.maxTokens ?? 4096,
-          timeoutMs: config.ai?.main?.timeoutMs ?? 120_000,
-          ...samplingSettings(config, "main"),
-          telemetry: telemetryFor("main_agent"),
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...memory,
-            {
-              role: "user",
-              content: safeJsonStringify(mainPayload)
-            }
-          ]
-        });
-        if (!String(generated || "").trim()) {
-          throw new Error("Main Agent returned an empty response");
-        }
-        return generated;
-      }
+          knowledgePlan,
+          investigationPlan,
+          sourceQuality,
+          conflicts,
+          exactInvoiceEnrichment,
+          toolResults: projectedToolResults,
+          skippedTools: skipped.map((call) => call.toolName),
+          sources,
+          systemPrompt,
+          memory,
+          resolveSourceUrl: (row) => buildInternalSourceUrl(config, row),
+          options: {
+            recordLimit: config.rag?.mainEvidenceRecordsLimit,
+            broadRecordLimit: config.rag?.mainBroadEvidenceRecordsLimit,
+            excerptLimit: config.rag?.mainEvidenceExcerptLimit,
+            budgetTokens: config.rag?.mainInputBudgetTokens,
+            toolDetail: listIntent ? "minimal" : "full",
+            broad: listIntent
+          }
+        })
+      : null;
+    const mainPayload = compactBuild?.payload || legacyMainPayload;
+    payloadMetrics = compactBuild?.metrics || measureMainRequest({
+      systemPrompt,
+      memory,
+      payload: mainPayload,
+      budgetTokens: config.rag?.mainInputBudgetTokens,
+      mode: "legacy"
     });
-    if (!String(answer || "").trim()) {
-      console.warn("[main_agent] Model returned empty string — using structured fallback.");
-      trace.push({ step: "mainAgent", ok: false, fallback: true, error: "Main Agent returned an empty answer" });
-      emitRunEvent(runId, "main_agent", "Main Agent returned empty answer, using fallback", {});
-      return fallbackRagAnswer({ successful, failed, skipped, sources, message, retrievalResults, config });
-    }
-    emitRunEvent(runId, "main_agent", "Main Agent response received", { length: answer.length });
-    return appendEmailSemanticLatestBoundary(linkifyCitations(answer, sources), { message });
-  } catch (error) {
-    // Retry once with compact, deduplicated context when the provider times out
-    // or rejects the requested output budget. The retry uses the configured
-    // lite model for credit/capacity failures and never loops.
-    const retryPolicy = mainSynthesisRetryPolicy(error, config);
-    if (retryPolicy) {
-      try {
+    emitRunEvent(runId, "main_agent", "Main payload prepared", {
+      model: config.models.main,
+      answer_mode: answerMode,
+      payload_metrics: payloadMetrics
+    });
+    emitRunEvent(runId, "main_agent", "Calling Main Agent", {
+      model: config.models.main,
+      retrievalRecords: countRows(retrievalResults),
+      evidenceRecords: payloadMetrics.evidence?.selected_records ?? null,
+      graphRelationships: graphContext.length,
+      answerMode,
+      toolCalls: toolCalls.length,
+      payloadMode: payloadMetrics.mode,
+      estimatedInputTokens: payloadMetrics.total.estimated_tokens,
+      withinBudget: payloadMetrics.within_budget
+    });
+    const enforceCompletionIntegrity = config.mainCompletionIntegrityEnabled !== false;
+    const completion = await runBoundedMainCompletion({
+      enforceIntegrity: enforceCompletionIntegrity,
+      retryPolicyFor: (error) => mainSynthesisRetryPolicy(error, config, { broad: listIntent }),
+      initialCall: () => cachedOperation({
+        context: cacheContext,
+        type: "finalAnswer",
+        keyParts: {
+          completion_contract: "detailed.v1",
+          payload_contract: compactEvidenceEnabled ? "canonical_evidence.v1" : "legacy.v1",
+          user_question: message,
+          retrieved_context_hash: hashValue({
+            mainPayload,
+            memorySummary,
+            memory
+          }),
+          model: config.models.main,
+          prompt_hash: hashValue(systemPrompt)
+        },
+        ttl: CACHE_TTL.finalAnswer,
+        savedCall: "model",
+        estimatedCost: 0.01,
+        operation: async () => {
+          const generated = await chatCompletionDetailed({
+            apiKey: config.openRouterApiKey,
+            model: config.models.main,
+            temperature: config.ai?.main?.temperature ?? 0.2,
+            maxTokens: config.ai?.main?.maxTokens ?? 4096,
+            timeoutMs: config.ai?.main?.timeoutMs ?? 120_000,
+            ...samplingSettings(config, "main"),
+            telemetry: telemetryFor("main_agent"),
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...memory,
+              { role: "user", content: safeJsonStringify(mainPayload) }
+            ]
+          });
+          try {
+            validateMainCompletion(generated, { enforceIntegrity: enforceCompletionIntegrity });
+          } catch (error) {
+            error.completionModel = generated.model;
+            error.completionCallId = generated.callId;
+            throw error;
+          }
+          return generated;
+        }
+      }),
+      retryCall: async (retryPolicy) => {
+        const retryBuild = buildCompactMainPayload({
+          userMessage: message,
+          answerMode,
+          retrievalResults,
+          graphContext,
+          knowledgePlan: null,
+          investigationPlan,
+          sourceQuality,
+          conflicts,
+          exactInvoiceEnrichment,
+          toolResults: projectedToolResults,
+          skippedTools: skipped.map((call) => call.toolName),
+          sources,
+          systemPrompt,
+          memory,
+          resolveSourceUrl: (row) => buildInternalSourceUrl(config, row),
+          options: {
+            recordLimit: retryPolicy.recordLimit,
+            broadRecordLimit: retryPolicy.recordLimit,
+            minimumRecords: Math.min(3, retryPolicy.recordLimit),
+            excerptLimit: retryPolicy.chunkTextLimit,
+            minimumExcerptLimit: Math.min(320, retryPolicy.chunkTextLimit),
+            graphLimit: 4,
+            budgetTokens: Math.min(Number(config.rag?.mainInputBudgetTokens || 24_000), 12_000),
+            toolDetail: "minimal",
+            broad: listIntent
+          }
+        });
+        retryPayloadMetrics = retryBuild.metrics;
         emitRunEvent(runId, "main_agent", "Main Agent retrying with compact context", {
           reason: retryPolicy.reason,
           model: retryPolicy.model,
-          maxTokens: retryPolicy.maxTokens
+          maxTokens: retryPolicy.maxTokens,
+          payload_metrics: retryBuild.metrics
         });
-        const trimmedContext = formatRetrievalContext(
-          retrievalResults,
-          retryPolicy.recordLimit,
-          retryPolicy.chunkTextLimit,
-          config
-        );
-        const retryAnswer = await chatCompletion({
+        return chatCompletionDetailed({
           apiKey: config.openRouterApiKey,
           model: retryPolicy.model,
           temperature: config.ai?.main?.temperature ?? 0.2,
@@ -2473,38 +2563,73 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
           ...samplingSettings(config, "main"),
           telemetry: telemetryFor("main_agent_compact_retry"),
           messages: [
-            { role: "system", content: mainSystemPrompt(classification, config) },
+            { role: "system", content: systemPrompt },
             ...memory,
             {
               role: "user",
-              content: safeJsonStringify({
-                user_message: message,
-                answer_mode: listIntent ? "ranked_entity_list" : "standard_grounded_answer",
-                retrieval_context: trimmedContext,
-                graph_context: (Array.isArray(graphContext) ? graphContext : []).slice(0, 4),
-                project_graph_findings: (Array.isArray(projectGraphFindings) ? projectGraphFindings : []).slice(0, 4),
-                tool_results: compactToolCallsForMainRetry(toolCalls.filter((call) => !call.skipped)),
-                skipped_tools: skipped.map((call) => call.toolName),
-                potential_conflicts: conflicts,
-                sources: uniqueByUrl(sources).slice(0, 8)
-              })
+              content: safeJsonStringify(retryBuild.payload)
             }
           ]
         });
-        if (String(retryAnswer || "").trim()) {
-          emitRunEvent(runId, "main_agent", "Main Agent compact retry succeeded", {
-            reason: retryPolicy.reason,
-            length: retryAnswer.length
-          });
-          return appendEmailSemanticLatestBoundary(linkifyCitations(retryAnswer, sources), { message });
-        }
-      } catch (retryError) {
-        trace.push({ step: "mainAgent", ok: false, fallback: true, error: `retry failed: ${retryError.message}` });
       }
-    }
-    trace.push({ step: "mainAgent", ok: false, fallback: true, error: error.message });
-    emitRunEvent(runId, "main_agent", "Main Agent failed, using fallback answer", { error: error.message });
-    return fallbackRagAnswer({ successful, failed, skipped, sources, message, retrievalResults, config });
+    });
+    const mainSynthesis = {
+      status: completion.status,
+      reason: completion.reason,
+      integrityStatus: completion.integrityStatus,
+      retryReason: completion.status === "retried" ? completion.reason : null,
+      attempts: completion.attempts,
+      payload: payloadMetrics,
+      retryPayload: retryPayloadMetrics
+    };
+    trace.push({ step: "mainAgent",
+      ok: true,
+      status: mainSynthesis.status,
+      reason_code: mainSynthesis.reason
+    });
+    emitRunEvent(
+      runId,
+      "main_agent",
+      completion.status === "retried" ? "Main Agent compact retry succeeded" : "Main Agent response received",
+      {
+        reason: completion.reason,
+        length: completion.content.length,
+        attempts: completion.attempts.length
+      }
+    );
+    return {
+      answer: appendEmailSemanticLatestBoundary(linkifyCitations(completion.content, sources), { message }),
+      mainSynthesis
+    };
+  } catch (error) {
+    const mainSynthesis = {
+      ...(error?.mainCompletion || {
+      status: "fallback",
+      reason: mainCompletionFailureCode(error),
+      integrityStatus: error?.integrityStatus || "error",
+      retryReason: null,
+      attempts: []
+      }),
+      payload: payloadMetrics,
+      retryPayload: retryPayloadMetrics
+    };
+    trace.push({
+      step: "mainAgent",
+      ok: false,
+      fallback: true,
+      reason_code: mainSynthesis.reason,
+      integrity_status: mainSynthesis.integrityStatus,
+      attempts: mainSynthesis.attempts.length
+    });
+    emitRunEvent(runId, "main_agent", "Main Agent failed, using fallback answer", {
+      reason: mainSynthesis.reason,
+      integrity_status: mainSynthesis.integrityStatus,
+      attempts: mainSynthesis.attempts.length
+    });
+    return {
+      answer: fallbackRagAnswer({ successful, failed, skipped, sources, message, retrievalResults, config }),
+      mainSynthesis
+    };
   }
 }
 
@@ -5772,12 +5897,15 @@ export function fallbackRagAnswer({ successful = [], failed = [], skipped = [], 
   const safeSources = safeFallbackSources({ sources, retrievalResults, config, hebrew });
   const sourceItems = safeSources.map((source) => `- [${source.title}](<${source.url}>)`);
   const hasExactFacts = exactSections.length > 0;
+  const hasEvidence = hasExactFacts || safeSources.length > 0 || normalizeRows(retrievalResults).length > 0;
   if (hebrew) {
     return [
       "**לא ניתן היה להשלים כרגע תשובה מהימנה.**",
       hasExactFacts
         ? "המידע המאומת שניתן להציג מופיע להלן. עיבוד התוכן הנוסף לא הושלם, ולכן לא נוספה מסקנה משוערת."
-        : "נמצאו מקורות שעשויים להיות רלוונטיים, אך עיבוד התוכן לא הושלם. כדי להימנע מהצגת טקסט גולמי או מסקנה לא מבוססת, לא מוצג סיכום משוער.",
+        : hasEvidence
+          ? "נמצאו מקורות שעשויים להיות רלוונטיים, אך עיבוד התוכן לא הושלם. כדי להימנע מהצגת טקסט גולמי או מסקנה לא מבוססת, לא מוצג סיכום משוער."
+          : "לא נמצא מידע מאומת מספיק כדי לענות על הבקשה. לא הוצגה תשובה משוערת או טקסט גולמי.",
       exactSections.length ? `\n${exactSections.join("\n\n")}` : "",
       sourceItems.length ? `\n**מסמכים שעשויים להיות רלוונטיים:**\n\n${sourceItems.join("\n")}` : "",
       "\n> אפשר לנסות שוב מאוחר יותר. טקסט גולמי, פרטי קשר ושלבי עיבוד פנימיים אינם מוצגים."
@@ -5787,7 +5915,9 @@ export function fallbackRagAnswer({ successful = [], failed = [], skipped = [], 
     "**A reliable answer could not be completed right now.**",
     hasExactFacts
       ? "The verified information available for display appears below. Additional content processing did not complete, so no estimated conclusion was added."
-      : "Potentially relevant sources were found, but content processing did not complete. To avoid showing raw text or an unsupported conclusion, no estimated summary is displayed.",
+      : hasEvidence
+        ? "Potentially relevant sources were found, but content processing did not complete. To avoid showing raw text or an unsupported conclusion, no estimated summary is displayed."
+        : "No sufficient verified evidence was available for this request. No estimated answer or raw text is displayed.",
     exactSections.length ? `\n${exactSections.join("\n\n")}` : "",
     sourceItems.length ? `\n**Potentially relevant documents:**\n\n${sourceItems.join("\n")}` : "",
     "\n> Please try again later. Raw excerpts, contact details, and internal processing stages are not displayed."
@@ -5884,6 +6014,17 @@ function uniqueByUrl(sources) {
   });
 }
 
+export function mainWorkflowStatus(mainSynthesis = {}) {
+  const status = String(mainSynthesis?.status || "").toLowerCase();
+  if (["done", "retried", "fallback", "truncated", "error", "skipped"].includes(status)) return status;
+  if (mainSynthesis?.integrityStatus === "truncated") return "truncated";
+  return "error";
+}
+
+export function conflictWorkflowStatus(conflicts = []) {
+  return Array.isArray(conflicts) && conflicts.length ? "warning" : "done";
+}
+
 function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, classification, result, trace, config, openRouterCalls = [], memoryWrite = null }) {
   const toolCalls = result.toolCalls || [];
   const hybridCall = toolCalls.find((call) => call.toolName === "hybrid_search");
@@ -5901,6 +6042,13 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
   const n8nCalls = toolCalls.filter((call) => !["alert", "data_query"].includes(call.toolName) && !retrievalToolNames.includes(call.toolName) && !safetyPrecheckNames.has(call.toolName));
   const isChat = classification.type === "CHAT";
   const knowledgePlan = result.knowledgePlan || null;
+  const mainSynthesis = result.mainSynthesis || {
+    status: "done",
+    reason: "legacy_completion",
+    integrityStatus: "unknown",
+    retryReason: null,
+    attempts: []
+  };
   const nodes = [
     workflowNode("chat_input", "Chat Trigger", "trigger", "done", { message }, { session_id: saved.session_id }),
     workflowNode("sanitize", "Sanitize Message", "code", "done", { message }, { sanitized }),
@@ -6081,24 +6229,39 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
       }, result.sourceQuality || {
         summary: "not returned"
       }),
-      workflowNode("conflict_detection", "Conflict Detection", "router", (result.conflicts || []).length ? "error" : "done", {
+      workflowNode("conflict_detection", "Conflict Detection", "router", conflictWorkflowStatus(result.conflicts), {
         source_quality: Boolean(result.sourceQuality),
         sources: result.sources?.length || 0
       }, {
         conflicts: result.conflicts || []
       }),
-      workflowNode("main_agent", "Main RAG Agent", "ai", "done", {
+      workflowNode("main_agent", "Main RAG Agent", "ai", mainWorkflowStatus(mainSynthesis), {
         message: sanitized,
         memory_messages: memory.length,
         retrieval_records: countRows(rerankerCall?.data || hybridCall?.data),
         graph_relationships: countRows(graphCall?.data),
         answer_mode: isEntityListQuestion(sanitized) ? "ranked_entity_list" : "standard_grounded_answer",
-        tool_calls: n8nCalls.length
+        tool_calls: n8nCalls.length,
+        payload_mode: mainSynthesis.payload?.mode || "not_available",
+        payload_contract: mainSynthesis.payload?.contract || null,
+        estimated_input_tokens: mainSynthesis.payload?.total?.estimated_tokens ?? null,
+        evidence_records: mainSynthesis.payload?.evidence?.selected_records ?? null,
+        duplicate_records_removed: mainSynthesis.payload?.evidence?.duplicates_removed ?? null,
+        input_budget_tokens: mainSynthesis.payload?.budget_tokens ?? null,
+        retry_estimated_input_tokens: mainSynthesis.retryPayload?.total?.estimated_tokens ?? null,
+        retry_input_budget_ok: mainSynthesis.retryPayload?.within_budget ?? null,
+        input_budget_ok: mainSynthesis.payload?.within_budget ?? null
       }, {
-        answer: result.answer,
-        sources: result.sources,
-        source_quality: result.sourceQuality,
-        conflicts: result.conflicts
+        answer: String(result.answer || "").slice(0, 800),
+        answer_chars: String(result.answer || "").length,
+        source_count: result.sources?.length || 0,
+        sources: (Array.isArray(result.sources) ? result.sources : []).slice(0, 3).map((source) => ({
+          title: String(source?.title || source?.label || "").slice(0, 180),
+          url: String(source?.url || "").slice(0, 240),
+          toolName: String(source?.toolName || source?.source || "").slice(0, 120)
+        })),
+        completion: mainSynthesis,
+        fallback: mainSynthesis.status === "fallback"
       })
     );
   }
