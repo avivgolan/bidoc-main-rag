@@ -19,6 +19,7 @@ import {
 } from "./activityAssignmentBatch.js";
 import { SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS } from "../scheduleActivityAssignmentLabels.js";
 import { mergeScheduleActivityUpdatesWithSharedReviews } from "./scheduleActivityAssignmentReviewState.js";
+import { buildScheduleAssignmentDecisionPresentation, formatScheduleAssignmentNumber } from "./scheduleActivityAssignmentPresentation.js";
 
 // Schedule Intelligence tab (spec section 15, phases 1-2 screens).
 //
@@ -614,6 +615,7 @@ function ActivityUpdatesTable({
               const hasPersistedAuditRun = Boolean(agentResult?.runId && agentResult?.auditPersisted);
               const canRecordReviewedLabel = Boolean(agentResult?.persistedReview && agentResult?.reviewId);
               const assignmentPresentation = activityAssignmentMethodPresentation(item);
+              const decisionPresentation = buildScheduleAssignmentDecisionPresentation(agentResult);
               return (
                 <React.Fragment key={`${item.sourceTable}:${item.id}`}>
                   <tr className={item.activityKey ? "is-assigned" : ""}>
@@ -655,13 +657,16 @@ function ActivityUpdatesTable({
                                 <strong title={reviewHeader.alertTitle}>{reviewHeader.alertTitle}</strong>
                                 <span><b>הצעת הסוכן המובילה:</b> {reviewHeader.recommendation}</span>
                               </div>
-                              <span className="activityAgentResultScore">
-                                ציון התאמה {agentResult.decision?.rankingScore ?? agentResult.decision?.confidence ?? 0}
-                                {` · פער ${agentResult.decision?.rankingGap ?? agentResult.decision?.margin ?? 0}`}
-                                {Number.isFinite(agentResult.decision?.calibratedProbability)
-                                  ? ` · הסתברות מכוילת ${Math.round(agentResult.decision.calibratedProbability * 100)}%`
-                                  : ""}
-                              </span>
+                              <div className="activityAgentResultScores" aria-label="נתוני דירוג וכיול">
+                                <span><b>ציון התאמה מוביל</b>{formatScheduleAssignmentNumber(decisionPresentation.rankingScore)}</span>
+                                {decisionPresentation.hasRunnerUp ? <span><b>ציון האפשרות השנייה</b>{formatScheduleAssignmentNumber(decisionPresentation.runnerUpRankingScore)}</span> : null}
+                                <span><b>פער בדירוג</b>{formatScheduleAssignmentNumber(decisionPresentation.rankingGap)} נקודות</span>
+                                <span className={decisionPresentation.calibratedProbability == null ? "is-unavailable" : "is-calibrated"}>
+                                  <b>הסתברות מכוילת</b>{decisionPresentation.calibratedProbability == null
+                                    ? "לא זמינה בריצה זו"
+                                    : `${Math.round(decisionPresentation.calibratedProbability * 100)}%`}
+                                </span>
+                              </div>
                             </div>
                             {agentResult.persistedReview ? (
                               <span className={`activityAgentSharedReviewBadge ${agentResult.approved || agentResult.rejected ? "is-resolved" : ""}`}>
@@ -671,7 +676,26 @@ function ActivityUpdatesTable({
                             {agentResult.detachedFromCurrentFeed ? (
                               <small className="activityAgentWarning">ההתראה המקורית אינה נמצאת עוד בפיד הפעיל. ההחלטה תישמר כתווית כיול בלבד ולא תשנה שיוך בלוח.</small>
                             ) : null}
-                            <p>{agentResult.decision?.reason}</p>
+                            {agentResult.decision?.autoAssigned !== true && decisionPresentation.reviewReasons.length ? (
+                              <div className="activityAgentReviewReasons">
+                                <strong>למה נדרשת בדיקה אנושית?</strong>
+                                <ul>{decisionPresentation.reviewReasons.map((reason) => <li key={reason.key}>{reason.label}</li>)}</ul>
+                              </div>
+                            ) : null}
+                            {agentResult.decision?.reason ? <p><b>סיכום הסוכן:</b> {agentResult.decision.reason}</p> : null}
+                            {decisionPresentation.gateRows.length || decisionPresentation.auditItems.length ? (
+                              <details className="activityAgentAuditDetails">
+                                <summary>פרטי החלטה לביקורת</summary>
+                                {decisionPresentation.auditItems.length ? <dl>{decisionPresentation.auditItems.map((auditItem) => (
+                                  <div key={auditItem.key}><dt>{auditItem.label}</dt><dd>{auditItem.value}</dd></div>
+                                ))}</dl> : null}
+                                {decisionPresentation.gateRows.length ? <div className="activityAgentGateList" aria-label="בדיקות מדיניות">
+                                  {decisionPresentation.gateRows.map((gate) => <span className={gate.passed ? "is-passed" : "is-failed"} key={gate.key}>
+                                    {gate.passed ? "עבר" : "נכשל"} · {gate.label}
+                                  </span>)}
+                                </div> : null}
+                              </details>
+                            ) : null}
                             {reviewCandidates.length ? (
                               <div className="activityAgentReview" aria-label="בחירת פעילות מתוך הצעות הסוכן">
                                 <strong className="activityAgentReviewPrompt">נדרשת החלטה שלך - בחר את הפעילות המתאימה:</strong>
@@ -1224,7 +1248,7 @@ export function SchedulePage() {
     }
   }, [projectId]);
 
-  const runActivityAssignmentAgent = useCallback(async (item, { timeFilter = false, reviewOnly = false } = {}) => {
+  const runActivityAssignmentAgent = useCallback(async (item, { timeFilter = false, reviewOnly = true } = {}) => {
     if (!projectId || !item?.id) return { ok: false, error: "חסרים פרויקט או מזהה התראה" };
     setActivityAgentBusyId(item.id);
     setError("");

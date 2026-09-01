@@ -4,6 +4,7 @@ import {
   scheduleAssignmentReviewRowToEvaluationCase,
   summarizeScheduleAssignmentLabelCoverage
 } from "../scheduleActivityAssignmentLabels.js";
+import { summarizeScheduleAssignmentShadowRows } from "../scheduleActivityAssignmentShadow.js";
 
 export const SCHEDULE_ASSIGNMENT_REVIEWS_TABLE = "schedule_activity_assignment_reviews";
 const UPSERT_REVIEW_RPC = "bidoc_upsert_schedule_assignment_review_v1";
@@ -12,6 +13,12 @@ const RESOLVE_REVIEW_LABEL_RPC = "bidoc_resolve_schedule_assignment_review_label
 
 function safeText(value, max = 1000) {
   return String(value ?? "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/gu, "").slice(0, max);
+}
+
+function safeNumber(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function mainConnection(config = {}) {
@@ -108,6 +115,14 @@ export function scheduleAssignmentReviewSnapshot(result = {}) {
       reason: safeText(result.decision?.reason, 3000),
       autoAssigned: false,
       gates: result.decision?.gates && typeof result.decision.gates === "object" ? result.decision.gates : {},
+      policy: result.decision?.policy && typeof result.decision.policy === "object"
+        ? {
+            suggestionScoreThreshold: safeNumber(result.decision.policy.suggestionScoreThreshold),
+            calibratedProbabilityThreshold: safeNumber(result.decision.policy.calibratedProbabilityThreshold),
+            minimumRankingGap: safeNumber(result.decision.policy.minimumRankingGap),
+            automaticAssignmentEnabled: result.decision.policy.automaticAssignmentEnabled === true
+          }
+        : null,
       engineVersion: safeText(result.engineVersion, 160) || null,
       scheduleVersionId: safeText(result.scheduleVersionId, 500) || null,
       settingsVersion: safeText(result.settingsVersion, 160) || null,
@@ -118,7 +133,8 @@ export function scheduleAssignmentReviewSnapshot(result = {}) {
             semanticPoolLimit: Number(result.retrieval.semanticPoolLimit) || null,
             modelCandidateLimit: Number(result.retrieval.modelCandidateLimit) || null
           }
-        : null
+        : null,
+      shadow: compactShadowObservation(result.shadow || result.decision?.shadow)
     },
     candidates
   };
@@ -127,6 +143,9 @@ export function scheduleAssignmentReviewSnapshot(result = {}) {
 export function sharedReviewRowToAgentResult(row = {}) {
   const event = row.event_snapshot && typeof row.event_snapshot === "object" ? row.event_snapshot : {};
   const decision = row.decision_snapshot && typeof row.decision_snapshot === "object" ? row.decision_snapshot : {};
+  const visibleDecision = { ...decision };
+  delete visibleDecision.shadow;
+  delete visibleDecision.wouldAutoAssign;
   const candidates = Array.isArray(row.candidates_snapshot) ? row.candidates_snapshot.map(compactCandidate) : [];
   return {
     ok: true,
@@ -141,7 +160,7 @@ export function sharedReviewRowToAgentResult(row = {}) {
     reviewId: row.id,
     reviewCreatedAt: row.created_at || null,
     event,
-    decision: { ...decision, autoAssigned: false },
+    decision: { ...visibleDecision, autoAssigned: false },
     candidates,
     assignment: null,
     warnings: ["כרטיס הבדיקה נשמר וממתין להחלטת הצוות."]
@@ -202,6 +221,54 @@ export async function listSharedScheduleAssignmentEvaluationLabels({ projectId, 
     cases,
     coverage: summarizeScheduleAssignmentLabelCoverage(cases)
   };
+}
+
+function compactShadowObservation(shadow = {}) {
+  if (!shadow || typeof shadow !== "object" || !shadow.schemaVersion) return null;
+  return {
+    schemaVersion: safeText(shadow.schemaVersion, 160),
+    mode: safeText(shadow.mode, 80),
+    observedAt: safeText(shadow.observedAt, 100) || null,
+    compatible: shadow.compatible === true,
+    compatibilityReasons: Array.isArray(shadow.compatibilityReasons)
+      ? shadow.compatibilityReasons.map((reason) => safeText(reason, 160)).filter(Boolean).slice(0, 20)
+      : [],
+    policyArtifactId: safeText(shadow.policyArtifactId, 300) || null,
+    policyId: safeText(shadow.policyId, 300) || null,
+    calibrationArtifactId: safeText(shadow.calibrationArtifactId, 300) || null,
+    retrieval: shadow.retrieval && typeof shadow.retrieval === "object"
+      ? {
+          strategy: safeText(shadow.retrieval.strategy, 80) || null,
+          semanticPoolLimit: Number(shadow.retrieval.semanticPoolLimit) || null,
+          modelCandidateLimit: Number(shadow.retrieval.modelCandidateLimit) || null
+        }
+      : null,
+    writeAllowed: false,
+    assignmentCreated: shadow.assignmentCreated === true,
+    wouldAutoAssign: shadow.wouldAutoAssign === true,
+    selectedActivityKey: safeText(shadow.selectedActivityKey, 500) || null,
+    rankingScore: safeNumber(shadow.rankingScore),
+    runnerUpRankingScore: safeNumber(shadow.runnerUpRankingScore),
+    rankingGap: safeNumber(shadow.rankingGap),
+    calibratedProbability: safeNumber(shadow.calibratedProbability),
+    policyGates: shadow.policyGates && typeof shadow.policyGates === "object" ? shadow.policyGates : {},
+    roleFailureCount: Math.max(0, Number(shadow.roleFailureCount) || 0),
+    durationMs: safeNumber(shadow.durationMs),
+    providerCost: safeNumber(shadow.providerCost),
+    totalTokens: safeNumber(shadow.totalTokens),
+    candidateCount: Math.max(0, Number(shadow.candidateCount) || 0)
+  };
+}
+
+export async function listSharedScheduleAssignmentShadowValidation({ projectId, limit = 5000, config, fetchImpl = fetch } = {}) {
+  if (!projectId) throw new Error("projectId is required");
+  const safeLimit = Math.max(1, Math.min(5000, Number(limit) || 5000));
+  const rows = await mainDataRequest({
+    config,
+    fetchImpl,
+    path: `/rest/v1/${SCHEDULE_ASSIGNMENT_REVIEWS_TABLE}?select=id,source_id,status,decision_snapshot,candidates_snapshot,evaluation_label_type,expected_activity_key,forbidden_activity_keys,evaluation_label_reason,labelled_at,resolved_at&source_project_id=eq.${encodeURIComponent(projectId)}&status=in.(pending,selected,rejected)&order=created_at.desc&limit=${safeLimit}`
+  });
+  return summarizeScheduleAssignmentShadowRows(rows);
 }
 
 export async function getPendingSharedScheduleAssignmentReview({ projectId, sourceId, config, fetchImpl = fetch } = {}) {

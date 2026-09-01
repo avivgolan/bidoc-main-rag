@@ -172,6 +172,10 @@ function policyOutcome(row = {}, config = {}) {
   };
 }
 
+export function evaluateScheduleAssignmentPolicyRow(row = {}, config = {}) {
+  return policyOutcome(row, config);
+}
+
 export function evaluateScheduleAssignmentPolicyConfiguration(rows = [], config = {}) {
   const safeRows = Array.isArray(rows) ? rows : [];
   const policy = normalizePolicyConfig(config);

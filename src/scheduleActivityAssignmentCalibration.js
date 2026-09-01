@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
+import { SCHEDULE_ASSIGNMENT_CALIBRATION_REQUIRED_LABEL_TYPES } from "./scheduleActivityAssignmentLabels.js";
 
-export const SCHEDULE_ASSIGNMENT_CALIBRATION_ARTIFACT_VERSION = "schedule-assignment-calibrator.v1";
+export const SCHEDULE_ASSIGNMENT_CALIBRATION_ARTIFACT_VERSION = "schedule-assignment-calibrator.v2";
 export const SCHEDULE_ASSIGNMENT_CALIBRATION_FEATURE_VERSION = "schedule-assignment-calibration-features.v2";
 
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, Number(value) || 0));
@@ -272,7 +273,7 @@ export function buildScheduleAssignmentCalibrationArtifact({
   if (positiveCount < minimumClassCount) reasons.push(`correct_count_below_${minimumClassCount}`);
   if (negativeCount < minimumClassCount) reasons.push(`incorrect_count_below_${minimumClassCount}`);
   const labelTypes = [...new Set(examples.map((item) => item.labelType).filter(Boolean))];
-  for (const required of ["confirmed_match", "rejected_match", "no_match", "stale_activity", "irrelevant_alert", "ambiguous"]) {
+  for (const required of SCHEDULE_ASSIGNMENT_CALIBRATION_REQUIRED_LABEL_TYPES) {
     if (!labelTypes.includes(required)) reasons.push(`label_type_missing:${required}`);
   }
   if (selectedMethod === "control") reasons.push("no_stable_calibrator_improved_validation");

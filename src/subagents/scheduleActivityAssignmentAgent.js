@@ -15,6 +15,7 @@ import {
 import { loadScheduleInputs, scheduleDataRequest, scheduleRpcRequest, scheduleSettings } from "../scheduleIngestion.js";
 import { resolveIndicatorProjectContext } from "../indicator/contractConditions.js";
 import { buildScheduleActivityAssignmentWorkflowLog } from "../scheduleActivityAssignmentWorkflow.js";
+import { buildScheduleAssignmentShadowObservation } from "../scheduleActivityAssignmentShadow.js";
 import { scheduleActivityUpdateItem } from "./schedule.js";
 
 const RUNS_TABLE = "schedule_activity_assignment_runs";
@@ -359,6 +360,7 @@ export async function runScheduleActivityAssignmentAgent({
   emit = null
 } = {}) {
   if (!projectId || !sourceId) throw new Error("projectId and sourceId are required");
+  if (commit === true) throw new Error("Schedule assignment automatic writes are disabled during Phase 6 shadow validation");
   if (commit && persistAudit === false) throw new Error("persistAudit=false is allowed only for a dry-run");
   if (evaluationFixture && (commit || persistAudit)) throw new Error("evaluationFixture requires commit=false and persistAudit=false");
   const scheduleCfg = settingsInput || scheduleSettings();
@@ -401,6 +403,7 @@ export async function runScheduleActivityAssignmentAgent({
       selectedActivityKey: result.decision?.selectedActivityKey || null,
       rankingScore: result.decision?.rankingScore ?? result.decision?.confidence ?? null,
       calibratedProbability: result.decision?.calibratedProbability ?? null,
+      shadowWouldAutoAssign: result.shadow?.wouldAutoAssign === true,
       warnings: result.warnings?.length || 0
     });
     const openRouterUsage = summarizeOpenRouterUsage(openRouterCalls);
@@ -834,11 +837,13 @@ export async function runScheduleActivityAssignmentAgent({
     rankingGap: decision.rankingGap,
     calibratedProbability: decision.calibratedProbability,
     calibrationStatus: decision.calibration.status,
+    calibrationArtifactId: decision.calibration.artifactId || null,
     confidence: decision.confidence,
     runnerUpConfidence: decision.runnerUpConfidence,
     margin: decision.margin,
     autoAssignmentThreshold: agentSettings.autoAssignmentThreshold,
     minimumRunnerUpMargin: agentSettings.minimumRunnerUpMargin,
+    policy: decision.policy,
     gates: decision.gates,
     autoAssigned: decision.autoAssigned
   });
@@ -904,7 +909,15 @@ export async function runScheduleActivityAssignmentAgent({
 
   if (!apiKey) warnings.push("מפתח OpenRouter אינו מוגדר ב־Settings; הוצגו מועמדים דטרמיניסטיים בלבד ולא בוצע שיוך אוטומטי.");
   if (Object.keys(roleErrors).length) warnings.push("אחד מתפקידי המודל או החיפוש נכשל; מדיניות הבטיחות חסמה שיוך אוטומטי.");
-  return finalizeResult({
+  const roleResults = {
+    timeFilter: timeFilterRole || { error: timeFilter === true ? "not_required" : "not_requested" },
+    extractor: extractorOutput ? { ok: true } : { ok: false, error: roleErrors.extractor || "not_run" },
+    matcher: matcher || { error: roleErrors.matcher || "not_run" },
+    validator: validator || { error: roleErrors.validator || "not_run" },
+    judge: judge || { error: roleErrors.judge || "not_required" },
+    embedding: { ok: Object.keys(semanticScores).length > 0, error: roleErrors.embedding || null }
+  };
+  const result = {
     ok: true,
     runId,
     workflowRunId: runId,
@@ -931,13 +944,14 @@ export async function runScheduleActivityAssignmentAgent({
       rankingGap: decision.rankingGap,
       calibratedProbability: decision.calibratedProbability,
       calibration: decision.calibration,
+      policy: decision.policy,
       roleAgreement: decision.roleAgreement,
       hardConflict: decision.hardConflict,
       confidence: decision.confidence,
       runnerUpConfidence: decision.runnerUpConfidence,
       margin: decision.margin,
       reason: judge?.reason || decision.reason,
-      wouldAutoAssign: decision.autoAssigned,
+      wouldAutoAssign: false,
       autoAssigned: Boolean(assignment),
       gates: decision.gates
     },
@@ -951,17 +965,23 @@ export async function runScheduleActivityAssignmentAgent({
       scoredSemanticCandidateCount: Object.keys(semanticScores).length,
       cache: retrievalCacheContext ? finalizeCacheMetrics(retrievalCacheContext) : null
     },
-    roles: {
-      timeFilter: timeFilterRole || { error: timeFilter === true ? "not_required" : "not_requested" },
-      extractor: extractorOutput ? { ok: true } : { ok: false, error: roleErrors.extractor || "not_run" },
-      matcher: matcher || { error: roleErrors.matcher || "not_run" },
-      validator: validator || { error: roleErrors.validator || "not_run" },
-      judge: judge || { error: roleErrors.judge || "not_required" },
-      embedding: { ok: Object.keys(semanticScores).length > 0, error: roleErrors.embedding || null }
-    },
+    roles: roleResults,
     assignment,
     warnings
-  }, {
+  };
+  const shadow = buildScheduleAssignmentShadowObservation({
+    result,
+    observedAt: finishedAt,
+    durationMs: Math.max(0, new Date(finishedAt).getTime() - new Date(startedAt).getTime()),
+    openRouterUsage: summarizeOpenRouterUsage(openRouterCalls)
+  });
+  result.shadow = shadow;
+  result.decision = {
+    ...result.decision,
+    wouldAutoAssign: shadow.wouldAutoAssign,
+    shadow
+  };
+  return finalizeResult(result, {
     scheduleMeta: inputs.scheduleMeta,
     taskCount: tasks.length,
     finishedAt

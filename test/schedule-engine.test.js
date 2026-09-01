@@ -31,6 +31,7 @@ import {
 } from "../src/subagents/scheduleConditionResolver.js";
 import { DEFAULT_SCHEDULE_VIEW, formatIsraeliDate, makeScheduleScale, parseIsraeliDate, scheduleSubjectKey } from "../src/react/scheduleTimeline.js";
 import { mergeScheduleActivityUpdatesWithSharedReviews } from "../src/react/scheduleActivityAssignmentReviewState.js";
+import { buildScheduleAssignmentDecisionPresentation, formatScheduleAssignmentNumber } from "../src/react/scheduleActivityAssignmentPresentation.js";
 import {
   ACTIVITY_ASSIGNMENT_BATCH_STATUSES,
   activityAssignmentBatchConfirmationText,
@@ -47,6 +48,7 @@ import {
 } from "../src/react/activityAssignmentBatch.js";
 import {
   listSharedScheduleAssignmentEvaluationLabels,
+  listSharedScheduleAssignmentShadowValidation,
   resolveSharedScheduleAssignmentReviews,
   scheduleAssignmentNeedsSharedReview,
   scheduleAssignmentReviewSnapshot,
@@ -99,6 +101,16 @@ import {
   buildScheduleAssignmentPolicyArtifact,
   SCHEDULE_ASSIGNMENT_POLICY_ARTIFACT_VERSION
 } from "../src/scheduleActivityAssignmentPolicy.js";
+import {
+  buildScheduleAssignmentShadowObservation,
+  scheduleAssignmentShadowRuntimeStatus,
+  SCHEDULE_ASSIGNMENT_SHADOW_CALIBRATOR,
+  SCHEDULE_ASSIGNMENT_SHADOW_MODE,
+  SCHEDULE_ASSIGNMENT_SHADOW_POLICY,
+  SCHEDULE_ASSIGNMENT_SHADOW_RETRIEVAL,
+  SCHEDULE_ASSIGNMENT_SHADOW_SCHEMA_VERSION,
+  summarizeScheduleAssignmentShadowRows
+} from "../src/scheduleActivityAssignmentShadow.js";
 import { buildScheduleActivityAssignmentWorkflowLog } from "../src/scheduleActivityAssignmentWorkflow.js";
 import {
   normalizeScheduleAssignmentRetrievalOptions,
@@ -262,8 +274,26 @@ test("schedule assignment shared review: persists only actionable decisions and 
     sourceId: "alert-9",
     status: "review_required",
     auditPersisted: true,
+    engineVersion: "schedule-assignment.test",
+    scheduleVersionId: "file",
+    settingsVersion: "settings-test",
+    configurationSnapshotId: "schedule-assignment-config:test",
     event: { id: "alert-9", title: "עיכוב בריצוף", alertType: "עיכוב", date: "2025-01-15", severity: 4, status: "בטיפול" },
-    decision: { type: "ambiguous", confidence: 52.62, runnerUpConfidence: 52.37, margin: 0.25, reason: "נדרשת החלטת צוות", autoAssigned: false },
+    decision: {
+      type: "ambiguous",
+      rankingScore: 52.62,
+      runnerUpRankingScore: 52.37,
+      rankingGap: 0.25,
+      calibratedProbability: 0.42,
+      calibration: { status: "calibrated", artifactId: "calibrator-test", reason: null },
+      confidence: 52.62,
+      runnerUpConfidence: 52.37,
+      margin: 0.25,
+      reason: "נדרשת החלטת צוות",
+      autoAssigned: false,
+      gates: { decisionMatch: false, calibratedThreshold: false, margin: false },
+      policy: { suggestionScoreThreshold: 45, calibratedProbabilityThreshold: 50, minimumRankingGap: 12, automaticAssignmentEnabled: false }
+    },
     candidates: [
       { activityKey: "gantt:file:1", name: "ריצוף", finalScore: 52.62, plannedStart: "2025-01-10", plannedFinish: "2025-01-20" },
       { activityKey: "gantt:file:2", name: "אספקה", finalScore: 52.37 },
@@ -276,6 +306,14 @@ test("schedule assignment shared review: persists only actionable decisions and 
   const snapshot = scheduleAssignmentReviewSnapshot(result);
   assert.equal(snapshot.candidates.length, 2);
   assert.equal(snapshot.candidates[0].name, "ריצוף");
+  assert.equal(snapshot.decision.rankingScore, 52.62);
+  assert.equal(snapshot.decision.calibratedProbability, 0.42);
+  assert.deepEqual(snapshot.decision.policy, {
+    suggestionScoreThreshold: 45,
+    calibratedProbabilityThreshold: 50,
+    minimumRankingGap: 12,
+    automaticAssignmentEnabled: false
+  });
   const hydrated = sharedReviewRowToAgentResult({
     id: "review-1",
     run_id: result.runId,
@@ -291,6 +329,8 @@ test("schedule assignment shared review: persists only actionable decisions and 
   assert.equal(hydrated.persistedReview, true);
   assert.equal(hydrated.auditPersisted, true);
   assert.deepEqual(hydrated.candidates.map((candidate) => candidate.activityKey), ["gantt:file:1", "gantt:file:2"]);
+  assert.equal(hydrated.decision.engineVersion, "schedule-assignment.test");
+  assert.equal(hydrated.decision.calibration.artifactId, "calibrator-test");
   assert.deepEqual(hydrated.warnings, ["כרטיס הבדיקה נשמר וממתין להחלטת הצוות."]);
 });
 
@@ -306,6 +346,237 @@ test("schedule assignment shared review: card header separates the source alert 
   assert.match(page, /ההתראה שנבדקת/u);
   assert.match(page, /הצעת הסוכן המובילה/u);
   assert.match(page, /אפשרות \{index \+ 1\}/u);
+  assert.match(page, /ציון התאמה מוביל/u);
+  assert.match(page, /ציון האפשרות השנייה/u);
+  assert.match(page, /פער בדירוג/u);
+  assert.match(page, /הסתברות מכוילת/u);
+  assert.match(page, /למה נדרשת בדיקה אנושית/u);
+  assert.match(page, /פרטי החלטה לביקורת/u);
+});
+
+test("schedule assignment shadow: compatible policy decisions are recorded without write authority", () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL("./fixtures/schedule-assignment-phase4-shadow-manifest.v1.json", import.meta.url), "utf8"));
+  assert.equal(SCHEDULE_ASSIGNMENT_SHADOW_CALIBRATOR.artifactVersion, manifest.calibrator.artifactVersion);
+  assert.equal(SCHEDULE_ASSIGNMENT_SHADOW_CALIBRATOR.artifactId, manifest.calibrator.artifactId);
+  assert.deepEqual(SCHEDULE_ASSIGNMENT_SHADOW_CALIBRATOR.context, manifest.calibrator.context);
+  assert.equal(SCHEDULE_ASSIGNMENT_SHADOW_CALIBRATOR.selectedMethod, manifest.calibrator.selectedMethod);
+  assert.deepEqual(SCHEDULE_ASSIGNMENT_SHADOW_CALIBRATOR.selectedModel, manifest.calibrator.selectedModel);
+  assert.equal(SCHEDULE_ASSIGNMENT_SHADOW_POLICY.artifactVersion, manifest.policy.artifactVersion);
+  assert.equal(SCHEDULE_ASSIGNMENT_SHADOW_POLICY.artifactId, manifest.policy.artifactId);
+  assert.deepEqual(SCHEDULE_ASSIGNMENT_SHADOW_POLICY.selectedPolicy, manifest.policy.selectedPolicy);
+  assert.deepEqual(SCHEDULE_ASSIGNMENT_SHADOW_POLICY.baselineAcceptance, manifest.policy.baselineAcceptance);
+  assert.equal(SCHEDULE_ASSIGNMENT_SHADOW_POLICY.readyForShadow, manifest.policy.readyForShadow);
+  assert.equal(SCHEDULE_ASSIGNMENT_SHADOW_POLICY.readyForProduction, manifest.policy.readyForProduction);
+  const selectedActivityKey = "gantt:1787251318726_MS_Project.xml:101";
+  const context = SCHEDULE_ASSIGNMENT_SHADOW_POLICY.context;
+  const result = {
+    runId: "shadow-run-1",
+    sourceId: "shadow-alert-1",
+    dryRun: true,
+    assignment: null,
+    engineVersion: context.engineVersion,
+    scheduleVersionId: context.scheduleVersionId,
+    settingsVersion: context.settingsVersion,
+    configurationSnapshotId: context.configurationSnapshotId,
+    retrieval: SCHEDULE_ASSIGNMENT_SHADOW_RETRIEVAL,
+    decision: {
+      type: "match",
+      selectedActivityKey,
+      rankingScore: 90,
+      runnerUpRankingScore: 70,
+      rankingGap: 20,
+      roleAgreement: true,
+      hardConflict: false,
+      autoAssigned: false,
+      gates: {
+        decisionMatch: true,
+        noHardConflict: true,
+        canonicalDate: true,
+        activeScheduleActivity: true,
+        unassigned: true,
+        freshRun: true,
+        requiredRolesCompleted: true,
+        matcherValidatorAgreement: true
+      }
+    },
+    candidates: [
+      { activityKey: selectedActivityKey, finalScore: 90, signals: { semantic: 0.9, lexical: 0.8 } },
+      { activityKey: "gantt:1787251318726_MS_Project.xml:102", finalScore: 70, signals: { semantic: 0.6, lexical: 0.5 } }
+    ],
+    roles: {
+      matcher: { bestActivityKey: selectedActivityKey, scores: [{ activityKey: selectedActivityKey, score: 95 }] },
+      validator: { bestActivityKey: selectedActivityKey, scores: [{ activityKey: selectedActivityKey, score: 94 }] },
+      judge: { error: "not_required" }
+    }
+  };
+  const observation = buildScheduleAssignmentShadowObservation({
+    result,
+    observedAt: "2026-08-31T12:00:00.000Z",
+    durationMs: 1200,
+    openRouterUsage: { totals: { total_tokens: 450, cost: 0.0045 } }
+  });
+  assert.equal(observation.schemaVersion, SCHEDULE_ASSIGNMENT_SHADOW_SCHEMA_VERSION);
+  assert.equal(observation.mode, SCHEDULE_ASSIGNMENT_SHADOW_MODE);
+  assert.equal(observation.compatible, true);
+  assert.equal(observation.wouldAutoAssign, true);
+  assert.equal(observation.writeAllowed, false);
+  assert.equal(observation.assignmentCreated, false);
+  assert.deepEqual(observation.retrieval, SCHEDULE_ASSIGNMENT_SHADOW_RETRIEVAL);
+  assert.ok(observation.calibratedProbability >= 0.5);
+  assert.equal(Object.values(observation.policyGates).every(Boolean), true);
+  assert.equal(observation.policyArtifactId, SCHEDULE_ASSIGNMENT_SHADOW_POLICY.artifactId);
+  assert.equal(observation.calibrationArtifactId, SCHEDULE_ASSIGNMENT_SHADOW_CALIBRATOR.artifactId);
+
+  const incompatible = buildScheduleAssignmentShadowObservation({
+    result: { ...result, dryRun: false, assignment: { activityKey: selectedActivityKey } }
+  });
+  assert.equal(incompatible.compatible, false);
+  assert.equal(incompatible.wouldAutoAssign, false);
+  assert.ok(incompatible.compatibilityReasons.includes("shadow_run_not_dry_run"));
+  assert.ok(incompatible.compatibilityReasons.includes("shadow_assignment_write_detected"));
+
+  const snapshot = scheduleAssignmentReviewSnapshot({
+    ...result,
+    event: { id: result.sourceId, title: "Shadow review alert" },
+    status: "review_required",
+    shadow: observation,
+    decision: { ...result.decision, shadow: observation, wouldAutoAssign: true },
+    candidates: result.candidates.map((candidate, index) => ({ ...candidate, name: `Candidate ${index + 1}` }))
+  });
+  assert.equal(snapshot.decision.shadow.wouldAutoAssign, true);
+  const hydrated = sharedReviewRowToAgentResult({
+    id: "shadow-review-1",
+    run_id: result.runId,
+    source_project_id: PROJECT,
+    schedule_project_id: PROJECT,
+    source_id: result.sourceId,
+    event_snapshot: snapshot.event,
+    decision_snapshot: snapshot.decision,
+    candidates_snapshot: snapshot.candidates
+  });
+  assert.equal("shadow" in hydrated.decision, false);
+  assert.equal("wouldAutoAssign" in hydrated.decision, false);
+});
+
+test("schedule assignment shadow: aggregate readiness compares hidden verdicts with human labels", async () => {
+  const rows = Array.from({ length: 50 }, (_, index) => {
+    const selectedActivityKey = `gantt:shadow:${index}`;
+    const eligible = index < 5;
+    const negative = index >= 5 && index < 15;
+    return {
+      id: `shadow-review-${index}`,
+      source_id: `shadow-alert-${index}`,
+      status: index % 2 ? "selected" : "rejected",
+      evaluation_label_type: negative ? "no_match" : "confirmed_match",
+      expected_activity_key: negative ? null : selectedActivityKey,
+      candidates_snapshot: [{ activityKey: selectedActivityKey }],
+      decision_snapshot: {
+        shadow: {
+          schemaVersion: SCHEDULE_ASSIGNMENT_SHADOW_SCHEMA_VERSION,
+          mode: SCHEDULE_ASSIGNMENT_SHADOW_MODE,
+          compatible: true,
+          compatibilityReasons: [],
+          writeAllowed: false,
+          assignmentCreated: false,
+          wouldAutoAssign: eligible,
+          selectedActivityKey,
+          calibratedProbability: SCHEDULE_ASSIGNMENT_SHADOW_POLICY.baselineAcceptance.calibratedProbabilityMean,
+          rankingGap: SCHEDULE_ASSIGNMENT_SHADOW_POLICY.baselineAcceptance.rankingGapMean,
+          durationMs: 1000,
+          roleFailureCount: 0
+        }
+      }
+    };
+  });
+  const report = summarizeScheduleAssignmentShadowRows(rows);
+  assert.equal(report.observationCount, 50);
+  assert.equal(report.reviewedObservationCount, 50);
+  assert.equal(report.negativeReviewedObservationCount, 10);
+  assert.equal(report.eligibleReviewedCount, 5);
+  assert.equal(report.correctEligibleCount, 5);
+  assert.equal(report.falseEligibleCount, 0);
+  assert.equal(report.writeViolationCount, 0);
+  assert.equal(report.readyForPhase7, true);
+
+  const unsafeRows = rows.map((row, index) => index === 5
+    ? { ...row, decision_snapshot: { shadow: { ...row.decision_snapshot.shadow, wouldAutoAssign: true } } }
+    : row);
+  const unsafeReport = summarizeScheduleAssignmentShadowRows(unsafeRows);
+  assert.equal(unsafeReport.falseEligibleCount, 1);
+  assert.equal(unsafeReport.readyForPhase7, false);
+  assert.ok(unsafeReport.readinessReasons.includes("false_automatic_eligibility_observed"));
+
+  let requestedUrl = "";
+  let requestedMethod = "";
+  const fetchImpl = async (url, options = {}) => {
+    requestedUrl = url;
+    requestedMethod = options.method || "GET";
+    return new Response(JSON.stringify(rows), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const listed = await listSharedScheduleAssignmentShadowValidation({
+    projectId: PROJECT,
+    config: { supabaseUrl: "https://main.example.test", supabaseServiceRoleKey: "service-key" },
+    fetchImpl
+  });
+  assert.equal(listed.readyForPhase7, true);
+  assert.equal(requestedMethod, "GET");
+  assert.match(requestedUrl, /source_project_id=eq\./u);
+  assert.match(requestedUrl, /status=in\.\(pending,selected,rejected\)/u);
+  assert.equal(scheduleAssignmentShadowRuntimeStatus().automaticWritesEnabled, false);
+});
+
+test("schedule assignment review terminology: separates raw ranking from calibrated probability and explains failed gates", () => {
+  const presentation = buildScheduleAssignmentDecisionPresentation({
+    engineVersion: "schedule-assignment.test",
+    settingsVersion: "settings-test",
+    scheduleVersionId: "file-a",
+    candidates: [{ activityKey: "gantt:file-a:1" }, { activityKey: "gantt:file-a:2" }],
+    decision: {
+      type: "ambiguous",
+      rankingScore: 43.06,
+      runnerUpRankingScore: 36.63,
+      rankingGap: 6.43,
+      calibratedProbability: 0.43,
+      calibration: { status: "calibrated", artifactId: "calibrator-test", reason: null },
+      gates: {
+        decisionMatch: false,
+        calibratedThreshold: false,
+        margin: false,
+        noHardConflict: true,
+        requiredRolesCompleted: true,
+        matcherValidatorAgreement: false,
+        autoAssignmentEnabled: false
+      },
+      policy: { calibratedProbabilityThreshold: 50, minimumRankingGap: 12 }
+    }
+  });
+  assert.equal(formatScheduleAssignmentNumber(presentation.rankingScore), "43.06");
+  assert.equal(presentation.calibratedProbability, 0.43);
+  assert.equal(presentation.hasRunnerUp, true);
+  assert.ok(presentation.reviewReasons.some((reason) => /43%.*50%/u.test(reason.label)));
+  assert.ok(presentation.reviewReasons.some((reason) => /6.43.*12/u.test(reason.label)));
+  assert.ok(presentation.reviewReasons.some((reason) => /לא הסכימו/u.test(reason.label)));
+  assert.ok(presentation.reviewReasons.some((reason) => /כבויה/u.test(reason.label)));
+  assert.deepEqual(presentation.gateRows.filter((gate) => !gate.passed).map((gate) => gate.key), [
+    "autoAssignmentEnabled",
+    "matcherValidatorAgreement",
+    "decisionMatch",
+    "calibratedThreshold",
+    "margin"
+  ]);
+  assert.ok(presentation.auditItems.some((item) => item.key === "calibrator" && item.value === "calibrator-test"));
+
+  const uncalibrated = buildScheduleAssignmentDecisionPresentation({
+    decision: {
+      type: "match",
+      rankingScore: 76.28,
+      calibratedProbability: 0.76,
+      calibration: { status: "not_ready", artifactId: "calibrator-draft", reason: "minimum_evidence_not_met" },
+      gates: { calibratedThreshold: false }
+    }
+  });
+  assert.equal(uncalibrated.calibratedProbability, null);
+  assert.ok(uncalibrated.reviewReasons.some((reason) => /מספיק ראיות/u.test(reason.label)));
 });
 
 test("schedule assignment shared review: missing source rows remain visible as pinned label-only snapshots", () => {
@@ -389,6 +660,18 @@ test("schedule assignment labels: resolved shared rows become provenance-rich ev
   assert.equal(coverage.caseCount, 1);
   assert.equal(coverage.remainingCaseCount, 99);
   assert.ok(coverage.missingLabelTypes.includes("no_match"));
+  assert.ok(coverage.missingRequiredLabelTypes.includes("no_match"));
+});
+
+test("schedule assignment labels: missing stale historical evidence is diagnostic but not an impossible collection gate", () => {
+  const labelTypes = ["confirmed_match", "rejected_match", "no_match", "irrelevant_alert", "ambiguous"];
+  const cases = Array.from({ length: 100 }, (_, index) => ({
+    label: { type: labelTypes[index % labelTypes.length] }
+  }));
+  const coverage = summarizeScheduleAssignmentLabelCoverage(cases);
+  assert.deepEqual(coverage.missingLabelTypes, ["stale_activity"]);
+  assert.deepEqual(coverage.missingRequiredLabelTypes, []);
+  assert.equal(coverage.minimumCoverageMet, true);
 });
 
 test("schedule assignment labels: mapped project review results merge without duplicating a review", () => {
@@ -547,9 +830,27 @@ test("schedule assignment workflow: exposes components, safe parameters, scores 
       extractedEvent: { trades: ["ריצוף"], date: "2025-01-15" },
       timeFilter: { enabled: true, skipped: false, confidence: 96 },
       auditPersisted: true,
-      decision: { selectedActivityKey: "gantt:file:1", confidence: 84, margin: 7, gates: { threshold: false } },
+      decision: {
+        selectedActivityKey: "gantt:file:1",
+        selectedActivityName: "ריצוף",
+        rankingScore: 84,
+        runnerUpRankingScore: 77,
+        rankingGap: 7,
+        calibratedProbability: 0.61,
+        calibration: { status: "calibrated", artifactId: "calibrator-test" },
+        policy: { calibratedProbabilityThreshold: 90, minimumRankingGap: 12 },
+        confidence: 84,
+        margin: 7,
+        gates: { calibratedThreshold: false, margin: false }
+      },
       candidates: [{ activityKey: "gantt:file:1", name: "ריצוף", finalScore: 84, signals: { temporal: 1 } }],
       roles: { timeFilter: { ok: true }, extractor: { ok: true }, matcher: { bestActivityKey: "gantt:file:1" }, validator: { bestActivityKey: "gantt:file:1" }, judge: { error: "not_required" }, embedding: { ok: true } },
+      shadow: {
+        mode: SCHEDULE_ASSIGNMENT_SHADOW_MODE,
+        compatible: true,
+        wouldAutoAssign: false,
+        policyArtifactId: SCHEDULE_ASSIGNMENT_SHADOW_POLICY.artifactId
+      },
       warnings: []
     },
     configuration: {
@@ -593,6 +894,18 @@ test("schedule assignment workflow: exposes components, safe parameters, scores 
   assert.equal(byId.get("assignment_matcher").input.role.instructionRole, "system");
   assert.equal(byId.get("assignment_candidates").output.candidates[0].signals.temporal, 1);
   assert.equal(byId.get("assignment_matcher").openrouter[0].total_tokens, 321);
+  assert.equal(byId.get("assignment_result").output.rankingScore, 84);
+  assert.equal(byId.get("assignment_result").output.runnerUpRankingScore, 77);
+  assert.equal(byId.get("assignment_result").output.rankingGap, 7);
+  assert.equal(byId.get("assignment_result").output.calibratedProbability, 0.61);
+  assert.equal(byId.get("assignment_result").output.calibrationStatus, "calibrated");
+  assert.equal(byId.get("assignment_result").output.calibrationArtifactId, "calibrator-test");
+  assert.deepEqual(byId.get("assignment_result").output.gates, { calibratedThreshold: false, margin: false });
+  assert.equal(byId.get("assignment_policy").input.automaticWritesEnabled, false);
+  assert.equal(byId.get("assignment_write").input.writeAllowed, false);
+  assert.equal(byId.get("assignment_result").output.shadowMode, SCHEDULE_ASSIGNMENT_SHADOW_MODE);
+  assert.equal(byId.get("assignment_result").output.shadowWouldAutoAssign, false);
+  assert.equal(byId.get("assignment_result").output.shadowWriteAllowed, false);
   assert.equal(workflow.openRouterUsage.totals.total_tokens, 321);
 });
 
@@ -610,6 +923,7 @@ test("schedule assignment batch: outcomes retain restart and resume progress acc
 
 test("schedule assignment batch: UI awaits each row and exposes controlled stop choices", () => {
   const page = fs.readFileSync(new URL("../src/react/SchedulePage.jsx", import.meta.url), "utf8");
+  assert.match(page, /const runActivityAssignmentAgent = useCallback\(async \(item, \{ timeFilter = false, reviewOnly = true \} = \{\}\)/u);
   const start = page.indexOf("const runActivityAssignmentBatch");
   const end = page.indexOf("const clearActivityAgentBatchResults", start);
   const runner = page.slice(start, end);
@@ -973,8 +1287,10 @@ test("schedule assignment evaluation: frozen edge cases expose recall, false-aut
 
 test("schedule assignment evaluation: non-persisting dry-run cannot be combined with commit and exposes policy eligibility", () => {
   const source = fs.readFileSync(new URL("../src/subagents/scheduleActivityAssignmentAgent.js", import.meta.url), "utf8");
+  assert.match(source, /if \(commit === true\) throw new Error\("Schedule assignment automatic writes are disabled during Phase 6 shadow validation"\)/u);
   assert.match(source, /if \(commit && persistAudit === false\) throw/iu);
-  assert.match(source, /wouldAutoAssign: decision\.autoAssigned/iu);
+  assert.match(source, /buildScheduleAssignmentShadowObservation\(/u);
+  assert.match(source, /wouldAutoAssign: shadow\.wouldAutoAssign/u);
   assert.match(source, /auditPersistenceSkipped = persistAudit === false/iu);
 });
 
@@ -1027,7 +1343,18 @@ test("schedule assignment evaluation: frozen fixture lane completes without data
   assert.equal(result.auditPersisted, false);
   assert.equal(result.auditPersistenceSkipped, true);
   assert.equal(result.assignment, null);
+  assert.equal(result.shadow.writeAllowed, false);
+  assert.equal(result.shadow.assignmentCreated, false);
+  assert.equal(result.shadow.compatible, false);
+  assert.ok(result.shadow.compatibilityReasons.includes("scheduleVersionId_mismatch"));
   assert.equal(result.workflowLog.configuration.snapshotId.startsWith("schedule-assignment-config:"), true);
+});
+
+test("schedule assignment shadow: direct commit requests fail before any data access", async () => {
+  await assert.rejects(
+    runScheduleActivityAssignmentAgent({ projectId: PROJECT, sourceId: "alert-shadow-write", commit: true }),
+    /automatic writes are disabled during Phase 6 shadow validation/u
+  );
 });
 
 test("schedule assignment time filter: explicit schedule signals pass before a model call", () => {
@@ -1136,6 +1463,12 @@ test("schedule assignment agent: automatic write requires calibrated probability
   assert.ok(allowed.calibratedProbability > 0.99);
   assert.equal(allowed.calibration.status, "calibrated");
   assert.equal(allowed.gates.calibratedThreshold, true);
+  assert.deepEqual(allowed.policy, {
+    suggestionScoreThreshold: settings.suggestionThreshold,
+    calibratedProbabilityThreshold: settings.autoAssignmentThreshold,
+    minimumRankingGap: settings.minimumRunnerUpMargin,
+    automaticAssignmentEnabled: true
+  });
 });
 
 test("schedule assignment policy: calibrated sweep blocks raw-score, role-disagreement and hard-conflict shortcuts", () => {
@@ -1417,6 +1750,47 @@ test("schedule assignment calibration: held-out artifact is versioned, gated, an
   assert.equal(stale.reason, "engineVersion_mismatch");
 });
 
+test("schedule assignment calibration: absent stale historical links do not block an otherwise complete reviewed dataset", () => {
+  const negativeLabels = ["rejected_match", "no_match", "irrelevant_alert", "ambiguous"];
+  const rows = [
+    ...Array.from({ length: 60 }, (_, index) => ({
+      caseId: `available-positive-${index}`,
+      sourceId: `ap-${index}`,
+      labelType: "confirmed_match",
+      expectedActivityKey: `gantt:file-a:ap-${index}`,
+      selectedActivityKey: `gantt:file-a:ap-${index}`,
+      rankingScore: 82 + index % 14,
+      runnerUpRankingScore: 25 + index % 8,
+      rankingGap: 50 + index % 12,
+      allCandidates: []
+    })),
+    ...Array.from({ length: 60 }, (_, index) => ({
+      caseId: `available-negative-${index}`,
+      sourceId: `an-${index}`,
+      labelType: negativeLabels[index % negativeLabels.length],
+      expectedActivityKey: null,
+      selectedActivityKey: `gantt:file-a:wrong-${index}`,
+      rankingScore: 8 + index % 22,
+      runnerUpRankingScore: 5 + index % 5,
+      rankingGap: 1 + index % 8,
+      allCandidates: []
+    }))
+  ];
+  const artifact = buildScheduleAssignmentCalibrationArtifact({
+    rows,
+    manifest: {
+      engineVersion: SCHEDULE_ASSIGNMENT_ENGINE_VERSION,
+      activeScheduleVersionId: "file-a",
+      settingsVersion: "calibration-test-v1",
+      configurationSnapshotId: "schedule-assignment-config:test"
+    },
+    retrieval: { strategy: "hybrid_union", deterministicLimit: 14, semanticLimit: 6 }
+  });
+  assert.equal(artifact.evidence.labelTypes.includes("stale_activity"), false);
+  assert.equal(artifact.readinessReasons.includes("label_type_missing:stale_activity"), false);
+  assert.equal(artifact.readyForProduction, true);
+});
+
 test("schedule assignment agent: model output cannot inject an unknown activity key", () => {
   const result = sanitizeRoleResult({
     bestActivityKey: "gantt:other:999",
@@ -1441,7 +1815,7 @@ test("schedule assignment agent: migration keeps audit tables private and commit
   assert.match(sql, /grant execute on function public\.bidoc_schedule_commit_activity_assignment_v1[\s\S]+to service_role/iu);
 });
 
-test("schedule assignment agent: runtime route owns settings and accepts only lower-authority browser flags", () => {
+test("schedule assignment agent: runtime route owns settings and forces Phase 6 shadow-only execution", () => {
   const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   const start = server.indexOf('url.pathname === "/api/schedule/activity-updates/assignment-agent/run"');
   const end = server.indexOf('url.pathname === "/api/schedule/activity-updates/assignment-agent/confirm"', start);
@@ -1451,8 +1825,11 @@ test("schedule assignment agent: runtime route owns settings and accepts only lo
   assert.match(route, /settingsOpenRouterApiKey\(\)/u);
   assert.match(route, /config: getConfig\(\)/u);
   assert.match(route, /timeFilter: body\.timeFilter === true/u);
-  assert.match(route, /const reviewOnly = body\.reviewOnly === true/u);
-  assert.match(route, /commit: !reviewOnly/u);
+  assert.doesNotMatch(route, /const reviewOnly = body\.reviewOnly/u);
+  assert.match(route, /commit: false/u);
+  assert.match(route, /retrieval: SCHEDULE_ASSIGNMENT_SHADOW_RETRIEVAL/u);
+  assert.match(route, /shadowWouldAutoAssign: result\.shadow\?\.wouldAutoAssign === true/u);
+  assert.match(route, /scheduleAssignmentResultForReviewer\(result\)/u);
   assert.match(route, /createRun\(runId\)/u);
   assert.match(route, /const runId = crypto\.randomUUID\(\)/u);
   assert.match(route, /recordRunHistory\(/u);
@@ -1460,6 +1837,10 @@ test("schedule assignment agent: runtime route owns settings and accepts only lo
   assert.match(route, /persistScheduleActivityAssignmentWorkflow\(/u);
   assert.doesNotMatch(route, /body\.(?:prompt|model|threshold|apiKey|commit)/u);
   assert.doesNotMatch(route, /buildRequestConfig/u);
+  assert.match(server, /assignment-agent\/shadow-report/u);
+  assert.match(server, /scheduleAssignmentShadowRuntimeStatus\(\)/u);
+  assert.match(server, /delete reviewerResult\.shadow/u);
+  assert.match(server, /delete clean\.shadowWouldAutoAssign/u);
 });
 
 test("schedule activity updates: ingestion time never replaces a missing business date", () => {

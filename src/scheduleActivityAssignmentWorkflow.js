@@ -138,7 +138,9 @@ export function buildScheduleActivityAssignmentWorkflowLog({
       nearThresholdRange: configuration.judgeNearThresholdRange ?? null,
       maximumJudgeCandidates: 5
     }, roles.judge || null),
-    node("assignment_policy", "Safety & Auto-Assignment Gate", "router", filteredOut ? "skipped" : "done", {
+    node("assignment_policy", "Safety & Shadow Assignment Gate", "router", filteredOut ? "skipped" : "done", {
+      shadowMode: true,
+      automaticWritesEnabled: false,
       autoAssignmentEnabled: configuration.autoAssignmentEnabled === true,
       autoAssignmentThreshold: configuration.autoAssignmentThreshold ?? null,
       minimumRunnerUpMargin: configuration.minimumRunnerUpMargin ?? null,
@@ -155,8 +157,15 @@ export function buildScheduleActivityAssignmentWorkflowLog({
     }),
     node("assignment_write", "Commit Activity Link", "database", result.assignment ? "done" : "skipped", {
       commitRequested: result.dryRun !== true,
+      writeAllowed: false,
+      shadowWouldAutoAssign: result.shadow?.wouldAutoAssign === true,
       method: result.assignment ? "agent_auto" : null
-    }, result.assignment || { assigned: false, reason: result.decision?.reason || null }),
+    }, result.assignment || {
+      assigned: false,
+      reason: result.decision?.reason || null,
+      shadowMode: result.shadow?.mode || null,
+      shadowWouldAutoAssign: result.shadow?.wouldAutoAssign === true
+    }),
     node("assignment_result", "Assignment Result", "output", "done", {
       workflowRunId,
       auditRunId: result.runId || null
@@ -164,6 +173,19 @@ export function buildScheduleActivityAssignmentWorkflowLog({
       status: result.status || null,
       selectedActivityKey: result.decision?.selectedActivityKey || null,
       selectedActivityName: result.decision?.selectedActivityName || null,
+      rankingScore: result.decision?.rankingScore ?? result.decision?.confidence ?? null,
+      runnerUpRankingScore: result.decision?.runnerUpRankingScore ?? result.decision?.runnerUpConfidence ?? null,
+      rankingGap: result.decision?.rankingGap ?? result.decision?.margin ?? null,
+      calibratedProbability: result.decision?.calibratedProbability ?? null,
+      calibrationStatus: result.decision?.calibration?.status || null,
+      calibrationArtifactId: result.decision?.calibration?.artifactId || null,
+      policy: result.decision?.policy || null,
+      gates: result.decision?.gates || {},
+      shadowMode: result.shadow?.mode || null,
+      shadowCompatible: result.shadow?.compatible === true,
+      shadowWouldAutoAssign: result.shadow?.wouldAutoAssign === true,
+      shadowPolicyArtifactId: result.shadow?.policyArtifactId || null,
+      shadowWriteAllowed: false,
       confidence: result.decision?.confidence ?? null,
       margin: result.decision?.margin ?? null,
       warnings: result.warnings || [],

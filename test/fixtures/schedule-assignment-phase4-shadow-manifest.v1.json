@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "schedule-assignment-shadow-manifest.v1",
+  "sourceArtifacts": {
+    "calibrator": "phase4-expanded-calibrator-v2-2026-08-31.json",
+    "policy": "phase4-expanded-policy-sweep-2026-08-31.json"
+  },
+  "calibrator": {
+    "artifactVersion": "schedule-assignment-calibrator.v2",
+    "artifactId": "schedule-assignment-calibrator:e14941848ae46effce000f6de175d218839a3f76868b83487b2ae07bd69e2964",
+    "context": {
+      "featureVersion": "schedule-assignment-calibration-features.v2",
+      "engineVersion": "schedule-assignment.v2.1-rc1",
+      "scheduleVersionId": "1787251318726_MS_Project.xml",
+      "settingsVersion": "schedule-assignment-openai.v2.1-rc1",
+      "configurationSnapshotId": "schedule-assignment-config:9f2fb7c98d4faae092c69927b92b0e1dcbcb4bd318344f08b7b9557d91d7b4d0",
+      "fixtureHash": "sha256:624149641bfe74d5791ce2f549a378c9dc13485b6e8230929b43c3021baf7bb2",
+      "retrieval": {
+        "strategy": "hybrid_union",
+        "semanticPoolLimit": 20,
+        "modelCandidateLimit": 20
+      }
+    },
+    "selectedMethod": "platt",
+    "selectedModel": {
+      "method": "platt",
+      "coefficient": 0.6101315980625583,
+      "intercept": -0.29811118126448644,
+      "mean": 0.5988534090909092,
+      "scale": 0.09951658551639628
+    }
+  },
+  "policy": {
+    "artifactVersion": "schedule-assignment-policy.v1",
+    "artifactId": "schedule-assignment-policy:8adc1afe588b500c3b372fd70c98aba0f31f632221cb9220fe111f3cc49d9c67",
+    "selectedPolicy": {
+      "probabilityThreshold": 0.5,
+      "rankingMargin": 12,
+      "requireMatcherValidatorAgreement": true,
+      "requireJudgeMatchWhenRun": true,
+      "blockHardConflict": true,
+      "policyId": "schedule-assignment-policy-config:d552d66e4cb7d251f979efc92331e480b7c755bf6844976aad99a0902c88ad11",
+      "safetyEligible": true,
+      "enabled": false
+    },
+    "baselineAcceptance": {
+      "caseCount": 32,
+      "eligibleCount": 4,
+      "correctAutomaticAssignmentCount": 4,
+      "falseAutomaticAssignmentCount": 0,
+      "safeCoverageRate": 0.125,
+      "calibratedProbabilityMean": 0.613607,
+      "rankingGapMean": 19.415
+    },
+    "readyForShadow": true,
+    "readyForProduction": false
+  }
+}

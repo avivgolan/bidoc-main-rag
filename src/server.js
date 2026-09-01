@@ -17,9 +17,10 @@ import { authorizeContractsExtractionRequest, authorizeDataQueryRequest } from "
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
-import { getPendingSharedScheduleAssignmentReview, listSharedScheduleAssignmentEvaluationLabels, listSharedScheduleAssignmentReviews, persistSharedScheduleAssignmentReview, resolveSharedScheduleAssignmentReviews, scheduleAssignmentNeedsSharedReview } from "./subagents/scheduleActivityAssignmentReviewQueue.js";
+import { getPendingSharedScheduleAssignmentReview, listSharedScheduleAssignmentEvaluationLabels, listSharedScheduleAssignmentReviews, listSharedScheduleAssignmentShadowValidation, persistSharedScheduleAssignmentReview, resolveSharedScheduleAssignmentReviews, scheduleAssignmentNeedsSharedReview } from "./subagents/scheduleActivityAssignmentReviewQueue.js";
 import { SCHEDULE_ASSIGNMENT_LABEL_TYPES, SCHEDULE_ASSIGNMENT_NEGATIVE_LABEL_TYPES } from "./scheduleActivityAssignmentLabels.js";
 import { scheduleAssignmentConfigurationSnapshot, validateScheduleAssignmentAgentSettings } from "./scheduleActivityAssignmentEngine.js";
+import { scheduleAssignmentShadowRuntimeStatus, SCHEDULE_ASSIGNMENT_SHADOW_RETRIEVAL } from "./scheduleActivityAssignmentShadow.js";
 import { runScheduleConditionResolver } from "./subagents/scheduleConditionResolver.js";
 import { CONTRACTS_AGENT_VERSION, CONTRACTS_EXTRACTION_BUDGET_MS, CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES, CONTRACTS_MAX_RESPONSE_BYTES, CONTRACTS_PDF_READER_VERSION } from "./contracts/constants.js";
 import { contractsErrorResponse } from "./contracts/errors.js";
@@ -2384,17 +2385,37 @@ async function handleApi(req, res, url) {
     const projectId = url.searchParams.get("projectId") || "";
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
-      const [result, labels] = await Promise.all([
+      const [result, labels, shadowValidation] = await Promise.all([
         listSharedScheduleAssignmentReviews({
           projectId,
           status: url.searchParams.get("status") || "pending",
           config: getConfig()
         }),
-        listSharedScheduleAssignmentEvaluationLabels({ projectId, config: getConfig() })
+        listSharedScheduleAssignmentEvaluationLabels({ projectId, config: getConfig() }),
+        listSharedScheduleAssignmentShadowValidation({ projectId, config: getConfig() }).catch((error) => ({
+          ...scheduleAssignmentShadowRuntimeStatus(),
+          readyForPhase7: false,
+          readinessReasons: ["shadow_report_unavailable"],
+          error: error.message
+        }))
       ]);
-      return sendJson(res, 200, { ok: true, projectId, ...result, labelCoverage: labels.coverage });
+      return sendJson(res, 200, { ok: true, projectId, ...result, labelCoverage: labels.coverage, shadowValidation });
     } catch (error) {
       return sendJson(res, 500, { ok: false, error: error.message, reviews: [] });
+    }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/schedule/activity-updates/assignment-agent/shadow-report") {
+    res.setHeader("Cache-Control", "private, no-store");
+    const reviewer = getSuperadminSession(req);
+    if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+    const projectId = url.searchParams.get("projectId") || "";
+    if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
+    try {
+      const report = await listSharedScheduleAssignmentShadowValidation({ projectId, config: getConfig() });
+      return sendJson(res, 200, { ok: true, projectId, runtime: scheduleAssignmentShadowRuntimeStatus(), report });
+    } catch (error) {
+      return sendJson(res, 500, { ok: false, error: error.message });
     }
   }
 
@@ -2437,29 +2458,30 @@ async function handleApi(req, res, url) {
     const body = await readJson(req).catch(() => ({}));
     const projectId = body.projectId || body.project_id || "";
     if (!projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
-    const reviewOnly = body.reviewOnly === true;
     const runId = crypto.randomUUID();
     createRun(runId);
     try {
-      // The browser cannot supply a model, prompt, threshold or key. It may
-      // only reduce authority through reviewOnly, which disables link writes.
+      // The browser cannot supply a model, prompt, threshold, key or write authority.
+      // Every Phase 6 agent run is a dry-run. Only an explicit human confirm route may write a link.
       // Refresh the SETTINGS-owned configuration and secret for every click.
       await reloadSettingsFromDb();
       const result = await runScheduleActivityAssignmentAgent({
         projectId,
         sourceId: body.sourceId,
         requestedBy: reviewer.sub,
-        commit: !reviewOnly,
+        commit: false,
         timeFilter: body.timeFilter === true,
         config: getConfig(),
         apiKey: settingsOpenRouterApiKey(),
+        retrieval: SCHEDULE_ASSIGNMENT_SHADOW_RETRIEVAL,
         runId,
         emit: emitRunEvent
       });
       completeRun(runId, {
         status: result.status,
         selectedActivityKey: result.decision?.selectedActivityKey || null,
-        confidence: result.decision?.confidence ?? null
+        confidence: result.decision?.confidence ?? null,
+        shadowWouldAutoAssign: result.shadow?.wouldAutoAssign === true
       });
       const runEvents = getRunEvents(runId);
       recordRunHistory({
@@ -2505,14 +2527,14 @@ async function handleApi(req, res, url) {
         result.persistedReview = false;
         result.warnings = [...(result.warnings || []), `שמירת ההחלטה המשותפת ב־MAIN נכשלה: ${error.message}`];
       }
-      return sendJson(res, 200, result);
+      return sendJson(res, 200, scheduleAssignmentResultForReviewer(result));
     } catch (error) {
       failRun(runId, error);
       const workflowLog = {
         kind: "schedule_activity_assignment",
         runId,
         nodes: [
-          { id: "assignment_start", label: "Schedule Assignment Trigger", kind: "trigger", status: "done", input: { projectId, sourceId: body.sourceId, timeFilterEnabled: body.timeFilter === true, reviewOnly }, output: { runId } },
+          { id: "assignment_start", label: "Schedule Assignment Trigger", kind: "trigger", status: "done", input: { projectId, sourceId: body.sourceId, timeFilterEnabled: body.timeFilter === true, shadowMode: true }, output: { runId } },
           { id: "assignment_error", label: "Assignment Run Error", kind: "output", status: "error", input: {}, output: { error: error.message } }
         ],
         edges: [{ from: "assignment_start", to: "assignment_error" }],
@@ -3891,6 +3913,40 @@ function dedupeProjectFindings(findings = []) {
     output.push(finding);
   }
   return output;
+}
+
+function scheduleAssignmentResultForReviewer(result = {}) {
+  const stripShadowFields = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    const clean = { ...value };
+    delete clean.shadow;
+    delete clean.wouldAutoAssign;
+    delete clean.shadowWouldAutoAssign;
+    delete clean.shadowCompatible;
+    delete clean.shadowPolicyArtifactId;
+    delete clean.shadowWriteAllowed;
+    return clean;
+  };
+  const reviewerResult = {
+    ...result,
+    decision: stripShadowFields(result.decision || {})
+  };
+  delete reviewerResult.shadow;
+  if (result.workflowLog && typeof result.workflowLog === "object") {
+    reviewerResult.workflowLog = {
+      ...result.workflowLog,
+      nodes: (Array.isArray(result.workflowLog.nodes) ? result.workflowLog.nodes : []).map((node) => ({
+        ...node,
+        input: stripShadowFields(node?.input),
+        output: stripShadowFields(node?.output)
+      })),
+      trace: (Array.isArray(result.workflowLog.trace) ? result.workflowLog.trace : []).map((entry) => ({
+        ...entry,
+        data: stripShadowFields(entry?.data)
+      }))
+    };
+  }
+  return reviewerResult;
 }
 
 function sendJson(res, status, value) {

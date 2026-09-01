@@ -15,6 +15,17 @@ export const SCHEDULE_ASSIGNMENT_NEGATIVE_LABEL_TYPES = Object.freeze([
   SCHEDULE_ASSIGNMENT_LABEL_TYPES.AMBIGUOUS
 ]);
 
+// stale_activity is derived from an existing historical link whose activity is
+// absent from the active Schedule. It is not a reviewer-selectable outcome, so
+// a project with no such historical link cannot collect it through the review UI.
+export const SCHEDULE_ASSIGNMENT_CALIBRATION_REQUIRED_LABEL_TYPES = Object.freeze([
+  SCHEDULE_ASSIGNMENT_LABEL_TYPES.CONFIRMED_MATCH,
+  SCHEDULE_ASSIGNMENT_LABEL_TYPES.REJECTED_MATCH,
+  SCHEDULE_ASSIGNMENT_LABEL_TYPES.NO_MATCH,
+  SCHEDULE_ASSIGNMENT_LABEL_TYPES.IRRELEVANT_ALERT,
+  SCHEDULE_ASSIGNMENT_LABEL_TYPES.AMBIGUOUS
+]);
+
 export const SCHEDULE_ASSIGNMENT_REVIEW_LABEL_OPTIONS = Object.freeze([
   {
     type: SCHEDULE_ASSIGNMENT_LABEL_TYPES.NO_MATCH,
@@ -148,13 +159,16 @@ export function summarizeScheduleAssignmentLabelCoverage(cases = [], { minimumCa
   const labelBreakdown = Object.fromEntries(Object.values(SCHEDULE_ASSIGNMENT_LABEL_TYPES)
     .map((type) => [type, rows.filter((item) => (item?.label?.type || item?.labelType) === type).length]));
   const missingLabelTypes = Object.entries(labelBreakdown).filter(([, count]) => count === 0).map(([type]) => type);
+  const missingRequiredLabelTypes = SCHEDULE_ASSIGNMENT_CALIBRATION_REQUIRED_LABEL_TYPES
+    .filter((type) => labelBreakdown[type] === 0);
   return {
     caseCount: rows.length,
     minimumCaseCount,
     remainingCaseCount: Math.max(0, minimumCaseCount - rows.length),
     labelBreakdown,
     missingLabelTypes,
-    minimumCoverageMet: rows.length >= minimumCaseCount && missingLabelTypes.length === 0
+    missingRequiredLabelTypes,
+    minimumCoverageMet: rows.length >= minimumCaseCount && missingRequiredLabelTypes.length === 0
   };
 }
 

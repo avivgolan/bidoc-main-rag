@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 
-Status: the Phase 4 policy-evaluation framework is implemented, but evidence-based policy selection is blocked. The Phase 3.1 MAIN migration and authenticated production collection UI are deployed and verified. The bounded, review-only collection safety update from commit `69e6d68` is present in the public production bundle; authenticated rendered-page verification remains pending a renewed reviewer session. Four reviews are pending, zero explicit labels exist, and Phase 5 has not started.
+Status: Phase 5 is complete, including populated-card visual acceptance. Phase 6 non-writing infrastructure is complete locally: the exact Phase 4 retrieval, calibrator, and disabled policy can record hidden `wouldAutoAssign` observations and compare them with later human labels. Fresh shadow observations have not yet been collected, automatic assignment remains disabled, and Phase 6 acceptance has not passed.
 
 Current engine: `schedule-assignment.v2.1-rc1`
 Current published configuration: `schedule-assignment-openai.v2.1-rc1`
@@ -405,7 +405,7 @@ Select the simplest method that improves held-out calibration without unstable f
 
 The initial 28 positive links and 2 rejected cases can diagnose retrieval but are not balanced enough to authorize calibrated automatic assignment.
 
-Before enabling calibrated production confidence, collect approximately 100 representative reviewed cases with meaningful coverage of rejected, no-match, ambiguous, irrelevant, and stale outcomes. The exact readiness decision must consider class balance and held-out behavior, not only total row count.
+Before enabling calibrated production confidence, collect approximately 100 representative reviewed cases with meaningful coverage of rejected, no-match, ambiguous, and irrelevant outcomes. `stale_activity` remains valid diagnostic evidence when an existing historical link points outside the active Schedule, but it cannot be collected through the review UI when the project contains no such link. The exact readiness decision must consider positive and negative class balance and held-out behavior, not only total row count or the presence of an unavailable diagnostic subtype.
 
 Until this gate passes:
 
@@ -428,7 +428,7 @@ If calibration is unavailable, stale, or incompatible with the active feature ve
 
 ## 9A. Phase 3.1 - Reviewed evidence collection
 
-Implementation status: deployed and verified in the authenticated production Schedule UI on 2026-08-30. The collection path supports explicit labels for confirmed matches, rejected matches, no match, ambiguous cases, irrelevant alerts, and stale activities. Labels are merged with canonical links using conflict-safe precedence, and readiness is reported against the 100-case evidence target.
+Implementation status: deployed and verified in the authenticated production Schedule UI on 2026-08-30. The collection path supports explicit reviewer labels for confirmed matches, rejected matches, no match, ambiguous cases, and irrelevant alerts. `stale_activity` is derived only from a reviewed historical link whose activity is absent from the active Schedule. Labels are merged with canonical links using conflict-safe precedence, and readiness is reported against the 100-case evidence target.
 
 The latest read-only refresh contains 30 reviewed cases: 28 confirmed matches and 2 rejected matches. Another 70 representative reviewed cases are required, and the dataset still has no examples of `no_match`, `stale_activity`, `irrelevant_alert`, or `ambiguous`.
 
@@ -439,6 +439,8 @@ The 2026-08-31 bounded collection update replaces the ambiguous all-row action w
 The 2026-08-31 read-only refresh found and corrected two preparation gaps: labels are now loaded across the requested, mapped source, and mapped Schedule project IDs, and resolved historical cards can fall back to their durable bounded event snapshots when the live alert is gone. The valid frozen dataset now contains 36 usable cases: 35 `confirmed_match` and 1 `no_match`. Another 64 cases are required, and `rejected_match`, `stale_activity`, `irrelevant_alert`, and `ambiguous` remain absent. The checkpoint is `BIDoc_Schedule_Activity_Assignment_Phase_3_1_Evidence_Refresh_Checkpoint_2026-08-31.md`.
 
 The expanded dataset must be frozen and reviewed before calibration and Phase 4 policy selection are rerun. Collection-path activation does not authorize an automatic policy, shadow mode, or Phase 5 work.
+
+The 2026-08-31 expanded refresh froze 148 usable cases from 100 explicit shared-review labels and canonical reviewed links: 119 `confirmed_match`, 2 `rejected_match`, 23 `no_match`, 2 `irrelevant_alert`, and 2 `ambiguous`. No `stale_activity` case exists because every recoverable historical link points to an activity in the active Schedule. The readiness contract now reports that missing subtype diagnostically without creating an impossible collection gate. The versioned calibrator and policy results are recorded in `BIDoc_Schedule_Activity_Assignment_Calibration_Phase_4_Expanded_Evidence_and_Shadow_Readiness_Checkpoint_2026-08-31.md`.
 
 ## 10. Phase 4 - Automatic decision policy calibration
 
@@ -509,9 +511,9 @@ The offline policy framework was implemented locally on 2026-08-30. It evaluates
 
 Runtime gates now require a valid calibrated probability and split `aiCompleted` into `requiredRolesCompleted` and `matcherValidatorAgreement`. The calibration feature version advanced to v2, preventing silent reuse of the old combined-gate artifact.
 
-The actual 30-case run selected no policy. It is blocked by `calibration_feature_version_mismatch` and `calibration_artifact_not_ready`; `readyForShadow` and `readyForProduction` are both false. The checkpoint is recorded in `BIDoc_Schedule_Activity_Assignment_Calibration_Phase_4_Automatic_Decision_Policy_Checkpoint_2026-08-30.md`.
+The original 30-case run selected no policy. It was blocked by `calibration_feature_version_mismatch` and `calibration_artifact_not_ready`; that historical result remains recorded in `BIDoc_Schedule_Activity_Assignment_Calibration_Phase_4_Automatic_Decision_Policy_Checkpoint_2026-08-30.md`.
 
-Phase 4 acceptance remains blocked until the Phase 3.1 collection path is activated, at least 70 additional representative cases cover every missing label class, a compatible calibrator passes held-out review, and the policy acceptance set observes zero false automatic assignments with non-zero safe coverage.
+The expanded 148-case run selected Platt calibration and evaluated 392 policy configurations. The disabled policy at 50% calibrated probability, 12 ranking points, required Matcher/Validator agreement, required Judge match when Judge ran, and hard-conflict blocking produced 4 correct and 0 false automatic assignments on the untouched 32-case acceptance split. Safe coverage was 12.5%, so the artifact is `readyForShadow` and explicitly not ready for production. Phase 4 acceptance is complete; policy activation, deployment, and Phase 5 remain separately gated.
 
 ## 11. Phase 5 - Review UI and audit terminology
 
@@ -558,6 +560,22 @@ Persist enough diagnostic information to reproduce the decision without exposing
 
 Keep API compatibility aliases during the UI transition. The previous rendering can be restored without changing Schedule links or review records.
 
+### Phase 5 implementation status
+
+Completed locally on 2026-08-31:
+
+- Raw ranking values are labelled as match scores without a percent sign.
+- Calibrated probability appears as a percentage only when the calibration status is explicitly `calibrated`.
+- The leading score, runner-up score, and ranking gap are shown as separate values.
+- Review cards explain failed safety gates in plain Hebrew and expose bounded audit details behind an expandable section.
+- Review snapshots and workflow logs retain explicit ranking, calibration, policy, version, and gate fields.
+- Legacy `confidence`, `runnerUpConfidence`, and `margin` aliases remain available for existing consumers.
+- Shared candidate selection and negative review actions are unchanged.
+- 117 focused Schedule tests passed and the React production build completed with 26 modules.
+- The authenticated local Schedule route loaded without browser console errors. A later connected-system review supplied three populated-card screenshots and confirmed the score tiles, human-review reasons, audit details, RTL layout, candidate choices, and negative-label actions.
+
+Phase 5 acceptance is complete. Phase 6 shadow observation remains separately gated.
+
 ## 12. Phase 6 - Shadow-mode validation
 
 ### Objective
@@ -581,6 +599,21 @@ Measure the proposed calibrated policy against new human decisions without allow
 - Manual override and rejection remain available.
 - A rollback configuration and disable switch are verified.
 - Explicit approval is received before Phase 7.
+
+### Phase 6 implementation status
+
+The local shadow infrastructure was completed on 2026-08-31:
+
+- The normal browser route is forced to `commit:false`, and the agent rejects any direct `commit:true` request before data access.
+- The runtime pins the exact Phase 4 hybrid retrieval configuration, calibrator artifact, policy artifact, engine version, settings version, Schedule version, and configuration snapshot.
+- Incompatible runs cannot become shadow-eligible.
+- A bounded versioned observation is stored in the existing backend-owned review snapshot. No new table or migration is required.
+- The row-level `wouldAutoAssign` verdict is hidden from pending reviewer cards, while the authenticated aggregate report compares it with the later human label.
+- The report tracks false eligibility, safe coverage, label distribution, compatibility, probability and gap drift, latency, role failures, and write-boundary violations.
+- The operational report gate requires at least 50 compatible reviewed observations, including 10 negative outcomes and 5 shadow-eligible outcomes, with zero false eligibility and zero write violations.
+- 120 focused Schedule tests pass, and the React production build completes with 26 modules. The implementation checkpoint is `BIDoc_Schedule_Activity_Assignment_Calibration_Phase_6_Shadow_Validation_Infrastructure_Checkpoint_2026-08-31.md`.
+
+This completes Phase 6 infrastructure only. The fresh reviewed shadow sample is still empty, so Phase 6 acceptance and Phase 7 remain blocked.
 
 ## 13. Phase 7 - Controlled automatic-assignment rollout
 
@@ -699,12 +732,17 @@ Prevent calibration drift as alerts, activities, Schedule versions, models, prom
 
 ## 18. Immediate next action
 
-Phase 4 tooling is complete, but policy selection remains evidence-blocked. The immediate next action is the separately gated Phase 3.1 activation and evidence collection sequence:
+Phase 5 and the local Phase 6 shadow infrastructure are complete while the policy remains disabled and `readyForShadow`. The immediate next action is to publish the reviewed shadow code and collect the fresh non-writing sample:
 
-1. Completed: review, approve, apply, and verify the additive MAIN label migration.
-2. Completed: commit, push, automatic deployment, and authenticated production verification of the label-collection path.
-3. Completed and deployed in commit `69e6d68`: bound grouped collection to 10, 25, or 50 review-only rows and clarify assignment provenance. Public bundle verification passed; authenticated rendered verification remains pending sign-in.
-4. Next: review the four pending cases and collect at least 70 additional representative cases across all missing label classes.
-5. Freeze and review the expanded dataset.
-6. Rerun evaluation, compatible v2 calibration, and the Phase 4 policy acceptance sweep.
-7. Stop before Phase 5 unless a disabled policy is genuinely `readyForShadow` and receives separate approval.
+1. Completed: collected 100 explicit review labels and froze 148 usable evaluation cases.
+2. Completed: ran the full non-persisting 148-case hybrid evaluation.
+3. Completed: built a compatible v2 Platt calibrator with held-out improvement over the raw-score control.
+4. Completed: evaluated 392 policy configurations and passed the zero-false acceptance gate at 12.5% safe coverage.
+5. Completed: separated raw ranking scores from calibrated probability in the review UI and audit record.
+6. Completed: added human-readable failed-gate reasons while preserving shared review choices and compatibility aliases.
+7. Completed: visually verified populated review cards in the connected system.
+8. Completed locally: forced all browser agent runs to `commit:false`, pinned the exact Phase 4 hybrid path, and added hidden durable shadow observations plus an aggregate report.
+9. Current stop: review and publish the Phase 6 infrastructure through the normal commit-triggered deployment path.
+10. After publication, collect at least 50 new compatible reviewed shadow outcomes, including 10 negative and 5 shadow-eligible outcomes.
+11. Freeze the report and stop after any false eligibility, write violation, incompatibility, or material drift.
+12. Do not activate an automatic policy or change remote settings without explicit Phase 7 approval.

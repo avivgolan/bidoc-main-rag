@@ -411,6 +411,12 @@ export function evaluateAssignmentDecision({
     matcherValidatorAgreement: baseGates.matcherValidatorAgreement
   };
   const autoAssigned = settings.enabled && Object.values(gates).every(Boolean);
+  const policy = {
+    suggestionScoreThreshold: settings.suggestionThreshold,
+    calibratedProbabilityThreshold: settings.autoAssignmentThreshold,
+    minimumRankingGap: settings.minimumRunnerUpMargin,
+    automaticAssignmentEnabled: settings.enabled === true && settings.autoAssignmentEnabled === true
+  };
   const reason = autoAssigned
     ? `הפעילות נבחרה בהסתברות מכוילת ${Math.round(calibration.probability * 100)}% ובפער ${rankingGap} נקודות מהמועמד הבא.`
     : decision === "no_match"
@@ -435,6 +441,7 @@ export function evaluateAssignmentDecision({
     roleAgreement,
     hardConflict,
     gates,
+    policy,
     autoAssigned,
     reason
   };

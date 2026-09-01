@@ -10647,10 +10647,28 @@ body:has(#timeline.active) .sidebar {
 .activityAgentResultIdentity strong { max-width: 100%; font-size: 0.86rem; line-height: 1.45; white-space: normal; }
 .activityAgentResultHead .activityAgentResultIdentity span { color: var(--text-secondary); white-space: normal; }
 .activityAgentResultIdentity span b { color: #6840ad; }
-.activityAgentResultScore { flex: none; }
+.activityAgentResultScores { flex: none; display: grid; grid-template-columns: repeat(2, minmax(130px, 1fr)); gap: 5px; min-width: min(100%, 320px); }
+.activityAgentResultScores span { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text-primary); font-size: 0.68rem; white-space: normal; }
+.activityAgentResultScores span b { color: var(--text-muted); font-size: 0.6rem; font-weight: 800; }
+.activityAgentResultScores span.is-calibrated { border-color: color-mix(in srgb, var(--brand-600) 35%, var(--line)); background: var(--brand-50); color: var(--brand-700); }
+.activityAgentResultScores span.is-unavailable { color: var(--text-muted); }
 .activityAgentSharedReviewBadge { align-self: flex-start; display: inline-flex; align-items: center; min-height: 24px; padding: 3px 8px; border: 1px solid color-mix(in srgb, #7d57c2 38%, var(--line)); border-radius: 999px; background: color-mix(in srgb, #7d57c2 9%, var(--surface)); color: #6840ad; font-size: 0.66rem; font-weight: 800; }
 .activityAgentSharedReviewBadge.is-resolved { border-color: color-mix(in srgb, var(--brand-600) 38%, var(--line)); background: var(--brand-50); color: var(--brand-700); }
 .activityAgentResult p { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.activityAgentResult p b { color: var(--text-primary); }
+.activityAgentReviewReasons { padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--amber-soft) 48%, var(--surface)); }
+.activityAgentReviewReasons strong { color: var(--text-primary); font-size: 0.72rem; }
+.activityAgentReviewReasons ul { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 4px 0 0; padding-inline-start: 18px; color: var(--text-secondary); font-size: 0.69rem; line-height: 1.5; }
+.activityAgentAuditDetails { border-top: 1px solid var(--line); padding-top: 5px; color: var(--text-secondary); font-size: 0.68rem; }
+.activityAgentAuditDetails summary { width: fit-content; color: #6840ad; font-weight: 800; cursor: pointer; }
+.activityAgentAuditDetails dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 5px; margin: 7px 0; }
+.activityAgentAuditDetails dl div { min-width: 0; padding: 5px 7px; border-radius: 6px; background: var(--surface); }
+.activityAgentAuditDetails dt { color: var(--text-muted); font-size: 0.58rem; font-weight: 800; }
+.activityAgentAuditDetails dd { overflow-wrap: anywhere; margin: 2px 0 0; direction: ltr; text-align: right; }
+.activityAgentGateList { display: flex; flex-wrap: wrap; gap: 4px; }
+.activityAgentGateList span { padding: 3px 6px; border: 1px solid var(--line); border-radius: 999px; }
+.activityAgentGateList span.is-passed { border-color: color-mix(in srgb, var(--brand-600) 30%, var(--line)); color: var(--brand-700); }
+.activityAgentGateList span.is-failed { border-color: color-mix(in srgb, var(--danger) 30%, var(--line)); color: var(--danger); }
 .activityAgentReview { display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
 .activityAgentReviewPrompt { color: var(--text-primary); font-size: 0.74rem; }
 .activityAgentCandidates { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -10674,7 +10692,7 @@ body:has(#timeline.active) .sidebar {
   .activityAgentBatchExplanation { text-align: right; }
   .activityAgentBatchStatus { justify-content: flex-start; flex-wrap: wrap; }
   .activityAgentResultHead { align-items: flex-start; flex-direction: column; }
-  .activityAgentResultScore { white-space: normal !important; }
+  .activityAgentResultScores { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 900px) {
