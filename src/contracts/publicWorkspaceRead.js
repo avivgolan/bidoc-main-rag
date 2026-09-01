@@ -91,9 +91,12 @@ export async function getPublicContractWorkspace({
       projectSite: workspace.site
     },
     preview: {
+      persisted: true,
       document: {
         filename: workspace.document_name,
         documentType: workspace.document_type,
+        documentVersionId: workspace.document_sha256 || workspace.id,
+        documentSha256: workspace.document_sha256,
         pageCount: workspace.page_count
       },
       clauses: clauses.map((clause) => ({

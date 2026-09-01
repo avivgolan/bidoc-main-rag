@@ -163,6 +163,9 @@ export function decorateContractsClausePreview(preview = {}) {
   return {
     ...preview,
     presentationVersion: CONTRACTS_CLAUSE_PRESENTATION_VERSION,
+    generations: {
+      ...(preview?.generations || {})
+    },
     clauses,
     coverage: {
       ...(preview?.coverage || {}),

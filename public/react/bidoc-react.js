@@ -1929,16 +1929,16 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		transitionstart: Or("Transition", "TransitionStart"),
 		transitioncancel: Or("Transition", "TransitionCancel"),
 		transitionend: Or("Transition", "TransitionEnd")
-	}, K = {}, Ar = {};
-	tn && (Ar = document.createElement("div").style, "AnimationEvent" in window || (delete kr.animationend.animation, delete kr.animationiteration.animation, delete kr.animationstart.animation), "TransitionEvent" in window || delete kr.transitionend.transition);
-	function jr(e) {
-		if (K[e]) return K[e];
+	}, Ar = {}, jr = {};
+	tn && (jr = document.createElement("div").style, "AnimationEvent" in window || (delete kr.animationend.animation, delete kr.animationiteration.animation, delete kr.animationstart.animation), "TransitionEvent" in window || delete kr.transitionend.transition);
+	function K(e) {
+		if (Ar[e]) return Ar[e];
 		if (!kr[e]) return e;
 		var t = kr[e], n;
-		for (n in t) if (t.hasOwnProperty(n) && n in Ar) return K[e] = t[n];
+		for (n in t) if (t.hasOwnProperty(n) && n in jr) return Ar[e] = t[n];
 		return e;
 	}
-	var Mr = jr("animationend"), Nr = jr("animationiteration"), Pr = jr("animationstart"), Fr = jr("transitionrun"), q = jr("transitionstart"), Ir = jr("transitioncancel"), Lr = jr("transitionend"), Rr = /* @__PURE__ */ new Map(), zr = "abort auxClick beforeToggle cancel canPlay canPlayThrough click close contextMenu copy cut drag dragEnd dragEnter dragExit dragLeave dragOver dragStart drop durationChange emptied encrypted ended error gotPointerCapture input invalid keyDown keyPress keyUp load loadedData loadedMetadata loadStart lostPointerCapture mouseDown mouseMove mouseOut mouseOver mouseUp paste pause play playing pointerCancel pointerDown pointerMove pointerOut pointerOver pointerUp progress rateChange reset resize seeked seeking stalled submit suspend timeUpdate touchCancel touchEnd touchStart volumeChange scroll toggle touchMove waiting wheel".split(" ");
+	var Mr = K("animationend"), Nr = K("animationiteration"), Pr = K("animationstart"), Fr = K("transitionrun"), Ir = K("transitionstart"), Lr = K("transitioncancel"), q = K("transitionend"), Rr = /* @__PURE__ */ new Map(), zr = "abort auxClick beforeToggle cancel canPlay canPlayThrough click close contextMenu copy cut drag dragEnd dragEnter dragExit dragLeave dragOver dragStart drop durationChange emptied encrypted ended error gotPointerCapture input invalid keyDown keyPress keyUp load loadedData loadedMetadata loadStart lostPointerCapture mouseDown mouseMove mouseOut mouseOver mouseUp paste pause play playing pointerCancel pointerDown pointerMove pointerOut pointerOver pointerUp progress rateChange reset resize seeked seeking stalled submit suspend timeUpdate touchCancel touchEnd touchStart volumeChange scroll toggle touchMove waiting wheel".split(" ");
 	zr.push("scrollEnd");
 	function Br(e, t) {
 		Rr.set(e, t), ht(t, [e]);
@@ -6124,7 +6124,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 		var hd = zr[md];
 		Br(hd.toLowerCase(), "on" + (hd[0].toUpperCase() + hd.slice(1)));
 	}
-	Br(Mr, "onAnimationEnd"), Br(Nr, "onAnimationIteration"), Br(Pr, "onAnimationStart"), Br("dblclick", "onDoubleClick"), Br("focusin", "onFocus"), Br("focusout", "onBlur"), Br(Fr, "onTransitionRun"), Br(q, "onTransitionStart"), Br(Ir, "onTransitionCancel"), Br(Lr, "onTransitionEnd"), gt("onMouseEnter", ["mouseout", "mouseover"]), gt("onMouseLeave", ["mouseout", "mouseover"]), gt("onPointerEnter", ["pointerout", "pointerover"]), gt("onPointerLeave", ["pointerout", "pointerover"]), ht("onChange", "change click focusin focusout input keydown keyup selectionchange".split(" ")), ht("onSelect", "focusout contextmenu dragend focusin keydown keyup mousedown mouseup selectionchange".split(" ")), ht("onBeforeInput", [
+	Br(Mr, "onAnimationEnd"), Br(Nr, "onAnimationIteration"), Br(Pr, "onAnimationStart"), Br("dblclick", "onDoubleClick"), Br("focusin", "onFocus"), Br("focusout", "onBlur"), Br(Fr, "onTransitionRun"), Br(Ir, "onTransitionStart"), Br(Lr, "onTransitionCancel"), Br(q, "onTransitionEnd"), gt("onMouseEnter", ["mouseout", "mouseover"]), gt("onMouseLeave", ["mouseout", "mouseover"]), gt("onPointerEnter", ["pointerout", "pointerover"]), gt("onPointerLeave", ["pointerout", "pointerover"]), ht("onChange", "change click focusin focusout input keydown keyup selectionchange".split(" ")), ht("onSelect", "focusout contextmenu dragend focusin keydown keyup mousedown mouseup selectionchange".split(" ")), ht("onBeforeInput", [
 		"compositionend",
 		"keypress",
 		"textInput",
@@ -6275,7 +6275,7 @@ var e = Object.create, t = Object.defineProperty, n = Object.getOwnPropertyDescr
 						case Pr:
 							l = wn;
 							break;
-						case Lr:
+						case q:
 							l = Fn;
 							break;
 						case "scroll":
@@ -15925,6 +15925,7 @@ function Bn(e = {}) {
 	return {
 		...e,
 		presentationVersion: On,
+		generations: { ...e?.generations || {} },
 		clauses: t,
 		coverage: {
 			...e?.coverage || {},
@@ -16085,8 +16086,8 @@ function $n(e = {}) {
 	};
 }
 //#endregion
-//#region src/react/contractsHebrew.js
-var er = Object.freeze({
+//#region src/contracts/studyCase.js
+var er = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", tr = "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5", nr = Object.freeze({
 	contractual_completion: "השלמת ומסירת העבודות",
 	contractual_commencement: "תחילת העבודה החוזית",
 	contractual_obligation: "התחייבות חוזית",
@@ -16102,7 +16103,7 @@ var er = Object.freeze({
 	performance_bond_delivery: "מסירת ערבות ביצוע",
 	performance_bond_renewal: "הארכת ערבות ביצוע",
 	notice_service: "מועד קבלת הודעה לפי אופן המסירה"
-}), tr = Object.freeze({
+}), rr = Object.freeze({
 	contractual_completion: "השלם ומסור את העבודות",
 	contractual_commencement: "התחל את העבודות במועד החוזי",
 	contractual_obligation: "בצע את ההתחייבות החוזית",
@@ -16118,7 +16119,7 @@ var er = Object.freeze({
 	performance_bond_delivery: "מסור את ערבות הביצוע",
 	performance_bond_renewal: "הארך את ערבות הביצוע לפני פקיעתה",
 	notice_service: "קבע את מועד קבלת ההודעה לפי אופן המסירה"
-}), nr = Object.freeze({
+}), ir = Object.freeze({
 	authority_unverified: "סמכות המסמך טרם אומתה",
 	human_review_required: "נדרשת סקירה אנושית",
 	project_binding_unreviewed: "קישור הפרויקט טרם נבדק",
@@ -16150,7 +16151,7 @@ var er = Object.freeze({
 	responsible_party_unverified: "זהות הגורם האחראי טרם אומתה",
 	beneficiary_unverified: "זהות הגורם הזכאי טרם אומתה",
 	unreadable_pdf_page: "עמוד בחוזה אינו קריא"
-}), rr = Object.freeze({
+}), ar = Object.freeze({
 	human_review_required: "נדרשת סקירה אנושית",
 	project_mapping_inactive: "קישור הפרויקט אינו פעיל",
 	schedule_version_conflict: "קיימת סתירה בגרסת לוח הזמנים",
@@ -16166,7 +16167,7 @@ var er = Object.freeze({
 	identity_continuity_requires_review: "רציפות זהות הפעילות דורשת סקירה",
 	summary_activity_requires_review: "פעילות סיכום דורשת סקירה מפורשת",
 	prior_mapping_confidence_below_continuity_gate: "רמת הביטחון הקודמת נמוכה מסף הרציפות"
-}), ir = Object.freeze({
+}), or = Object.freeze({
 	schema_reuse_not_approved: "שימוש חוזר במבנה הנתונים טרם אושר",
 	project_namespace_not_approved: "מרחב מזהי הפרויקט טרם אושר",
 	review_audit_persistence_not_approved: "שמירת יומן הסקירה טרם אושרה",
@@ -16206,7 +16207,7 @@ var er = Object.freeze({
 	extension_milestone_identity_missing: "חסרה אבן הדרך שאליה שייכת ההארכה",
 	review_decision_missing: "חסרה החלטת סוקר",
 	transaction_batch_blocked: "קבוצת הקידום חסומה"
-}), ar = Object.freeze({
+}), sr = Object.freeze({
 	reviewed_indicator_impact: "החלטה חוזית שנבדקה וסומנה כרלוונטית ל־Indicator",
 	no_indicator_impact: "החלטה חוזית שנבדקה ואינה דורשת טיפול של Indicator",
 	indicator_suitability_unknown: "ההתאמה ל־Indicator טרם הוכרעה בסקירת ההחלטה",
@@ -16216,7 +16217,7 @@ var er = Object.freeze({
 	decision_inactive: "החלטה שנדחתה, פוצלה, מוזגה או הוחלפה אינה נמסרת ל־Indicator",
 	decision_conflict_unresolved: "ההחלטה מכילה סתירה שלא הוכרעה",
 	decision_conflict_not_reviewed: "זוהתה סתירה שטרם סומנה כבדוקה"
-}), or = Object.freeze({
+}), cr = Object.freeze({
 	contracts_model_provider_timeout: "ספק הבינה המלאכותית לא השלים את החילוץ בזמן. לא נשמרה תוצאה חלקית; בניסיון הבא המערכת תשתמש מחדש רק בחלקים שכבר אומתו.",
 	contracts_model_time_budget_exceeded: "חילוץ החוזה חרג ממגבלת הזמן הכוללת. לא נשמרה תוצאה חלקית; אפשר לנסות שוב.",
 	contracts_model_provider_failed: "ספק הבינה המלאכותית לא הצליח להשלים את חילוץ החוזה. לא נשמרה תוצאה חלקית; אפשר לנסות שוב.",
@@ -16330,12 +16331,12 @@ var er = Object.freeze({
 	contracts_semantic_relationships_verifier_json_invalid: "הבדיקה הספקנית החזירה תשובה לא תקינה. הזוגות שלא אומתו הושמטו בבטחה מהתצוגה.",
 	contracts_semantic_relationships_verifier_schema_invalid: "הבדיקה הספקנית החזירה מבנה לא תקין. הזוגות שלא אומתו הושמטו בבטחה מהתצוגה.",
 	contracts_semantic_relationships_response_invalid: "תוצאת סוכן הקשרים חרגה מגבולות הבטיחות של R4.1 ולכן נדחתה ולא נשמרה."
-}), sr = Object.freeze({
+}), lr = Object.freeze({
 	candidate_for_schedule_contract_milestones: "מועמד לאבן דרך חוזית",
 	candidate_for_schedule_contract_extensions: "מועמד להארכת מועד חוזית",
 	candidate_for_schedule_contract_conditions: "מועמד לתנאי חוזי ממתין",
 	dry_run_only: "סקירה בלבד — ללא יעד תפעולי"
-}), cr = Object.freeze({
+}), ur = Object.freeze({
 	contract_source: "ציטוט מדויק מן החוזה",
 	preferred_activity_key_exact: "התאמה מלאה למזהה פעילות מועדף",
 	preferred_task_uid_exact: "התאמה מלאה למזהה משימה",
@@ -16347,7 +16348,7 @@ var er = Object.freeze({
 	confirmed_alias_owner: "זהות פעילות שכבר אושרה",
 	conflicting_alias_owners: "סתירה בין זהויות פעילות קיימות",
 	invalid_canonical_owner: "זהות פעילות קיימת אינה תקינה"
-}), lr = Object.freeze({
+}), dr = Object.freeze({
 	day: "ימים",
 	calendar_day: "ימים קלנדריים",
 	calendar_days: "ימים קלנדריים",
@@ -16359,40 +16360,40 @@ var er = Object.freeze({
 	months: "חודשים",
 	hour: "שעות",
 	hours: "שעות"
-}), ur = Object.freeze({
+}), fr = Object.freeze({
 	after: "לאחר האירוע המפעיל",
 	before: "לפני האירוע המפעיל"
 });
-function dr(e) {
-	return er[e] || "עובדה חוזית הדורשת סקירה";
-}
-function fr(e) {
-	return tr[typeof e == "string" ? e : e?.role] || "בדוק את העובדה החוזית מול הראיה המקורית";
-}
 function pr(e) {
-	return nr[e] || "נדרש בירור נוסף לפני קידום";
+	return nr[e] || "עובדה חוזית הדורשת סקירה";
 }
 function mr(e) {
-	return rr[e] || pr(e);
+	return rr[typeof e == "string" ? e : e?.role] || "בדוק את העובדה החוזית מול הראיה המקורית";
 }
 function hr(e) {
-	let t = String(e || "");
-	return t.startsWith("review_gate_unresolved:") ? `חסם סקירה טרם נפתר: ${pr(t.slice(23))}` : t.startsWith("unknown_review_candidate:") ? "התקבלה החלטה עבור מועמד שאינו קיים בחילוץ הנוכחי" : t.startsWith("duplicate_review_decision:") ? "נמצאו כמה החלטות עבור אותו מועמד" : ir[t] || "הקידום חסום ונדרשת בדיקה נוספת";
+	return ir[e] || "נדרש בירור נוסף לפני קידום";
 }
 function gr(e) {
-	return ar[String(e || "")] || "נדרשת בדיקה נוספת לפני מסירה ל־Indicator";
+	return ar[e] || hr(e);
 }
 function _r(e) {
+	let t = String(e || "");
+	return t.startsWith("review_gate_unresolved:") ? `חסם סקירה טרם נפתר: ${hr(t.slice(23))}` : t.startsWith("unknown_review_candidate:") ? "התקבלה החלטה עבור מועמד שאינו קיים בחילוץ הנוכחי" : t.startsWith("duplicate_review_decision:") ? "נמצאו כמה החלטות עבור אותו מועמד" : or[t] || "הקידום חסום ונדרשת בדיקה נוספת";
+}
+function vr(e) {
+	return sr[String(e || "")] || "נדרשת בדיקה נוספת לפני מסירה ל־Indicator";
+}
+function yr(e) {
 	return {
 		suitable: "מתאימה למסירה ל־Indicator",
 		not_suitable: "אינה מתאימה למסירה",
 		requires_review: "דורשת סקירה חוזית"
 	}[e] || "מצב מסירה לא ידוע";
 }
-function vr(e) {
-	return sr[e] || "אין יעד תפעולי מאושר בשלב זה";
+function br(e) {
+	return lr[e] || "אין יעד תפעולי מאושר בשלב זה";
 }
-function yr(e) {
+function xr(e) {
 	return {
 		confirm: "אישור",
 		reject: "דחייה",
@@ -16400,7 +16401,7 @@ function yr(e) {
 		unmapped: "ללא מיפוי"
 	}[e] || "החלטת סקירה";
 }
-function br(e) {
+function Sr(e) {
 	return {
 		suggested: "הוצעו חלופות לסקירה",
 		blocked: "חסום עד לפתרון מפורש",
@@ -16412,23 +16413,23 @@ function br(e) {
 		rejected: "נדחה"
 	}[e] || "מצב דורש בדיקה";
 }
-function xr(e) {
+function Cr(e) {
 	return {
 		transaction_ready: "מוכן לטרנזקציה",
 		blocked: "חסום",
 		rejected: "נדחה"
 	}[e] || "מצב טרם נקבע";
 }
-function Sr(e) {
-	return cr[e] || "ראיית התאמה ללוח הזמנים";
-}
-function Cr(e) {
-	return lr[e] || "יחידות זמן";
-}
 function wr(e) {
-	return ur[e] || "ביחס לאירוע המפעיל";
+	return ur[e] || "ראיית התאמה ללוח הזמנים";
 }
 function Tr(e) {
+	return dr[e] || "יחידות זמן";
+}
+function Er(e) {
+	return fr[e] || "ביחס לאירוע המפעיל";
+}
+function Dr(e) {
 	return {
 		scope_and_execution: "היקף וביצוע",
 		commencement_and_completion: "תחילה והשלמה",
@@ -16445,7 +16446,7 @@ function Tr(e) {
 		other: "אחר"
 	}[e] || "קטגוריה לא ידועה";
 }
-function Er(e) {
+function Or(e) {
 	return {
 		proposed: "ממתינה לסקירה",
 		approved: "אושרה",
@@ -16457,14 +16458,14 @@ function Er(e) {
 		superseded: "הוחלפה בגרסה חדשה"
 	}[e] || "מצב סקירה לא ידוע";
 }
-function Dr(e) {
+function kr(e) {
 	return {
 		yes: "עשויה להשפיע על לוח הזמנים",
 		no: "ללא השפעה על לוח הזמנים",
 		unknown: "השפעה על לוח הזמנים טרם הוכרעה"
 	}[e] || "השפעה לא ידועה";
 }
-function Or(e) {
+function Ar(e) {
 	return {
 		none: "ללא כלל זמן",
 		fixed: "מועד קבוע",
@@ -16474,7 +16475,7 @@ function Or(e) {
 		consequence: "תוצאה של איחור"
 	}[e] || "סוג זמן לא ידוע";
 }
-function kr(e) {
+function jr(e) {
 	if (!e) return "מועד לא זמין";
 	let t = new Date(e);
 	return Number.isNaN(t.getTime()) ? "מועד לא זמין" : new Intl.DateTimeFormat("he-IL", {
@@ -16483,11 +16484,11 @@ function kr(e) {
 	}).format(t);
 }
 function K(e) {
-	return e?.name === "AbortError" ? "הפעולה חרגה ממגבלת הזמן. אפשר לנסות שוב." : or[e?.code] || "הפעולה נכשלה. אפשר לנסות שוב או לבדוק את הגדרות השרת.";
+	return e?.name === "AbortError" ? "הפעולה חרגה ממגבלת הזמן. אפשר לנסות שוב." : cr[e?.code] || "הפעולה נכשלה. אפשר לנסות שוב או לבדוק את הגדרות השרת.";
 }
 //#endregion
 //#region src/react/ContractsPage.jsx
-var Ar = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", jr = "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5", Mr = [
+var Mr = er, Nr = tr, Pr = [
 	"scope_and_execution",
 	"commencement_and_completion",
 	"stage_acceptance_and_handover",
@@ -16501,7 +16502,7 @@ var Ar = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", jr = "81b1cbac-8fcf-43c1-acdc-6
 	"termination_and_remedy",
 	"document_and_information_obligation",
 	"other"
-], Nr = Object.freeze([
+], Fr = Object.freeze([
 	{
 		id: "clauses",
 		label: "תוכן החוזה",
@@ -16523,19 +16524,19 @@ var Ar = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7", jr = "81b1cbac-8fcf-43c1-acdc-6
 		description: "ערכת החלטות מאושרת"
 	}
 ]);
-function Pr({ activeTab: e, onChange: t }) {
+function Ir({ activeTab: e, onChange: t }) {
 	function n(e, n) {
 		let r = null;
-		if (e.key === "ArrowLeft" && (r = (n + 1) % Nr.length), e.key === "ArrowRight" && (r = (n - 1 + Nr.length) % Nr.length), e.key === "Home" && (r = 0), e.key === "End" && (r = Nr.length - 1), r === null) return;
+		if (e.key === "ArrowLeft" && (r = (n + 1) % Fr.length), e.key === "ArrowRight" && (r = (n - 1 + Fr.length) % Fr.length), e.key === "Home" && (r = 0), e.key === "End" && (r = Fr.length - 1), r === null) return;
 		e.preventDefault();
-		let i = Nr[r];
+		let i = Fr[r];
 		t(i.id), requestAnimationFrame(() => document.getElementById(`contracts-workspace-tab-${i.id}`)?.focus());
 	}
 	return /* @__PURE__ */ (0, x.jsx)("nav", {
 		className: "contractsWorkspaceTabs",
 		role: "tablist",
 		"aria-label": "שלבי העבודה בחוזה הפתוח",
-		children: Nr.map((r, i) => /* @__PURE__ */ (0, x.jsxs)("button", {
+		children: Fr.map((r, i) => /* @__PURE__ */ (0, x.jsxs)("button", {
 			id: `contracts-workspace-tab-${r.id}`,
 			type: "button",
 			role: "tab",
@@ -16549,7 +16550,7 @@ function Pr({ activeTab: e, onChange: t }) {
 		}, r.id))
 	});
 }
-function Fr({ id: e, activeTab: t, children: n }) {
+function Lr({ id: e, activeTab: t, children: n }) {
 	let r = t === e;
 	return /* @__PURE__ */ (0, x.jsx)("div", {
 		id: `contracts-workspace-panel-${e}`,
@@ -16580,12 +16581,12 @@ async function q(e, { method: t = "GET", body: n = null, timeoutMs: r = 12e4 } =
 		clearTimeout(a);
 	}
 }
-async function Ir(e) {
+async function Rr(e) {
 	let t = new Uint8Array(await e.arrayBuffer()), n = "", r = 32768;
 	for (let e = 0; e < t.length; e += r) n += String.fromCharCode(...t.subarray(e, e + r));
 	return btoa(n);
 }
-function Lr(e) {
+function zr(e) {
 	return {
 		action: "reject",
 		reason: "",
@@ -16596,13 +16597,13 @@ function Lr(e) {
 		conflictReason: ""
 	};
 }
-function Rr(e) {
-	return e.fixedDate ? `מועד קבוע: ${e.fixedDate}` : e.offset ? `${e.offset.value} ${Cr(e.offset.unit)} ${wr(e.offset.direction)}` : e.metadata?.extensionAmount ? `הארכה: ${e.metadata.extensionAmount} ${Cr(e.metadata.extensionUnit)}` : "ללא ערך זמן סופי";
+function Br(e) {
+	return e.fixedDate ? `מועד קבוע: ${e.fixedDate}` : e.offset ? `${e.offset.value} ${Tr(e.offset.unit)} ${Er(e.offset.direction)}` : e.metadata?.extensionAmount ? `הארכה: ${e.metadata.extensionAmount} ${Tr(e.metadata.extensionUnit)}` : "ללא ערך זמן סופי";
 }
-function zr(e) {
+function Vr(e) {
 	return [e.pdfPage ? `עמוד ${e.pdfPage}` : null, e.clause ? `סעיף ${e.clause}` : null].filter(Boolean).join(" · ") || "מיקום מקור לא צוין";
 }
-function Br(e) {
+function Hr(e) {
 	return {
 		mappingRequirement: "required",
 		conditionStatus: e.type === "relative_condition" ? "pending" : "not_applicable",
@@ -16617,10 +16618,10 @@ function Br(e) {
 		reviewRequestId: crypto.randomUUID()
 	};
 }
-function Vr(e, t = null) {
+function Ur(e, t = null) {
 	return {
 		decisions: Object.fromEntries((e.candidates || []).map((e) => [e.candidateKey, {
-			...Lr(e),
+			...zr(e),
 			...t?.decisions?.[e.candidateKey] || {}
 		}])),
 		reviewReason: t?.reviewReason || "",
@@ -16629,7 +16630,7 @@ function Vr(e, t = null) {
 		mappingDraft: t?.mappingDraft || null
 	};
 }
-function Hr({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingDraft: i }) {
+function Wr({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingDraft: i }) {
 	return {
 		decisions: e,
 		reviewReason: t,
@@ -16638,14 +16639,14 @@ function Hr({ decisions: e, reviewReason: t, batchId: n, reviewedAt: r, mappingD
 		mappingDraft: i
 	};
 }
-function Ur(e) {
+function Gr(e) {
 	return JSON.stringify(e);
 }
-function Wr(e) {
+function Kr(e) {
 	let t = Number(e?.revision ?? 0);
 	return Number.isSafeInteger(t) && t >= 0 ? t : 0;
 }
-function Gr(e, t, n) {
+function qr(e, t, n) {
 	return {
 		documentVersionId: e.document.documentVersionId,
 		candidateKey: t.candidateKey,
@@ -16667,11 +16668,11 @@ function Gr(e, t, n) {
 		}))
 	};
 }
-function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, savedState: i = null, savedStateKey: a = "", onDraftStateChange: o = null }) {
+function Jr({ extraction: e, sourceProjectId: t, status: n, statusError: r, savedState: i = null, savedStateKey: a = "", onDraftStateChange: o = null }) {
 	let [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(null), [d, f] = (0, b.useState)(null), [p, m] = (0, b.useState)([]), [h, g] = (0, b.useState)(""), [_, v] = (0, b.useState)(""), [y, S] = (0, b.useState)(""), [C, w] = (0, b.useState)(null), T = (0, b.useRef)(null), E = (e.candidates || []).find((e) => e.candidateKey === s) || null, D = p.filter((e) => e.selectedCanonicalKey);
 	(0, b.useEffect)(() => {
 		let t = (e.candidates || []).find((e) => e.candidateKey === i?.candidateKey) || null, n = t && i?.draft ? {
-			...Br(t),
+			...Hr(t),
 			...i.draft
 		} : null;
 		c(t?.candidateKey || ""), u(n), f(null), m([]), g(""), S(""), w(null);
@@ -16715,7 +16716,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 		}
 	}
 	async function M(n) {
-		let r = Br(n);
+		let r = Hr(n);
 		c(n.candidateKey), u(r), o?.({
 			candidateKey: n.candidateKey,
 			draft: r
@@ -16725,7 +16726,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 				method: "POST",
 				body: {
 					sourceProjectId: t,
-					obligation: Gr(e, n, r)
+					obligation: qr(e, n, r)
 				}
 			})).candidateBundle, a = i?.candidates?.[0]?.activityKey || "";
 			f(i), u((e) => ({
@@ -16754,7 +16755,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 					method: "POST",
 					body: {
 						sourceProjectId: t,
-						obligation: Gr(e, E, l)
+						obligation: qr(e, E, l)
 					}
 				})).candidateBundle, r = n.candidates.some((e) => e.activityKey === l.selectedActivityKey) ? l.selectedActivityKey : n.candidates[0]?.activityKey || "";
 				f(n), u((e) => ({
@@ -16796,7 +16797,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 				method: "POST",
 				body: {
 					sourceProjectId: t,
-					obligation: Gr(e, E, l),
+					obligation: qr(e, E, l),
 					action: l.action,
 					selectedActivityKey: ["confirm", "correct"].includes(l.action) ? l.selectedActivityKey : null,
 					reason: l.reason.trim(),
@@ -16843,8 +16844,8 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 					onClick: () => M(e),
 					disabled: !!_,
 					children: [
-						/* @__PURE__ */ (0, x.jsx)("span", { children: dr(e.role) }),
-						/* @__PURE__ */ (0, x.jsx)("strong", { children: fr(e) }),
+						/* @__PURE__ */ (0, x.jsx)("span", { children: pr(e.role) }),
+						/* @__PURE__ */ (0, x.jsx)("strong", { children: mr(e) }),
 						/* @__PURE__ */ (0, x.jsx)("small", { children: s === e.candidateKey && _ === "candidates" ? "טוען חלופות…" : "בדוק התאמה ללוח" })
 					]
 				}, e.candidateKey))
@@ -16936,7 +16937,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsMappingSummary",
 							children: [
-								/* @__PURE__ */ (0, x.jsxs)("span", { children: ["מצב ", /* @__PURE__ */ (0, x.jsx)("strong", { children: br(d.decisionState) })] }),
+								/* @__PURE__ */ (0, x.jsxs)("span", { children: ["מצב ", /* @__PURE__ */ (0, x.jsx)("strong", { children: Sr(d.decisionState) })] }),
 								/* @__PURE__ */ (0, x.jsxs)("span", { children: ["גרסת לוח ", /* @__PURE__ */ (0, x.jsx)("strong", {
 									dir: "ltr",
 									children: d.scheduleVersion.fileId
@@ -16948,11 +16949,11 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 						(d.blockers || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
 							className: "contractsGateList",
 							"aria-label": "חסמי מיפוי",
-							children: d.blockers.map((e) => /* @__PURE__ */ (0, x.jsx)("span", { children: mr(e) }, e))
+							children: d.blockers.map((e) => /* @__PURE__ */ (0, x.jsx)("span", { children: gr(e) }, e))
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsMappingEvidence",
-							children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "ראיה חוזית מדויקת — הציטוט נשמר בשפת המקור" }), (d.obligation.sourceEvidence || []).map((e) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: zr(e) }), /* @__PURE__ */ (0, x.jsx)("p", { children: e.sourceText })] }, e.evidenceId))]
+							children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: "ראיה חוזית מדויקת — הציטוט נשמר בשפת המקור" }), (d.obligation.sourceEvidence || []).map((e) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Vr(e) }), /* @__PURE__ */ (0, x.jsx)("p", { children: e.sourceText })] }, e.evidenceId))]
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsAlternativeList",
@@ -16998,7 +16999,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 									/* @__PURE__ */ (0, x.jsxs)("details", { children: [
 										/* @__PURE__ */ (0, x.jsx)("summary", { children: "ראיות וחסמים" }),
 										(e.evidence || []).map((t, n) => /* @__PURE__ */ (0, x.jsxs)("p", { children: [
-											/* @__PURE__ */ (0, x.jsxs)("strong", { children: [Sr(t.kind), ":"] }),
+											/* @__PURE__ */ (0, x.jsxs)("strong", { children: [wr(t.kind), ":"] }),
 											" ",
 											/* @__PURE__ */ (0, x.jsx)("span", {
 												dir: "auto",
@@ -17007,7 +17008,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 										] }, `${e.activityKey}-${n}`)),
 										(e.blockers || []).map((e) => /* @__PURE__ */ (0, x.jsx)("p", {
 											className: "is-blocker",
-											children: mr(e)
+											children: gr(e)
 										}, e))
 									] })
 								]
@@ -17019,7 +17020,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 						d.conflict && /* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "contractsConflictBox",
 							children: [
-								/* @__PURE__ */ (0, x.jsxs)("strong", { children: ["נמצאה סתירה: ", mr(d.conflict.type)] }),
+								/* @__PURE__ */ (0, x.jsxs)("strong", { children: ["נמצאה סתירה: ", gr(d.conflict.type)] }),
 								/* @__PURE__ */ (0, x.jsx)("p", { children: "אישור אינו אומר שהסעיף תקין; הוא רק בוחר במפורש את הפעילות המתאימה מתוך החלופות הנוכחיות." }),
 								/* @__PURE__ */ (0, x.jsxs)("label", {
 									className: "contractsCheck",
@@ -17071,9 +17072,9 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 							}), D.map((e) => /* @__PURE__ */ (0, x.jsxs)("option", {
 								value: e.eventId,
 								children: [
-									yr(e.action),
+									xr(e.action),
 									" · ",
-									kr(e.reviewedAt),
+									jr(e.reviewedAt),
 									" · ",
 									e.selectedActivityKey || e.selectedCanonicalKey
 								]
@@ -17089,7 +17090,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 							className: "contractsCommit",
 							disabled: !!_ || !n?.reviewApplyApproved,
 							onClick: L,
-							children: _ === "review" ? "שומר אירוע ביקורת אטומי…" : `שמור ${yr(l.action)}`
+							children: _ === "review" ? "שומר אירוע ביקורת אטומי…" : `שמור ${xr(l.action)}`
 						})
 					] }),
 					y && /* @__PURE__ */ (0, x.jsx)("div", {
@@ -17122,9 +17123,9 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 								children: "אין עדיין החלטות שמורות לעובדה זו."
 							}),
 							p.map((e) => /* @__PURE__ */ (0, x.jsxs)("article", { children: [
-								/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: yr(e.action) }), /* @__PURE__ */ (0, x.jsx)("time", {
+								/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: xr(e.action) }), /* @__PURE__ */ (0, x.jsx)("time", {
 									dateTime: e.reviewedAt,
-									children: kr(e.reviewedAt)
+									children: jr(e.reviewedAt)
 								})] }),
 								/* @__PURE__ */ (0, x.jsx)("p", { children: e.reason }),
 								/* @__PURE__ */ (0, x.jsxs)("small", { children: ["סוקר: ", /* @__PURE__ */ (0, x.jsx)("span", {
@@ -17147,7 +17148,7 @@ function Kr({ extraction: e, sourceProjectId: t, status: n, statusError: r, save
 		]
 	});
 }
-function qr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewedAt: i, sourceProjectId: a, scheduleProjectId: o }) {
+function Yr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewedAt: i, sourceProjectId: a, scheduleProjectId: o }) {
 	return {
 		extraction: e,
 		reviewBatch: {
@@ -17157,7 +17158,7 @@ function qr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewed
 			documentAuthority: "authoritative",
 			extractorVersion: e.extractorVersion || "contracts-agent.phase1.v1",
 			decisions: e.candidates.map((e) => {
-				let n = t[e.candidateKey] || Lr(e), r = n.action === "approve";
+				let n = t[e.candidateKey] || zr(e), r = n.action === "approve";
 				return {
 					candidateKey: e.candidateKey,
 					action: n.action,
@@ -17180,30 +17181,30 @@ function qr({ extraction: e, decisions: t, reviewReason: n, batchId: r, reviewed
 		}
 	};
 }
-function Jr({ candidate: e, decision: t, onChange: n }) {
-	let r = t.action === "approve", i = vr(e.storageDisposition), a = e.storageDisposition === "candidate_for_schedule_contract_extensions", o = e.offset?.unit === "day";
+function Xr({ candidate: e, decision: t, onChange: n }) {
+	let r = t.action === "approve", i = br(e.storageDisposition), a = e.storageDisposition === "candidate_for_schedule_contract_extensions", o = e.offset?.unit === "day";
 	return /* @__PURE__ */ (0, x.jsxs)("article", {
 		className: `contractsCandidate ${r ? "is-approved" : "is-rejected"}`,
 		children: [
 			/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [
 				/* @__PURE__ */ (0, x.jsx)("span", {
 					className: "contractsCandidateRole",
-					children: dr(e.role)
+					children: pr(e.role)
 				}),
-				/* @__PURE__ */ (0, x.jsx)("h3", { children: fr(e) }),
-				/* @__PURE__ */ (0, x.jsx)("p", { children: Rr(e) })
+				/* @__PURE__ */ (0, x.jsx)("h3", { children: mr(e) }),
+				/* @__PURE__ */ (0, x.jsx)("p", { children: Br(e) })
 			] }), /* @__PURE__ */ (0, x.jsx)("span", {
 				className: "contractsTarget",
 				children: i
 			})] }),
 			/* @__PURE__ */ (0, x.jsx)("div", {
 				className: "contractsEvidenceList",
-				children: (e.sourceEvidence || []).map((t, n) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: zr(t) }), /* @__PURE__ */ (0, x.jsx)("p", { children: t.sourceText })] }, `${e.candidateKey}-evidence-${n}`))
+				children: (e.sourceEvidence || []).map((t, n) => /* @__PURE__ */ (0, x.jsxs)("blockquote", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: Vr(t) }), /* @__PURE__ */ (0, x.jsx)("p", { children: t.sourceText })] }, `${e.candidateKey}-evidence-${n}`))
 			}),
 			(e.gates || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
 				className: "contractsGateList",
 				"aria-label": "חסמי קידום",
-				children: (e.gates || []).map((e) => /* @__PURE__ */ (0, x.jsx)("span", { children: pr(e) }, e))
+				children: (e.gates || []).map((e) => /* @__PURE__ */ (0, x.jsx)("span", { children: hr(e) }, e))
 			}),
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsDecisionRow",
@@ -17268,7 +17269,7 @@ function Jr({ candidate: e, decision: t, onChange: n }) {
 		]
 	});
 }
-function Yr({ preview: e, classicDocumentVersionId: t = "" }) {
+function Zr({ preview: e, classicDocumentVersionId: t = "" }) {
 	let [n, r] = (0, b.useState)(""), [i, a] = (0, b.useState)("operative"), [o, s] = (0, b.useState)("all"), [c, l] = (0, b.useState)("all"), [u, d] = (0, b.useState)(!1), f = (0, b.useMemo)(() => Bn(e), [e]), p = f.clauses || [], m = (0, b.useMemo)(() => [...new Set(p.map((e) => e.clauseType))].sort(), [p]), h = (0, b.useMemo)(() => [...new Set(p.flatMap((e) => e.hashtags || []))].sort(), [p]), g = (0, b.useMemo)(() => new Map(p.map((e) => [e.clauseKey, e])), [p]), _ = n.trim().toLocaleLowerCase("he"), v = (0, b.useMemo)(() => p.filter((e) => i !== "all" && e.structuralRole !== i || o !== "all" && e.clauseType !== o || c !== "all" && !(e.hashtags || []).includes(c) || u && !(e.crossReferences || []).length ? !1 : _ ? [
 		e.clauseKey,
 		e.parentClauseKey,
@@ -17559,11 +17560,11 @@ function Yr({ preview: e, classicDocumentVersionId: t = "" }) {
 		]
 	});
 }
-function Xr(e) {
+function Qr(e) {
 	let t = Number(e || 0);
 	return t >= .97 ? "גבוה מאוד" : t >= .9 ? "גבוה" : "בינוני";
 }
-var Zr = Object.freeze([
+var $r = Object.freeze([
 	"supports_same_decision",
 	"depends_on",
 	"condition_of",
@@ -17572,7 +17573,7 @@ var Zr = Object.freeze([
 	"duplicates",
 	"conflicts_with"
 ]);
-function Qr({ item: e, busy: t = !1, onReview: n }) {
+function ei({ item: e, busy: t = !1, onReview: n }) {
 	let [r, i] = (0, b.useState)(""), [a, o] = (0, b.useState)(e.relationshipType), [s, c] = (0, b.useState)(!1), l = e.reviewStatus === "proposed", u = r.trim().length >= 10 && /[\u0590-\u05ff]/u.test(r), d = ["duplicates", "conflicts_with"].includes(a), f = a !== e.relationshipType || !d && s, p = s && !d ? e.targetClauseKey : e.sourceClauseKey, m = s && !d ? e.sourceClauseKey : e.targetClauseKey, h = Array.isArray(e.evidence?.excerpts) ? e.evidence.excerpts : [], g = e.evidence?.signals?.autoReview, _ = g?.mode === "model_auto_approval";
 	function v(t) {
 		let i = { reasonHe: r.trim() };
@@ -17623,7 +17624,7 @@ function Qr({ item: e, busy: t = !1, onReview: n }) {
 					}),
 					e.confidence !== null && e.confidence !== void 0 && /* @__PURE__ */ (0, x.jsxs)("i", {
 						title: "ביטחון הסיווג של המודל; אינו ודאות משפטית",
-						children: ["ביטחון סיווג: ", Xr(e.confidence)]
+						children: ["ביטחון סיווג: ", Qr(e.confidence)]
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("span", { children: ["גרסה ", e.revision] })
 				]
@@ -17668,7 +17669,7 @@ function Qr({ item: e, busy: t = !1, onReview: n }) {
 								value: a,
 								onChange: (e) => o(e.target.value),
 								disabled: t,
-								children: Zr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+								children: $r.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 									value: e,
 									children: Xn(e)
 								}, e))
@@ -17713,14 +17714,14 @@ function Qr({ item: e, busy: t = !1, onReview: n }) {
 					e.reviewReason && /* @__PURE__ */ (0, x.jsx)("p", { children: e.reviewReason }),
 					e.reviewedAt && /* @__PURE__ */ (0, x.jsx)("time", {
 						dateTime: e.reviewedAt,
-						children: kr(e.reviewedAt)
+						children: jr(e.reviewedAt)
 					})
 				]
 			})
 		]
 	});
 }
-function $r({ preview: e, workspaceId: t = "", persistenceStatus: n = null, persistenceResult: r = null, persistenceError: i = "", persistenceBusy: a = !1, onPersist: o, semanticStatus: s = null, semanticResult: c = null, semanticError: l = "", semanticBusy: u = !1, onRunSemantic: d, reviewStatus: f = null, reviewResult: p = null, reviewError: m = "", reviewBusyId: h = "", onReview: g, autoReviewStatus: _ = null, autoReviewResult: v = null, autoReviewError: y = "", autoReviewBusy: S = !1, onAutoReview: C }) {
+function ti({ preview: e, workspaceId: t = "", persistenceStatus: n = null, persistenceResult: r = null, persistenceError: i = "", persistenceBusy: a = !1, onPersist: o, semanticStatus: s = null, semanticResult: c = null, semanticError: l = "", semanticBusy: u = !1, onRunSemantic: d, reviewStatus: f = null, reviewResult: p = null, reviewError: m = "", reviewBusyId: h = "", onReview: g, autoReviewStatus: _ = null, autoReviewResult: v = null, autoReviewError: y = "", autoReviewBusy: S = !1, onAutoReview: C }) {
 	let w = (0, b.useMemo)(() => $n(e), [e]), T = Number(r?.metrics?.explicitRelationshipCount || 0), E = Number(p?.metrics?.currentRelationshipCount || 0), D = Number(p?.metrics?.proposedCount || 0), O = !!(n?.ready && t && !a && !u), k = !!(s?.ready && t && !u && !a), A = !!(_?.ready && D > 0 && !S && !u && !a), j = T === w.metrics.explicitRelationshipCount && w.metrics.explicitRelationshipCount > 0, M = Number(c?.metrics?.classificationFailedPairCount || 0), N = Number(c?.metrics?.verificationFailedPairCount || 0), P = c?.metrics?.classificationComplete !== !1 && c?.metrics?.verificationComplete !== !1;
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "contractsPanel contractsRelationshipsPanel",
@@ -17975,7 +17976,7 @@ function $r({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 											/* @__PURE__ */ (0, x.jsx)("i", { children: Qn(e.reviewStatus) }),
 											/* @__PURE__ */ (0, x.jsxs)("i", {
 												title: "ביטחון סיווג של המודל לאחר בדיקה ספקנית; אינו ודאות משפטית",
-												children: ["ביטחון סיווג: ", Xr(e.confidence)]
+												children: ["ביטחון סיווג: ", Qr(e.confidence)]
 											})
 										]
 									}),
@@ -18064,7 +18065,7 @@ function $r({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 							}),
 							/* @__PURE__ */ (0, x.jsx)("div", {
 								className: "contractsRelationshipList",
-								children: (p.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(Qr, {
+								children: (p.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(ei, {
 									item: e,
 									busy: h === e.relationshipId,
 									onReview: g
@@ -18082,7 +18083,7 @@ function $r({ preview: e, workspaceId: t = "", persistenceStatus: n = null, pers
 		]
 	});
 }
-function ei(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: r = null, summaryHe: i = null, decisionTextHe: a = null, decisionCategory: o = null, scheduleImpact: s = null, responsibleParty: c = void 0, beneficiary: l = void 0 } = {}) {
+function ni(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: r = null, summaryHe: i = null, decisionTextHe: a = null, decisionCategory: o = null, scheduleImpact: s = null, responsibleParty: c = void 0, beneficiary: l = void 0 } = {}) {
 	let u = (t || e.sourceEvidence?.map((e) => e.clauseId) || []).filter(Boolean), d = [...new Set((Array.isArray(e.tags) ? e.tags : []).map((e) => String(e || "").trim()).filter(Boolean).map((e) => /[\u0590-\u05ff]/u.test(e) ? e : In(e)))].slice(0, 12);
 	return {
 		primaryClauseId: n || u[0],
@@ -18106,7 +18107,7 @@ function ei(e, { sourceClauseIds: t = null, primaryClauseId: n = null, titleHe: 
 		recurring: !!e.recurring
 	};
 }
-function ti(e, t) {
+function ri(e, t) {
 	let n = (e.sourceEvidence || []).map((e) => e.clauseId).filter(Boolean);
 	return {
 		id: `${e.decisionId}:split:${t}:${Date.now()}`,
@@ -18119,8 +18120,8 @@ function ti(e, t) {
 		primaryClauseId: n[0] || ""
 	};
 }
-function ni({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
-	let [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(() => [ti(e, 0), ti(e, 1)]), c = Array.isArray(e.sourceEvidence) ? e.sourceEvidence : [], l = c.map((e) => e.clauseId).filter(Boolean);
+function ii({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
+	let [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(() => [ri(e, 0), ri(e, 1)]), c = Array.isArray(e.sourceEvidence) ? e.sourceEvidence : [], l = c.map((e) => e.clauseId).filter(Boolean);
 	function u(e, t) {
 		s((n) => n.map((n, r) => r === e ? {
 			...n,
@@ -18139,7 +18140,7 @@ function ni({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 		r(e, {
 			expectedRevision: e.revision,
 			reasonHe: i.trim(),
-			outputs: o.map((t) => ei(e, t))
+			outputs: o.map((t) => ni(e, t))
 		});
 	}
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -18183,9 +18184,9 @@ function ni({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 								value: e.decisionCategory,
 								onChange: (e) => u(n, { decisionCategory: e.target.value }),
 								disabled: t,
-								children: Mr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+								children: Pr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 									value: e,
-									children: Tr(e)
+									children: Dr(e)
 								}, e))
 							})] }), /* @__PURE__ */ (0, x.jsxs)("label", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "השפעה אפשרית על לוח הזמנים" }), /* @__PURE__ */ (0, x.jsxs)("select", {
 								value: e.scheduleImpact,
@@ -18232,7 +18233,7 @@ function ni({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 			}),
 			o.length < 10 && /* @__PURE__ */ (0, x.jsx)("button", {
 				type: "button",
-				onClick: () => s((t) => [...t, ti(e, t.length)]),
+				onClick: () => s((t) => [...t, ri(e, t.length)]),
 				disabled: t,
 				children: "הוסף החלטה לפיצול"
 			}),
@@ -18256,7 +18257,7 @@ function ni({ item: e, busy: t = !1, onCancel: n, onSplit: r }) {
 		]
 	});
 }
-function ri({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
+function ai({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 	let [i, a] = (0, b.useState)(e[0]?.decisionId || ""), o = e.find((e) => e.decisionId === i) || e[0], [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(o?.titleHe || ""), [d, f] = (0, b.useState)(o?.summaryHe || ""), [p, m] = (0, b.useState)(o?.decisionTextHe || ""), [h, g] = (0, b.useState)(o?.decisionCategory || "other"), [_, v] = (0, b.useState)(o?.scheduleImpact || "unknown"), y = /* @__PURE__ */ new Map();
 	for (let t of e) for (let e of t.sourceEvidence || []) y.set(e.clauseId, e);
 	let S = [...y.values()], C = [...new Set(e.flatMap((e) => Array.isArray(e.tags) ? e.tags : []))].slice(0, 12), w = e.some((e) => e.conflictStatus === "unresolved"), T = e.length >= 2 && s.trim().length >= 10 && /[א-ת]/u.test(s) && l.trim().length >= 5 && /[א-ת]/u.test(l) && d.trim().length >= 10 && /[א-ת]/u.test(d) && p.trim().length >= 10 && /[א-ת]/u.test(p) && S.length > 0;
@@ -18265,7 +18266,7 @@ function ri({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 		a(t), u(n?.titleHe || ""), f(n?.summaryHe || ""), m(n?.decisionTextHe || ""), g(n?.decisionCategory || "other"), v(n?.scheduleImpact || "unknown");
 	}
 	function D() {
-		let t = ei({
+		let t = ni({
 			...o,
 			tags: C,
 			conflictStatus: w ? "unresolved" : o.conflictStatus
@@ -18324,9 +18325,9 @@ function ri({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 						value: h,
 						onChange: (e) => g(e.target.value),
 						disabled: t,
-						children: Mr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+						children: Pr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 							value: e,
-							children: Tr(e)
+							children: Dr(e)
 						}, e))
 					})] }),
 					/* @__PURE__ */ (0, x.jsxs)("label", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "השפעה אפשרית על לוח הזמנים" }), /* @__PURE__ */ (0, x.jsxs)("select", {
@@ -18392,7 +18393,7 @@ function ri({ items: e, busy: t = !1, onCancel: n, onMerge: r }) {
 		]
 	});
 }
-function ii({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r = !1, onToggleMerge: i, onSplit: a, onReview: o }) {
+function oi({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r = !1, onToggleMerge: i, onSplit: a, onReview: o }) {
 	let [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(!1), [d, f] = (0, b.useState)(!1), [p, m] = (0, b.useState)(() => ({
 		titleHe: e.titleHe || "",
 		summaryHe: e.summaryHe || "",
@@ -18436,12 +18437,12 @@ function ii({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsDecisionCardHeader",
 				children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsxs)("small", { children: [
-					Tr(e.decisionCategory),
+					Dr(e.decisionCategory),
 					" · גרסה ",
 					e.revision
 				] }), /* @__PURE__ */ (0, x.jsx)("h4", { children: e.titleHe })] }), /* @__PURE__ */ (0, x.jsx)("span", {
 					className: "contractsPlanReady",
-					children: Er(e.reviewStatus)
+					children: Or(e.reviewStatus)
 				})]
 			}),
 			/* @__PURE__ */ (0, x.jsx)("p", {
@@ -18455,8 +18456,8 @@ function ii({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsRelationshipMeta",
 				children: [
-					/* @__PURE__ */ (0, x.jsx)("i", { children: Dr(e.scheduleImpact) }),
-					/* @__PURE__ */ (0, x.jsx)("i", { children: Or(e.temporalKind) }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: kr(e.scheduleImpact) }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: Ar(e.temporalKind) }),
 					e.responsibleParty && /* @__PURE__ */ (0, x.jsxs)("i", { children: ["אחראי: ", e.responsibleParty] }),
 					e.beneficiary && /* @__PURE__ */ (0, x.jsxs)("i", { children: ["זכאי: ", e.beneficiary] }),
 					e.conflictStatus === "unresolved" && /* @__PURE__ */ (0, x.jsx)("i", { children: "סתירה לא פתורה · לא נבחרה חלופה" })
@@ -18474,7 +18475,7 @@ function ii({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 						"מרווח מקור: ",
 						e.offsetValue,
 						" ",
-						Cr(e.offsetUnit)
+						Tr(e.offsetUnit)
 					] })
 				]
 			}),
@@ -18502,7 +18503,7 @@ function ii({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 					disabled: t
 				}), "בחר למיזוג"] })]
 			}),
-			d && g && /* @__PURE__ */ (0, x.jsx)(ni, {
+			d && g && /* @__PURE__ */ (0, x.jsx)(ii, {
 				item: e,
 				busy: t,
 				onCancel: () => f(!1),
@@ -18587,9 +18588,9 @@ function ii({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 									decisionCategory: e.target.value
 								})),
 								disabled: t,
-								children: Mr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
+								children: Pr.map((e) => /* @__PURE__ */ (0, x.jsx)("option", {
 									value: e,
-									children: Tr(e)
+									children: Dr(e)
 								}, e))
 							})] }),
 							/* @__PURE__ */ (0, x.jsxs)("label", { children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "השפעה חוזית אפשרית על לוח הזמנים" }), /* @__PURE__ */ (0, x.jsxs)("select", {
@@ -18644,18 +18645,18 @@ function ii({ item: e, busy: t = !1, lineageEnabled: n = !1, selectedForMerge: r
 				className: "contractsRelationshipReviewedState",
 				role: "status",
 				children: [
-					/* @__PURE__ */ (0, x.jsx)("strong", { children: Er(e.reviewStatus) }),
+					/* @__PURE__ */ (0, x.jsx)("strong", { children: Or(e.reviewStatus) }),
 					e.reviewReason && /* @__PURE__ */ (0, x.jsx)("p", { children: e.reviewReason }),
 					e.reviewedAt && /* @__PURE__ */ (0, x.jsx)("time", {
 						dateTime: e.reviewedAt,
-						children: kr(e.reviewedAt)
+						children: jr(e.reviewedAt)
 					})
 				]
 			})
 		]
 	});
 }
-function ai({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoReviewResult: i, autoReviewError: a = "", autoReviewBusy: o = !1, relationshipPendingCount: s = 0, error: c = "", generationBusy: l = !1, reviewBusyId: u = "", onGenerate: d, onAutoReview: f, onSplit: p, onMerge: m, onReview: h }) {
+function si({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoReviewResult: i, autoReviewError: a = "", autoReviewBusy: o = !1, relationshipPendingCount: s = 0, error: c = "", generationBusy: l = !1, reviewBusyId: u = "", onGenerate: d, onAutoReview: f, onSplit: p, onMerge: m, onReview: h }) {
 	let [g, _] = (0, b.useState)([]), v = Number(n?.metrics?.pendingRelationshipCount ?? s ?? 0), y = Number(n?.metrics?.currentDecisionCount || 0), S = Number(n?.lineage?.metrics?.activeDecisionCount ?? y), C = Number(n?.metrics?.proposedCount || 0), w = !!(t?.ready && n?.lineage?.gates?.splitEnabled && n?.lineage?.gates?.mergeEnabled), T = new Map((n?.items || []).map((e) => [e.decisionId, e])), E = g.map((e) => T.get(e)).filter(Boolean), D = !!(e?.ready && n?.workspace?.workspaceId && v === 0 && y === 0 && !l), O = !!(r?.ready && C > 0 && !l && !o && !u), k = i?.plan?.metrics;
 	function A(e) {
 		_((t) => t.includes(e.decisionId) ? t.filter((t) => t !== e.decisionId) : t.length < 10 ? [...t, e.decisionId] : t);
@@ -18783,7 +18784,7 @@ function ai({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 					role: "status",
 					children: "נבחרה החלטה אחת למיזוג. יש לבחור לפחות החלטה נוספת."
 				}),
-				w && E.length >= 2 && /* @__PURE__ */ (0, x.jsx)(ri, {
+				w && E.length >= 2 && /* @__PURE__ */ (0, x.jsx)(ai, {
 					items: E,
 					busy: u === "lineage:merge",
 					onCancel: () => _([]),
@@ -18791,7 +18792,7 @@ function ai({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 				}, E.map((e) => e.decisionId).join(":")),
 				/* @__PURE__ */ (0, x.jsx)("div", {
 					className: "contractsDecisionList",
-					children: (n.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(ii, {
+					children: (n.items || []).map((e) => /* @__PURE__ */ (0, x.jsx)(oi, {
 						item: e,
 						busy: u === e.decisionId || u === `lineage:${e.decisionId}` || u === "lineage:merge",
 						lineageEnabled: w,
@@ -18831,7 +18832,7 @@ function ai({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 								/* @__PURE__ */ (0, x.jsxs)("small", { children: [
 									e.reviewReason,
 									" · ",
-									kr(e.reviewedAt)
+									jr(e.reviewedAt)
 								] })
 							] }, e.relationshipId);
 						})
@@ -18841,23 +18842,23 @@ function ai({ status: e, lineageStatus: t, result: n, autoReviewStatus: r, autoR
 		]
 	});
 }
-function oi({ item: e }) {
+function ci({ item: e }) {
 	return /* @__PURE__ */ (0, x.jsxs)("article", {
 		className: `contractsScheduleProjectionCard is-${e.handoffStatus}`,
 		children: [
-			/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: _r(e.handoffStatus) }), /* @__PURE__ */ (0, x.jsx)("h3", { children: e.titleHe })] }), /* @__PURE__ */ (0, x.jsx)("span", { children: e.reviewStatus || Er(e.reviewStatusCode) })] }),
+			/* @__PURE__ */ (0, x.jsxs)("header", { children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: yr(e.handoffStatus) }), /* @__PURE__ */ (0, x.jsx)("h3", { children: e.titleHe })] }), /* @__PURE__ */ (0, x.jsx)("span", { children: e.reviewStatus || Or(e.reviewStatusCode) })] }),
 			/* @__PURE__ */ (0, x.jsx)("p", { children: e.summaryHe }),
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "contractsRelationshipMeta",
 				children: [
-					/* @__PURE__ */ (0, x.jsx)("i", { children: e.categoryHe || Tr("other") }),
+					/* @__PURE__ */ (0, x.jsx)("i", { children: e.categoryHe || Dr("other") }),
 					/* @__PURE__ */ (0, x.jsx)("i", { children: e.indicatorSuitability || "נדרשת בדיקה" }),
-					/* @__PURE__ */ (0, x.jsx)("i", { children: Or(e.timing?.kind || "none") })
+					/* @__PURE__ */ (0, x.jsx)("i", { children: Ar(e.timing?.kind || "none") })
 				]
 			}),
 			/* @__PURE__ */ (0, x.jsx)("ul", {
 				className: "contractsScheduleProjectionBlockers",
-				children: (e.reasonCodes || []).map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: gr(e) }, e))
+				children: (e.reasonCodes || []).map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: vr(e) }, e))
 			}),
 			e.sourceEvidence?.length > 0 && /* @__PURE__ */ (0, x.jsxs)("details", {
 				className: "contractsRelationshipEvidence",
@@ -18875,7 +18876,7 @@ function oi({ item: e }) {
 		]
 	});
 }
-function si({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !1, onRun: a }) {
+function li({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !1, onRun: a }) {
 	let o = t?.metrics || {}, s = (t?.items || []).filter((e) => e.handoffStatus === "suitable"), c = (t?.items || []).filter((e) => e.handoffStatus === "requires_review"), l = (t?.items || []).filter((e) => e.handoffStatus === "not_suitable"), u = !!(e?.ready && e?.mode === "indicator_handoff_read_only");
 	return /* @__PURE__ */ (0, x.jsxs)("section", {
 		className: "contractsPanel contractsScheduleProjectionPanel",
@@ -18962,7 +18963,7 @@ function si({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						})]
 					}), /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: s.map((e) => /* @__PURE__ */ (0, x.jsx)(oi, { item: e }, e.decisionId))
+						children: s.map((e) => /* @__PURE__ */ (0, x.jsx)(ci, { item: e }, e.decisionId))
 					})]
 				}),
 				/* @__PURE__ */ (0, x.jsxs)("section", {
@@ -18979,7 +18980,7 @@ function si({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						})]
 					}), c.length ? /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: c.map((e) => /* @__PURE__ */ (0, x.jsx)(oi, { item: e }, e.decisionId))
+						children: c.map((e) => /* @__PURE__ */ (0, x.jsx)(ci, { item: e }, e.decisionId))
 					}) : /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsMessage is-success",
 						role: "status",
@@ -18994,15 +18995,15 @@ function si({ status: e, result: t, error: n = "", busy: r = !1, disabled: i = !
 						" החלטות שאינן מתאימות למסירה"
 					] }), /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsScheduleProjectionList",
-						children: l.map((e) => /* @__PURE__ */ (0, x.jsx)(oi, { item: e }, e.decisionId))
+						children: l.map((e) => /* @__PURE__ */ (0, x.jsx)(ci, { item: e }, e.decisionId))
 					})]
 				})
 			] })
 		]
 	});
 }
-function ci() {
-	let [e, t] = (0, b.useState)(null), [n, r] = (0, b.useState)(null), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(""), [u, d] = (0, b.useState)([]), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(""), [g, _] = (0, b.useState)([]), [v, y] = (0, b.useState)(null), [S, C] = (0, b.useState)(""), [w, T] = (0, b.useState)(null), [E, D] = (0, b.useState)(null), [O, k] = (0, b.useState)(""), [A, j] = (0, b.useState)(null), [M, N] = (0, b.useState)(null), [P, F] = (0, b.useState)(null), [I, L] = (0, b.useState)(""), [R, z] = (0, b.useState)(null), [ee, te] = (0, b.useState)(null), [B, V] = (0, b.useState)(""), [ne, re] = (0, b.useState)(null), [ie, ae] = (0, b.useState)(null), [oe, se] = (0, b.useState)(null), [ce, le] = (0, b.useState)(""), [ue, de] = (0, b.useState)(null), [fe, pe] = (0, b.useState)(null), [me, he] = (0, b.useState)(""), [ge, _e] = (0, b.useState)(null), [ve, ye] = (0, b.useState)(null), [be, xe] = (0, b.useState)(""), [H, Se] = (0, b.useState)(""), [Ce, we] = (0, b.useState)(null), [Te, Ee] = (0, b.useState)(""), [De, Oe] = (0, b.useState)("idle"), [ke, Ae] = (0, b.useState)(""), [je, Me] = (0, b.useState)(null), [U, Ne] = (0, b.useState)(null), [Pe, Fe] = (0, b.useState)(Ar), [Ie, Le] = (0, b.useState)(jr), [Re, ze] = (0, b.useState)("אולם תצוגה הרצליה"), [Be, Ve] = (0, b.useState)(null), [He, Ue] = (0, b.useState)(null), [We, Ge] = (0, b.useState)("clauses"), [Ke, qe] = (0, b.useState)({}), [Je, Ye] = (0, b.useState)(""), [Xe, Ze] = (0, b.useState)(""), [Qe, $e] = (0, b.useState)(""), [et, tt] = (0, b.useState)(null), [nt, rt] = (0, b.useState)(null), [W, G] = (0, b.useState)(""), [it, at] = (0, b.useState)(""), ot = (0, b.useRef)(0), st = (0, b.useRef)(null), ct = (0, b.useRef)(null), lt = (0, b.useRef)(null), ut = (0, b.useRef)(""), dt = (0, b.useRef)(0), ft = (0, b.useRef)(""), pt = (0, b.useRef)(!1);
+function ui() {
+	let [e, t] = (0, b.useState)(null), [n, r] = (0, b.useState)(null), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(""), [u, d] = (0, b.useState)([]), [f, p] = (0, b.useState)(null), [m, h] = (0, b.useState)(""), [g, _] = (0, b.useState)([]), [v, y] = (0, b.useState)(null), [S, C] = (0, b.useState)(""), [w, T] = (0, b.useState)(null), [E, D] = (0, b.useState)(null), [O, k] = (0, b.useState)(""), [A, j] = (0, b.useState)(null), [M, N] = (0, b.useState)(null), [P, F] = (0, b.useState)(null), [I, L] = (0, b.useState)(""), [R, z] = (0, b.useState)(null), [ee, te] = (0, b.useState)(null), [B, V] = (0, b.useState)(""), [ne, re] = (0, b.useState)(null), [ie, ae] = (0, b.useState)(null), [oe, se] = (0, b.useState)(null), [ce, le] = (0, b.useState)(""), [ue, de] = (0, b.useState)(null), [fe, pe] = (0, b.useState)(null), [me, he] = (0, b.useState)(""), [ge, _e] = (0, b.useState)(null), [ve, ye] = (0, b.useState)(null), [be, xe] = (0, b.useState)(""), [H, Se] = (0, b.useState)(""), [Ce, we] = (0, b.useState)(null), [Te, Ee] = (0, b.useState)(""), [De, Oe] = (0, b.useState)("idle"), [ke, Ae] = (0, b.useState)(""), [je, Me] = (0, b.useState)(null), [U, Ne] = (0, b.useState)(null), [Pe, Fe] = (0, b.useState)(Mr), [Ie, Le] = (0, b.useState)(Nr), [Re, ze] = (0, b.useState)("אולם תצוגה הרצליה"), [Be, Ve] = (0, b.useState)(null), [He, Ue] = (0, b.useState)(null), [We, Ge] = (0, b.useState)("clauses"), [Ke, qe] = (0, b.useState)({}), [Je, Ye] = (0, b.useState)(""), [Xe, Ze] = (0, b.useState)(""), [Qe, $e] = (0, b.useState)(""), [et, tt] = (0, b.useState)(null), [nt, rt] = (0, b.useState)(null), [W, G] = (0, b.useState)(""), [it, at] = (0, b.useState)(""), ot = (0, b.useRef)(0), st = (0, b.useRef)(null), ct = (0, b.useRef)(null), lt = (0, b.useRef)(null), ut = (0, b.useRef)(""), dt = (0, b.useRef)(0), ft = (0, b.useRef)(""), pt = (0, b.useRef)(!1);
 	function mt(e) {
 		return !!(e && e.epoch === ot.current && e.workspaceId === ut.current);
 	}
@@ -19084,10 +19085,9 @@ function ci() {
 		let e = setTimeout(() => Ct(), 350);
 		return () => clearTimeout(e);
 	}, [Pe, o?.ready]), (0, b.useEffect)(() => {
-		if (!f?.ready || !/^[0-9a-f-]{36}$/iu.test(Pe.trim())) return;
 		let e = setTimeout(() => wt(), 350);
 		return () => clearTimeout(e);
-	}, [Pe, f?.ready]), (0, b.useEffect)(() => {
+	}, []), (0, b.useEffect)(() => {
 		!M?.ready || !H || Ot(H);
 	}, [H, M?.ready]), (0, b.useEffect)(() => {
 		!ne?.applyApproved || !H || kt(H);
@@ -19099,13 +19099,13 @@ function ci() {
 		ye(null), xe(""), te(null), V(""), pe(null), he("");
 	}, [H]), (0, b.useEffect)(() => {
 		if (!o?.ready || !Ce?.workspaceId || !Be || !Xe || !Qe || pt.current) return;
-		let e = Hr({
+		let e = Wr({
 			decisions: Ke,
 			reviewReason: Je,
 			batchId: Xe,
 			reviewedAt: Qe,
 			mappingDraft: je
-		}), t = Ur(e), n = ct.current;
+		}), t = Gr(e), n = ct.current;
 		if (t === ft.current && !mt(n)) {
 			lt.current = null, ht(), Oe(Ce.draft ? "saved" : "idle"), Ae("");
 			return;
@@ -19141,10 +19141,10 @@ function ci() {
 			d([]), l(K(e));
 		}
 	}
-	async function wt(e = f) {
-		if (!(!e?.ready || !/^[0-9a-f-]{36}$/iu.test(Pe.trim()))) try {
+	async function wt() {
+		try {
 			_((await q(`/api/contracts/clauses/workspaces?${new URLSearchParams({
-				sourceProjectId: Pe.trim(),
+				sourceProjectId: Mr,
 				limit: "50"
 			})}`)).items || []), h("");
 		} catch (e) {
@@ -19350,8 +19350,8 @@ function ci() {
 		}
 	}
 	function zt(e, t = "", { autosaveConflictMessage: n = "", preserveClausePreview: r = !1, preserveFile: i = !1 } = {}) {
-		let a = e.extraction, o = Vr(a, e.draft), s = Hr(o);
-		ht(), ot.current += 1, lt.current = null, pt.current = !!n, ut.current = e.workspaceId, dt.current = Wr(e.draft), ft.current = Ur(s), Oe(n ? "conflict" : e.draft ? "saved" : "idle"), Ae(n), Ve(a), qe(o.decisions), Ye(o.reviewReason), Ze(o.batchId), $e(o.reviewedAt), Me(o.mappingDraft), Fe(e.sourceProjectId || a.projectBinding?.projectId || Ar), Le(e.scheduleProjectId || jr), ze(e.projectSite || a.projectBinding?.projectSite || ""), we(e), Ee(t), tt(null), rt(null), at(""), r || Ue(null), i || Ne(null);
+		let a = e.extraction, o = Ur(a, e.draft), s = Wr(o);
+		ht(), ot.current += 1, lt.current = null, pt.current = !!n, ut.current = e.workspaceId, dt.current = Kr(e.draft), ft.current = Gr(s), Oe(n ? "conflict" : e.draft ? "saved" : "idle"), Ae(n), Ve(a), qe(o.decisions), Ye(o.reviewReason), Ze(o.batchId), $e(o.reviewedAt), Me(o.mappingDraft), Fe(e.sourceProjectId || a.projectBinding?.projectId || Mr), Le(e.scheduleProjectId || Nr), ze(e.projectSite || a.projectBinding?.projectSite || ""), we(e), Ee(t), tt(null), rt(null), at(""), r || Ue(null), i || Ne(null);
 	}
 	async function Bt(e) {
 		G("open-workspace"), l("");
@@ -19387,7 +19387,7 @@ function ci() {
 		if (!U) return at("יש לבחור קובץ PDF.");
 		G("extract"), at(""), l(""), Ee(""), tt(null), rt(null);
 		try {
-			let e = await Ir(U), t = {
+			let e = await Rr(U), t = {
 				filename: U.name,
 				mediaType: "application/pdf",
 				pdfBase64: e,
@@ -19408,7 +19408,7 @@ function ci() {
 				method: "POST",
 				timeoutMs: 3e5,
 				body: t
-			}), r = n.extraction || n, i = Vr(r, n.draft);
+			}), r = n.extraction || n, i = Ur(r, n.draft);
 			if (o?.ready) {
 				let e = n.reused ? "החוזה כבר היה שמור: החילוץ והטיוטה נטענו ללא קריאת מודל וללא עלות טוקנים נוספת." : "החוזה, ה-PDF ותוצאת החילוץ נשמרו. השינויים בהחלטות יישמרו אוטומטית.";
 				zt({
@@ -19431,7 +19431,7 @@ function ci() {
 		if (!f?.ready) return at("שמירת תוצאת סוכן החוזים עדיין אינה מופעלת בשרת.");
 		G("clause-persist"), at(""), Ee("");
 		try {
-			let e = await Ir(U), t = await q("/api/contracts/clauses/workspaces/extract", {
+			let e = await Rr(U), t = await q("/api/contracts/clauses/workspaces/extract", {
 				method: "POST",
 				timeoutMs: 3e5,
 				body: {
@@ -19460,7 +19460,7 @@ function ci() {
 		try {
 			tt(await q("/api/contracts/review/plan", {
 				method: "POST",
-				body: qr({
+				body: Yr({
 					extraction: Be,
 					decisions: Ke,
 					reviewReason: Je,
@@ -19482,7 +19482,7 @@ function ci() {
 		let t = e === En.reviewOnly;
 		G(t ? "save-review" : "commit"), at("");
 		try {
-			let e = qr({
+			let e = Yr({
 				extraction: Be,
 				decisions: Ke,
 				reviewReason: Je,
@@ -19546,33 +19546,26 @@ function ci() {
 				children: [
 					/* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsSectionHeader",
-						children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("h2", { children: "חילוצי סוכן החוזים שנשמרו" }), /* @__PURE__ */ (0, x.jsx)("p", { children: "פתיחה מכאן טוענת את כל הסעיפים, התקצירים, התגיות וההפניות ללא העלאת PDF וללא קריאה נוספת למודל." })] }), /* @__PURE__ */ (0, x.jsx)("span", {
-							className: f?.ready ? "contractsPlanReady" : "contractsPlanBlocked",
-							children: f?.ready ? "שמירת R3.2 פעילה" : "שמירת R3.2 מושבתת"
+						children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("h2", { children: "חוזי קייס־סטדי — כפיים" }), /* @__PURE__ */ (0, x.jsx)("p", { children: "אותם חוזים ציבוריים שמופיעים בבידוק כפיים. פתיחה טוענת סעיפים והחלטות חוזיות בלי העלאת PDF ובלי קריאה נוספת למודל." })] }), /* @__PURE__ */ (0, x.jsx)("span", {
+							className: "contractsPlanReady",
+							children: "קייס־סטדי כפיים"
 						})]
 					}),
-					!f?.ready && /* @__PURE__ */ (0, x.jsx)("p", {
-						className: "contractsActivationNotice",
-						children: m || "מיגרציית R3.2 והפעלת השרת עדיין נדרשות לפני שמירת חילוצי הסעיפים."
-					}),
-					f?.ready && g.length === 0 && /* @__PURE__ */ (0, x.jsx)("p", {
+					g.length === 0 && /* @__PURE__ */ (0, x.jsx)("p", {
 						className: "contractsMappingEmpty",
-						children: "אין עדיין חילוצי סעיפים שמורים לפרויקט MAIN הנבחר."
+						children: "אין עדיין חוזים ציבוריים בקייס־סטדי כפיים."
 					}),
-					f?.ready && g.length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
+					g.length > 0 && /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsSavedList",
-						"aria-label": "חילוצי סעיפים שמורים",
+						"aria-label": "חוזי קייס־סטדי כפיים",
 						children: g.map((e) => /* @__PURE__ */ (0, x.jsxs)("article", { children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [
 							/* @__PURE__ */ (0, x.jsx)("strong", { children: e.projectSite || e.filename }),
 							/* @__PURE__ */ (0, x.jsxs)("span", { children: [
 								e.filename,
-								" · ",
-								e.clauseCount,
-								" רשומות · ",
-								e.pageCount,
-								" עמודים"
+								e.clauseCount == null ? "" : ` · ${e.clauseCount} רשומות`,
+								e.pageCount == null ? "" : ` · ${e.pageCount} עמודים`
 							] }),
-							/* @__PURE__ */ (0, x.jsxs)("small", { children: ["נשמר ", kr(e.createdAt)] }),
+							/* @__PURE__ */ (0, x.jsxs)("small", { children: ["נשמר ", jr(e.createdAt)] }),
 							/* @__PURE__ */ (0, x.jsx)("small", {
 								dir: "ltr",
 								children: e.documentVersionId
@@ -19584,7 +19577,7 @@ function ci() {
 							children: W === "open-clause-workspace" ? "פותח…" : "פתח ללא חילוץ חוזר"
 						})] }, e.workspaceId))
 					}),
-					f?.ready && m && /* @__PURE__ */ (0, x.jsx)("div", {
+					m && /* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsMessage is-error",
 						role: "alert",
 						children: m
@@ -19620,7 +19613,7 @@ function ci() {
 								e.candidateCount,
 								" מועמדים"
 							] }),
-							/* @__PURE__ */ (0, x.jsx)("small", { children: e.draft ? `${e.draft.reviewedCount}/${e.candidateCount} החלטות עם נימוק · נשמר ${kr(e.draft.updatedAt)}` : `טרם נשמרה טיוטת החלטות · נוצר ${kr(e.createdAt)}` }),
+							/* @__PURE__ */ (0, x.jsx)("small", { children: e.draft ? `${e.draft.reviewedCount}/${e.candidateCount} החלטות עם נימוק · נשמר ${jr(e.draft.updatedAt)}` : `טרם נשמרה טיוטת החלטות · נוצר ${jr(e.createdAt)}` }),
 							/* @__PURE__ */ (0, x.jsxs)("small", { children: ["מזהה פרויקט לוח זמנים: ", /* @__PURE__ */ (0, x.jsx)("bdi", {
 								dir: "ltr",
 								children: e.scheduleProjectId || "לא שויך"
@@ -19721,22 +19714,22 @@ function ci() {
 							children: "החילוץ השמור נשאר טעון בעת מעבר בין הכרטיסיות"
 						})]
 					}),
-					/* @__PURE__ */ (0, x.jsx)(Pr, {
+					/* @__PURE__ */ (0, x.jsx)(Ir, {
 						activeTab: We,
 						onChange: Ge
 					}),
-					/* @__PURE__ */ (0, x.jsx)(Fr, {
+					/* @__PURE__ */ (0, x.jsx)(Lr, {
 						id: "clauses",
 						activeTab: We,
-						children: /* @__PURE__ */ (0, x.jsx)(Yr, {
+						children: /* @__PURE__ */ (0, x.jsx)(Zr, {
 							preview: He,
 							classicDocumentVersionId: yt
 						})
 					}),
-					/* @__PURE__ */ (0, x.jsx)(Fr, {
+					/* @__PURE__ */ (0, x.jsx)(Lr, {
 						id: "relationships",
 						activeTab: We,
-						children: /* @__PURE__ */ (0, x.jsx)($r, {
+						children: /* @__PURE__ */ (0, x.jsx)(ti, {
 							preview: He,
 							workspaceId: H,
 							persistenceStatus: v,
@@ -19761,10 +19754,10 @@ function ci() {
 							onAutoReview: Nt
 						})
 					}),
-					/* @__PURE__ */ (0, x.jsx)(Fr, {
+					/* @__PURE__ */ (0, x.jsx)(Lr, {
 						id: "decisions",
 						activeTab: We,
-						children: /* @__PURE__ */ (0, x.jsx)(ai, {
+						children: /* @__PURE__ */ (0, x.jsx)(si, {
 							status: ne,
 							lineageStatus: ie,
 							result: oe,
@@ -19783,10 +19776,10 @@ function ci() {
 							onReview: It
 						})
 					}),
-					/* @__PURE__ */ (0, x.jsx)(Fr, {
+					/* @__PURE__ */ (0, x.jsx)(Lr, {
 						id: "indicator",
 						activeTab: We,
-						children: /* @__PURE__ */ (0, x.jsx)(si, {
+						children: /* @__PURE__ */ (0, x.jsx)(li, {
 							status: ge,
 							result: ve,
 							error: be,
@@ -19835,7 +19828,7 @@ function ci() {
 					}),
 					/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "contractsCandidateList",
-						children: (Be.candidates || []).map((e) => /* @__PURE__ */ (0, x.jsx)(Jr, {
+						children: (Be.candidates || []).map((e) => /* @__PURE__ */ (0, x.jsx)(Xr, {
 							candidate: e,
 							decision: Ke[e.candidateKey],
 							onChange: (t) => Vt(e.candidateKey, t)
@@ -19867,7 +19860,7 @@ function ci() {
 						className: "contractsSectionHeader",
 						children: [/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("h2", { children: "3. תוכנית טרנזקציה" }), /* @__PURE__ */ (0, x.jsxs)("p", { children: [
 							"מצב: ",
-							xr(et.plan?.status),
+							Cr(et.plan?.status),
 							" · פעולה בטוחה: ",
 							St === En.promotion ? "קידום עובדות מאושרות" : St === En.reviewOnly ? "שמירת סקירה בלבד" : "אין"
 						] })] }), /* @__PURE__ */ (0, x.jsx)("span", {
@@ -19877,7 +19870,7 @@ function ci() {
 					}),
 					(et.plan?.globalBlockers || []).length > 0 && /* @__PURE__ */ (0, x.jsx)("ul", {
 						className: "contractsBlockers",
-						children: et.plan.globalBlockers.map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: hr(e) }, e))
+						children: et.plan.globalBlockers.map((e) => /* @__PURE__ */ (0, x.jsx)("li", { children: _r(e) }, e))
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "contractsPlanCounts",
@@ -19935,7 +19928,7 @@ function ci() {
 					})
 				]
 			}),
-			Be && /* @__PURE__ */ (0, x.jsx)(Kr, {
+			Be && /* @__PURE__ */ (0, x.jsx)(Jr, {
 				extraction: Be,
 				sourceProjectId: Pe.trim(),
 				status: n,
@@ -19958,35 +19951,35 @@ function ci() {
 }
 //#endregion
 //#region src/react/main.jsx
-var li = /* @__PURE__ */ new WeakMap();
-function ui({ label: e = "React bridge ready" }) {
+var di = /* @__PURE__ */ new WeakMap();
+function fi({ label: e = "React bridge ready" }) {
 	return /* @__PURE__ */ (0, x.jsx)("span", {
 		className: "reactBridgeStatus",
 		"data-react-ready": "true",
 		children: e
 	});
 }
-var di = {
-	status: ui,
+var pi = {
+	status: fi,
 	settings: je,
 	workflow: Ie,
 	insights: $e,
 	schedule: Tn,
-	contracts: ci
+	contracts: ui
 };
-function fi(e) {
-	let t = di[e.dataset.reactIsland];
-	if (!t || li.has(e)) return !1;
+function mi(e) {
+	let t = pi[e.dataset.reactIsland];
+	if (!t || di.has(e)) return !1;
 	let n = e.dataset.reactProps ? JSON.parse(e.dataset.reactProps) : {}, r = (0, y.createRoot)(e);
-	return r.render(/* @__PURE__ */ (0, x.jsx)(b.StrictMode, { children: /* @__PURE__ */ (0, x.jsx)(t, { ...n }) })), li.set(e, r), !0;
+	return r.render(/* @__PURE__ */ (0, x.jsx)(b.StrictMode, { children: /* @__PURE__ */ (0, x.jsx)(t, { ...n }) })), di.set(e, r), !0;
 }
-function pi(e = document) {
-	return Array.from(e.querySelectorAll("[data-react-island]")).reduce((e, t) => e + +!!fi(t), 0);
+function hi(e = document) {
+	return Array.from(e.querySelectorAll("[data-react-island]")).reduce((e, t) => e + +!!mi(t), 0);
 }
 typeof window < "u" && (window.BiDocReact = {
-	islands: Object.keys(di),
-	mountReactIslands: pi,
+	islands: Object.keys(pi),
+	mountReactIslands: hi,
 	version: "0.1.0"
-}, document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => pi(), { once: !0 }) : pi());
+}, document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => hi(), { once: !0 }) : hi());
 //#endregion
-export { pi as mountReactIslands };
+export { hi as mountReactIslands };

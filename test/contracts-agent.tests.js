@@ -102,6 +102,7 @@ import {
   CONTRACTS_RELATIONSHIPS_INPUT_BOUNDARY_VERSION,
   contractsReferenceTargetLabelHe,
   contractsTagLabelHe,
+  decorateContractsClausePreview,
   decorateContractsClauseRecords,
   selectContractsRelationshipEligibleClauses
 } from "../src/contracts/clausePresentation.js";
@@ -4561,6 +4562,54 @@ export function registerContractsAgentTests(test) {
     assert.equal(result.items[0].filename, "הסכם התקשרות.pdf");
     assert.equal(result.items[0].pageCount, 40);
     assert.equal(result.items[0].source, "public.contract_workspaces");
+  });
+
+  test("Kapaim public workspace satisfies the clause preview generation contract", async () => {
+    const workspaceId = "4ff258bd-29ac-4aa9-a148-ac1bfcc7b8aa";
+    const result = await getPublicContractWorkspace({
+      config: {
+        contentSource: { supabaseUrl: "https://fixture.supabase.co", supabaseServiceRoleKey: "service-role" }
+      },
+      workspaceId,
+      fetchImpl: async (url) => {
+        const requestUrl = String(url);
+        if (requestUrl.includes("/contract_workspaces?")) {
+          return new Response(JSON.stringify([{
+            id: workspaceId,
+            project_id: KAPAIM_STUDYCASE_PROJECT_ID,
+            document_name: "הסכם התקשרות.pdf",
+            document_type: "signed_contract",
+            document_sha256: "a".repeat(64),
+            page_count: 40,
+            site: "הרצליה"
+          }]), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        if (requestUrl.includes("/contracts_documents?")) {
+          return new Response(JSON.stringify([{
+            id: "clause-1",
+            clause_key: "1",
+            clause_type: "clause",
+            clause_title: "מבוא",
+            clause_order: 1,
+            page_start: 1,
+            page_end: 1,
+            exact_text: "טקסט",
+            summary_he: "תקציר",
+            hashtags: []
+          }]), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    });
+
+    const presented = decorateContractsClausePreview(result.preview);
+    assert.equal(result.preview.persisted, true);
+    assert.equal(result.preview.document.documentVersionId, "a".repeat(64));
+    assert.deepEqual(presented.generations, {});
+    assert.doesNotThrow(() => presented.generations.parserGenerationId);
   });
 
   test("Kapaim study-case public list hides contracts from other Bidoc projects", async () => {

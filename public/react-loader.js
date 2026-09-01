@@ -1,4 +1,4 @@
-const REACT_BRIDGE_URL = "/react/bidoc-react.js?v=20260815-contracts-r3-3";
+const REACT_BRIDGE_URL = "/react/bidoc-react.js?v=20260901-kapaim-contract-preview-fix";
 
 function loadReactBridge() {
   if (!document.querySelector("[data-react-island]")) return;
