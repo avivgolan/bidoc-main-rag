@@ -1,3 +1,6 @@
+import { createRequire } from "node:module";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { CONTRACTS_PDF_READER_VERSION } from "./constants.js";
 import { ContractsAgentError } from "./errors.js";
@@ -7,6 +10,51 @@ export const CONTRACTS_MAX_PAGES = 80;
 export const CONTRACTS_MAX_TEXT_CHARACTERS = 160_000;
 
 const BIDI_MARKS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+const require = createRequire(import.meta.url);
+const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
+const packedCmapUrl = `${pathToFileURL(path.join(pdfjsRoot, "cmaps")).href}/`;
+const packedStandardFontDataUrl = `${pathToFileURL(path.join(pdfjsRoot, "standard_fonts")).href}/`;
+
+ensurePdfjsDomPolyfills();
+
+export function contractPdfLoadOptions(pdfBytes) {
+  const source = pdfBytes instanceof Uint8Array
+    ? pdfBytes
+    : new Uint8Array(pdfBytes || []);
+  const data = new Uint8Array(source.byteLength);
+  data.set(source);
+  return {
+    data,
+    disableFontFace: true,
+    isEvalSupported: false,
+    useSystemFonts: false,
+    verbosity: 0,
+    isOffscreenCanvasSupported: false,
+    disableRange: true,
+    disableStream: true,
+    disableAutoFetch: true,
+    cMapPacked: true,
+    cMapUrl: packedCmapUrl,
+    standardFontDataUrl: packedStandardFontDataUrl
+  };
+}
+
+function ensurePdfjsDomPolyfills() {
+  try {
+    const canvas = require("@napi-rs/canvas");
+    if (typeof globalThis.DOMMatrix === "undefined" && canvas.DOMMatrix) {
+      globalThis.DOMMatrix = canvas.DOMMatrix;
+    }
+    if (typeof globalThis.ImageData === "undefined" && canvas.ImageData) {
+      globalThis.ImageData = canvas.ImageData;
+    }
+    if (typeof globalThis.Path2D === "undefined" && canvas.Path2D) {
+      globalThis.Path2D = canvas.Path2D;
+    }
+  } catch {
+    // Optional on machines that only run mocked PDF tests.
+  }
+}
 
 export async function readContractPdf({
   pdfBytes,
@@ -23,13 +71,7 @@ export async function readContractPdf({
   try {
     try {
       throwIfPdfOperationAborted(boundary.signal);
-      loadingTask = loadDocument({
-        data: new Uint8Array(pdfBytes),
-        disableFontFace: true,
-        isEvalSupported: false,
-        useSystemFonts: true,
-        verbosity: 0
-      });
+      loadingTask = loadDocument(contractPdfLoadOptions(pdfBytes));
       document = await racePdfOperation(loadingTask.promise, boundary.signal);
     } catch (error) {
       throw mapPdfDocumentFailure(error, boundary.signal);

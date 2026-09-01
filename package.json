@@ -60,6 +60,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.0.0",
+    "@napi-rs/canvas": "^0.1.100",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "graphology": "^0.26.0",

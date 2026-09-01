@@ -47,7 +47,7 @@ import {
   submitContractPromotion
 } from "../src/contracts/promotionWriter.js";
 import { compileRepresentativeCases, evaluateRepresentativeCases } from "../src/contracts/representativeEvaluator.js";
-import { readContractPdf, reconstructPdfPageText } from "../src/contracts/pdfReader.js";
+import { contractPdfLoadOptions, readContractPdf, reconstructPdfPageText } from "../src/contracts/pdfReader.js";
 import { parseContractExtractionRequest, readJsonBounded } from "../src/contracts/request.js";
 import { contractsPhase2ApplyApproved, prepareContractReview } from "../src/contracts/reviewWorkflow.js";
 import { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } from "../src/contracts/reviewMode.js";
@@ -1773,6 +1773,17 @@ export function registerContractsAgentTests(test) {
     assert.equal(parsed.pageCount, 1);
     assert.equal(parsed.unreadablePages.length, 0);
     assert.match(parsed.pages[0].text, /Hello contract text/);
+  });
+
+  test("contracts PDF reader loads packaged cmaps and standard fonts for serverless", () => {
+    const options = contractPdfLoadOptions(Buffer.from("%PDF-1.4"));
+    assert.match(options.cMapUrl, /cmaps\/$/);
+    assert.match(options.standardFontDataUrl, /standard_fonts\/$/);
+    assert.equal(options.cMapPacked, true);
+    assert.equal(options.useSystemFonts, false);
+    assert.equal(options.isOffscreenCanvasSupported, false);
+    assert.ok(options.data instanceof Uint8Array);
+    assert.equal(options.data.byteLength, 8);
   });
 
   test("contracts PDF reader maps page and text-layer failures to a safe typed 422", async () => {
