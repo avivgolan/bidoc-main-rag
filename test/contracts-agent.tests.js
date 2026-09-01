@@ -47,7 +47,7 @@ import {
   submitContractPromotion
 } from "../src/contracts/promotionWriter.js";
 import { compileRepresentativeCases, evaluateRepresentativeCases } from "../src/contracts/representativeEvaluator.js";
-import { contractPdfLoadOptions, readContractPdf, reconstructPdfPageText } from "../src/contracts/pdfReader.js";
+import { contractPdfLoadOptions, contractPdfWorkerSrc, readContractPdf, reconstructPdfPageText } from "../src/contracts/pdfReader.js";
 import { parseContractExtractionRequest, readJsonBounded } from "../src/contracts/request.js";
 import { contractsPhase2ApplyApproved, prepareContractReview } from "../src/contracts/reviewWorkflow.js";
 import { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } from "../src/contracts/reviewMode.js";
@@ -1784,6 +1784,8 @@ export function registerContractsAgentTests(test) {
     assert.equal(options.useSystemFonts, false);
     assert.equal(options.isOffscreenCanvasSupported, false);
     assert.equal(typeof options.canvasFactory?.create, "function");
+    assert.match(contractPdfWorkerSrc, /pdf\.worker\.mjs$/);
+    assert.equal(typeof globalThis.pdfjsWorker?.WorkerMessageHandler, "function");
     assert.ok(options.data instanceof Uint8Array);
     assert.equal(options.data.byteLength, 8);
 

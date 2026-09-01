@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+import * as pdfjsWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs";
 import { CONTRACTS_PDF_READER_VERSION } from "./constants.js";
 import { ContractsAgentError } from "./errors.js";
 
@@ -15,6 +16,12 @@ const require = createRequire(import.meta.url);
 const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
 const packedCmapUrl = `${pathToFileURL(path.join(pdfjsRoot, "cmaps")).href}/`;
 const packedStandardFontDataUrl = `${pathToFileURL(path.join(pdfjsRoot, "standard_fonts")).href}/`;
+const packedWorkerSrc = pathToFileURL(require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs")).href;
+
+// Vercel NFT traces the static import, but pdfjs still tries a dynamic
+// `import(workerSrc)` unless the worker is already on the global.
+globalThis.pdfjsWorker = pdfjsWorker;
+GlobalWorkerOptions.workerSrc = packedWorkerSrc;
 const remoteCmapUrl = `https://unpkg.com/pdfjs-dist@${PDFJS_CDN_VERSION}/cmaps/`;
 const remoteStandardFontDataUrl = `https://unpkg.com/pdfjs-dist@${PDFJS_CDN_VERSION}/standard_fonts/`;
 
@@ -42,6 +49,8 @@ export function contractPdfLoadOptions(pdfBytes, { vercel = Boolean(process.env.
     canvasFactory: createContractsCanvasFactory()
   };
 }
+
+export const contractPdfWorkerSrc = packedWorkerSrc;
 
 function loadNapiCanvas() {
   return require("@napi-rs/canvas");
