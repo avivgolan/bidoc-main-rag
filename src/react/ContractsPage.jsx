@@ -13,6 +13,10 @@ import {
   contractsRelationshipTypeLabelHe
 } from "../contracts/relationshipProposals.js";
 import {
+  KAPAIM_STUDYCASE_PROJECT_ID,
+  MAIN_STUDYCASE_SOURCE_PROJECT_ID
+} from "../contracts/studyCase.js";
+import {
   contractActionLabel,
   contractDirectionLabel,
   contractGateLabel,
@@ -35,8 +39,8 @@ import {
   storageDispositionLabel
 } from "./contractsHebrew.js";
 
-const SOURCE_PROJECT_ID = "652bf3e0-9a1e-47ca-b06f-cd8dc33907f7";
-const SCHEDULE_PROJECT_ID = "81b1cbac-8fcf-43c1-acdc-6b5c809de0e5";
+const SOURCE_PROJECT_ID = MAIN_STUDYCASE_SOURCE_PROJECT_ID;
+const SCHEDULE_PROJECT_ID = KAPAIM_STUDYCASE_PROJECT_ID;
 const CONTRACTS_DECISION_CATEGORY_OPTIONS = [
   "scope_and_execution",
   "commencement_and_completion",
@@ -2448,10 +2452,9 @@ export function ContractsPage() {
   }, [sourceProjectId, workspaceStatus?.ready]);
 
   useEffect(() => {
-    if (!clausePersistenceStatus?.ready || !/^[0-9a-f-]{36}$/iu.test(sourceProjectId.trim())) return;
     const timer = setTimeout(() => loadSavedClauseContracts(), 350);
     return () => clearTimeout(timer);
-  }, [sourceProjectId, clausePersistenceStatus?.ready]);
+  }, []);
 
   useEffect(() => {
     if (!relationshipReviewStatus?.ready || !currentClauseWorkspaceId) return;
@@ -2539,10 +2542,9 @@ export function ContractsPage() {
     }
   }
 
-  async function loadSavedClauseContracts(statusOverride = clausePersistenceStatus) {
-    if (!statusOverride?.ready || !/^[0-9a-f-]{36}$/iu.test(sourceProjectId.trim())) return;
+  async function loadSavedClauseContracts() {
     try {
-      const query = new URLSearchParams({ sourceProjectId: sourceProjectId.trim(), limit: "50" });
+      const query = new URLSearchParams({ sourceProjectId: SOURCE_PROJECT_ID, limit: "50" });
       const response = await api(`/api/contracts/clauses/workspaces?${query}`);
       setSavedClauseContracts(response.items || []);
       setClausePersistenceError("");
@@ -3136,28 +3138,25 @@ export function ContractsPage() {
       <section className="contractsPanel contractsWorkspacePanel contractsClauseWorkspacePanel">
         <div className="contractsSectionHeader">
           <div>
-            <h2>חילוצי סוכן החוזים שנשמרו</h2>
-            <p>פתיחה מכאן טוענת את כל הסעיפים, התקצירים, התגיות וההפניות ללא העלאת PDF וללא קריאה נוספת למודל.</p>
+            <h2>חוזי קייס־סטדי — כפיים</h2>
+            <p>אותם חוזים ציבוריים שמופיעים בבידוק כפיים. פתיחה טוענת סעיפים והחלטות חוזיות בלי העלאת PDF ובלי קריאה נוספת למודל.</p>
           </div>
-          <span className={clausePersistenceStatus?.ready ? "contractsPlanReady" : "contractsPlanBlocked"}>
-            {clausePersistenceStatus?.ready ? "שמירת R3.2 פעילה" : "שמירת R3.2 מושבתת"}
-          </span>
+          <span className="contractsPlanReady">קייס־סטדי כפיים</span>
         </div>
-        {!clausePersistenceStatus?.ready && (
-          <p className="contractsActivationNotice">
-            {clausePersistenceError || "מיגרציית R3.2 והפעלת השרת עדיין נדרשות לפני שמירת חילוצי הסעיפים."}
-          </p>
+        {savedClauseContracts.length === 0 && (
+          <p className="contractsMappingEmpty">אין עדיין חוזים ציבוריים בקייס־סטדי כפיים.</p>
         )}
-        {clausePersistenceStatus?.ready && savedClauseContracts.length === 0 && (
-          <p className="contractsMappingEmpty">אין עדיין חילוצי סעיפים שמורים לפרויקט MAIN הנבחר.</p>
-        )}
-        {clausePersistenceStatus?.ready && savedClauseContracts.length > 0 && (
-          <div className="contractsSavedList" aria-label="חילוצי סעיפים שמורים">
+        {savedClauseContracts.length > 0 && (
+          <div className="contractsSavedList" aria-label="חוזי קייס־סטדי כפיים">
             {savedClauseContracts.map((workspace) => (
               <article key={workspace.workspaceId}>
                 <div>
                   <strong>{workspace.projectSite || workspace.filename}</strong>
-                  <span>{workspace.filename} · {workspace.clauseCount} רשומות · {workspace.pageCount} עמודים</span>
+                  <span>
+                    {workspace.filename}
+                    {workspace.clauseCount != null ? ` · ${workspace.clauseCount} רשומות` : ""}
+                    {workspace.pageCount != null ? ` · ${workspace.pageCount} עמודים` : ""}
+                  </span>
                   <small>נשמר {formatHebrewDateTime(workspace.createdAt)}</small>
                   <small dir="ltr">{workspace.documentVersionId}</small>
                 </div>
@@ -3172,7 +3171,7 @@ export function ContractsPage() {
             ))}
           </div>
         )}
-        {clausePersistenceStatus?.ready && clausePersistenceError && (
+        {clausePersistenceError && (
           <div className="contractsMessage is-error" role="alert">{clausePersistenceError}</div>
         )}
       </section>

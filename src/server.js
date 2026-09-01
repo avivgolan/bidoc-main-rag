@@ -1039,21 +1039,12 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const {
-        contractsClausePersistenceApproved,
-        listSavedContractsClauseWorkspaces,
         parseContractsClauseWorkspaceListRequest
       } = await import("./contracts/clausePersistence.js");
       const request = parseContractsClauseWorkspaceListRequest(url.searchParams);
       const { listPublicContractWorkspaces } = await import("./contracts/publicWorkspaceRead.js");
       const publicList = await listPublicContractWorkspaces({ config: config(), ...request });
-      if (publicList.items.length) {
-        return sendJson(res, 200, { ok: true, items: publicList.items, source: "public.contract_workspaces" });
-      }
-      if (!contractsClausePersistenceApproved()) {
-        return sendJson(res, 200, { ok: true, items: [], source: "public.contract_workspaces" });
-      }
-      const result = await listSavedContractsClauseWorkspaces({ config: config(), ...request });
-      return sendJson(res, 200, { ok: true, ...result });
+      return sendJson(res, 200, { ok: true, items: publicList.items, source: "public.contract_workspaces" });
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);

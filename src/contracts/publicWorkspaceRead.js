@@ -1,3 +1,4 @@
+import { resolvePublicContractProjectId, isKapaimStudyCaseProjectId } from "./studyCase.js";
 import { workspaceRequest } from "./workspacePersistence.js";
 
 function asArray(value) {
@@ -11,9 +12,9 @@ export async function listPublicContractWorkspaces({
   fetchImpl = fetch,
   timeoutMs
 } = {}) {
-  const projectId = String(sourceProjectId || "").trim();
-  if (!/^[0-9a-f-]{36}$/iu.test(projectId)) return { items: [] };
-  const path = `/rest/v1/contract_workspaces?project_id=eq.${encodeURIComponent(projectId)}&select=id,document_name,document_type,document_sha256,created_at,execution_date,site,parties&order=created_at.desc&limit=${Math.max(1, Number(limit) || 50)}`;
+  const projectId = resolvePublicContractProjectId(sourceProjectId);
+  if (!projectId) return { items: [] };
+  const path = `/rest/v1/contract_workspaces?project_id=eq.${encodeURIComponent(projectId)}&select=id,document_name,document_type,document_sha256,created_at,execution_date,site,parties,page_count&order=created_at.desc&limit=${Math.max(1, Number(limit) || 50)}`;
   try {
     const { response, data } = await workspaceRequest({
       config,
@@ -35,6 +36,7 @@ export async function listPublicContractWorkspaces({
         site: row.site,
         projectSite: row.site,
         parties: row.parties,
+        pageCount: row.page_count,
         source: "public.contract_workspaces"
       }))
     };
@@ -60,7 +62,7 @@ export async function getPublicContractWorkspace({
     responseCode: "contracts_public_workspace_get_invalid"
   });
   const workspace = asArray(data)[0];
-  if (!response.ok || !workspace) return null;
+  if (!response.ok || !workspace || !isKapaimStudyCaseProjectId(workspace.project_id)) return null;
 
   const [{ data: clauses }, { data: decisions }] = await Promise.all([
     workspaceRequest({

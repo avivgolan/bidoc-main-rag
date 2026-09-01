@@ -114,6 +114,15 @@ import {
   runContractsClausePersistence
 } from "../src/contracts/clausePersistence.js";
 import {
+  getPublicContractWorkspace,
+  listPublicContractWorkspaces
+} from "../src/contracts/publicWorkspaceRead.js";
+import {
+  KAPAIM_STUDYCASE_PROJECT_ID,
+  MAIN_STUDYCASE_SOURCE_PROJECT_ID,
+  resolvePublicContractProjectId
+} from "../src/contracts/studyCase.js";
+import {
   contractsR6Phase3Approved,
   loadContractsR6ActiveCatalog,
   persistContractsR6Embeddings
@@ -4502,6 +4511,95 @@ export function registerContractsAgentTests(test) {
       () => parseContractsClauseWorkspaceListRequest({ sourceProjectId: MAPPING_SOURCE_PROJECT_ID, limit: "101" }),
       (error) => error.code === "contracts_clause_persistence_request_invalid"
     );
+  });
+
+  test("Kapaim study-case maps MAIN onto Kapaim public contracts and hides other projects", () => {
+    assert.equal(resolvePublicContractProjectId(MAIN_STUDYCASE_SOURCE_PROJECT_ID), KAPAIM_STUDYCASE_PROJECT_ID);
+    assert.equal(resolvePublicContractProjectId(KAPAIM_STUDYCASE_PROJECT_ID), KAPAIM_STUDYCASE_PROJECT_ID);
+    assert.equal(resolvePublicContractProjectId(""), KAPAIM_STUDYCASE_PROJECT_ID);
+    assert.equal(resolvePublicContractProjectId(MAPPING_SOURCE_PROJECT_ID), null);
+    const pageSource = fs.readFileSync(new URL("../src/react/ContractsPage.jsx", import.meta.url), "utf8");
+    assert.match(pageSource, /sourceProjectId: SOURCE_PROJECT_ID/);
+    assert.match(pageSource, /חוזי קייס־סטדי — כפיים/);
+    assert.doesNotMatch(pageSource, /clausePersistenceStatus\?\.ready \|\| !\/\^\[0-9a-f-\]\{36\}/);
+    const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
+    assert.match(serverSource, /listPublicContractWorkspaces/);
+    assert.doesNotMatch(
+      serverSource,
+      /listPublicContractWorkspaces[\s\S]{0,400}listSavedContractsClauseWorkspaces/
+    );
+  });
+
+  test("Kapaim study-case public list queries Kapaim rows for the MAIN mapping twin", async () => {
+    const urls = [];
+    const result = await listPublicContractWorkspaces({
+      config: {
+        contentSource: { supabaseUrl: "https://fixture.supabase.co", supabaseServiceRoleKey: "service-role" }
+      },
+      sourceProjectId: MAIN_STUDYCASE_SOURCE_PROJECT_ID,
+      fetchImpl: async (url) => {
+        urls.push(String(url));
+        return new Response(JSON.stringify([
+          {
+            id: "4ff258bd-29ac-4aa9-a148-ac1bfcc7b8aa",
+            document_name: "הסכם התקשרות.pdf",
+            document_type: "signed_contract",
+            document_sha256: "a".repeat(64),
+            created_at: "2026-08-20T14:43:54.274Z",
+            execution_date: null,
+            site: "הרצליה",
+            parties: "סמל",
+            page_count: 40
+          }
+        ]), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+    });
+    assert.equal(urls.length, 1);
+    assert.match(urls[0], new RegExp(`project_id=eq\\.${KAPAIM_STUDYCASE_PROJECT_ID}`, "u"));
+    assert.doesNotMatch(urls[0], new RegExp(MAIN_STUDYCASE_SOURCE_PROJECT_ID, "u"));
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].filename, "הסכם התקשרות.pdf");
+    assert.equal(result.items[0].pageCount, 40);
+    assert.equal(result.items[0].source, "public.contract_workspaces");
+  });
+
+  test("Kapaim study-case public list hides contracts from other Bidoc projects", async () => {
+    let fetchCalls = 0;
+    const result = await listPublicContractWorkspaces({
+      config: {
+        contentSource: { supabaseUrl: "https://fixture.supabase.co", supabaseServiceRoleKey: "service-role" }
+      },
+      sourceProjectId: MAPPING_SOURCE_PROJECT_ID,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error("must not list another project");
+      }
+    });
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(result, { items: [] });
+  });
+
+  test("Kapaim study-case public get hides a workspace that is not Kapaim", async () => {
+    let fetchCalls = 0;
+    const result = await getPublicContractWorkspace({
+      config: {
+        contentSource: { supabaseUrl: "https://fixture.supabase.co", supabaseServiceRoleKey: "service-role" }
+      },
+      workspaceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        return new Response(JSON.stringify([
+          {
+            id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            project_id: MAPPING_SOURCE_PROJECT_ID,
+            document_name: "other.pdf",
+            document_type: "signed_contract"
+          }
+        ]), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+    });
+    assert.equal(fetchCalls, 1);
+    assert.equal(result, null);
   });
 
   test("contracts R3.2 migration is atomic, private, bounded, and Schedule-independent", () => {
