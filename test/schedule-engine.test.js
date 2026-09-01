@@ -212,6 +212,9 @@ test("schedule assignment batch: queues every dated unassigned alert once in sou
   ]);
   assert.deepEqual(queue.map((item) => item.id), ["a", "d"]);
   assert.deepEqual(buildActivityAssignmentBatchQueue([dated, { id: "d", date: "2026-08-22", activityKey: null }], { limit: 1 }).map((item) => item.id), ["a"]);
+  assert.deepEqual(buildActivityAssignmentBatchQueue([dated, { id: "d", date: "2026-08-22", activityKey: null }], {
+    excludedSourceIds: ["a"]
+  }).map((item) => item.id), ["d"]);
   assert.deepEqual(buildActivityAssignmentBatchQueue([dated], { limit: 0 }), []);
   assert.equal(normalizeActivityAssignmentBatchLimit("25"), 25);
   assert.equal(normalizeActivityAssignmentBatchLimit("508"), 10);
@@ -519,6 +522,8 @@ test("schedule assignment shadow: aggregate readiness compares hidden verdicts w
     fetchImpl
   });
   assert.equal(listed.readyForPhase7, true);
+  assert.equal(listed.observedSourceIds.length, 50);
+  assert.deepEqual(listed.observedSourceIds.slice(0, 2), ["shadow-alert-0", "shadow-alert-1"]);
   assert.equal(requestedMethod, "GET");
   assert.match(requestedUrl, /source_project_id=eq\./u);
   assert.match(requestedUrl, /status=in\.\(pending,selected,rejected\)/u);
@@ -938,8 +943,9 @@ test("schedule assignment batch: UI awaits each row and exposes controlled stop 
   assert.match(runner, /stopRequested[\s\S]+PAUSED/u);
   assert.match(page, />המשך מאותה נקודה</u);
   assert.match(page, />הרץ מחדש</u);
-  assert.match(page, /בדוק \$\{boundedBatchCount\} מתוך \$\{eligibleCount\} לא משויכות/u);
-  assert.match(page, /המספר אינו מציין שיוכים שבוצעו/u);
+  assert.match(page, /excludedSourceIds: activityAssignmentShadowObservedSourceIds/u);
+  assert.match(page, /בדוק \$\{boundedBatchCount\} מתוך \$\{eligibleCount\} חדשות/u);
+  assert.match(page, /מקרים שכבר נשמרו במצב הצל אינם נספרים שוב/u);
   assert.match(page, /כרטיס הבדיקה נשמר · ממתין להחלטת צוות/u);
   assert.doesNotMatch(page, /אתר את כולם/u);
   assert.doesNotMatch(page, /נשמר ב־MAIN · ממתין להחלטת צוות/u);

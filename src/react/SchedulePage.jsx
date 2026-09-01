@@ -465,7 +465,8 @@ function ActivityPicker({ activities, value, disabled, busy, onChange }) {
 function ActivityUpdatesTable({
   items, activities, busyId, onAssign, agentBusyId, agentResults, onRunAgent, onConfirmAgent, onRejectAgent,
   agentBatch, onStartAgentBatch, onStopAgentBatch, onResumeAgentBatch, onRestartAgentBatch,
-  timeFilterEnabled, onTimeFilterChange, batchLimit, onBatchLimitChange, labelCoverage
+  timeFilterEnabled, onTimeFilterChange, batchLimit, onBatchLimitChange, labelCoverage,
+  shadowObservedSourceIds
 }) {
   const [filters, setFilters] = useState(() => ({ ...DEFAULT_ACTIVITY_UPDATE_FILTERS }));
   const [visibleCount, setVisibleCount] = useState(100);
@@ -484,7 +485,10 @@ function ActivityUpdatesTable({
   );
   const assigned = filtered.filter((item) => item.activityKey).length;
   const sharedReviewCount = Object.values(agentResults || {}).filter((result) => result?.persistedReview && !result?.approved && !result?.rejected).length;
-  const eligibleCount = useMemo(() => buildActivityAssignmentBatchQueue(filtered).length, [filtered]);
+  const shadowHistoryReady = Array.isArray(shadowObservedSourceIds);
+  const eligibleCount = useMemo(() => shadowHistoryReady
+    ? buildActivityAssignmentBatchQueue(filtered, { excludedSourceIds: shadowObservedSourceIds }).length
+    : 0, [filtered, shadowHistoryReady, shadowObservedSourceIds]);
   const boundedBatchCount = Math.min(eligibleCount, normalizeActivityAssignmentBatchLimit(batchLimit));
   const severityOptions = useMemo(() => [...new Set(items.map((item) => item.severity).filter((value) => value !== null && value !== undefined))]
     .sort((a, b) => Number(a) - Number(b)), [items]);
@@ -541,7 +545,11 @@ function ActivityUpdatesTable({
             ) : (
               <>
                 <button type="button" className="activityAgentBatchButton is-primary" disabled={batchActive || anotherRowActionActive || !eligibleCount}
-                  onClick={() => onStartAgentBatch(filtered, batchLimit)}>{eligibleCount ? `בדוק ${boundedBatchCount} מתוך ${eligibleCount} לא משויכות` : "אין התראות לא משויכות לבדיקה"}</button>
+                  onClick={() => onStartAgentBatch(filtered, batchLimit)}>{!shadowHistoryReady
+                    ? "היסטוריית הבדיקות אינה זמינה"
+                    : eligibleCount
+                      ? `בדוק ${boundedBatchCount} מתוך ${eligibleCount} חדשות`
+                      : "אין התראות חדשות לבדיקה"}</button>
                 {batchActive ? (
                   <button type="button" className="activityAgentBatchButton is-stop"
                     disabled={agentBatch.status === ACTIVITY_ASSIGNMENT_BATCH_STATUSES.STOPPING}
@@ -550,7 +558,11 @@ function ActivityUpdatesTable({
               </>
             )}
           </div>
-          {eligibleCount ? <p className="activityAgentBatchExplanation">{eligibleCount} התראות ממתינות לבדיקה. המספר אינו מציין שיוכים שבוצעו.</p> : null}
+          {!shadowHistoryReady ? (
+            <p className="activityAgentBatchExplanation">לא ניתן להתחיל בדיקה קבוצתית בלי היסטוריית המקרים שכבר נבדקו.</p>
+          ) : eligibleCount ? (
+            <p className="activityAgentBatchExplanation">{eligibleCount} התראות חדשות ממתינות לבדיקה. מקרים שכבר נשמרו במצב הצל אינם נספרים שוב.</p>
+          ) : null}
           {batchStatusText ? (
             <div className={`activityAgentBatchStatus is-${agentBatch.status}`} role="status" aria-live="polite">
               <progress max={Math.max(agentBatch.total, 1)} value={agentBatch.processed} aria-label={batchStatusText} />
@@ -1076,6 +1088,7 @@ export function SchedulePage() {
   const [activityAgentBusyId, setActivityAgentBusyId] = useState(null);
   const [activityAgentResults, setActivityAgentResults] = useState({});
   const [activityAssignmentLabelCoverage, setActivityAssignmentLabelCoverage] = useState(null);
+  const [activityAssignmentShadowObservedSourceIds, setActivityAssignmentShadowObservedSourceIds] = useState(null);
   const [activityAgentBatch, setActivityAgentBatch] = useState(() => createActivityAssignmentBatch());
   const [activityAgentTimeFilter, setActivityAgentTimeFilter] = useState(false);
   const [activityAgentBatchLimit, setActivityAgentBatchLimit] = useState(DEFAULT_ACTIVITY_ASSIGNMENT_BATCH_LIMIT);
@@ -1115,6 +1128,7 @@ export function SchedulePage() {
     setError("");
     setActivityAgentResults({});
     setActivityAssignmentLabelCoverage(null);
+    setActivityAssignmentShadowObservedSourceIds(null);
     try {
       const calculationDate = asOfValue || projectEndDateValue || "";
       const asOfQuery = calculationDate ? `&asOf=${encodeURIComponent(calculationDate)}` : "";
@@ -1170,6 +1184,9 @@ export function SchedulePage() {
       const updates = updatesLoad.value;
       const sharedReviews = sharedReviewsLoad.value;
       setActivityAssignmentLabelCoverage(sharedReviews.labelCoverage || null);
+      setActivityAssignmentShadowObservedSourceIds(Array.isArray(sharedReviews.shadowValidation?.observedSourceIds)
+        ? sharedReviews.shadowValidation.observedSourceIds.map((sourceId) => String(sourceId))
+        : null);
       const failedRequiredLoads = [healthLoad, sweepLoad].filter((part) => part.error);
       if (failedRequiredLoads.length) setError(scheduleLoadFailureMessage(failedRequiredLoads));
       setHealth(healthResult);
@@ -1265,6 +1282,11 @@ export function SchedulePage() {
         timeoutMs: 900_000
       });
       setActivityAgentResults(current => ({ ...current, [item.id]: result }));
+      if (result.persistedReview) {
+        setActivityAssignmentShadowObservedSourceIds((current) => Array.isArray(current) && !current.includes(String(item.id))
+          ? [...current, String(item.id)]
+          : current);
+      }
       if (result.workflowLog && typeof window.__bidocSetWorkflowFromReact === "function") {
         window.__bidocSetWorkflowFromReact(result);
       }
@@ -1366,8 +1388,13 @@ export function SchedulePage() {
   }, []);
 
   const startActivityAssignmentBatch = useCallback((scopedItems = activityUpdates.items, requestedLimit = activityAgentBatchLimit) => {
-    const eligibleQueue = buildActivityAssignmentBatchQueue(scopedItems);
-    const queue = buildActivityAssignmentBatchQueue(scopedItems, { limit: normalizeActivityAssignmentBatchLimit(requestedLimit) });
+    if (!Array.isArray(activityAssignmentShadowObservedSourceIds)) return;
+    const queueOptions = { excludedSourceIds: activityAssignmentShadowObservedSourceIds };
+    const eligibleQueue = buildActivityAssignmentBatchQueue(scopedItems, queueOptions);
+    const queue = buildActivityAssignmentBatchQueue(scopedItems, {
+      ...queueOptions,
+      limit: normalizeActivityAssignmentBatchLimit(requestedLimit)
+    });
     if (!queue.length) return;
     const confirmationText = activityAssignmentBatchConfirmationText({
       batchSize: queue.length,
@@ -1376,7 +1403,7 @@ export function SchedulePage() {
     if (typeof window !== "undefined" && !window.confirm(confirmationText)) return;
     clearActivityAgentBatchResults(queue);
     void runActivityAssignmentBatch({ queue, timeFilter: activityAgentTimeFilter });
-  }, [activityUpdates.items, activityAgentBatchLimit, activityAgentTimeFilter, clearActivityAgentBatchResults, runActivityAssignmentBatch]);
+  }, [activityUpdates.items, activityAgentBatchLimit, activityAgentTimeFilter, activityAssignmentShadowObservedSourceIds, clearActivityAgentBatchResults, runActivityAssignmentBatch]);
 
   const stopActivityAssignmentBatch = useCallback(() => {
     if (activityAgentBatch.status !== ACTIVITY_ASSIGNMENT_BATCH_STATUSES.RUNNING) return;
@@ -1766,7 +1793,8 @@ export function SchedulePage() {
         onResumeAgentBatch={resumeActivityAssignmentBatch} onRestartAgentBatch={restartActivityAssignmentBatch}
         timeFilterEnabled={activityAgentTimeFilter} onTimeFilterChange={setActivityAgentTimeFilter}
         batchLimit={activityAgentBatchLimit} onBatchLimitChange={setActivityAgentBatchLimit}
-        labelCoverage={activityAssignmentLabelCoverage} />
+        labelCoverage={activityAssignmentLabelCoverage}
+        shadowObservedSourceIds={activityAssignmentShadowObservedSourceIds} />
     </div>
   );
 }

@@ -4,7 +4,10 @@ import {
   scheduleAssignmentReviewRowToEvaluationCase,
   summarizeScheduleAssignmentLabelCoverage
 } from "../scheduleActivityAssignmentLabels.js";
-import { summarizeScheduleAssignmentShadowRows } from "../scheduleActivityAssignmentShadow.js";
+import {
+  SCHEDULE_ASSIGNMENT_SHADOW_SCHEMA_VERSION,
+  summarizeScheduleAssignmentShadowRows
+} from "../scheduleActivityAssignmentShadow.js";
 
 export const SCHEDULE_ASSIGNMENT_REVIEWS_TABLE = "schedule_activity_assignment_reviews";
 const UPSERT_REVIEW_RPC = "bidoc_upsert_schedule_assignment_review_v1";
@@ -268,7 +271,14 @@ export async function listSharedScheduleAssignmentShadowValidation({ projectId, 
     fetchImpl,
     path: `/rest/v1/${SCHEDULE_ASSIGNMENT_REVIEWS_TABLE}?select=id,source_id,status,decision_snapshot,candidates_snapshot,evaluation_label_type,expected_activity_key,forbidden_activity_keys,evaluation_label_reason,labelled_at,resolved_at&source_project_id=eq.${encodeURIComponent(projectId)}&status=in.(pending,selected,rejected)&order=created_at.desc&limit=${safeLimit}`
   });
-  return summarizeScheduleAssignmentShadowRows(rows);
+  const observedSourceIds = [...new Set((Array.isArray(rows) ? rows : [])
+    .filter((row) => row?.decision_snapshot?.shadow?.schemaVersion === SCHEDULE_ASSIGNMENT_SHADOW_SCHEMA_VERSION)
+    .map((row) => safeText(row?.source_id, 160))
+    .filter(Boolean))];
+  return {
+    ...summarizeScheduleAssignmentShadowRows(rows),
+    observedSourceIds
+  };
 }
 
 export async function getPendingSharedScheduleAssignmentReview({ projectId, sourceId, config, fetchImpl = fetch } = {}) {

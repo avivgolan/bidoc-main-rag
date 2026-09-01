@@ -99,16 +99,22 @@ export function normalizeActivityAssignmentBatchLimit(value) {
     : DEFAULT_ACTIVITY_ASSIGNMENT_BATCH_LIMIT;
 }
 
-export function buildActivityAssignmentBatchQueue(items = [], { limit = Number.POSITIVE_INFINITY } = {}) {
+export function buildActivityAssignmentBatchQueue(items = [], {
+  limit = Number.POSITIVE_INFINITY,
+  excludedSourceIds = []
+} = {}) {
   const normalizedLimit = Number.isFinite(Number(limit))
     ? Math.max(0, Math.floor(Number(limit)))
     : Number.POSITIVE_INFINITY;
   if (normalizedLimit === 0) return [];
+  const excluded = new Set((Array.isArray(excludedSourceIds) ? excludedSourceIds : [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean));
   const seen = new Set();
   const queue = [];
   for (const item of Array.isArray(items) ? items : []) {
     const id = String(item?.id || "").trim();
-    if (!id || !item?.date || item?.activityKey || seen.has(id)) continue;
+    if (!id || !item?.date || item?.activityKey || seen.has(id) || excluded.has(id)) continue;
     seen.add(id);
     queue.push(item);
     if (queue.length >= normalizedLimit) break;
