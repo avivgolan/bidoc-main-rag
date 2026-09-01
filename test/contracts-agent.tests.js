@@ -1779,11 +1779,17 @@ export function registerContractsAgentTests(test) {
     const options = contractPdfLoadOptions(Buffer.from("%PDF-1.4"));
     assert.match(options.cMapUrl, /cmaps\/$/);
     assert.match(options.standardFontDataUrl, /standard_fonts\/$/);
+    assert.doesNotMatch(options.cMapUrl, /^https:/);
     assert.equal(options.cMapPacked, true);
     assert.equal(options.useSystemFonts, false);
     assert.equal(options.isOffscreenCanvasSupported, false);
+    assert.equal(typeof options.canvasFactory?.create, "function");
     assert.ok(options.data instanceof Uint8Array);
     assert.equal(options.data.byteLength, 8);
+
+    const vercelOptions = contractPdfLoadOptions(Buffer.from("%PDF-1.4"), { vercel: true });
+    assert.match(vercelOptions.cMapUrl, /^https:\/\/unpkg\.com\/pdfjs-dist@4\.10\.38\/cmaps\/$/);
+    assert.match(vercelOptions.standardFontDataUrl, /^https:\/\/unpkg\.com\/pdfjs-dist@4\.10\.38\/standard_fonts\/$/);
   });
 
   test("contracts PDF reader maps page and text-layer failures to a safe typed 422", async () => {

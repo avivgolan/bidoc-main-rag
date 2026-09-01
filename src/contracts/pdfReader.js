@@ -10,14 +10,17 @@ export const CONTRACTS_MAX_PAGES = 80;
 export const CONTRACTS_MAX_TEXT_CHARACTERS = 160_000;
 
 const BIDI_MARKS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
+const PDFJS_CDN_VERSION = "4.10.38";
 const require = createRequire(import.meta.url);
 const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
 const packedCmapUrl = `${pathToFileURL(path.join(pdfjsRoot, "cmaps")).href}/`;
 const packedStandardFontDataUrl = `${pathToFileURL(path.join(pdfjsRoot, "standard_fonts")).href}/`;
+const remoteCmapUrl = `https://unpkg.com/pdfjs-dist@${PDFJS_CDN_VERSION}/cmaps/`;
+const remoteStandardFontDataUrl = `https://unpkg.com/pdfjs-dist@${PDFJS_CDN_VERSION}/standard_fonts/`;
 
 ensurePdfjsDomPolyfills();
 
-export function contractPdfLoadOptions(pdfBytes) {
+export function contractPdfLoadOptions(pdfBytes, { vercel = Boolean(process.env.VERCEL) } = {}) {
   const source = pdfBytes instanceof Uint8Array
     ? pdfBytes
     : new Uint8Array(pdfBytes || []);
@@ -34,14 +37,19 @@ export function contractPdfLoadOptions(pdfBytes) {
     disableStream: true,
     disableAutoFetch: true,
     cMapPacked: true,
-    cMapUrl: packedCmapUrl,
-    standardFontDataUrl: packedStandardFontDataUrl
+    cMapUrl: vercel ? remoteCmapUrl : packedCmapUrl,
+    standardFontDataUrl: vercel ? remoteStandardFontDataUrl : packedStandardFontDataUrl,
+    canvasFactory: createContractsCanvasFactory()
   };
+}
+
+function loadNapiCanvas() {
+  return require("@napi-rs/canvas");
 }
 
 function ensurePdfjsDomPolyfills() {
   try {
-    const canvas = require("@napi-rs/canvas");
+    const canvas = loadNapiCanvas();
     if (typeof globalThis.DOMMatrix === "undefined" && canvas.DOMMatrix) {
       globalThis.DOMMatrix = canvas.DOMMatrix;
     }
@@ -54,6 +62,28 @@ function ensurePdfjsDomPolyfills() {
   } catch {
     // Optional on machines that only run mocked PDF tests.
   }
+}
+
+function createContractsCanvasFactory() {
+  return {
+    create(width, height) {
+      const canvas = loadNapiCanvas().createCanvas(width, height);
+      return {
+        canvas,
+        context: canvas.getContext("2d", { willReadFrequently: true })
+      };
+    },
+    reset(canvasAndContext, width, height) {
+      canvasAndContext.canvas.width = width;
+      canvasAndContext.canvas.height = height;
+    },
+    destroy(canvasAndContext) {
+      canvasAndContext.canvas.width = 0;
+      canvasAndContext.canvas.height = 0;
+      canvasAndContext.canvas = null;
+      canvasAndContext.context = null;
+    }
+  };
 }
 
 export async function readContractPdf({
@@ -209,6 +239,10 @@ function mapPdfDocumentFailure(error, signal) {
   const abortError = pdfAbortFailure(error, signal);
   if (abortError) return abortError;
   if (error instanceof ContractsAgentError) return error;
+  console.error("[contracts:pdf] document open failed", {
+    name: String(error?.name || "Error").slice(0, 80),
+    message: String(error?.message || "").replace(/[\r\n]+/gu, " ").slice(0, 400)
+  });
   const encrypted = /password|encrypted/i.test(String(error?.message || ""));
   return new ContractsAgentError(
     encrypted ? "contracts_pdf_encrypted" : "contracts_pdf_unreadable",
