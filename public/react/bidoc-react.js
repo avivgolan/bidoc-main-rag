@@ -15836,28 +15836,28 @@ var On = "contracts-clause-presentation.r3.3.v1", kn = "contracts-relationships-
 	termination: "סיום ההסכם",
 	warranty: "אחריות בדק"
 }), Nn = Object.freeze({
-	a: "א׳",
-	b: "ב׳",
-	c: "ג׳",
-	d: "ד׳",
-	e: "ה׳",
-	f: "ו׳",
-	g: "ז׳",
-	h: "ח׳",
-	i: "ט׳",
-	j: "י׳",
-	k: "כ׳",
-	l: "ל׳",
-	m: "מ׳",
-	n: "נ׳",
-	o: "ס׳",
-	p: "ע׳",
-	q: "פ׳",
-	r: "צ׳",
-	s: "ק׳",
-	t: "ר׳",
-	u: "ש׳",
-	v: "ת׳"
+	a: "א",
+	b: "ב",
+	c: "ג",
+	d: "ד",
+	e: "ה",
+	f: "ו",
+	g: "ז",
+	h: "ח",
+	i: "ט",
+	j: "י",
+	k: "כ",
+	l: "ל",
+	m: "מ",
+	n: "נ",
+	o: "ס",
+	p: "ע",
+	q: "פ",
+	r: "צ",
+	s: "ק",
+	t: "ר",
+	u: "ש",
+	v: "ת"
 });
 function Pn(e) {
 	return An[e] || "רשומת חוזה";
@@ -15870,10 +15870,10 @@ function In(e) {
 	return Mn[t] ? Mn[t] : /[\u0590-\u05ff]/u.test(t) ? t : "תגית חוזית";
 }
 function Ln(e, t = null) {
-	let n = String(e || "").trim(), r = n.match(/^appendix_([a-v])(?:\.(heading|.+))?$/u);
+	let n = String(e || "").trim(), r = n.match(/^appendix_([a-v])(?:\.(heading)|(?:\.(\d+(?:\.\d+)*))|(\d+(?:\.\d+)*))?$/u);
 	if (r) {
-		let e = Nn[r[1]] || r[1].toUpperCase();
-		return !r[2] || r[2] === "heading" ? `כותרת נספח ${e}` : `נספח ${e}, סעיף ${r[2]}`;
+		let e = Nn[r[1]] || r[1].toUpperCase(), t = r[3] || r[4] || "";
+		return !t || r[2] === "heading" ? `כותרת נספח ${e}` : `נספח ${e}${t}`;
 	}
 	return /^\d+(?:\.\d+)*$/u.test(n) ? `סעיף ${n}` : n.includes(".context.") ? t || "הקשר המסמך" : t || "רשומת חוזה";
 }

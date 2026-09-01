@@ -3079,7 +3079,7 @@ export function registerContractsAgentTests(test) {
     assert.deepEqual(records.map((record) => record.structuralRole), ["context", "heading", "operative", "definition", "heading", "operative"]);
     assert.deepEqual(records[2].hashtags, ["scope", "responsibility"]);
     assert.deepEqual(records[2].tagLabelsHe, ["תחולת העבודה", "אחריות"]);
-    assert.equal(records[2].crossReferences[0].targetLabelHe, "כותרת נספח א׳");
+    assert.equal(records[2].crossReferences[0].targetLabelHe, "כותרת נספח א");
     assert.equal(records[4].structuralLeadHe, "הקבלן מצהיר, מאשר ומתחייב בזה כדלקמן:");
     assert.match(records[2].displayContentHe, /תגיות: תחולת העבודה · אחריות/u);
     assert.doesNotMatch(records[2].displayContentHe, /scope|responsibility/u);
@@ -3087,7 +3087,8 @@ export function registerContractsAgentTests(test) {
     assert.equal(contractsTagLabelHe("other"), "אחר");
     assert.equal(contractsTagLabelHe("לוח זמנים"), "לוח זמנים");
     assert.equal(contractsTagLabelHe("unmapped_legacy_tag"), "תגית חוזית");
-    assert.equal(contractsReferenceTargetLabelHe("appendix_a.2"), "נספח א׳, סעיף 2");
+    assert.equal(contractsReferenceTargetLabelHe("appendix_a.2"), "נספח א2");
+    assert.equal(contractsReferenceTargetLabelHe("appendix_b3"), "נספח ב3");
   });
 
   test("contracts model extraction reports a typed provider timeout after both bounded attempts fail", async () => {

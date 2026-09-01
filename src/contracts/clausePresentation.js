@@ -53,28 +53,28 @@ export const CONTRACTS_TAG_LABELS_HE = Object.freeze({
 });
 
 const APPENDIX_LABELS_HE = Object.freeze({
-  a: "א׳",
-  b: "ב׳",
-  c: "ג׳",
-  d: "ד׳",
-  e: "ה׳",
-  f: "ו׳",
-  g: "ז׳",
-  h: "ח׳",
-  i: "ט׳",
-  j: "י׳",
-  k: "כ׳",
-  l: "ל׳",
-  m: "מ׳",
-  n: "נ׳",
-  o: "ס׳",
-  p: "ע׳",
-  q: "פ׳",
-  r: "צ׳",
-  s: "ק׳",
-  t: "ר׳",
-  u: "ש׳",
-  v: "ת׳"
+  a: "א",
+  b: "ב",
+  c: "ג",
+  d: "ד",
+  e: "ה",
+  f: "ו",
+  g: "ז",
+  h: "ח",
+  i: "ט",
+  j: "י",
+  k: "כ",
+  l: "ל",
+  m: "מ",
+  n: "נ",
+  o: "ס",
+  p: "ע",
+  q: "פ",
+  r: "צ",
+  s: "ק",
+  t: "ר",
+  u: "ש",
+  v: "ת"
 });
 
 export function contractsClauseTypeLabelHe(value) {
@@ -96,11 +96,12 @@ export function contractsTagLabelHe(value) {
 
 export function contractsClauseDisplayLabelHe(clauseKey, clauseTitle = null) {
   const key = String(clauseKey || "").trim();
-  const appendix = key.match(/^appendix_([a-v])(?:\.(heading|.+))?$/u);
+  const appendix = key.match(/^appendix_([a-v])(?:\.(heading)|(?:\.(\d+(?:\.\d+)*))|(\d+(?:\.\d+)*))?$/u);
   if (appendix) {
     const appendixLabel = APPENDIX_LABELS_HE[appendix[1]] || appendix[1].toUpperCase();
-    if (!appendix[2] || appendix[2] === "heading") return `כותרת נספח ${appendixLabel}`;
-    return `נספח ${appendixLabel}, סעיף ${appendix[2]}`;
+    const item = appendix[3] || appendix[4] || "";
+    if (!item || appendix[2] === "heading") return `כותרת נספח ${appendixLabel}`;
+    return `נספח ${appendixLabel}${item}`;
   }
   if (/^\d+(?:\.\d+)*$/u.test(key)) return `סעיף ${key}`;
   if (key.includes(".context.")) return clauseTitle || "הקשר המסמך";
