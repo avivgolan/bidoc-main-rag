@@ -36,6 +36,7 @@ import {
   submitActivityMappingReview
 } from "../src/contracts/activityMappingReview.js";
 import { compileContractDraft, findGroundedQuote } from "../src/contracts/compiler.js";
+import { conflictFingerprint, rowsFromUnresolvedProposals } from "../src/contracts/conflictRegistry.js";
 import { ContractsAgentError } from "../src/contracts/errors.js";
 import { evaluateContractExtraction } from "../src/contracts/goldEvaluator.js";
 import { planContractPromotions } from "../src/contracts/promotionPlanner.js";
@@ -421,6 +422,30 @@ function mappingReviewRequest(overrides = {}) {
 }
 
 export function registerContractsAgentTests(test) {
+  test("contracts conflict registry maps unresolved R4.2B proposals", () => {
+    const workspaceId = "82345c75-c6f4-468d-b899-1f8407d9a9c1";
+    const rows = rowsFromUnresolvedProposals({
+      workspaceId,
+      proposals: [
+        { conflictStatus: "none", sourceClauseKeys: ["1", "2"], titleHe: "לא" },
+        {
+          conflictStatus: "unresolved",
+          sourceClauseKeys: ["appendix_b.3", "6.7"],
+          titleHe: "קנס בגין איחור בהשלמת העבודות",
+          summaryHe: "סתירה בגובה הקנס",
+          decisionTextHe: "2000 מול 3250"
+        }
+      ]
+    });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].fingerprint, conflictFingerprint({
+      scope: "same_contract",
+      workspaceId,
+      clauseKeys: ["6.7", "appendix_b.3"]
+    }));
+    assert.deepEqual(rows[0].sides.map((side) => side.clause_key), ["6.7", "appendix_b.3"]);
+  });
+
   test("contracts reviewer presents controlled decisions, statuses, and blockers in Hebrew", () => {
     assert.equal(contractRoleLabel("contractual_completion"), "השלמת ומסירת העבודות");
     assert.equal(contractActionLabel({ role: "performance_bond_renewal" }), "הארך את ערבות הביצוע לפני פקיעתה");

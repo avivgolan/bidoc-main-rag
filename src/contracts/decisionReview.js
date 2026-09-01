@@ -10,6 +10,7 @@ import {
   runContractsDecisionNormalization
 } from "./decisionNormalization.js";
 import { workspaceRpc } from "./workspacePersistence.js";
+import { publishUnresolvedContractConflicts } from "./conflictRegistry.js";
 import {
   CONTRACTS_R6_PHASE3_DECISION_PERSISTENCE_RPC,
   CONTRACTS_R6_PHASE3_DECISION_REVIEW_RPC,
@@ -380,6 +381,18 @@ export async function persistContractsDecisionProposals({
       timeoutMs
     });
     const accepted = assertProjection(projection, { persistenceRequired: true });
+    try {
+      accepted.conflictRegistry = await publishUnresolvedContractConflicts({
+        config,
+        workspaceId: parseContractsClauseWorkspaceId(workspaceId),
+        proposals,
+        fetchImpl,
+        timeoutMs
+      });
+    } catch (error) {
+      console.warn("[contracts-r4.2b] conflict registry publish failed", error?.message || error);
+      accepted.conflictRegistry = { published: 0, skipped: "publish_failed" };
+    }
     if (contractsR6Phase3Approved(env)) {
       await persistContractsR6Embeddings({
         config,
