@@ -5,7 +5,7 @@ const DEFAULTS = Object.freeze({
     primaryModel: "",
     retryModel: "",
     temperature: 0,
-    maxTokens: 4096,
+    maxTokens: 8192,
     timeoutMs: 120_000,
     totalBudgetMs: 270_000,
     concurrency: 3,

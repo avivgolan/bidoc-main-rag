@@ -1993,6 +1993,7 @@ export function registerContractsAgentTests(test) {
       },
       chatComplete: async (options) => {
         calls += 1;
+        assert.deepEqual(options.reasoning, { max_tokens: 128, exclude: true });
         providerLimits.push({ maxTokens: options.maxTokens, timeoutMs: options.timeoutMs });
         active += 1;
         maxActive = Math.max(maxActive, active);
@@ -2084,6 +2085,54 @@ export function registerContractsAgentTests(test) {
       segmentCount: 3,
       reasonCode: "contracts_model_draft_invalid"
     });
+  });
+
+  test("contracts model extraction splits a truncated Gemini-style batch instead of aborting persist", async () => {
+    const segments = Array.from({ length: 3 }, (_, index) => segment(
+      `truncated-${index + 1}`,
+      index + 1,
+      String(index + 1),
+      String(index + 1),
+      `Clause ${index + 1}: complete the work within 30 days after commencement.`
+    ));
+    const calls = [];
+    const draft = await extractContractsModelDraft({
+      segments,
+      pageCount: 3,
+      unreadablePages: [],
+      config: {
+        openRouterApiKey: "sk-test",
+        models: { main: "google/gemini-2.5-pro" },
+        ai: { main: { maxTokens: 4096, timeoutMs: 60000 } }
+      },
+      chatComplete: async (options) => {
+        calls.push(options.telemetry.callId);
+        assert.deepEqual(options.reasoning, { max_tokens: 128, exclude: true });
+        if (options.telemetry.callId === "contracts_extract_1") {
+          options.telemetry.record({
+            status: "done",
+            finish_reason: "length",
+            native_finish_reason: "MAX_TOKENS"
+          });
+          return "{\"draftVersion\":\"contracts-model-draft.v1\",\"candidates\":[";
+        }
+        options.telemetry.record({ status: "done", finish_reason: "stop", native_finish_reason: "STOP" });
+        return JSON.stringify({
+          draftVersion: "contracts-model-draft.v1",
+          documentObservations: { documentType: "unknown", executionDate: null, attachmentsStatus: "unknown", contractSiteRaw: null },
+          candidates: [],
+          missingObservations: [],
+          packetReferences: []
+        });
+      }
+    });
+    assert.deepEqual(calls, [
+      "contracts_extract_1",
+      "contracts_extract_1_fallback_1",
+      "contracts_extract_1_fallback_2",
+      "contracts_extract_1_fallback_3"
+    ]);
+    assert.deepEqual(draft.candidates, []);
   });
 
   test("contracts model extraction stops queued chunks and aborts in-flight calls after failure", async () => {

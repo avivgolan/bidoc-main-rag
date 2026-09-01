@@ -17,6 +17,7 @@ const MAX_MODEL_CHUNK_CHARACTERS = 10_000;
 const MAX_MODEL_CHUNK_PAGES = 5;
 const MAX_PARALLEL_MODEL_CHUNKS = 3;
 const REPAIR_MODEL_TIMEOUT_MS = 60_000;
+const PROVIDER_REASONING_MAX_TOKENS = 128;
 const CONTRACTS_MODEL_CHUNK_RESUME_TTL_MS = 30 * 60_000;
 const CONTRACTS_MODEL_CHUNK_RESUME_MAX_ENTRIES = 96;
 const contractsModelChunkResumeCache = new Map();
@@ -312,6 +313,7 @@ export async function extractContractsModelDraft({
             frequencyPenalty: 0,
             presencePenalty: 0,
             seed: 0,
+            reasoning: { max_tokens: PROVIDER_REASONING_MAX_TOKENS, exclude: true },
             responseFormat: { type: "json_object" },
             telemetry: { step: "contracts_extract", callId: attempt ? `${callId}_retry` : callId, record: modelTelemetry.record },
             signal: abortSignal,
@@ -390,7 +392,7 @@ export async function extractContractsModelDraft({
       return resumed.draft;
     }
     let raw = await call(messages, `contracts_extract_${chunkNumber}`);
-    ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, raw);
+    ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, raw, { allowTruncated: true });
     let draft;
     try {
       draft = parseAndValidateDraft(raw, chunk);
@@ -421,7 +423,7 @@ export async function extractContractsModelDraft({
             `contracts_extract_${chunkNumber}_fallback_${fallbackIndex + 1}`,
             Math.min(primaryModelTimeoutMs, Number(extractionSettings.repairTimeoutMs) || REPAIR_MODEL_TIMEOUT_MS)
           );
-          ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, fallbackRaw);
+          ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, fallbackRaw, { allowTruncated: true });
           try {
             fallbackDrafts.push(parseAndValidateDraft(fallbackRaw, fallbackChunk));
           } catch (fallbackError) {
@@ -908,7 +910,7 @@ async function repairContractsDraft({ raw, error, sourceSegments, call, callId, 
     }
   ];
   const repaired = await call(repairMessages, callId, Number(repairTimeoutMs) || REPAIR_MODEL_TIMEOUT_MS);
-  ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, repaired);
+  ensureModelCallCompleted(modelTelemetry.latest, MAX_MODEL_RESPONSE_CHARACTERS, repaired, { allowTruncated: true });
   parseAndValidateDraft(repaired, sourceSegments);
   return repaired;
 }
@@ -923,7 +925,7 @@ function normalizeMissingBlockAlias(value) {
   return enabled.length === 1 ? enabled[0] : null;
 }
 
-function ensureModelCallCompleted(latest, maxCharacters, raw) {
+function ensureModelCallCompleted(latest, maxCharacters, raw, { allowTruncated = false } = {}) {
   if (String(raw || "").length > maxCharacters) {
     throw new ContractsAgentError("contracts_model_response_too_large", "The model response exceeded the Phase 1 output limit.", 502);
   }
@@ -936,7 +938,7 @@ function ensureModelCallCompleted(latest, maxCharacters, raw) {
       { issueCodes: ["provider.call_failed"] }
     );
   }
-  if (finish === "length" || finish === "max_tokens") {
+  if (!allowTruncated && (finish === "length" || finish === "max_tokens")) {
     throw new ContractsAgentError(
       "contracts_model_response_truncated",
       "The model response was truncated and cannot be validated safely.",
