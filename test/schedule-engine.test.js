@@ -526,6 +526,11 @@ test("schedule assignment shadow: aggregate readiness compares hidden verdicts w
 });
 
 test("schedule assignment review terminology: separates raw ranking from calibrated probability and explains failed gates", () => {
+  const emptyPresentation = buildScheduleAssignmentDecisionPresentation(null);
+  assert.equal(emptyPresentation.rankingScore, 0);
+  assert.equal(emptyPresentation.hasRunnerUp, false);
+  assert.equal(emptyPresentation.calibratedProbability, null);
+
   const presentation = buildScheduleAssignmentDecisionPresentation({
     engineVersion: "schedule-assignment.test",
     settingsVersion: "settings-test",

@@ -80,7 +80,8 @@ function reviewReasons({ decision, gates, policy, calibratedProbability, calibra
 }
 
 export function buildScheduleAssignmentDecisionPresentation(agentResult = {}) {
-  const decision = agentResult?.decision && typeof agentResult.decision === "object" ? agentResult.decision : {};
+  const result = agentResult && typeof agentResult === "object" ? agentResult : {};
+  const decision = result.decision && typeof result.decision === "object" ? result.decision : {};
   const gates = decision.gates && typeof decision.gates === "object" ? decision.gates : {};
   const policy = decision.policy && typeof decision.policy === "object" ? decision.policy : {};
   const rankingScore = finiteNumber(decision.rankingScore ?? decision.confidence) ?? 0;
@@ -91,15 +92,15 @@ export function buildScheduleAssignmentDecisionPresentation(agentResult = {}) {
   const calibratedProbability = calibrationStatus === "calibrated" && probability != null
     ? Math.max(0, Math.min(1, probability))
     : null;
-  const hasRunnerUp = (Array.isArray(agentResult.candidates) && agentResult.candidates.length > 1)
+  const hasRunnerUp = (Array.isArray(result.candidates) && result.candidates.length > 1)
     || (runnerUpRankingScore != null && runnerUpRankingScore > 0);
   const gateRows = Object.entries(REVIEW_GATE_LABELS)
     .filter(([key]) => typeof gates[key] === "boolean")
     .map(([key, label]) => ({ key, label, passed: gates[key] === true }));
   const auditItems = [
-    { key: "engineVersion", label: "גרסת מנוע", value: agentResult.engineVersion || decision.engineVersion || null },
-    { key: "settingsVersion", label: "גרסת הגדרות", value: agentResult.settingsVersion || decision.settingsVersion || null },
-    { key: "scheduleVersionId", label: "גרסת לוח זמנים", value: agentResult.scheduleVersionId || decision.scheduleVersionId || null },
+    { key: "engineVersion", label: "גרסת מנוע", value: result.engineVersion || decision.engineVersion || null },
+    { key: "settingsVersion", label: "גרסת הגדרות", value: result.settingsVersion || decision.settingsVersion || null },
+    { key: "scheduleVersionId", label: "גרסת לוח זמנים", value: result.scheduleVersionId || decision.scheduleVersionId || null },
     { key: "calibrator", label: "מכייל", value: decision.calibration?.artifactId || null },
     { key: "calibrationStatus", label: "מצב כיול", value: calibrationStatus || null }
   ].filter((item) => item.value);

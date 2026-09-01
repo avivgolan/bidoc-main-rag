@@ -13584,54 +13584,54 @@ function Xt({ decision: e, gates: t, policy: n, calibratedProbability: r, calibr
 	return t.noHardConflict === !1 && Yt(a, "noHardConflict", "זוהתה סתירה מהותית בנתונים"), t.matcherValidatorAgreement === !1 && Yt(a, "matcherValidatorAgreement", "בודק ההתאמה ובודק לוח הזמנים לא הסכימו על אותה פעילות"), t.requiredRolesCompleted === !1 && Yt(a, "requiredRolesCompleted", "לא כל בדיקות המודל הנדרשות הושלמו"), t.canonicalDate === !1 && Yt(a, "canonicalDate", "להתראה אין תאריך מקור תקין"), t.activeScheduleActivity === !1 && Yt(a, "activeScheduleActivity", "המועמד אינו שייך לגרסת לוח הזמנים הפעילה"), t.freshRun === !1 && Yt(a, "freshRun", "הריצה אינה עדכנית עוד"), t.unassigned === !1 && Yt(a, "unassigned", "ההתראה כבר משויכת לפעילות"), t.autoAssignmentEnabled === !1 && Yt(a, "autoAssignmentEnabled", "מדיניות השיוך האוטומטי כבויה כרגע"), !a.length && e?.autoAssigned !== !0 && Yt(a, "humanReview", "המדיניות דרשה בדיקה אנושית לפני שיוך"), a;
 }
 function Zt(e = {}) {
-	let t = e?.decision && typeof e.decision == "object" ? e.decision : {}, n = t.gates && typeof t.gates == "object" ? t.gates : {}, r = t.policy && typeof t.policy == "object" ? t.policy : {}, i = qt(t.rankingScore ?? t.confidence) ?? 0, a = qt(t.runnerUpRankingScore ?? t.runnerUpConfidence), o = qt(t.rankingGap ?? t.margin) ?? 0, s = qt(t.calibratedProbability), c = String(t.calibration?.status || "unavailable"), l = c === "calibrated" && s != null ? Math.max(0, Math.min(1, s)) : null, u = Array.isArray(e.candidates) && e.candidates.length > 1 || a != null && a > 0, d = Object.entries(Gt).filter(([e]) => typeof n[e] == "boolean").map(([e, t]) => ({
+	let t = e && typeof e == "object" ? e : {}, n = t.decision && typeof t.decision == "object" ? t.decision : {}, r = n.gates && typeof n.gates == "object" ? n.gates : {}, i = n.policy && typeof n.policy == "object" ? n.policy : {}, a = qt(n.rankingScore ?? n.confidence) ?? 0, o = qt(n.runnerUpRankingScore ?? n.runnerUpConfidence), s = qt(n.rankingGap ?? n.margin) ?? 0, c = qt(n.calibratedProbability), l = String(n.calibration?.status || "unavailable"), u = l === "calibrated" && c != null ? Math.max(0, Math.min(1, c)) : null, d = Array.isArray(t.candidates) && t.candidates.length > 1 || o != null && o > 0, f = Object.entries(Gt).filter(([e]) => typeof r[e] == "boolean").map(([e, t]) => ({
 		key: e,
 		label: t,
-		passed: n[e] === !0
-	})), f = [
+		passed: r[e] === !0
+	})), p = [
 		{
 			key: "engineVersion",
 			label: "גרסת מנוע",
-			value: e.engineVersion || t.engineVersion || null
+			value: t.engineVersion || n.engineVersion || null
 		},
 		{
 			key: "settingsVersion",
 			label: "גרסת הגדרות",
-			value: e.settingsVersion || t.settingsVersion || null
+			value: t.settingsVersion || n.settingsVersion || null
 		},
 		{
 			key: "scheduleVersionId",
 			label: "גרסת לוח זמנים",
-			value: e.scheduleVersionId || t.scheduleVersionId || null
+			value: t.scheduleVersionId || n.scheduleVersionId || null
 		},
 		{
 			key: "calibrator",
 			label: "מכייל",
-			value: t.calibration?.artifactId || null
+			value: n.calibration?.artifactId || null
 		},
 		{
 			key: "calibrationStatus",
 			label: "מצב כיול",
-			value: c || null
+			value: l || null
 		}
 	].filter((e) => e.value);
 	return {
-		rankingScore: i,
-		runnerUpRankingScore: a,
-		rankingGap: o,
-		hasRunnerUp: u,
-		calibratedProbability: l,
-		calibrationStatus: c,
-		policy: r,
+		rankingScore: a,
+		runnerUpRankingScore: o,
+		rankingGap: s,
+		hasRunnerUp: d,
+		calibratedProbability: u,
+		calibrationStatus: l,
+		policy: i,
 		reviewReasons: Xt({
-			decision: t,
-			gates: n,
-			policy: r,
-			calibratedProbability: l,
-			calibrationStatus: c
+			decision: n,
+			gates: r,
+			policy: i,
+			calibratedProbability: u,
+			calibrationStatus: l
 		}),
-		gateRows: d,
-		auditItems: f
+		gateRows: f,
+		auditItems: p
 	};
 }
 //#endregion
