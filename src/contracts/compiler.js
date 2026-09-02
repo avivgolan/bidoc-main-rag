@@ -1,3 +1,4 @@
+import { contractActionLabel } from "../react/contractsHebrew.js";
 import { ContractsAgentError } from "./errors.js";
 import { assertContractExtractionSchema } from "./schema.js";
 import { normalizeClauseKey } from "./segmenter.js";
@@ -314,7 +315,8 @@ function compileEvidence(item, segmentIndex, documentSha256) {
 
 function normalizeLockedCandidate(candidate, role, sourceEvidence) {
   const groundedText = sourceEvidence.map((evidence) => evidence.sourceText).join(" ");
-  const action = LOCKED_ROLE_ACTIONS.get(role) || candidate.action;
+  const lockedAction = LOCKED_ROLE_ACTIONS.get(role) || candidate.action;
+  const action = /[\u0590-\u05FF]/u.test(groundedText) ? contractActionLabel(role) : lockedAction;
   const triggerKind = role === "contractual_completion" && !/(?:מועד\s+תחילת|commencement)/iu.test(groundedText)
     ? candidate.trigger?.kind
     : LOCKED_ROLE_TRIGGER_KINDS.get(role);
@@ -456,22 +458,24 @@ function applyDeterministicConflicts(candidates, drafts) {
       candidate.type !== "missing_information" && candidate.factStatus !== "missing"
     );
     if (eligible.length < 2) continue;
-    const signatures = new Set(eligible.map(materialFactSignature));
-    if (signatures.size < 2) continue;
+    const amounts = new Set(eligible.map(resolveComparableAmount).filter((value) => value !== null));
+    const timings = new Set(eligible.map(timingSignature));
+    const hasValueClash = amounts.size > 1;
+    const hasTimingClash = timings.size > 1;
+    if (!hasValueClash && !hasTimingClash) continue;
     const conflictGroupId = hint;
-    const numericValues = new Set(eligible.map((candidate) => candidate.metadata?.amount).filter(Number.isFinite));
     for (const candidate of eligible) {
       candidate.factStatus = "conflicting";
       candidate.conflictGroupId = conflictGroupId;
       candidate.gates = uniqueStrings([
         ...candidate.gates,
-        numericValues.size > 1 ? "material_value_conflict" : "contract_conflict_unresolved"
+        hasValueClash ? "material_value_conflict" : "contract_conflict_unresolved"
       ]).sort();
     }
     conflicts.push({
       conflictGroupId,
-      type: numericValues.size > 1 ? "value_conflict" : "rule_conflict",
-      materiality: numericValues.size > 1 ? "high" : "medium",
+      type: hasValueClash ? "value_conflict" : "rule_conflict",
+      materiality: hasValueClash ? "high" : "medium",
       status: "unresolved",
       candidateKeys: eligible.map((candidate) => candidate.candidateKey).sort(),
       selectedCandidateKey: null,
@@ -481,14 +485,24 @@ function applyDeterministicConflicts(candidates, drafts) {
   return conflicts;
 }
 
-function materialFactSignature(candidate) {
+function resolveComparableAmount(candidate) {
+  const metadata = candidate.metadata || {};
+  const raw = metadata.amount ?? metadata.value ?? metadata.extensionAmount;
+  const fromMetadata = Number(raw);
+  if (Number.isFinite(fromMetadata) && fromMetadata > 0) return fromMetadata;
+  const text = (candidate.sourceEvidence || []).map((item) => item.sourceText || "").join(" ");
+  const match = text.match(/(\d{1,3}(?:[,\s]\d{3})+|\d+)(?:\.\d+)?\s*(?:ש["״']?ח|₪|שקלים|ILS|NIS)/iu);
+  if (!match) return null;
+  const parsed = Number(String(match[1]).replace(/[,\s]/gu, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function timingSignature(candidate) {
   return JSON.stringify({
-    type: candidate.type,
-    fixedDate: candidate.fixedDate,
-    triggerKind: candidate.trigger?.kind || null,
-    offset: candidate.offset,
-    recurrence: candidate.recurrence,
-    metadata: candidate.metadata
+    fixedDate: candidate.fixedDate || null,
+    offsetValue: candidate.offset?.value ?? null,
+    offsetUnit: candidate.offset?.unit ?? null,
+    offsetDirection: candidate.offset?.direction ?? null
   });
 }
 

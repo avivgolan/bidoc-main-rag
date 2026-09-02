@@ -371,6 +371,7 @@ function shouldInsertWordSpace(previous, current, line, raw) {
 function normalizeExtractedLine(value) {
   return String(value || "")
     .replace(BIDI_MARKS, "")
+    .replace(/\u00F0/gu, "נ")
     .replace(/[\t ]+/gu, " ")
     .trim();
 }

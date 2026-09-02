@@ -130,7 +130,7 @@ export function buildContractsClauseGeneration({
   const normalizedPages = normalizePages(pages);
   const state = createAssemblyState(normalizedPages);
   assembleLogicalRecords(state);
-  const clauses = finalizeRecords(state.records, identity, parser);
+  const clauses = stampStubHeadingPages(finalizeRecords(state.records, identity, parser));
   const coverageLedger = buildCoverageLedger(state, clauses);
   assertContractsClauseCoverage(coverageLedger);
 
@@ -291,6 +291,7 @@ function assembleLogicalRecords(state) {
       const marker = parseClauseMarker(line.text);
       if (marker) {
         flushCurrent(state);
+        maybeStartAppendixNumberingRestart(state, marker, line);
         state.appendixInventoryMode = APPENDIX_INVENTORY_PATTERN.test(marker.remainder);
         state.numberedSourceCount += 1;
         const appendixKey = state.appendixKey;
@@ -319,6 +320,7 @@ function assembleLogicalRecords(state) {
     }
   }
   flushCurrent(state);
+  synthesizeSkippedParentHeadings(state);
 }
 
 function createRecordBuilder({ clauseKey, clauseType, clauseTitle, parentClauseKey, heading }) {
@@ -367,6 +369,31 @@ function flushCurrent(state) {
 
 function finalizeRecords(records, identity, parser) {
   return records.map((record, index) => {
+    if (!record.lineRefs.length) {
+      const rawText = String(record.clauseTitle || record.clauseKey || "").trim();
+      return {
+        documentVersionId: identity.documentVersionId,
+        documentSha256: identity.documentSha256,
+        parserGenerationId: parser.parserGenerationId,
+        clauseKey: record.clauseKey,
+        parentClauseKey: record.parentClauseKey,
+        clauseType: record.clauseType,
+        clauseTitle: record.clauseTitle,
+        clauseOrder: index + 1,
+        pageStart: 1,
+        pageEnd: 1,
+        rawText,
+        rawTextSha256: sha256(rawText),
+        rawData: {
+          segments: rawText ? [{ page: 1, text: rawText, heading: record.clauseTitle, continuation: false }] : [],
+          pageLocators: [],
+          headings: record.heading && record.clauseTitle ? [{ page: 1, text: record.clauseTitle }] : [],
+          continuationDecisions: []
+        },
+        sourceLineIds: [],
+        crossReferences: []
+      };
+    }
     const segments = groupLinesByPage(record.lineRefs);
     const rawText = segments.map((segment) => segment.text).join("\n");
     if (rawText.length > MAX_CLAUSE_CHARACTERS || segments.length > MAX_RAW_SEGMENTS) {
@@ -541,6 +568,21 @@ function normalizePages(pages) {
   return normalized;
 }
 
+function stampStubHeadingPages(clauses) {
+  for (const clause of clauses) {
+    if (clause.sourceLineIds.length) continue;
+    const children = clauses.filter((item) =>
+      item.parentClauseKey === clause.clauseKey && item.sourceLineIds.length
+    );
+    if (!children.length) continue;
+    clause.pageStart = Math.min(...children.map((item) => item.pageStart));
+    clause.pageEnd = Math.max(...children.map((item) => item.pageEnd));
+    if (clause.rawData?.headings?.[0]) clause.rawData.headings[0].page = clause.pageStart;
+    if (clause.rawData?.segments?.[0]) clause.rawData.segments[0].page = clause.pageStart;
+  }
+  return clauses;
+}
+
 function groupLinesByPage(lines) {
   const segments = [];
   for (const line of lines) {
@@ -560,12 +602,62 @@ function groupLinesByPage(lines) {
   return segments.map((segment) => ({ ...segment, text: segment.lines.join("\n") }));
 }
 
+function recordPage(record) {
+  return record?.lineRefs?.[0]?.pdfPage ?? 0;
+}
+
+function maybeStartAppendixNumberingRestart(state, marker, line) {
+  const proposed = state.appendixKey
+    ? `appendix_${state.appendixKey}.${marker.number}`
+    : marker.number;
+  const existing = state.records.find((record) => record.clauseKey === proposed);
+  if (!existing || line.pdfPage <= recordPage(existing)) return;
+  const appendixKey = `p${line.pdfPage}`;
+  state.appendixKey = appendixKey;
+  state.records.push(createRecordBuilder({
+    clauseKey: `appendix_${appendixKey}.heading`,
+    clauseType: "document_context",
+    clauseTitle: line.text,
+    parentClauseKey: null,
+    heading: true
+  }));
+}
+
+function synthesizeSkippedParentHeadings(state) {
+  const keys = new Set(state.records.map((record) => record.clauseKey));
+  const topLevels = [...keys]
+    .filter((key) => /^\d+$/u.test(key))
+    .map(Number);
+  const missing = new Set();
+  for (const record of state.records) {
+    const parent = record.parentClauseKey;
+    if (!parent || keys.has(parent) || missing.has(parent)) continue;
+    if (!/^\d+$/u.test(parent)) continue;
+    const parentNum = Number(parent);
+    if (!topLevels.some((value) => value > parentNum)) continue;
+    missing.add(parent);
+  }
+  for (const parent of [...missing].sort()) {
+    keys.add(parent);
+    const record = createRecordBuilder({
+      clauseKey: parent,
+      clauseType: "document_context",
+      clauseTitle: parent,
+      parentClauseKey: parentClauseKey(parent),
+      heading: true
+    });
+    const childIndex = state.records.findIndex((item) => item.parentClauseKey === parent);
+    if (childIndex >= 0) state.records.splice(childIndex, 0, record);
+    else state.records.push(record);
+  }
+}
+
 function parseAppendixHeading(value) {
   const text = String(value || "").trim();
   if (/^\d/u.test(text)) return null;
-  const leading = text.match(/^נספח\s+([א-תA-Za-z])(?:\s*['׳״"])?(?:\s|[-–—:]|$)/u);
+  const leading = text.match(/^(?:נספח|[^\s\d]ספח)\s+([א-תA-Za-z])(?:\s*['׳״"])?(?:\s|[-–—:]|$)/u);
   const reversed = text.length <= 160
-    ? text.match(/(?:^|[-–—]\s*)([א-תA-Za-z])(?:\s*['׳״"])?\s+נספח(?:\s|$)/u)
+    ? text.match(/(?:^|[-–—]\s*)([א-תA-Za-z])(?:\s*['׳״"])?\s+(?:נספח|[^\s\d]ספח)(?:\s|$)/u)
     : null;
   const key = leading?.[1] || reversed?.[1];
   if (!key) return null;

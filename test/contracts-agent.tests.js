@@ -2320,6 +2320,44 @@ export function registerContractsAgentTests(test) {
     assert.equal(appendix.parentClauseKey, "appendix_b.heading");
   });
 
+  test("contracts R2 clause parser namespaces later-page numbering restarts and skipped parents", () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [
+        {
+          pdfPage: 1,
+          text: [
+            "1. General",
+            "1.1. Scope",
+            "2. Payment",
+            "7. Dates",
+            "8.1. Change order",
+            "9. Completion"
+          ].join("\n")
+        },
+        {
+          pdfPage: 2,
+          text: [
+            "1. Form field one",
+            "2. Form field two"
+          ].join("\n")
+        }
+      ],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+
+    assert.equal(generation.coverageLedger.accepted, true);
+    assert.deepEqual(generation.coverageLedger.duplicateKeys, []);
+    assert.deepEqual(generation.coverageLedger.errors, []);
+    assert.ok(generation.clauses.some((clause) => clause.clauseKey === "1"));
+    assert.ok(generation.clauses.some((clause) => clause.clauseKey === "8" && clause.clauseType === "document_context"));
+    const restart = generation.clauses.find((clause) => clause.clauseKey === "appendix_p2.1");
+    assert.ok(restart);
+    assert.equal(restart.clauseType, "appendix_item");
+    assert.equal(restart.parentClauseKey, "appendix_p2.heading");
+    assert.equal(restart.pageStart, 2);
+  });
+
   test("contracts R2 parser policy changes create immutable generation identity", () => {
     const input = {
       pages: [{ pdfPage: 1, text: "1. General\n1.1. Exact source text" }],
@@ -3389,6 +3427,52 @@ export function registerContractsAgentTests(test) {
       assert.ok(candidate.sourceEvidence.every((evidence) => evidence.documentSha256 === identity.sha256));
     }
     assert.deepEqual(contractExtractionSchemaErrors(first), []);
+  });
+
+  test("contracts compiler does not treat same-amount restatements as conflicts", () => {
+    const segments = [
+      segment("s-charge-main", 5, "5.7", "5.7", "הקבלן ישלם 2,000 שקלים חדשים בגין כל יום איחור."),
+      segment("s-charge-appendix", 14, "Appendix B, item 3", "appendix_b.3", "הקנס בגין האיחור בהשלמת העבודות: 2,000 ש\"ח ליום.")
+    ];
+    const draft = {
+      draftVersion: "contracts-model-draft.v1",
+      documentObservations: { documentType: "signing_version", executionDate: null, attachmentsStatus: "unknown", contractSiteRaw: null },
+      candidates: [
+        draftCandidate({
+          type: "consequence",
+          roleCode: "daily_delay_charge",
+          action: "Pay a daily charge for delayed completion",
+          trigger: { kind: "event", description: "איחור ממועד השלמת העבודות", eventDate: null },
+          projectionHint: "project_schedule",
+          conflictHint: "daily-delay-charge",
+          evidence: [{ segmentId: "s-charge-main", exactQuote: segments[0].text }],
+          metadata: { amount: 2000, currency: "ILS", rateUnit: "per_day" }
+        }),
+        draftCandidate({
+          type: "notice_rule",
+          roleCode: "daily_delay_charge",
+          action: "Pay a daily charge for delayed completion",
+          trigger: { kind: "event", description: "Each delayed day", eventDate: null },
+          projectionHint: "project_schedule",
+          conflictHint: "daily-delay-charge",
+          evidence: [{ segmentId: "s-charge-appendix", exactQuote: segments[1].text }],
+          metadata: { currency: "ILS", rateUnit: "per_day" }
+        })
+      ],
+      missingObservations: [],
+      packetReferences: []
+    };
+    const output = compileContractDraft({
+      draft,
+      segments,
+      identity: { filename: "contract.pdf", sourceId: null, sha256: FIXTURE_SHA, documentVersionId: `sha256:${FIXTURE_SHA}` }
+    });
+    const charges = output.candidates.filter((candidate) => candidate.role === "daily_delay_charge");
+    assert.equal(charges.length, 2);
+    assert.deepEqual(charges.map((candidate) => candidate.metadata.amount).sort((a, b) => a - b), [2000, 2000]);
+    assert.ok(charges.every((candidate) => candidate.factStatus !== "conflicting"));
+    assert.deepEqual(output.conflicts, []);
+    assert.ok(charges.every((candidate) => candidate.action === "שלם חיוב יומי בגין איחור בהשלמה"));
   });
 
   test("contracts compiler rejects ungrounded values and does not conflict complementary notice clocks", () => {
