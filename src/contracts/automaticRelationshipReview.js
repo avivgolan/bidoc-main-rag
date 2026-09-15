@@ -14,7 +14,8 @@ amendments, duplicate wording, differing amounts, dates, deadlines, triggers and
 Use reject only when the proposed relationship is demonstrably incorrect. Use unresolved when evidence
 is incomplete or ambiguous. Do not force an answer to keep the pipeline moving. Unresolved findings
 are retained and the remaining contract continues automatically. Never calculate dates or invent facts.
-Confidence is between 0 and 1. Explain the result in Hebrew. Do not correct the relationship type or IDs.`;
+Confidence is between 0 and 1. Explain the result in Hebrew. Do not correct the relationship type or IDs.
+Return JSON.`;
 
 export async function reviewAutomaticRelationshipBatch({ items, config, chatComplete = chatCompletion }) {
   if (!Array.isArray(items) || items.length < 1 || items.length > 4) {

@@ -62,7 +62,7 @@ export async function chatCompletionDetailed({
     () => abortWith(null, `OpenRouter response timed out after ${timeoutMs}ms`),
     timeoutMs
   );
-  const requestChat = async (format) => {
+  const requestChat = async (format, nextMessages = messages) => {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
@@ -74,7 +74,7 @@ export async function chatCompletionDetailed({
       },
       body: JSON.stringify(omitNullish({
         model,
-        messages,
+        messages: nextMessages,
         temperature,
         max_tokens: maxTokens,
         top_p: topP,
@@ -94,11 +94,25 @@ export async function chatCompletionDetailed({
   };
 
   try {
-    ({ res: response, body: data } = await requestChat(responseFormat));
-    if (!response.ok) {
+    let activeFormat = responseFormat;
+    let activeMessages = messages;
+    ({ res: response, body: data } = await requestChat(activeFormat, activeMessages));
+    if (!response.ok && !controller.signal.aborted) {
       const firstDetails = extractProviderErrorDetails(data, response.status);
-      if (isJsonSchemaUnsupported(responseFormat, firstDetails.message) && !controller.signal.aborted) {
-        ({ res: response, body: data } = await requestChat({ type: "json_object" }));
+      if (isJsonSchemaUnsupported(activeFormat, firstDetails.message)) {
+        activeFormat = { type: "json_object" };
+        activeMessages = ensureJsonWordInMessages(activeMessages);
+        ({ res: response, body: data } = await requestChat(activeFormat, activeMessages));
+      }
+    }
+    if (!response.ok && !controller.signal.aborted) {
+      const objectDetails = extractProviderErrorDetails(data, response.status);
+      if (needsJsonWordForJsonObject(activeFormat, objectDetails.message)) {
+        activeMessages = ensureJsonWordInMessages(activeMessages);
+        ({ res: response, body: data } = await requestChat(activeFormat, activeMessages));
+      } else if (isJsonObjectUnsupported(activeFormat, objectDetails.message)) {
+        activeFormat = null;
+        ({ res: response, body: data } = await requestChat(activeFormat, activeMessages));
       }
     }
     if (!response.ok) {
@@ -364,6 +378,32 @@ function isJsonSchemaUnsupported(responseFormat, message) {
   if (type !== "json_schema" && !responseFormat?.json_schema) return false;
   const text = String(message || "");
   return /json_schema/iu.test(text) && /not supported/iu.test(text);
+}
+
+function isJsonObjectUnsupported(responseFormat, message) {
+  return String(responseFormat?.type || "").trim() === "json_object"
+    && /json_object/iu.test(String(message || ""))
+    && /not supported/iu.test(String(message || ""));
+}
+
+function needsJsonWordForJsonObject(responseFormat, message) {
+  return String(responseFormat?.type || "").trim() === "json_object"
+    && /must contain the word ['"]?json['"]?/iu.test(String(message || ""));
+}
+
+function messagesContainJsonWord(messages = []) {
+  return messages.some((message) => /json/iu.test(String(message?.content || "")));
+}
+
+function ensureJsonWordInMessages(messages = []) {
+  if (messagesContainJsonWord(messages)) return messages;
+  const clone = messages.map((message) => ({ ...message }));
+  const lastUser = [...clone].reverse().find((message) => message.role === "user");
+  if (lastUser) {
+    lastUser.content = `${String(lastUser.content || "").trim()}\n\nRespond with JSON.`.trim();
+    return clone;
+  }
+  return [...clone, { role: "user", content: "Respond with JSON." }];
 }
 
 function extractProviderErrorDetails(data, status) {
