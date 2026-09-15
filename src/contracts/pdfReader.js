@@ -330,7 +330,7 @@ export function reconstructPdfPageText(items = []) {
   };
 
   for (const item of items) {
-    const raw = String(item?.str || "").normalize("NFC").replace(BIDI_MARKS, "");
+    const raw = normalizeContractsPdfText(item?.str);
     if (!raw) {
       if (item?.hasEOL) flush();
       continue;
@@ -371,9 +371,17 @@ function shouldInsertWordSpace(previous, current, line, raw) {
 }
 
 function normalizeExtractedLine(value) {
-  return String(value || "")
-    .replace(BIDI_MARKS, "")
-    .replace(/\u00F0/gu, "נ")
+  return normalizeContractsPdfText(value)
     .replace(/[\t ]+/gu, " ")
     .trim();
+}
+
+// Some legacy Hebrew PDF encodings use Apple private-use glyph U+F8FF for
+// the letter נ. Keep the source text readable before parsing, indexing, or
+// handing it to the model.
+function normalizeContractsPdfText(value) {
+  return String(value || "")
+    .normalize("NFC")
+    .replace(BIDI_MARKS, "")
+    .replace(/[\u00F0\uF8FF]/gu, "נ");
 }

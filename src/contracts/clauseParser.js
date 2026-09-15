@@ -8,8 +8,8 @@ import { ContractsAgentError } from "./errors.js";
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v3";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v3";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v4";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v4";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -269,6 +269,13 @@ function createAssemblyState(pages) {
 
 function assembleLogicalRecords(state) {
   for (const page of state.pages) {
+    // Context is supporting metadata, not an unbounded catch-all preceding
+    // the first numbered clause. Preserve provenance, but constrain each
+    // context record to a single PDF page.
+    if (state.current?.clauseType === "document_context"
+        && state.current.lineRefs[0]?.pdfPage !== page.pdfPage) {
+      flushCurrent(state);
+    }
     for (const line of page.lines) {
       if (REPEATED_PAGE_MARKERS.has(line.text)) {
         excludeLine(state, line, "repeated_page_marker");
@@ -538,7 +545,9 @@ function normalizePages(pages) {
   }
   const normalized = pages.map((page) => ({
     pdfPage: Number(page?.pdfPage),
-    text: String(page?.text || "").normalize("NFC")
+    text: String(page?.text || "")
+      .normalize("NFC")
+      .replace(/[\u00F0\uF8FF]/gu, "נ")
   })).sort((a, b) => a.pdfPage - b.pdfPage);
   let totalCharacters = 0;
   for (let index = 0; index < normalized.length; index += 1) {

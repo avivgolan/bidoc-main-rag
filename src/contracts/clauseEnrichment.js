@@ -12,40 +12,40 @@ export const CONTRACTS_INDEX_RECORD_SCHEMA_VERSION = "contracts-index-record.r3.
 export const CONTRACTS_INDEX_REF_SCHEMA_VERSION = "contracts-index-ref.r1.v1";
 
 export const CONTRACTS_CONTROLLED_TAGS = Object.freeze([
-  "appendix",
-  "approval",
-  "authorization",
-  "bond",
-  "change",
-  "commercial",
-  "communication",
-  "compliance",
-  "completion",
-  "confidentiality",
-  "coordination",
-  "definitions",
-  "delay",
-  "dispute",
-  "document_context",
-  "documents",
-  "execution",
-  "extension",
-  "insurance",
-  "liability",
-  "milestone",
-  "notice",
-  "other",
-  "ownership",
-  "parties",
-  "payment",
-  "quality",
-  "responsibility",
-  "safety",
-  "schedule",
-  "scope",
-  "storage",
-  "termination",
-  "warranty"
+  "נספח",
+  "אישור",
+  "הסמכה",
+  "ערבות",
+  "שינוי",
+  "מסחרי",
+  "תקשורת",
+  "עמידה_בדרישות",
+  "השלמה",
+  "סודיות",
+  "תיאום",
+  "הגדרות",
+  "עיכוב",
+  "מחלוקת",
+  "הקשר_מסמך",
+  "מסמכים",
+  "ביצוע",
+  "הארכת_מועד",
+  "ביטוח",
+  "אחריות_משפטית",
+  "אבן_דרך",
+  "הודעה",
+  "אחר",
+  "בעלות",
+  "צדדים_להסכם",
+  "תשלום",
+  "איכות",
+  "אחריות",
+  "בטיחות",
+  "לוח_זמנים",
+  "תחולת_העבודה",
+  "אחסון",
+  "סיום_ההסכם",
+  "אחריות_בדק"
 ]);
 
 const MAX_CLAUSES = 500;
@@ -76,7 +76,22 @@ const ENRICHMENT_GENERATION_PATTERN = /^enrichment-generation:sha256:[0-9a-f]{64
 const HEBREW_CHARACTER_PATTERN = /[\u0590-\u05ff]/u;
 const CONTROLLED_TAG_ALIASES = Object.freeze({
   "פיצוי": "תשלום",
-  "פיצויים": "תשלום"
+  "פיצויים": "תשלום",
+  "appendix": "נספח",
+  "approval": "אישור",
+  "change": "שינוי",
+  "completion": "השלמה",
+  "delay": "עיכוב",
+  "documents": "מסמכים",
+  "execution": "ביצוע",
+  "notice": "הודעה",
+  "other": "אחר",
+  "payment": "תשלום",
+  "quality": "איכות",
+  "responsibility": "אחריות",
+  "safety": "בטיחות",
+  "schedule": "לוח_זמנים",
+  "scope": "תחולת_העבודה"
 });
 const NUMERIC_FACT_PATTERN = /\d+(?:[.,:/-]\d+)*/gu;
 const NUMERIC_REFERENCE_PATTERN = /(?:סעיף|סעיפים|סעיף\s+קטן|ס["״']?ק|clauses?|sections?)\s*(\d+(?:\.\d+){0,7})/giu;
@@ -802,7 +817,7 @@ function deterministicEnrichmentItem(clause, controlledTags = null) {
   const grounded = sourceGroundedCatalogTags({ controlledTags: tags, sourceText: clause.rawText });
   const fallbackTags = grounded.length
     ? grounded
-    : (tags.includes("other") ? ["other"] : tags.slice(0, 1));
+    : (tags.includes("אחר") ? ["אחר"] : tags.slice(0, 1));
   const source = String(clause.rawText || "").trim().replace(/\s+/gu, " ");
   const clipped = source.slice(0, Math.max(0, MAX_SUMMARY_CHARACTERS - 24));
   const prefixed = HEBREW_CHARACTER_PATTERN.test(clipped) && clipped.length >= 5
