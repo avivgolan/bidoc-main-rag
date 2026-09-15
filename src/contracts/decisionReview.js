@@ -9,6 +9,7 @@ import {
   CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
   runContractsDecisionNormalization
 } from "./decisionNormalization.js";
+import crypto from "node:crypto";
 import { workspaceRpc } from "./workspacePersistence.js";
 import { publishUnresolvedContractConflicts } from "./conflictRegistry.js";
 import {
@@ -364,7 +365,12 @@ export async function persistContractsDecisionProposals({
   if (!contractsDecisionReviewApproved(env)) {
     throw decisionReviewError("contracts_decision_review_not_enabled", "R4.2B is not enabled on this server.", 503);
   }
-  const proposals = assertCompleteNormalization(normalizationResult).proposals.map(toPersistenceProposal);
+  const complete = assertCompleteNormalization(normalizationResult);
+  const proposals = collapseTemporalDecisionProposals(
+    complete.proposals,
+    complete.documentSha256,
+    complete.decisionPolicyVersion
+  ).map(toPersistenceProposal);
   try {
     const projection = await workspaceRpc({
       config,
@@ -500,6 +506,36 @@ function assertCompleteNormalization(value) {
     );
   }
   return value;
+}
+
+function collapseTemporalDecisionProposals(proposals, documentSha256, policyVersion) {
+  const sha = String(documentSha256 || "").trim().toLowerCase();
+  if (!SHA256_PATTERN.test(sha)) {
+    throw decisionReviewError(
+      "contracts_decision_review_response_invalid",
+      "A normalized decision proposal is missing its document identity.",
+      502
+    );
+  }
+  const seen = new Set();
+  const collapsed = [];
+  for (const proposal of proposals) {
+    const decisionKey = String(proposal.decisionKey || "").replace(/:relative:[0-9a-f]{12}$/u, "");
+    if (seen.has(decisionKey)) continue;
+    seen.add(decisionKey);
+    const proposalKey = crypto.createHash("sha256")
+      .update([policyVersion, sha, ...proposal.sourceClauseKeys].join("\u001f"), "utf8")
+      .digest("hex");
+    collapsed.push({ ...proposal, decisionKey, proposalKey });
+  }
+  if (collapsed.length < 1) {
+    throw decisionReviewError(
+      "contracts_decision_normalization_incomplete",
+      "Only a complete R4.2B normalization result can be persisted for review.",
+      422
+    );
+  }
+  return collapsed;
 }
 
 function toPersistenceProposal(value) {

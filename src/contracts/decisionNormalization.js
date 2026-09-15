@@ -553,6 +553,7 @@ export async function runContractsDecisionNormalization({
     supportRelationshipPolicyVersion: CONTRACTS_DECISION_SUPPORT_POLICY_VERSION,
     promptVersion: normalizedPromptVersion,
     modelVersion: model,
+    documentSha256: normalizeDocumentSha(preview),
     scope: "reviewed_relationships_to_normalized_decision_proposals",
     proposals,
     metrics: {

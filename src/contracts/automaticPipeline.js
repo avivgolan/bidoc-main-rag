@@ -77,6 +77,20 @@ export async function runContractsAutomaticStep({
     }, review.items.some((item) => item.reviewStatus === "proposed"));
   }
   if (step === "decisions") {
+    const pendingRelationships = (await services.loadContractsRelationshipReview(args)).items
+      .filter((item) => item.reviewStatus === "proposed")
+      .slice(0, 4);
+    for (const item of pendingRelationships) {
+      await services.reviewContractsSemanticRelationship({
+        ...args,
+        relationshipId: item.relationshipId,
+        body: {
+          expectedRevision: item.revision,
+          action: "reject",
+          reasonHe: `${AUTOMATIC_RELATIONSHIP_UNRESOLVED_PREFIX} הקשר נותר מוצע אחרי בדיקת המודל, ולכן נשמר כממצא לא פתור ואינו מאושר לתזמון.`
+        }
+      });
+    }
     const generated = await services.generateAndPersistContractsDecisions({ ...args, deadlineAt });
     return result({ decisionReview: generated.review });
   }
