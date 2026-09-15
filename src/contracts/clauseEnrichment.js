@@ -214,6 +214,8 @@ export async function runContractsClauseEnrichment({
   let groundingSanitizationCount = 0;
   let correctedUnknownTagCount = 0;
   let catalogFallbackClauseCount = 0;
+  let correctedUnknownKeyCount = 0;
+  let deterministicFallbackClauseCount = 0;
   const callProvider = async ({ batch, batchIndex, messages, abortSignal, stage }) => {
     let attempt = 0;
     while (true) {
@@ -296,18 +298,34 @@ export async function runContractsClauseEnrichment({
       let correctedTags = 0;
       let catalogFallbacks = 0;
       let sanitizedNumericFacts = 0;
+      let correctedKeys = 0;
       const items = validateModelBatch(candidateRaw, batch, {
         controlledTags: tags,
         sanitizeUnknownTags: true,
+        sanitizeUnknownKeys: true,
         onUnknownTagsCorrected: (_clauseKey, unknownTags) => { correctedTags += unknownTags.length; },
+        onUnknownKeysCorrected: (count) => { correctedKeys += count; },
         onCatalogFallback: () => { catalogFallbacks += 1; },
         sanitizeUnsupportedNumericFacts,
         onNumericSanitized: () => { sanitizedNumericFacts += 1; }
       });
       correctedUnknownTagCount += correctedTags;
+      correctedUnknownKeyCount += correctedKeys;
       catalogFallbackClauseCount += catalogFallbacks;
       groundingSanitizationCount += sanitizedNumericFacts;
       return items;
+    };
+    const completeFromSourceIfKeysMissing = (error, candidateRaw) => {
+      if (!isKeyCompletenessError(error)) throw error;
+      const completed = completeBatchFromSource(candidateRaw, batch, {
+        controlledTags: tags,
+        sanitizeUnknownTags: true,
+        onUnknownTagsCorrected: (_clauseKey, unknownTags) => { correctedUnknownTagCount += unknownTags.length; },
+        onCatalogFallback: () => { catalogFallbackClauseCount += 1; }
+      });
+      correctedUnknownKeyCount += completed.correctedKeyCount;
+      deterministicFallbackClauseCount += completed.fallbackCount;
+      return completed.items;
     };
     try {
       return validateProviderBatch(raw);
@@ -320,7 +338,9 @@ export async function runContractsClauseEnrichment({
           validationError = sanitizedError;
         }
       }
-      if (!isRepairableModelOutputError(validationError) || repairBatchCount >= maxRepairBatches) throw validationError;
+      if (!isRepairableModelOutputError(validationError) || repairBatchCount >= maxRepairBatches) {
+        return completeFromSourceIfKeysMissing(validationError, raw);
+      }
       repairBatchCount += 1;
       const repairRemainingMs = effectiveDeadline - now();
       if (repairRemainingMs < 1_000) {
@@ -351,7 +371,18 @@ export async function runContractsClauseEnrichment({
           { cause: repairError, issueCodes: ["enrichment.repair_provider_failed"] }
         );
       }
-      return validateProviderBatch(repairedRaw);
+      try {
+        return validateProviderBatch(repairedRaw);
+      } catch (repairValidationError) {
+        if (repairValidationError?.code === "contracts_clause_enrichment_ungrounded_numeric_fact") {
+          try {
+            return validateProviderBatch(repairedRaw, { sanitizeUnsupportedNumericFacts: true });
+          } catch (sanitizedRepairError) {
+            return completeFromSourceIfKeysMissing(sanitizedRepairError, repairedRaw);
+          }
+        }
+        return completeFromSourceIfKeysMissing(repairValidationError, repairedRaw);
+      }
     }
   }, { signal, deadlineAt: effectiveDeadline, now });
 
@@ -415,7 +446,9 @@ export async function runContractsClauseEnrichment({
       modelRepairCount: repairBatchCount,
       groundingSanitizationCount,
       correctedUnknownTagCount,
+      correctedUnknownKeyCount,
       catalogFallbackClauseCount,
+      deterministicFallbackClauseCount,
       modelCallCount: batches.length + repairBatchCount + providerRetryCount,
       modelEnrichedClauseCount: pendingClauses.length,
       reusedClauseCount: reusableItems.size,
@@ -661,7 +694,10 @@ export function buildContractsClauseEnrichmentRpcPayload({
 function validateModelBatch(raw, batch, {
   controlledTags = null,
   sanitizeUnknownTags = false,
+  sanitizeUnknownKeys = false,
+  allowIncomplete = false,
   onUnknownTagsCorrected = null,
+  onUnknownKeysCorrected = null,
   onCatalogFallback = null,
   sanitizeUnsupportedNumericFacts = false,
   onNumericSanitized = null
@@ -685,16 +721,45 @@ function validateModelBatch(raw, batch, {
     throw enrichmentError("contracts_clause_enrichment_schema_invalid", "The R3 model response does not match the locked schema.", 502, "enrichment.schema_invalid");
   }
   const expected = new Map(batch.map((clause) => [clause.clauseKey, clause]));
+  const expectedOrder = batch.map((clause) => clause.clauseKey);
   const seen = new Set();
-  const items = parsed.items.map((item) => {
+  const accepted = [];
+  const unknownLeftovers = [];
+  let correctedKeyCount = 0;
+  for (const item of parsed.items) {
     if (!isPlainObject(item) || !hasExactKeys(item, ["clauseKey", "summaryHe", "tags"])) {
       throw enrichmentError("contracts_clause_enrichment_item_invalid", "An R3 model item contains unsupported fields.", 502, "enrichment.item_invalid");
     }
-    const clauseKey = String(item.clauseKey || "");
-    if (!expected.has(clauseKey) || seen.has(clauseKey)) {
-      throw enrichmentError("contracts_clause_enrichment_key_invalid", "The R3 model returned an unknown or duplicate clause key.", 502, "enrichment.key_invalid");
+    const clauseKey = normalizeEnrichmentClauseKey(item.clauseKey);
+    if (expected.has(clauseKey) && !seen.has(clauseKey)) {
+      seen.add(clauseKey);
+      accepted.push({ ...item, clauseKey });
+      continue;
     }
-    seen.add(clauseKey);
+    if (!sanitizeUnknownKeys) {
+      throw enrichmentError(
+        "contracts_clause_enrichment_key_invalid",
+        "The R3 model returned an unknown or duplicate clause key.",
+        502,
+        "enrichment.key_invalid",
+        { clauseKey, expectedKeys: expectedOrder }
+      );
+    }
+    correctedKeyCount += 1;
+    if (!expected.has(clauseKey)) unknownLeftovers.push({ ...item, clauseKey });
+  }
+  const missing = expectedOrder.filter((key) => !seen.has(key));
+  if (sanitizeUnknownKeys && unknownLeftovers.length === missing.length && missing.length > 0) {
+    unknownLeftovers.forEach((item, index) => {
+      const clauseKey = missing[index];
+      seen.add(clauseKey);
+      accepted.push({ ...item, clauseKey });
+    });
+    unknownLeftovers.length = 0;
+  }
+  if (correctedKeyCount) onUnknownKeysCorrected?.(correctedKeyCount);
+  const items = accepted.map((item) => {
+    const clauseKey = item.clauseKey;
     let summaryHe = validateSummary(item.summaryHe, clauseKey);
     if (sanitizeUnsupportedNumericFacts) {
       const sanitized = sanitizeSummaryNumericGrounding(summaryHe, expected.get(clauseKey).rawText);
@@ -715,10 +780,65 @@ function validateModelBatch(raw, batch, {
       })
     };
   });
-  if (seen.size !== expected.size) {
+  if (seen.size !== expected.size && !allowIncomplete) {
     throw enrichmentError("contracts_clause_enrichment_batch_incomplete", "The R3 model omitted one or more clauses from a batch.", 502, "enrichment.batch_incomplete");
   }
   return items;
+}
+
+function isKeyCompletenessError(error) {
+  return error?.code === "contracts_clause_enrichment_key_invalid"
+    || error?.code === "contracts_clause_enrichment_batch_incomplete";
+}
+
+function normalizeEnrichmentClauseKey(value) {
+  return String(value || "")
+    .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]/gu, "")
+    .trim();
+}
+
+function deterministicEnrichmentItem(clause, controlledTags = null) {
+  const tags = normalizeControlledTags(controlledTags);
+  const grounded = sourceGroundedCatalogTags({ controlledTags: tags, sourceText: clause.rawText });
+  const fallbackTags = grounded.length
+    ? grounded
+    : (tags.includes("other") ? ["other"] : tags.slice(0, 1));
+  const source = String(clause.rawText || "").trim().replace(/\s+/gu, " ");
+  const clipped = source.slice(0, Math.max(0, MAX_SUMMARY_CHARACTERS - 24));
+  const prefixed = HEBREW_CHARACTER_PATTERN.test(clipped) && clipped.length >= 5
+    ? clipped
+    : `סעיף מתוך המקור. ${clipped}`.trim();
+  const summaryHe = validateSummary(prefixed.slice(0, MAX_SUMMARY_CHARACTERS), clause.clauseKey);
+  assertSummaryGrounding(summaryHe, clause.rawText, clause.clauseKey);
+  return {
+    clauseKey: clause.clauseKey,
+    summaryHe,
+    tags: fallbackTags
+  };
+}
+
+function completeBatchFromSource(raw, batch, options = {}) {
+  let partial = [];
+  let correctedKeyCount = 0;
+  try {
+    partial = validateModelBatch(raw, batch, {
+      ...options,
+      sanitizeUnknownKeys: true,
+      allowIncomplete: true,
+      onUnknownKeysCorrected: (count) => { correctedKeyCount += count; }
+    });
+  } catch (error) {
+    if (!isKeyCompletenessError(error)) throw error;
+    partial = [];
+  }
+  const have = new Set(partial.map((item) => item.clauseKey));
+  return {
+    items: batch.map((clause) => have.has(clause.clauseKey)
+      ? partial.find((item) => item.clauseKey === clause.clauseKey)
+      : deterministicEnrichmentItem(clause, options.controlledTags)),
+    fallbackCount: batch.length - have.size,
+    correctedKeyCount
+  };
 }
 
 function isRepairableModelOutputError(error) {
@@ -1110,6 +1230,9 @@ function sha256(value) {
   return crypto.createHash("sha256").update(String(value), "utf8").digest("hex");
 }
 
-function enrichmentError(code, message, status, issueCode) {
-  return new ContractsAgentError(code, message, status, { issueCodes: [issueCode] });
+function enrichmentError(code, message, status, issueCode, details = null) {
+  return new ContractsAgentError(code, message, status, {
+    issueCodes: [issueCode],
+    ...(details ? { details } : {})
+  });
 }
