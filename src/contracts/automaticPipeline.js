@@ -96,11 +96,13 @@ export async function runContractsAutomaticStep({
   }
   if (step === "decision-review") {
     const automatic = await services.autoReviewContractsDecisions({ ...args, deadlineAt });
-    // Provider/JSON failures are retryable failures, never a completed review.
-    if (automatic.plan.metrics.failedBatchCount > 0) {
-      throw new ContractsAgentError("contracts_automatic_verifier_failed", "Some model reviews failed. Saved approvals are retained; retrying reviews only the remaining proposals.", 502);
-    }
-    return result({ decisionReview: automatic.review, approvedCount: automatic.autoReview.approvedCount });
+    // Failed verifier batches stay proposed; decision-findings records them as unresolved
+    // so File Classify can continue to Indicator instead of retrying the same stage forever.
+    return result({
+      decisionReview: automatic.review,
+      approvedCount: automatic.autoReview?.approvedCount || 0,
+      failedVerifierBatches: Number(automatic.plan?.metrics?.failedBatchCount || 0)
+    });
   }
   if (step === "decision-findings") {
     const current = await services.loadContractsDecisionReview(args);

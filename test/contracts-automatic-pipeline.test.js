@@ -107,10 +107,16 @@ test("provider failure retries the saved stage and never skips ahead", async () 
   assert.equal(calls.length, 3); assert.equal(saved[0].nextStep, "schedule"); assert.equal(saved.at(-1), null);
 });
 
-test("failed verifier batches do not advance to findings or Indicator", async () => {
-  await assert.rejects(runContractsAutomaticStep({ ...base, step: "decision-review", services: {
-    autoReviewContractsDecisions: async () => ({ plan: { metrics: { failedBatchCount: 1 } } })
-  } }), (error) => error.code === "contracts_automatic_verifier_failed");
+test("failed verifier batches still advance so findings can record unresolved decisions", async () => {
+  const result = await runContractsAutomaticStep({ ...base, step: "decision-review", services: {
+    autoReviewContractsDecisions: async () => ({
+      review: { items: [], metrics: { proposedCount: 1 } },
+      plan: { metrics: { failedBatchCount: 1 } },
+      autoReview: { approvedCount: 0 }
+    })
+  } });
+  assert.equal(result.nextStep, "decision-findings");
+  assert.equal(result.failedVerifierBatches, 1);
 });
 
 test("incomplete reviews cannot trigger an operational handoff", async () => {
@@ -119,27 +125,33 @@ test("incomplete reviews cannot trigger an operational handoff", async () => {
   } }), (error) => error.code === "contracts_automatic_review_incomplete");
 });
 
-test("invalid model IDs, duplicate IDs, non-Hebrew reasons and truncation apply no batch", async () => {
+test("invalid model IDs, duplicate IDs, non-Hebrew reasons and truncation apply no approvals", async () => {
   const item = { relationshipId: "rel-1", revision: 2, evidence: { excerpts: [{ excerpt: "מקור ראשון" }, { excerpt: "מקור שני" }] } };
   for (const output of [
     { items: [{ relationshipId: "invented", verdict: "approve", confidence: 1, reasonHe: "הקשר נתמך באופן ברור במקורות." }] },
     { items: [{ relationshipId: "rel-1", verdict: "approve", confidence: 1, reasonHe: "unsupported English reason" }] },
     { items: [{ relationshipId: "rel-1", verdict: "approve", confidence: "1", reasonHe: "הקשר נתמך באופן ברור במקורות." }] }
   ]) {
-    await assert.rejects(reviewAutomaticRelationshipBatch({ items: [item], config, chatComplete: async () => JSON.stringify(output) }), /incomplete or invalid/);
+    const [result] = await reviewAutomaticRelationshipBatch({ items: [item], config, chatComplete: async () => JSON.stringify(output) });
+    assert.equal(result.unresolved, true);
+    assert.equal(result.action, "reject");
   }
-  await assert.rejects(reviewAutomaticRelationshipBatch({ items: [item], config, chatComplete: async ({ telemetry }) => {
+  const truncated = await reviewAutomaticRelationshipBatch({ items: [item], config, chatComplete: async ({ telemetry }) => {
     telemetry.record({ finish_reason: "length" }); return "{}";
-  } }), /incomplete or invalid/);
-  await assert.rejects(reviewAutomaticRelationshipBatch({ items: [item], config, chatComplete: async ({ telemetry }) => {
+  } });
+  assert.equal(truncated[0].unresolved, true);
+  const maxTokens = await reviewAutomaticRelationshipBatch({ items: [item], config, chatComplete: async ({ telemetry }) => {
     telemetry.record({ finish_reason: "stop", native_finish_reason: "MAX_TOKENS" });
     return JSON.stringify({ items: [{ relationshipId: "rel-1", verdict: "approve", confidence: 1, reasonHe: "הקשר נתמך באופן ברור במקורות." }] });
-  } }), /incomplete or invalid/);
-  await assert.rejects(reviewAutomaticRelationshipBatch({ items: [item, { ...item, relationshipId: "rel-2" }], config,
+  } });
+  assert.equal(maxTokens[0].unresolved, true);
+  const duplicates = await reviewAutomaticRelationshipBatch({ items: [item, { ...item, relationshipId: "rel-2" }], config,
     chatComplete: async () => JSON.stringify({ items: [1, 2].map(() => ({
       relationshipId: "rel-1", verdict: "approve", confidence: 1, reasonHe: "הקשר נתמך באופן ברור במקורות."
     })) })
-  }), /incomplete or invalid/);
+  });
+  assert.equal(duplicates[0].unresolved, false);
+  assert.equal(duplicates[1].unresolved, true);
 });
 
 test("complete high-confidence model verdicts preserve their IDs, revisions and audit reasons", async () => {

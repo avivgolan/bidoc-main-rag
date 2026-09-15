@@ -102,6 +102,7 @@ export async function reviewAutomaticRelationshipBatch({ items, config, chatComp
     const valid = relationshipId === item.relationshipId
       && !seen.has(relationshipId)
       && ["approve", "reject", "unresolved"].includes(verdict)
+      && typeof result.confidence === "number"
       && Number.isFinite(confidence)
       && confidence >= 0
       && confidence <= 1

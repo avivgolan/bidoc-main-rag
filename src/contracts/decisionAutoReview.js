@@ -252,36 +252,40 @@ function verifierResponseFormat() {
 }
 
 function assertVerifierBatch(value, expectedIds) {
-  if (!value
-      || value.schemaVersion !== CONTRACTS_DECISION_AUTO_REVIEW_VERIFIER_SCHEMA_VERSION
-      || !Array.isArray(value.items)
-      || value.items.length !== expectedIds.length) {
-    throw new Error("Decision verifier response envelope is invalid.");
-  }
+  const items = Array.isArray(value?.items) ? value.items : Array.isArray(value) ? value : [];
   const byId = new Map();
-  for (const item of value.items) {
+  for (const item of items) {
+    const decisionId = String(item?.decisionId || "").trim();
+    if (!UUID_PATTERN.test(decisionId) || !expectedIds.includes(decisionId) || byId.has(decisionId)) continue;
     const confidence = Number(item?.confidence);
-    if (!UUID_PATTERN.test(String(item?.decisionId || ""))
-        || !expectedIds.includes(item.decisionId)
-        || byId.has(item.decisionId)
-        || !VERDICTS.has(item?.verdict)
-        || !REASON_CODES.has(item?.reasonCode)
-        || !Number.isFinite(confidence)
-        || confidence < 0
-        || confidence > 1
-        || !HEBREW_PATTERN.test(normalizedText(item?.rationaleHe))
-        || (item.verdict === "approve" && item.reasonCode !== "accepted")
-        || (item.verdict === "review" && item.reasonCode === "accepted")) {
-      throw new Error("Decision verifier response item is invalid.");
-    }
-    byId.set(item.decisionId, {
-      verdict: item.verdict,
-      confidence,
-      reasonCode: item.reasonCode,
-      rationaleHe: normalizedText(item.rationaleHe)
+    const rationaleHe = normalizedText(item?.rationaleHe);
+    const approve = item?.verdict === "approve"
+      && item?.reasonCode === "accepted"
+      && Number.isFinite(confidence)
+      && confidence >= 0
+      && confidence <= 1
+      && HEBREW_PATTERN.test(rationaleHe);
+    byId.set(decisionId, {
+      verdict: approve ? "approve" : "review",
+      confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : 0,
+      reasonCode: approve
+        ? "accepted"
+        : (REASON_CODES.has(item?.reasonCode) && item.reasonCode !== "accepted" ? item.reasonCode : "insufficient_evidence"),
+      rationaleHe: HEBREW_PATTERN.test(rationaleHe)
+        ? rationaleHe
+        : "הבודק העצמאי החזיר תוצאה חלקית ולכן ההחלטה נשארה לסקירה."
     });
   }
-  if (expectedIds.some((id) => !byId.has(id))) throw new Error("Decision verifier response is incomplete.");
+  for (const id of expectedIds) {
+    if (byId.has(id)) continue;
+    byId.set(id, {
+      verdict: "review",
+      confidence: 0,
+      reasonCode: "insufficient_evidence",
+      rationaleHe: "הבודק העצמאי לא החזיר תוצאה להחלטה זו."
+    });
+  }
+  if (!items.length) throw new Error("Decision verifier response envelope is invalid.");
   return byId;
 }
 
