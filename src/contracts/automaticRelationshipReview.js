@@ -1,4 +1,4 @@
-import { chatCompletion } from "../openrouter.js";
+import { chatCompletion, extractJsonObject } from "../openrouter.js";
 import { ContractsAgentError } from "./errors.js";
 import {
   AUTOMATIC_RELATIONSHIP_UNRESOLVED_PREFIX,
@@ -70,35 +70,45 @@ export async function reviewAutomaticRelationshipBatch({ items, config, chatComp
       }
     }
   });
-  if ((finishReason && finishReason !== "stop") || /max[_ ]?tokens|length/iu.test(nativeFinishReason)) throw invalidResult();
+  if (/max[_ ]?tokens|length/iu.test(nativeFinishReason) || (finishReason && !["stop", "end_turn", "completed"].includes(finishReason))) {
+    throw invalidResult();
+  }
   let parsed;
-  try { parsed = JSON.parse(raw); } catch { throw invalidResult(); }
-  if (!parsed || Object.keys(parsed).join() !== "items" || !Array.isArray(parsed.items)
-      || parsed.items.length !== items.length) throw invalidResult();
-  const byId = new Map(items.map((item) => [item.relationshipId, item]));
+  try { parsed = extractJsonObject(raw); } catch { throw invalidResult(); }
+  const parsedItems = Array.isArray(parsed?.items) ? parsed.items : [];
+  if (parsedItems.length !== items.length) throw invalidResult();
   const seen = new Set();
-  return parsed.items.map((result) => {
-    const item = byId.get(result.relationshipId);
-    if (!item || seen.has(result.relationshipId)
-        || Object.keys(result).sort().join() !== "confidence,reasonHe,relationshipId,verdict"
-        || !["approve", "reject", "unresolved"].includes(result.verdict)
-        || typeof result.confidence !== "number" || !Number.isFinite(result.confidence)
-        || result.confidence < 0 || result.confidence > 1
-        || typeof result.reasonHe !== "string" || result.reasonHe.trim().length < 10
-        || !/[\u0590-\u05ff]/u.test(result.reasonHe)) throw invalidResult();
-    seen.add(result.relationshipId);
+  return items.map((item, index) => {
+    const result = parsedItems.find((row) => String(row?.relationshipId || "") === item.relationshipId)
+      || (parsedItems[index] && typeof parsedItems[index] === "object" ? parsedItems[index] : {});
+    const relationshipId = String(result.relationshipId || item.relationshipId);
+    const verdict = String(result.verdict || "").trim().toLowerCase();
+    const confidence = Number(result.confidence);
+    const reasonHe = typeof result.reasonHe === "string" ? result.reasonHe.trim() : "";
+    const valid = relationshipId === item.relationshipId
+      && !seen.has(relationshipId)
+      && ["approve", "reject", "unresolved"].includes(verdict)
+      && Number.isFinite(confidence)
+      && confidence >= 0
+      && confidence <= 1
+      && reasonHe.length >= 10
+      && /[\u0590-\u05ff]/u.test(reasonHe);
+    seen.add(item.relationshipId);
     const excerpts = item.evidence?.excerpts || [];
     const complete = excerpts.length === 2 && excerpts.every((entry) => (
       typeof entry.excerpt === "string" && entry.excerpt.trim() && entry.excerpt.length <= 9000
     ));
-    const unresolved = result.verdict === "unresolved" || result.confidence < 0.95 || !complete;
+    const unresolved = !valid || verdict === "unresolved" || confidence < 0.95 || !complete;
     const marker = unresolved ? AUTOMATIC_RELATIONSHIP_UNRESOLVED_PREFIX : `[${CONTRACTS_AUTOMATIC_PIPELINE_VERSION}:model]`;
+    const explanation = valid
+      ? reasonHe
+      : "המודל החזיר תוצאה חלקית או לא תקפה, ולכן הקשר נשמר כממצא לא פתור.";
     return {
       relationshipId: item.relationshipId,
       expectedRevision: item.revision,
-      action: unresolved ? "reject" : result.verdict,
+      action: unresolved ? "reject" : verdict,
       unresolved,
-      reasonHe: `${marker} בדיקת מודל ${model}; ביטחון ${result.confidence}. ${unresolved ? "הקשר לא אומת; הסעיפים נשמרים כממצא לא פתור ואינם מאושרים לתזמון. " : ""}${result.reasonHe.trim()}`.slice(0, 1000)
+      reasonHe: `${marker} בדיקת מודל ${model}; ביטחון ${Number.isFinite(confidence) ? confidence : "n/a"}. ${unresolved ? "הקשר לא אומת; הסעיפים נשמרים כממצא לא פתור ואינם מאושרים לתזמון. " : ""}${explanation}`.slice(0, 1000)
     };
   });
 }
