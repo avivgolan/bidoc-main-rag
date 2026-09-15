@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { CONTRACTS_AUTOMATIC_STORAGE_KEY, readContractsAutomaticCheckpoint, runContractsAutomaticSequence } from "./contractsAutomaticRun.js";
+import { CONTRACTS_AUTOMATIC_PIPELINE_VERSION, unresolvedAutomaticRelationship } from "../contracts/automaticPipelinePolicy.js";
 import { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } from "../contracts/reviewMode.js";
 import {
   contractsClauseTypeLabelHe,
@@ -1031,7 +1033,9 @@ function SemanticRelationshipReviewCard({ item, busy = false, onReview }) {
   const targetClauseKey = reverseDirection && !symmetric ? item.sourceClauseKey : item.targetClauseKey;
   const excerpts = Array.isArray(item.evidence?.excerpts) ? item.evidence.excerpts : [];
   const automaticReview = item.evidence?.signals?.autoReview;
-  const automaticallyApproved = automaticReview?.mode === "model_auto_approval";
+  const automaticPipelineReviewed = String(item.reviewReason || "").startsWith(`[${CONTRACTS_AUTOMATIC_PIPELINE_VERSION}:`);
+  const automaticallyApproved = automaticReview?.mode === "model_auto_approval"
+    || (automaticPipelineReviewed && item.reviewStatus === "approved");
 
   function submit(action) {
     const body = { reasonHe: reasonHe.trim() };
@@ -1059,8 +1063,8 @@ function SemanticRelationshipReviewCard({ item, busy = false, onReview }) {
       <div className="contractsRelationshipMeta">
         <i>{contractsRelationshipTypeLabelHe(item.relationshipType)}</i>
         <i>{contractsRelationshipOriginLabelHe(item.origin)}</i>
-        <i>{contractsRelationshipReviewLabelHe(item.reviewStatus)}</i>
-        {automaticallyApproved && <i title={`מדיניות: ${automaticReview.policyVersion}`}>אושר אוטומטית בידי המודל</i>}
+        <i>{unresolvedAutomaticRelationship(item) ? "לא הוכרע אוטומטית" : contractsRelationshipReviewLabelHe(item.reviewStatus)}</i>
+        {automaticallyApproved && <i title={`מדיניות: ${automaticReview?.policyVersion || CONTRACTS_AUTOMATIC_PIPELINE_VERSION}`}>אושר אוטומטית בידי המודל</i>}
         {item.confidence !== null && item.confidence !== undefined && (
           <i title="ביטחון הסיווג של המודל; אינו ודאות משפטית">
             ביטחון סיווג: {contractsModelConfidenceLabelHe(item.confidence)}
@@ -2238,6 +2242,10 @@ function ContractsIndicatorHandoffPanel({ status, result, error = "", busy = fal
 }
 
 export function ContractsPage() {
+  const [automaticRun, setAutomaticRun] = useState(null);
+  const automaticRunning = useRef(false);
+  const automaticMounted = useRef(true);
+  const automaticResumeChecked = useRef(false);
   const [status, setStatus] = useState(null);
   const [mappingStatus, setMappingStatus] = useState(null);
   const [mappingStatusError, setMappingStatusError] = useState("");
@@ -2298,6 +2306,72 @@ export function ContractsPage() {
   const currentWorkspaceRevision = useRef(0);
   const lastSavedDraftSnapshot = useRef("");
   const autosaveBlocked = useRef(false);
+
+  async function continueAutomaticContract(workspaceId, nextStep = "explicit", loadPreview = false) {
+    if (automaticRunning.current) return;
+    automaticRunning.current = true;
+    setBusy("automatic");
+    setError("");
+    setAutomaticRun({ workspaceId, step: nextStep, status: "running" });
+    const run = async () => {
+      if (loadPreview) {
+        const saved = await api(`/api/contracts/clauses/workspaces/${workspaceId}`, { timeoutMs: 60_000 });
+        if (automaticMounted.current) {
+          setClausePreview(saved.preview);
+          setCurrentClauseWorkspaceId(workspaceId);
+        }
+      }
+      const outcome = await runContractsAutomaticSequence({
+        workspaceId, nextStep, request: api,
+        cancelled: () => !automaticMounted.current,
+        saveCheckpoint(value) {
+          if (value) localStorage.setItem(CONTRACTS_AUTOMATIC_STORAGE_KEY, JSON.stringify(value));
+          else localStorage.removeItem(CONTRACTS_AUTOMATIC_STORAGE_KEY);
+        },
+        onProgress(progress) {
+          if (!automaticMounted.current) return;
+          setAutomaticRun((previous) => ({ ...previous, ...progress }));
+          const response = progress.response;
+          if (response?.relationships) setRelationshipsResult(response.relationships);
+          if (response?.relationshipReview) setRelationshipReviewResult(response.relationshipReview);
+          if (response?.decisionReview) setDecisionReviewResult(response.decisionReview);
+          if (response?.handoff) setIndicatorHandoffResult(response.handoff);
+        }
+      });
+      if (outcome.completed && automaticMounted.current) {
+        setAutomaticRun((previous) => ({ ...previous, status: "completed" }));
+        setWorkspaceMessage("העיבוד האוטומטי הסתיים. ההמלצות והממצאים נשמרו; תנאים שתלויים באירוע עתידי יישארו ממתינים לאסמכתה.");
+      }
+    };
+    try {
+      // Prevent two tabs from reviewing the same revisions at the same time.
+      if (navigator.locks) await navigator.locks.request(`contracts-automatic:${workspaceId}`, run);
+      else await run();
+    } catch (nextError) {
+      if (automaticMounted.current) {
+        setAutomaticRun((previous) => ({ ...previous, status: "failed" }));
+        setError(contractsUiError(nextError));
+      }
+    } finally {
+      automaticRunning.current = false;
+      if (automaticMounted.current) setBusy("");
+    }
+  }
+
+  useEffect(() => {
+    automaticMounted.current = true;
+    return () => { automaticMounted.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!clausePersistenceStatus?.ready || automaticResumeChecked.current) return;
+    automaticResumeChecked.current = true;
+    const checkpoint = readContractsAutomaticCheckpoint(localStorage);
+    if (checkpoint) {
+      setCurrentClauseWorkspaceId(checkpoint.workspaceId);
+      continueAutomaticContract(checkpoint.workspaceId, checkpoint.nextStep, true);
+    }
+  }, [clausePersistenceStatus?.ready]);
 
   function isCurrentAutosaveRequest(request) {
     return Boolean(
@@ -2457,12 +2531,12 @@ export function ContractsPage() {
   }, []);
 
   useEffect(() => {
-    if (!relationshipReviewStatus?.ready || !currentClauseWorkspaceId) return;
+    if (automaticRunning.current || !relationshipReviewStatus?.ready || !currentClauseWorkspaceId) return;
     loadRelationshipReview(currentClauseWorkspaceId);
   }, [currentClauseWorkspaceId, relationshipReviewStatus?.ready]);
 
   useEffect(() => {
-    if (!decisionReviewStatus?.applyApproved || !currentClauseWorkspaceId) return;
+    if (automaticRunning.current || !decisionReviewStatus?.applyApproved || !currentClauseWorkspaceId) return;
     loadDecisionReview(currentClauseWorkspaceId);
   }, [currentClauseWorkspaceId, decisionReviewStatus?.applyApproved, decisionLineageStatus?.ready]);
 
@@ -3061,6 +3135,9 @@ export function ContractsPage() {
         ? "החילוץ הזה כבר היה שמור ונטען מיד, ללא קריאה חוזרת למודל."
         : "ה־PDF וכל תוצאת סוכן החוזים נשמרו. מעכשיו אפשר לפתוח אותם מחדש ללא חילוץ חוזר.");
       loadSavedClauseContracts();
+      const workspaceId = response.workspace?.workspaceId;
+      if (!workspaceId) throw new Error("The saved contract did not return a workspace ID.");
+      await continueAutomaticContract(workspaceId);
     } catch (nextError) {
       setError(contractsUiError(nextError));
     } finally {
@@ -3266,7 +3343,7 @@ export function ContractsPage() {
         </div>
         <div className="contractsUploadActions">
           <button type="button" className="contractsPrimary" disabled={Boolean(busy) || !clausePersistenceStatus?.ready} onClick={persistContractClauses}>
-            {busy === "clause-persist" ? "מפרק, מעשיר ושומר את כל סעיפי החוזה…" : "חלץ ושמור את כל תוצאת סוכן החוזים"}
+            {busy === "clause-persist" ? "מפרק, מעשיר ושומר את כל סעיפי החוזה…" : busy === "automatic" ? "מעבד את החוזה אוטומטית…" : "העלה חוזה והפעל עיבוד אוטומטי מלא"}
           </button>
           <button type="button" className="contractsSecondary" disabled={Boolean(busy)} onClick={extractContract}>
             {busy === "extract"
@@ -3276,7 +3353,19 @@ export function ContractsPage() {
                 : "הרץ גם את החילוץ הקלאסי"}
           </button>
         </div>
-        <p className="contractsFieldHint">תוצאת הסעיפים נשמרת ב־KAPAIM ובאחסון הפרטי וניתנת לפתיחה מחדש ללא חילוץ חוזר. לאחר הפתיחה סוכן הקשרים מציג את ההפניות המפורשות בנפרד. הכפתור השני משאיר את מסלול החילוץ הקלאסי זמין להשוואה.</p>
+        <p className="contractsFieldHint">לאחר ההעלאה יופעלו ברצף חילוץ, קשרים, בדיקת מודל, החלטות, מסירה ל־Indicator וחישוב לוח הזמנים. אין צורך ללחוץ בין השלבים. השאירו את המסך פתוח במהלך העיבוד; אם נסגר, העיבוד ימשיך מהשלב השמור בפתיחה הבאה.</p>
+        {automaticRun && (
+          <div className={`contractsMessage ${automaticRun.status === "failed" ? "is-error" : "is-success"}`} role="status" aria-live="polite">
+            <strong>{automaticRun.status === "completed" ? "העיבוד האוטומטי הסתיים" : automaticRun.status === "failed" ? "העיבוד נשמר ונעצר עקב שגיאה" : automaticRun.status === "retrying" ? "מנסה שוב את השלב השמור" : "עיבוד אוטומטי מתבצע"}</strong>
+            <p>{({ explicit: "שמירת הפניות בין סעיפים", semantic: "ניתוח קשרים בין הסעיפים", "relationship-review": "הכרעת מודל בקשרים", decisions: "יצירת החלטות מכל סעיפי החוזה", "decision-review": "בדיקה עצמאית של ההחלטות", "decision-findings": "שמירת הממצאים שלא הוכרעו", handoff: "הכנת המלצות ל־Indicator", indicator: "סנכרון ההמלצות למנוע לוח הזמנים", schedule: "בדיקת אסמכתאות וחישוב לוח הזמנים" })[automaticRun.step]}</p>
+            {automaticRun.status === "completed" && <p>ממצאים לא פתורים: {automaticRun.response?.unresolvedDecisions || 0}. הם נשמרו ללא אישור לתזמון ואינם מעכבים את יתר ההמלצות.</p>}
+            {automaticRun.response?.schedule?.warnings?.map((warning, index) => <p key={index}>{warning}</p>)}
+            {automaticRun.status === "failed" && <button type="button" disabled={Boolean(busy)} onClick={() => {
+              const checkpoint = readContractsAutomaticCheckpoint(localStorage);
+              if (checkpoint) continueAutomaticContract(checkpoint.workspaceId, checkpoint.nextStep);
+            }}>נסה שוב מהשלב השמור</button>}
+          </div>
+        )}
         {workspaceMessage && <div className="contractsMessage is-success" role="status">{workspaceMessage}</div>}
       </section>
 

@@ -7733,8 +7733,8 @@ export function registerContractsAgentTests(test) {
     const presentation = fs.readFileSync(new URL("../src/contracts/clausePresentation.js", import.meta.url), "utf8");
     assert.match(page, /\/api\/contracts\/clauses\/status/u);
     assert.match(page, /\/api\/contracts\/clauses\/workspaces\/extract/u);
-    assert.match(page, /חלץ ושמור את כל תוצאת סוכן החוזים/u);
-    assert.match(page, /חילוצי סוכן החוזים שנשמרו/u);
+    assert.match(page, /העלה חוזה והפעל עיבוד אוטומטי מלא/u);
+    assert.match(page, /חוזי קייס־סטדי/u);
     assert.match(page, /פתח ללא חילוץ חוזר/u);
     assert.match(page, /תוכן החוזה שחולץ/u);
     assert.match(page, /הוראות חוזיות בלבד/u);

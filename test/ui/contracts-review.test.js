@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import crypto from "node:crypto";
 import { collectPageErrors } from "./helpers/setup.js";
+import { CONTRACTS_AUTOMATIC_PIPELINE_VERSION, CONTRACTS_AUTOMATIC_STEPS } from "../../src/contracts/automaticPipelinePolicy.js";
+import { CONTRACTS_AUTOMATIC_STORAGE_KEY } from "../../src/react/contractsAutomaticRun.js";
 
 const TEST_SESSION_SECRET = "playwright-test-session-secret";
 
@@ -163,6 +165,64 @@ const savedClausePreview = {
     processingStatus: "processed"
   }]
 };
+
+test.describe("Contracts automatic upload", () => {
+  async function setupAutomatic(page) {
+    await addTestSuperadminSession(page);
+    const calls = [];
+    const workspaceId = "11111111-1111-4111-8111-111111111111";
+    await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
+    await page.route("**/api/sessions", (route) => route.fulfill({ json: { sessions: [] } }));
+    await page.route("**/api/settings", (route) => route.fulfill({ json: {
+      retrieval: {}, secrets: {}, models: {}, prompts: {}, agents: [], tools: {}, ai: {}
+    } }));
+    await page.route(/^https?:\/\/(?!localhost)/, (route) => route.abort("blockedbyclient"));
+    await page.route("**/api/contracts/clauses/status", (route) => route.fulfill({ json: { ready: true } }));
+    await page.route("**/api/contracts/clauses/workspaces/extract", (route) => route.fulfill({ json: {
+      ...savedClausePreview, workspace: { workspaceId }
+    } }));
+    await page.route(`**/api/contracts/clauses/workspaces/${workspaceId}`, (route) => route.fulfill({ json: {
+      preview: savedClausePreview, workspace: { workspaceId }
+    } }));
+    await page.route("**/api/contracts/automatic/workspaces/*/steps/*", (route) => {
+      const step = new URL(route.request().url()).pathname.split("/").at(-1);
+      calls.push(step);
+      return route.fulfill({ json: {
+        version: CONTRACTS_AUTOMATIC_PIPELINE_VERSION, workspaceId, step, repeat: false,
+        nextStep: CONTRACTS_AUTOMATIC_STEPS[CONTRACTS_AUTOMATIC_STEPS.indexOf(step) + 1] || null,
+        ...(step === "schedule" ? { unresolvedDecisions: 2, schedule: { warnings: [] } } : {})
+      } });
+    });
+    return { calls, workspaceId };
+  }
+
+  test("one upload runs all stages without intermediate clicks", async ({ page }) => {
+    const { calls } = await setupAutomatic(page);
+    const errors = collectPageErrors(page);
+    await page.goto("/#contracts");
+    await page.locator('#contracts input[type="file"]').setInputFiles({
+      name: "automatic-contract.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 fixture")
+    });
+    await page.getByRole("button", { name: "העלה חוזה והפעל עיבוד אוטומטי מלא" }).click();
+    await expect(page.getByText("העיבוד האוטומטי הסתיים", { exact: true })).toBeVisible();
+    expect(calls).toEqual(CONTRACTS_AUTOMATIC_STEPS);
+    await expect(page.getByText(/ממצאים לא פתורים: 2/)).toBeVisible();
+    expect(await page.evaluate((key) => localStorage.getItem(key), CONTRACTS_AUTOMATIC_STORAGE_KEY)).toBeNull();
+    expect(errors).toHaveLength(0);
+  });
+
+  test("reopening resumes at the saved step without uploading or asking for a decision", async ({ page }) => {
+    const { calls, workspaceId } = await setupAutomatic(page);
+    await page.addInitScript(({ key, value }) => localStorage.setItem(key, JSON.stringify(value)), {
+      key: CONTRACTS_AUTOMATIC_STORAGE_KEY,
+      value: { version: CONTRACTS_AUTOMATIC_PIPELINE_VERSION, workspaceId, nextStep: "handoff" }
+    });
+    await page.goto("/#contracts");
+    await expect(page.getByText("העיבוד האוטומטי הסתיים", { exact: true })).toBeVisible();
+    expect(calls).toEqual(["handoff", "indicator", "schedule"]);
+    await expect(page.getByRole("heading", { name: "תוכן החוזה שחולץ" })).toBeVisible();
+  });
+});
 
 function semanticReviewItem({
   relationshipId,

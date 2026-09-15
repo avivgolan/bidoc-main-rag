@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { chatCompletion, extractJsonObject } from "../openrouter.js";
 import { ContractsAgentError } from "./errors.js";
+import { unresolvedAutomaticRelationship } from "./automaticPipelinePolicy.js";
 import { decorateContractsClauseRecords } from "./clausePresentation.js";
 
 export const CONTRACTS_DECISIONS_R4_2B_AGENT_VERSION = "contracts-decisions-agent.r4.2b.v1";
@@ -191,6 +192,7 @@ export function buildContractsDecisionCandidates({ preview, relationshipReview, 
       reviewStatus: item.reviewStatus,
       rationaleHe: String(item.evidence?.rationaleHe || item.reviewReason || "").trim()
     }));
+  const unresolvedRelationships = relationshipReview.items.filter(unresolvedAutomaticRelationship);
   for (const relationship of acceptedRelationships) {
     if (SAME_DECISION_RELATIONSHIP_TYPES.has(relationship.relationshipType)) {
       union(relationship.sourceClauseKey, relationship.targetClauseKey);
@@ -241,7 +243,13 @@ export function buildContractsDecisionCandidates({ preview, relationshipReview, 
           sourceClauses: boundedModelClauses(group),
           temporalFocus,
           relationshipContext,
-          hasReviewedConflict: relationshipContext.some((item) => item.relationshipType === "conflicts_with"),
+          // A conflict between separate components still affects BOTH components.
+          // Excluding an unverified edge must never erase its operational warning.
+          hasReviewedConflict: acceptedRelationships.some((item) => item.relationshipType === "conflicts_with"
+            && (sourceKeys.includes(item.sourceClauseKey) || sourceKeys.includes(item.targetClauseKey))),
+          hasUnresolvedRelationship: unresolvedRelationships.some((item) => (
+            sourceKeys.includes(item.sourceClauseKey) || sourceKeys.includes(item.targetClauseKey)
+          )),
           tags: uniqueStrings(group.flatMap((clause) => clause.hashtags), 12, 100)
         };
       });
@@ -911,7 +919,7 @@ function toDecisionProposal(candidate, item, { decisionPolicyVersion, promptVers
     responsibleParty: item.responsibleParty || null,
     beneficiary: item.beneficiary || null,
     decisionCategory: item.decisionCategory,
-    conflictStatus: candidate.hasReviewedConflict ? "unresolved" : "none",
+    conflictStatus: candidate.hasReviewedConflict || candidate.hasUnresolvedRelationship ? "unresolved" : "none",
     scheduleImpact: item.scheduleImpact,
     temporalKind: item.temporalKind,
     contractDate: item.contractDate || null,

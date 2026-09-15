@@ -212,13 +212,15 @@ async function handleApi(req, res, url) {
     const isContractsRelationshipsRoute = url.pathname.startsWith("/api/contracts/relationships/");
     const isContractsDecisionsRoute = url.pathname.startsWith("/api/contracts/decisions/");
     const isIndicatorContractsRoute = url.pathname.startsWith("/api/indicator/contracts/");
+    const isContractsAutomaticRoute = url.pathname.startsWith("/api/contracts/automatic/");
     const isContractsServerOwnedRoute = isContractsActivityMappingRoute
       || isContractsWorkspaceRoute
       || isContractsClausePreviewRoute
       || isContractsClausePersistenceRoute
       || isContractsRelationshipsRoute
       || isContractsDecisionsRoute
-      || isIndicatorContractsRoute;
+      || isIndicatorContractsRoute
+      || isContractsAutomaticRoute;
     const hasContractsDatabaseHeaderOverride = isContractsServerOwnedRoute && [
       "x-content-supabase-url",
       "x-content-supabase-key",
@@ -976,6 +978,28 @@ async function handleApi(req, res, url) {
   // Contracts Agent Phase 1: authenticated, bounded, dry-run extraction only.
   // This route intentionally has no project-data override, persistence option,
   // Schedule service call, or database writer.
+  const contractsAutomaticMatch = url.pathname.match(
+    /^\/api\/contracts\/automatic\/workspaces\/([0-9a-f-]+)\/steps\/([a-z-]+)$/iu
+  );
+  if (req.method === "POST" && contractsAutomaticMatch) {
+    try {
+      const reviewer = getSuperadminSession(req);
+      if (!reviewer?.sub) return sendJson(res, 403, { error: "An authenticated reviewer session is required." });
+      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { runContractsAutomaticStep } = await import("./contracts/automaticPipeline.js");
+      const result = await runContractsAutomaticStep({
+        workspaceId: contractsAutomaticMatch[1], step: contractsAutomaticMatch[2],
+        reviewerId: reviewer.sub, config: config(), body
+      });
+      const { sendContractsJson } = await import("./contracts/response.js");
+      return sendContractsJson(res, 200, result);
+    } catch (error) {
+      logContractsRouteFailure("automatic-pipeline", error);
+      const response = contractsErrorResponse(error);
+      return sendJson(res, response.status, response.body);
+    }
+  }
+
   if (req.method === "POST" && url.pathname === "/api/contracts/extract") {
     try {
       const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
