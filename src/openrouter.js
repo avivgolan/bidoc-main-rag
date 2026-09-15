@@ -62,8 +62,8 @@ export async function chatCompletionDetailed({
     () => abortWith(null, `OpenRouter response timed out after ${timeoutMs}ms`),
     timeoutMs
   );
-  try {
-    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const requestChat = async (format) => {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -82,15 +82,25 @@ export async function chatCompletionDetailed({
         presence_penalty: presencePenalty,
         seed,
         reasoning,
-        response_format: responseFormat
+        response_format: format
       }))
     });
-
-    data = await response.json().catch((error) => {
+    const body = await res.json().catch((error) => {
       if (controller.signal.aborted && abortError) throw abortError;
-      if (!response.ok) return {};
+      if (!res.ok) return {};
       throw error;
     });
+    return { res, body };
+  };
+
+  try {
+    ({ res: response, body: data } = await requestChat(responseFormat));
+    if (!response.ok) {
+      const firstDetails = extractProviderErrorDetails(data, response.status);
+      if (isJsonSchemaUnsupported(responseFormat, firstDetails.message) && !controller.signal.aborted) {
+        ({ res: response, body: data } = await requestChat({ type: "json_object" }));
+      }
+    }
     if (!response.ok) {
       const providerDetails = extractProviderErrorDetails(data, response.status);
       const providerError = new Error(providerDetails.message);
@@ -347,6 +357,13 @@ export async function rerankWithLlm({ apiKey, model, query, results, topK = 10, 
 
 function omitNullish(value = {}) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== ""));
+}
+
+function isJsonSchemaUnsupported(responseFormat, message) {
+  const type = String(responseFormat?.type || "").trim();
+  if (type !== "json_schema" && !responseFormat?.json_schema) return false;
+  const text = String(message || "");
+  return /json_schema/iu.test(text) && /not supported/iu.test(text);
 }
 
 function extractProviderErrorDetails(data, status) {

@@ -339,7 +339,7 @@ export async function runContractsSemanticRelationshipPreview({
           responseFormat,
           signal: abortSignal,
           telemetry: {
-            step: `contracts_semantic_relationships_${stage}`,
+            step: stage === "classification" ? "contracts_semantic_relationships" : `contracts_semantic_relationships_${stage}`,
             batch: batchIndex + 1,
             attempt: attempt + 1
           },
@@ -347,21 +347,57 @@ export async function runContractsSemanticRelationshipPreview({
         });
       } catch (error) {
         if (abortSignal?.aborted) throwIfAborted(abortSignal);
+        let providerError = error;
+        const schemaUnsupported = Boolean(responseFormat)
+          && /json_schema/iu.test(String(error?.message || ""))
+          && /not supported/iu.test(String(error?.message || ""));
+        if (schemaUnsupported) {
+          logger?.warn?.("[contracts-r4.1] json_schema unsupported, retrying with json_object", {
+            stage,
+            batch: batchIndex + 1,
+            model: callModel
+          });
+          try {
+            return await chatComplete({
+              apiKey: config.openRouterApiKey,
+              model: callModel,
+              temperature: Number(r4Settings.temperature) || 0,
+              maxTokens: callMaxTokens,
+              timeoutMs: Math.max(1, Math.min(timeoutMs, effectiveDeadline - now())),
+              topP: 1,
+              frequencyPenalty: 0,
+              presencePenalty: 0,
+              seed: 0,
+              reasoning: { max_tokens: 128, exclude: true },
+              responseFormat: { type: "json_object" },
+              signal: abortSignal,
+              telemetry: {
+                step: `contracts_semantic_relationships_${stage}_json_object`,
+                batch: batchIndex + 1,
+                attempt: attempt + 1
+              },
+              messages
+            });
+          } catch (fallbackError) {
+            if (abortSignal?.aborted) throwIfAborted(abortSignal);
+            providerError = fallbackError;
+          }
+        }
         const retrying = attempt === 0
           && providerRetryCount < maxProviderRetries
-          && isRetryableProviderError(error)
+          && isRetryableProviderError(providerError)
           && effectiveDeadline - now() > PROVIDER_RETRY_DELAY_MS + 1_000;
         logger?.warn?.("[contracts-r4.1] provider call failed", {
           stage,
           batch: batchIndex + 1,
           attempt: attempt + 1,
           retrying,
-          httpStatus: Number(error?.httpStatus || error?.status || 0) || null,
-          providerName: String(error?.providerName || "").slice(0, 120) || null,
-          providerCode: String(error?.providerCode || "").slice(0, 120) || null,
-          message: String(error?.message || "provider call failed").slice(0, 300)
+          httpStatus: Number(providerError?.httpStatus || providerError?.status || 0) || null,
+          providerName: String(providerError?.providerName || "").slice(0, 120) || null,
+          providerCode: String(providerError?.providerCode || "").slice(0, 120) || null,
+          message: String(providerError?.message || "provider call failed").slice(0, 300)
         });
-        if (!retrying) throw error;
+        if (!retrying) throw providerError;
         providerRetryCount += 1;
         attempt += 1;
         await wait(PROVIDER_RETRY_DELAY_MS, abortSignal);
