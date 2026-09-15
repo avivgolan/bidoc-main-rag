@@ -8,8 +8,8 @@ import { ContractsAgentError } from "./errors.js";
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v4";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v4";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v5";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v5";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
