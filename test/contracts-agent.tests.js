@@ -52,7 +52,7 @@ import { parseContractExtractionRequest, readJsonBounded } from "../src/contract
 import { contractsPhase2ApplyApproved, prepareContractReview } from "../src/contracts/reviewWorkflow.js";
 import { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } from "../src/contracts/reviewMode.js";
 import { sendContractsJson, serializeContractsResponse } from "../src/contracts/response.js";
-import { contractExtractionSchemaErrors } from "../src/contracts/schema.js";
+import { contractExtractionSchemaErrors, CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS } from "../src/contracts/schema.js";
 import {
   CONTRACTS_REVIEW_DRAFT_VERSION,
   CONTRACTS_WORKSPACE_MIGRATION_VERSION,
@@ -1981,6 +1981,14 @@ export function registerContractsAgentTests(test) {
       { segmentId: "known", exactQuote: "Exact parser segment." },
       { segmentId: "unknown", exactQuote: "unchanged" }
     ]);
+
+    const longText = "ס".repeat(CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS + 80);
+    const clipped = normalizeContractsModelDraftAliases({
+      documentObservations: { attachmentsStatus: "unknown" },
+      candidates: [{ evidence: [{ segmentId: "long" }, { segmentId: "unknown", exactQuote: longText }] }]
+    }, [{ segmentId: "long", text: longText }]);
+    assert.equal(clipped.candidates[0].evidence[0].exactQuote.length, CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS);
+    assert.equal(clipped.candidates[0].evidence[1].exactQuote.length, CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS);
 
     const aliasedEvidence = normalizeContractsModelDraftAliases({
       documentObservations: { attachmentsStatus: "unknown" },

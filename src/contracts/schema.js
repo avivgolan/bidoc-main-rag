@@ -19,6 +19,8 @@ const canonicalAjv = new Ajv2020({ strict: true, allErrors: true, allowUnionType
 addFormats(canonicalAjv);
 const validateCanonical = canonicalAjv.compile(canonicalSchema);
 
+export const CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS = 3000;
+
 const nullableString = { type: ["string", "null"] };
 const nullableDate = { type: ["string", "null"], format: "date" };
 
@@ -110,7 +112,7 @@ export const CONTRACTS_MODEL_DRAFT_SCHEMA = {
               required: ["segmentId", "exactQuote"],
               properties: {
                 segmentId: { type: "string", minLength: 1, maxLength: 200 },
-                exactQuote: { type: "string", minLength: 1, maxLength: 3000 }
+                exactQuote: { type: "string", minLength: 1, maxLength: CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS }
               }
             }
           },

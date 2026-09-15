@@ -8,7 +8,7 @@ import {
 import { ContractsAgentError } from "../contracts/errors.js";
 import { readContractPdf } from "../contracts/pdfReader.js";
 import { parseContractExtractionRequest } from "../contracts/request.js";
-import { assertContractsModelDraft } from "../contracts/schema.js";
+import { assertContractsModelDraft, CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS } from "../contracts/schema.js";
 import { CONTRACTS_SEGMENTER_VERSION, segmentContractPages } from "../contracts/segmenter.js";
 
 const MAX_MODEL_RESPONSE_CHARACTERS = 500_000;
@@ -595,7 +595,10 @@ function normalizePhase1Candidates(candidates, sourceSegments) {
     if (roleCode === "contractual_completion") {
       for (const segment of sourceSegments.filter(isCompletionCrossReferenceSegment)) {
         if (!base.evidence.some((item) => item.segmentId === segment.segmentId)) {
-          base.evidence.push({ segmentId: segment.segmentId, exactQuote: segment.text });
+          base.evidence.push({
+            segmentId: segment.segmentId,
+            exactQuote: boundedExactQuote(segment.text)
+          });
         }
       }
     }
@@ -874,16 +877,42 @@ export function normalizeContractsModelDraftAliases(value, sourceSegments = []) 
           continue;
         }
         for (const segmentId of issuedIds) {
-          evidence.push({ segmentId, exactQuote: segmentTextById.get(segmentId) });
+          evidence.push({
+            segmentId,
+            exactQuote: boundedExactQuote(segmentTextById.get(segmentId))
+          });
         }
       }
       return {
         ...candidate,
-        evidence: [...new Map(evidence.map((item) => [item?.segmentId || JSON.stringify(item), item])).values()]
+        evidence: [...new Map(evidence.map((item) => [item?.segmentId || JSON.stringify(item), boundEvidenceItem(item)])).values()]
+      };
+    });
+  }
+  if (Array.isArray(normalized.candidates)) {
+    normalized.candidates = normalized.candidates.map((candidate) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate) || !Array.isArray(candidate.evidence)) {
+        return candidate;
+      }
+      return {
+        ...candidate,
+        evidence: candidate.evidence.map(boundEvidenceItem)
       };
     });
   }
   return normalized;
+}
+
+function boundedExactQuote(value) {
+  const text = String(value || "").normalize("NFC");
+  if (text.length <= CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS) return text;
+  return text.slice(0, CONTRACTS_MODEL_EXACT_QUOTE_MAX_CHARS);
+}
+
+function boundEvidenceItem(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+  if (!Object.prototype.hasOwnProperty.call(item, "exactQuote")) return item;
+  return { ...item, exactQuote: boundedExactQuote(item.exactQuote) };
 }
 
 function collectIssuedSegmentIds(value, segmentTextById, depth = 0) {
