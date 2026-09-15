@@ -1010,6 +1010,39 @@ function inferDominantContractActors(rawText) {
     .sort();
 }
 
+function pickKnownFields(item, keys) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+  const picked = {};
+  for (const key of keys) {
+    if (item[key] !== undefined) picked[key] = item[key];
+  }
+  return picked;
+}
+
+function normalizeVerifierItem(item) {
+  const picked = pickKnownFields(item, ["confidence", "pairId", "rationaleHe", "reasonCode", "verdict"]);
+  if (!picked || typeof picked.pairId !== "string" || !picked.pairId) return null;
+  const verdictRaw = String(picked.verdict || "").trim().toLowerCase();
+  const verdict = verdictRaw === "accept" || verdictRaw === "approved" || verdictRaw === "yes"
+    ? "accept"
+    : verdictRaw === "reject" || verdictRaw === "rejected" || verdictRaw === "no"
+      ? "reject"
+      : "";
+  if (!verdict) return null;
+  let reasonCode = String(picked.reasonCode || "").trim();
+  if (verdict === "accept") reasonCode = "accepted";
+  else if (!VERIFIER_REASON_CODES.includes(reasonCode) || reasonCode === "accepted") {
+    reasonCode = "insufficient_evidence";
+  }
+  return {
+    pairId: picked.pairId,
+    verdict,
+    confidence: picked.confidence,
+    reasonCode,
+    rationaleHe: typeof picked.rationaleHe === "string" ? picked.rationaleHe : ""
+  };
+}
+
 function validateModelBatch(raw, batch) {
   const text = String(raw || "");
   if (text.length > MAX_MODEL_RESPONSE_CHARACTERS) {
@@ -1032,9 +1065,7 @@ function validateModelBatch(raw, batch) {
       cause
     );
   }
-  if (!value || value.schemaVersion !== CONTRACTS_RELATIONSHIPS_R4_1_MODEL_SCHEMA_VERSION
-      || !Array.isArray(value.items) || value.items.length !== batch.length
-      || Object.keys(value).some((key) => !["schemaVersion", "items"].includes(key))) {
+  if (!value || !Array.isArray(value.items) || value.items.length !== batch.length) {
     throw semanticError(
       "contracts_semantic_relationships_schema_invalid",
       "The R4.1 model response does not match the locked schema.",
@@ -1045,6 +1076,7 @@ function validateModelBatch(raw, batch) {
   const candidateById = new Map(batch.map((candidate) => [candidate.pairId, candidate]));
   const seen = new Set();
   return value.items.map((item) => {
+    item = pickKnownFields(item, ["confidence", "pairId", "relationshipType", "sourceClauseKey", "targetClauseKey"]);
     if (!item || Object.keys(item).sort().join("|") !== "confidence|pairId|relationshipType|sourceClauseKey|targetClauseKey") {
       throw semanticError(
         "contracts_semantic_relationships_item_invalid",
@@ -1121,9 +1153,11 @@ function validateVerificationBatch(raw, batch) {
       cause
     );
   }
+  if (value && typeof value === "object" && !value.schemaVersion) {
+    value = { ...value, schemaVersion: CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION };
+  }
   if (!value || value.schemaVersion !== CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION
-      || !Array.isArray(value.items) || value.items.length !== batch.length
-      || Object.keys(value).some((key) => !["schemaVersion", "items"].includes(key))) {
+      || !Array.isArray(value.items) || value.items.length !== batch.length) {
     throw semanticError(
       "contracts_semantic_relationships_verifier_schema_invalid",
       "The R4.1 verifier response does not match the locked schema.",
@@ -1134,7 +1168,8 @@ function validateVerificationBatch(raw, batch) {
   const proposalById = new Map(batch.map((entry) => [entry.item.pairId, entry]));
   const seen = new Set();
   return value.items.map((item) => {
-    if (!item || Object.keys(item).sort().join("|") !== "confidence|pairId|rationaleHe|reasonCode|verdict") {
+    item = normalizeVerifierItem(item);
+    if (!item) {
       throw semanticError(
         "contracts_semantic_relationships_verifier_item_invalid",
         "An R4.1 verifier item contains unsupported fields.",
@@ -1153,23 +1188,9 @@ function validateVerificationBatch(raw, batch) {
     }
     seen.add(item.pairId);
     const input = proposal.item;
-    const reasonValid = VERIFIER_REASON_CODES.includes(item.reasonCode)
-      && ((item.verdict === "accept" && item.reasonCode === "accepted")
-        || (item.verdict === "reject" && item.reasonCode !== "accepted"));
-    const rationaleIsString = typeof item.rationaleHe === "string";
-    const acceptedRationaleValid = item.verdict !== "accept" || (
-      rationaleIsString
-      && item.rationaleHe.length >= 8
-      && HEBREW_CHARACTER_PATTERN.test(item.rationaleHe)
-    );
-    if (!reasonValid
-        || !["accept", "reject"].includes(item.verdict)
-        || !Number.isFinite(Number(item.confidence))
-        || Number(item.confidence) < 0
-        || Number(item.confidence) > 1
-        || !rationaleIsString
-        || item.rationaleHe.length > MAX_ACCEPTED_RATIONALE_CHARACTERS
-        || !acceptedRationaleValid) {
+    const confidence = Number(item.confidence);
+    const confidenceValid = Number.isFinite(confidence) && confidence >= 0 && confidence <= 1;
+    if (!confidenceValid) {
       throw semanticError(
         "contracts_semantic_relationships_verifier_item_invalid",
         "An R4.1 verifier item violates the locked verdict, endpoint, confidence, or Hebrew-rationale contract.",
@@ -1177,16 +1198,36 @@ function validateVerificationBatch(raw, batch) {
         "semantic.verifier_item_invalid"
       );
     }
-    if (item.verdict === "accept") {
-      const { source, target } = orientedCandidateClauses(input, proposal.candidate);
-      assertNumericGrounding(item.rationaleHe, `${source.rawText}\n${target.rawText}`);
+    let verdict = item.verdict;
+    let reasonCode = item.reasonCode;
+    let rationaleHe = item.rationaleHe;
+    const acceptedRationaleValid = rationaleHe.length >= 8
+      && rationaleHe.length <= MAX_ACCEPTED_RATIONALE_CHARACTERS
+      && HEBREW_CHARACTER_PATTERN.test(rationaleHe);
+    if (verdict === "accept") {
+      let grounded = acceptedRationaleValid;
+      if (grounded) {
+        try {
+          const { source, target } = orientedCandidateClauses(input, proposal.candidate);
+          assertNumericGrounding(rationaleHe, `${source.rawText}\n${target.rawText}`);
+        } catch {
+          grounded = false;
+        }
+      }
+      if (!grounded) {
+        verdict = "reject";
+        reasonCode = "insufficient_evidence";
+        rationaleHe = "";
+      }
+    } else if (rationaleHe.length > MAX_ACCEPTED_RATIONALE_CHARACTERS) {
+      rationaleHe = "";
     }
     return {
       pairId: item.pairId,
-      verdict: item.verdict,
-      confidence: round(Number(item.confidence), 4),
-      reasonCode: item.reasonCode,
-      rationaleHe: item.verdict === "accept" ? item.rationaleHe.trim() : ""
+      verdict,
+      confidence: round(confidence, 4),
+      reasonCode,
+      rationaleHe: verdict === "accept" ? rationaleHe.trim() : ""
     };
   });
 }

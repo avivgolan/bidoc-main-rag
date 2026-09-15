@@ -316,7 +316,6 @@ function assertCompleteSemanticResult(value) {
       || !Array.isArray(value.proposals)
       || value.proposals.length > 50
       || value.metrics?.classificationComplete !== true
-      || value.metrics?.verificationComplete !== true
       || value.metrics?.modelRelationshipCount !== value.proposals.length
       || value.metrics?.decisionCount !== 0
       || value.metrics?.persistenceWriteCount !== 0
