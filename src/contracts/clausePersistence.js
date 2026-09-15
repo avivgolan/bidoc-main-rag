@@ -227,14 +227,14 @@ export async function runContractsClausePersistence({
     timeoutMs: remainingMs(deadlineAt)
   });
   if (existing) {
-    if (r6Enabled) {
-      await persistContractsR6Embeddings({
-        config,
-        workspaceId: existing.workspace.workspaceId,
-        fetchImpl,
-        timeoutMs: remainingMs(deadlineAt)
-      });
-    }
+    await bestEffortR6Embeddings({
+      r6Enabled,
+      config,
+      workspaceId: existing.workspace.workspaceId,
+      fetchImpl,
+      timeoutMs: remainingMs(deadlineAt),
+      progress
+    });
     progress("completed", { reused: true, modelAvoided: true });
     return projectPersistenceResponse(existing, { reused: true, modelAvoided: true });
   }
@@ -278,14 +278,14 @@ export async function runContractsClausePersistence({
     timeoutMs: remainingMs(deadlineAt)
   });
   if (afterModel) {
-    if (r6Enabled) {
-      await persistContractsR6Embeddings({
-        config,
-        workspaceId: afterModel.workspace.workspaceId,
-        fetchImpl,
-        timeoutMs: remainingMs(deadlineAt)
-      });
-    }
+    await bestEffortR6Embeddings({
+      r6Enabled,
+      config,
+      workspaceId: afterModel.workspace.workspaceId,
+      fetchImpl,
+      timeoutMs: remainingMs(deadlineAt),
+      progress
+    });
     progress("completed", { reused: true, modelAvoided: false, concurrentReuse: true });
     return projectPersistenceResponse(afterModel, { reused: true, modelAvoided: false, concurrentReuse: true });
   }
@@ -381,14 +381,14 @@ export async function runContractsClausePersistence({
       timeoutMs: remainingMs(deadlineAt)
     }).catch(() => null);
     if (raced) {
-      if (r6Enabled) {
-        await persistContractsR6Embeddings({
-          config,
-          workspaceId: raced.workspace.workspaceId,
-          fetchImpl,
-          timeoutMs: remainingMs(deadlineAt)
-        });
-      }
+      await bestEffortR6Embeddings({
+        r6Enabled,
+        config,
+        workspaceId: raced.workspace.workspaceId,
+        fetchImpl,
+        timeoutMs: remainingMs(deadlineAt),
+        progress
+      });
       return projectPersistenceResponse(raced, { reused: true, modelAvoided: false, concurrentReuse: true });
     }
     throw error;
@@ -399,20 +399,47 @@ export async function runContractsClausePersistence({
       || canonical.preview.clauses.length !== preview.clauses.length) {
     throw persistenceError("contracts_clause_persistence_response_invalid", "The saved clause generation does not match the accepted in-memory result.", 502);
   }
-  if (r6Enabled) {
-    await persistContractsR6Embeddings({
-      config,
-      workspaceId: canonical.workspace.workspaceId,
-      fetchImpl,
-      timeoutMs: remainingMs(deadlineAt)
-    });
-  }
+  await bestEffortR6Embeddings({
+    r6Enabled,
+    config,
+    workspaceId: canonical.workspace.workspaceId,
+    fetchImpl,
+    timeoutMs: remainingMs(deadlineAt),
+    progress
+  });
   progress("completed", { reused: persisted.persistence?.workspaceReused === true, modelAvoided: false });
   return projectPersistenceResponse(canonical, {
     reused: persisted.persistence?.workspaceReused === true,
     modelAvoided: false,
     concurrentReuse: false
   });
+}
+
+async function bestEffortR6Embeddings({
+  r6Enabled,
+  config,
+  workspaceId,
+  fetchImpl,
+  timeoutMs,
+  progress
+} = {}) {
+  if (!r6Enabled) return;
+  try {
+    const result = await persistContractsR6Embeddings({
+      config,
+      workspaceId,
+      fetchImpl,
+      timeoutMs
+    });
+    progress?.("embeddings_completed", result || {});
+  } catch (error) {
+    console.warn("[contracts-r6] embeddings skipped", {
+      workspaceId,
+      code: String(error?.code || "unknown").slice(0, 160),
+      message: String(error?.message || "").replace(/[\r\n]+/gu, " ").slice(0, 300)
+    });
+    progress?.("embeddings_skipped", { code: String(error?.code || "unknown").slice(0, 160) });
+  }
 }
 
 function parsePersistenceRequest(body) {
