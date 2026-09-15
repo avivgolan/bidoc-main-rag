@@ -2989,27 +2989,25 @@ export function registerContractsAgentTests(test) {
     assert.equal(enriched.qualityLedger.accepted, true);
   });
 
-  test("contracts R3 enrichment rejects unknown tags and removes ungrounded numeric facts", async () => {
+  test("contracts R3 enrichment maps unknown tags onto the catalog and removes ungrounded numeric facts", async () => {
     const generation = buildContractsClauseGeneration({
       pages: [{ pdfPage: 1, text: "1. הוראות כלליות" }],
       documentVersionId: `sha256:${FIXTURE_SHA}`,
       documentSha256: FIXTURE_SHA
     });
     const config = { openRouterApiKey: "configured", models: { main: "fixture/model" } };
-    await assert.rejects(
-      runContractsClauseEnrichment({
-        generation,
-        config,
-        chatComplete: async ({ messages }) => {
-          const input = JSON.parse(messages[1].content);
-          return JSON.stringify({
-            schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
-            items: input.clauses.map((clause) => ({ clauseKey: clause.clauseKey, summaryHe: "תקציר חוזי תקין.", tags: ["invented_tag"] }))
-          });
-        }
-      }),
-      (error) => error.code === "contracts_clause_enrichment_tags_invalid"
-    );
+    const remapped = await runContractsClauseEnrichment({
+      generation,
+      config,
+      chatComplete: async ({ messages }) => {
+        const input = JSON.parse(messages[1].content);
+        return JSON.stringify({
+          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+          items: input.clauses.map((clause) => ({ clauseKey: clause.clauseKey, summaryHe: "תקציר חוזי תקין.", tags: ["invented_tag"] }))
+        });
+      }
+    });
+    assert.ok(remapped.clauses[0].hashtags.length >= 1);
     const sanitized = await runContractsClauseEnrichment({
       generation,
       config,
@@ -3049,11 +3047,12 @@ export function registerContractsAgentTests(test) {
       }
     });
 
-    assert.equal(calls, 2);
+    assert.equal(calls, 1);
     assert.equal(enriched.qualityLedger.modelBatchCount, 1);
-    assert.equal(enriched.qualityLedger.modelRepairCount, 1);
-    assert.equal(enriched.qualityLedger.modelCallCount, 2);
-    assert.deepEqual(enriched.clauses[0].hashtags, ["scope"]);
+    assert.equal(enriched.qualityLedger.modelRepairCount, 0);
+    assert.equal(enriched.qualityLedger.modelCallCount, 1);
+    assert.ok(enriched.clauses[0].hashtags.length >= 1);
+    assert.equal(enriched.clauses[0].hashtags.includes("invented_tag"), false);
   });
 
   test("contracts R3 deterministically sanitizes an ungrounded numeric summary without accepting the invented fact", async () => {

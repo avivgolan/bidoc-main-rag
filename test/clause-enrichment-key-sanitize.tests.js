@@ -66,28 +66,54 @@ test("contracts R3 fills omitted enrichment keys from source text after bounded 
   assert.ok(enriched.clauses[0].hashtags.length >= 1);
 });
 
-test("contracts R3 still rejects unknown tags after bounded repair", async () => {
+test("contracts R3 maps spaced Hebrew tags and falls back invented tags without failing the batch", async () => {
+  const generation = buildContractsClauseGeneration({
+    pages: [{ pdfPage: 1, text: "1. הוראות כלליות לביצוע העבודה." }],
+    documentVersionId: `sha256:${FIXTURE_SHA}`,
+    documentSha256: FIXTURE_SHA
+  });
+  let calls = 0;
+  const enriched = await runContractsClauseEnrichment({
+    generation,
+    config: { openRouterApiKey: "configured", models: { main: "fixture/model" } },
+    chatComplete: async ({ messages }) => {
+      calls += 1;
+      const input = JSON.parse(messages[1].content);
+      return JSON.stringify({
+        schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+        items: input.clauses.map((clause) => ({
+          clauseKey: clause.clauseKey,
+          summaryHe: "הסעיף קובע הוראות כלליות לביצוע העבודה.",
+          tags: ["לוח זמנים", "#תשלום", "invented_tag"]
+        }))
+      });
+    }
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(enriched.clauses[0].hashtags, ["לוח_זמנים", "תשלום"]);
+});
+
+test("contracts R3 falls back invented-only tags onto the Hebrew catalog", async () => {
   const generation = buildContractsClauseGeneration({
     pages: [{ pdfPage: 1, text: "1. הוראות כלליות" }],
     documentVersionId: `sha256:${FIXTURE_SHA}`,
     documentSha256: FIXTURE_SHA
   });
-  await assert.rejects(
-    runContractsClauseEnrichment({
-      generation,
-      config: { openRouterApiKey: "configured", models: { main: "fixture/model" } },
-      chatComplete: async ({ messages }) => {
-        const input = JSON.parse(messages[1].content);
-        return JSON.stringify({
-          schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
-          items: input.clauses.map((clause) => ({
-            clauseKey: clause.clauseKey,
-            summaryHe: "תקציר חוזי תקין.",
-            tags: ["invented_tag"]
-          }))
-        });
-      }
-    }),
-    (error) => error.code === "contracts_clause_enrichment_tags_invalid"
-  );
+  const enriched = await runContractsClauseEnrichment({
+    generation,
+    config: { openRouterApiKey: "configured", models: { main: "fixture/model" } },
+    chatComplete: async ({ messages }) => {
+      const input = JSON.parse(messages[1].content);
+      return JSON.stringify({
+        schemaVersion: CONTRACTS_CLAUSE_ENRICHMENT_MODEL_SCHEMA_VERSION,
+        items: input.clauses.map((clause) => ({
+          clauseKey: clause.clauseKey,
+          summaryHe: "תקציר חוזי תקין.",
+          tags: ["invented_tag"]
+        }))
+      });
+    }
+  });
+  assert.ok(enriched.clauses[0].hashtags.length >= 1);
+  assert.equal(enriched.clauses[0].hashtags.every((tag) => typeof tag === "string" && !tag.includes("invented")), true);
 });
