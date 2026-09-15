@@ -44,8 +44,8 @@ export async function reviewAutomaticRelationshipBatch({ items, config, chatComp
     timeoutMs: 75_000,
     messages: [{ role: "system", content: PROMPT }, { role: "user", content: JSON.stringify({ items: input }) }],
     telemetry: { record(entry) {
-      finishReason = String(entry?.finish_reason || "");
-      nativeFinishReason = String(entry?.native_finish_reason || "");
+      finishReason = String(entry?.finish_reason || "").trim().toLowerCase();
+      nativeFinishReason = String(entry?.native_finish_reason || "").trim().toLowerCase();
     } },
     responseFormat: {
       type: "json_schema",
@@ -70,13 +70,27 @@ export async function reviewAutomaticRelationshipBatch({ items, config, chatComp
       }
     }
   });
-  if (/max[_ ]?tokens|length/iu.test(nativeFinishReason) || (finishReason && !["stop", "end_turn", "completed"].includes(finishReason))) {
-    throw invalidResult();
+  const truncated = /max[_ ]?tokens|length/iu.test(nativeFinishReason) || finishReason === "length";
+  let parsed = null;
+  try { parsed = extractJsonObject(raw); } catch { parsed = null; }
+  const parsedItems = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.items)
+      ? parsed.items
+      : Array.isArray(parsed?.results)
+        ? parsed.results
+        : [];
+  if (truncated || !parsedItems.length) {
+    console.warn("[contracts:automatic-relationship-review] treating batch as unresolved", {
+      truncated,
+      finishReason: finishReason || null,
+      nativeFinishReason: nativeFinishReason || null,
+      parsedCount: parsedItems.length,
+      expectedCount: items.length,
+      rawPreview: String(raw || "").slice(0, 240)
+    });
+    return unresolvedBatch(items, model, "המודל לא החזיר סקירת JSON מלאה.");
   }
-  let parsed;
-  try { parsed = extractJsonObject(raw); } catch { throw invalidResult(); }
-  const parsedItems = Array.isArray(parsed?.items) ? parsed.items : [];
-  if (parsedItems.length !== items.length) throw invalidResult();
   const seen = new Set();
   return items.map((item, index) => {
     const result = parsedItems.find((row) => String(row?.relationshipId || "") === item.relationshipId)
@@ -113,6 +127,12 @@ export async function reviewAutomaticRelationshipBatch({ items, config, chatComp
   });
 }
 
-function invalidResult() {
-  return new ContractsAgentError("contracts_automatic_review_invalid", "The automatic reviewer returned incomplete or invalid results. No review from this batch was applied.", 502);
+function unresolvedBatch(items, model, reason) {
+  return items.map((item) => ({
+    relationshipId: item.relationshipId,
+    expectedRevision: item.revision,
+    action: "reject",
+    unresolved: true,
+    reasonHe: `${AUTOMATIC_RELATIONSHIP_UNRESOLVED_PREFIX} בדיקת מודל ${model}; ביטחון n/a. הקשר לא אומת; הסעיפים נשמרים כממצא לא פתור ואינם מאושרים לתזמון. ${reason}`.slice(0, 1000)
+  }));
 }

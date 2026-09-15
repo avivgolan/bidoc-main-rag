@@ -35,6 +35,16 @@ test("accepts extra json_object fields and Hebrew reasons", async () => {
   assert.equal(results[0].action, "approve");
 });
 
+test("does not fail the pipeline when the model returns no JSON items", async () => {
+  const results = await reviewAutomaticRelationshipBatch({
+    items: [ITEM],
+    config: { openRouterApiKey: "sk-test", models: { main: "fixture/model" } },
+    chatComplete: async () => "I cannot review this."
+  });
+  assert.equal(results[0].unresolved, true);
+  assert.equal(results[0].action, "reject");
+});
+
 test("keeps the pipeline moving when one review item is malformed", async () => {
   const results = await reviewAutomaticRelationshipBatch({
     items: [ITEM],
