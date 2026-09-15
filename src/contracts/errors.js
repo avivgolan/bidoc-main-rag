@@ -5,6 +5,9 @@ export class ContractsAgentError extends Error {
     this.code = code;
     this.status = status;
     this.issueCodes = Array.isArray(options.issueCodes) ? options.issueCodes : [];
+    this.details = options.details && typeof options.details === "object" && !Array.isArray(options.details)
+      ? options.details
+      : null;
   }
 }
 
@@ -15,7 +18,8 @@ export function contractsErrorResponse(error) {
       body: {
         error: error.code,
         message: error.message,
-        ...(error.issueCodes.length ? { issueCodes: error.issueCodes } : {})
+        ...(error.issueCodes.length ? { issueCodes: error.issueCodes } : {}),
+        ...(error.details ? { details: error.details } : {})
       }
     };
   }

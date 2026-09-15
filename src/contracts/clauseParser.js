@@ -1,16 +1,15 @@
 import crypto from "node:crypto";
 import {
   CONTRACTS_MAX_PAGES,
-  CONTRACTS_MAX_TEXT_CHARACTERS,
-  readContractPdf
-} from "./pdfReader.js";
-import { CONTRACTS_MAX_PDF_BYTES } from "./constants.js";
+  CONTRACTS_MAX_PDF_BYTES,
+  CONTRACTS_MAX_TEXT_CHARACTERS
+} from "./constants.js";
 import { ContractsAgentError } from "./errors.js";
 
-export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v2";
+export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v2";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v2";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v3";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v3";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -62,7 +61,7 @@ export async function runContractsClauseParser({
   expectedDocumentVersionId = null,
   deadlineAt = null,
   signal = null,
-  readPdf = readContractPdf
+  readPdf = null
 } = {}) {
   const bytes = Buffer.isBuffer(pdfBytes) ? pdfBytes : Buffer.from(pdfBytes || []);
   if (!bytes.length || bytes.length > CONTRACTS_MAX_PDF_BYTES) {
@@ -84,7 +83,8 @@ export async function runContractsClauseParser({
       { issueCodes: ["clause_parser.document_version_mismatch"] }
     );
   }
-  const parsedPdf = await readPdf({ pdfBytes: bytes, deadlineAt, signal });
+  const parsePdf = readPdf ?? (await import("./pdfReader.js")).readContractPdf;
+  const parsedPdf = await parsePdf({ pdfBytes: bytes, deadlineAt, signal });
   const generation = buildContractsClauseGeneration({
     pages: parsedPdf.pages,
     documentVersionId,
@@ -156,7 +156,20 @@ export function assertContractsClauseCoverage(coverageLedger) {
     "contracts_clause_parser_coverage_failed",
     "The Contracts clause parser rejected the generation because deterministic coverage was incomplete.",
     422,
-    { issueCodes: [...new Set(errors)].slice(0, 40) }
+    {
+      issueCodes: [...new Set(errors)].slice(0, 40),
+      details: {
+        duplicateKeys: Array.isArray(coverageLedger?.duplicateKeys)
+          ? coverageLedger.duplicateKeys.slice(0, 40)
+          : [],
+        missingParents: Array.isArray(coverageLedger?.missingParents)
+          ? coverageLedger.missingParents.slice(0, 40)
+          : [],
+        unparsedNumberedLines: Array.isArray(coverageLedger?.unparsedNumberedLines)
+          ? coverageLedger.unparsedNumberedLines.slice(0, 40)
+          : []
+      }
+    }
   );
 }
 
@@ -249,7 +262,8 @@ function createAssemblyState(pages) {
     appendixInventoryMode: false,
     contextCounters: new Map(),
     numberedSourceCount: 0,
-    unparsedNumberedLines: []
+    unparsedNumberedLines: [],
+    lastNumberedNumber: null
   };
 }
 
@@ -269,8 +283,13 @@ function assembleLogicalRecords(state) {
         }
         flushCurrent(state);
         state.appendixKey = appendix;
+        const headingKey = `appendix_${appendix}.heading`;
+        if (state.records.some((record) => record.clauseKey === headingKey)) {
+          excludeLine(state, line, "repeated_appendix_heading");
+          continue;
+        }
         state.current = createRecordBuilder({
-          clauseKey: `appendix_${appendix}.heading`,
+          clauseKey: headingKey,
           clauseType: "document_context",
           clauseTitle: line.text,
           parentClauseKey: null,
@@ -292,6 +311,7 @@ function assembleLogicalRecords(state) {
       if (marker) {
         flushCurrent(state);
         maybeStartAppendixNumberingRestart(state, marker, line);
+        state.lastNumberedNumber = marker.number;
         state.appendixInventoryMode = APPENDIX_INVENTORY_PATTERN.test(marker.remainder);
         state.numberedSourceCount += 1;
         const appendixKey = state.appendixKey;
@@ -611,8 +631,12 @@ function maybeStartAppendixNumberingRestart(state, marker, line) {
     ? `appendix_${state.appendixKey}.${marker.number}`
     : marker.number;
   const existing = state.records.find((record) => record.clauseKey === proposed);
-  if (!existing || line.pdfPage <= recordPage(existing)) return;
-  const appendixKey = `p${line.pdfPage}`;
+  if (!existing) return;
+  const laterPage = line.pdfPage > recordPage(existing);
+  const sequenceRestart = Boolean(state.lastNumberedNumber)
+    && compareDottedNumbers(marker.number, state.lastNumberedNumber) < 0;
+  if (!laterPage && !sequenceRestart) return;
+  const appendixKey = nextRestartAppendixKey(state, line.pdfPage);
   state.appendixKey = appendixKey;
   state.records.push(createRecordBuilder({
     clauseKey: `appendix_${appendixKey}.heading`,
@@ -623,21 +647,41 @@ function maybeStartAppendixNumberingRestart(state, marker, line) {
   }));
 }
 
+function nextRestartAppendixKey(state, page) {
+  const headingKeys = new Set(state.records.map((record) => record.clauseKey));
+  let key = `p${page}`;
+  let serial = 2;
+  while (headingKeys.has(`appendix_${key}.heading`)) {
+    key = `p${page}r${serial}`;
+    serial += 1;
+  }
+  return key;
+}
+
+function compareDottedNumbers(left, right) {
+  const a = String(left || "").split(".").map(Number);
+  const b = String(right || "").split(".").map(Number);
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    const av = a[index] ?? 0;
+    const bv = b[index] ?? 0;
+    if (av !== bv) return av - bv;
+  }
+  return 0;
+}
+
 function synthesizeSkippedParentHeadings(state) {
   const keys = new Set(state.records.map((record) => record.clauseKey));
-  const topLevels = [...keys]
-    .filter((key) => /^\d+$/u.test(key))
-    .map(Number);
   const missing = new Set();
   for (const record of state.records) {
-    const parent = record.parentClauseKey;
-    if (!parent || keys.has(parent) || missing.has(parent)) continue;
-    if (!/^\d+$/u.test(parent)) continue;
-    const parentNum = Number(parent);
-    if (!topLevels.some((value) => value > parentNum)) continue;
-    missing.add(parent);
+    let parent = record.parentClauseKey;
+    while (parent && !keys.has(parent) && !missing.has(parent)) {
+      if (!shouldSynthesizeParent(parent, keys)) break;
+      missing.add(parent);
+      parent = parentClauseKey(parent);
+    }
   }
-  for (const parent of [...missing].sort()) {
+  for (const parent of [...missing].sort(compareDottedNumbers)) {
     keys.add(parent);
     const record = createRecordBuilder({
       clauseKey: parent,
@@ -650,6 +694,18 @@ function synthesizeSkippedParentHeadings(state) {
     if (childIndex >= 0) state.records.splice(childIndex, 0, record);
     else state.records.push(record);
   }
+}
+
+function shouldSynthesizeParent(parent, keys) {
+  if (!/^\d+(?:\.\d+)*$/u.test(parent)) return false;
+  let ancestor = parentClauseKey(parent);
+  while (ancestor) {
+    if (keys.has(ancestor)) return true;
+    ancestor = parentClauseKey(ancestor);
+  }
+  const parentTop = Number(String(parent).split(".")[0]);
+  const topLevels = [...keys].filter((key) => /^\d+$/u.test(key)).map(Number);
+  return topLevels.some((value) => value > parentTop);
 }
 
 function parseAppendixHeading(value) {
@@ -665,15 +721,30 @@ function parseAppendixHeading(value) {
 }
 
 function parseClauseMarker(value) {
-  const text = String(value || "");
+  const text = String(value || "").trim();
+  return parseLeadingClauseMarker(text) || parseTrailingClauseMarker(text);
+}
+
+function parseLeadingClauseMarker(text) {
   const match = text.match(/^\s*(\d{1,2}(?:\.\d{1,2}){0,4})([.)])?\s+(\S.*)$/u);
   const compactMatch = match
     ? null
     : text.match(/^\s*(\d{1,2}(?:\.\d{1,2}){1,4})[.)](\p{L}.*)$/u);
   if (compactMatch) return normalizeClauseMarker(compactMatch[1], compactMatch[2]);
   if (!match) return null;
+  const dotted = match[1].includes(".");
+  if (!match[2] && !dotted) return null;
   if (!match[2] && DURATION_REMAINDER_PATTERN.test(match[3])) return null;
   return normalizeClauseMarker(match[1], match[3]);
+}
+
+function parseTrailingClauseMarker(text) {
+  if (/^\s*\d/u.test(text)) return null;
+  const split = text.match(/^(.*\S)\s+\.(\d{1,2}(?:\.\d{1,2}){0,3})\s+\.(\d{1,2})\s*$/u);
+  if (split) return normalizeClauseMarker(`${split[3]}.${split[2]}`, split[1]);
+  const trailing = text.match(/^(.*\S)\s+\.(\d{1,2}(?:\.\d{1,2}){0,4})\s*$/u);
+  if (!trailing) return null;
+  return normalizeClauseMarker(trailing[2], trailing[1]);
 }
 
 function normalizeClauseMarker(number, remainder) {

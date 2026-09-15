@@ -2392,6 +2392,76 @@ export function registerContractsAgentTests(test) {
     assert.equal(restart.pageStart, 2);
   });
 
+  test("contracts R2 namespaces same-page numbering restarts after a higher clause", () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [{
+        pdfPage: 1,
+        text: [
+          "1. General",
+          "2. Payment",
+          "9. Completion",
+          "1. Form field one",
+          "2. Form field two"
+        ].join("\n")
+      }],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+
+    assert.equal(generation.coverageLedger.accepted, true);
+    assert.deepEqual(generation.coverageLedger.duplicateKeys, []);
+    assert.ok(generation.clauses.some((clause) => clause.clauseKey === "9"));
+    const restart = generation.clauses.find((clause) => clause.clauseKey === "appendix_p1.1");
+    assert.ok(restart);
+    assert.equal(restart.clauseType, "appendix_item");
+    assert.equal(restart.rawText, "1. Form field one");
+  });
+
+  test("contracts R2 ignores letterhead street numbers and reads RTL trailing clause markers", () => {
+    const generation = buildContractsClauseGeneration({
+      pages: [
+        {
+          pdfPage: 1,
+          text: [
+            "web site: www.kpym.co.il",
+            "10 שמעיה",
+            "תל אביב יפו",
+            "רשימת נספחים מצורפים : .1",
+            "- התוכניות או רשימת התוכניות נספח א'",
+            "הצהרת הקבלן : .2",
+            "הקבלן יבצע את העבודות בהתאם להסכם. .2.1"
+          ].join("\n")
+        },
+        {
+          pdfPage: 2,
+          text: [
+            "10 שמעיה",
+            "10 יחידת אוויר צח",
+            "שכר החוזה .4",
+            "כל העבודות, כל החומרים. .6.1 .4",
+            "פינוי שוטף של פסולת. .6.2 .4"
+          ].join("\n")
+        }
+      ],
+      documentVersionId: `sha256:${FIXTURE_SHA}`,
+      documentSha256: FIXTURE_SHA
+    });
+
+    assert.equal(generation.coverageLedger.accepted, true);
+    assert.deepEqual(generation.coverageLedger.errors, []);
+    assert.equal(generation.clauses.filter((clause) => clause.clauseKey === "10").length, 0);
+    assert.deepEqual(
+      generation.clauses
+        .filter((clause) => clause.clauseType !== "document_context" || /^\d/.test(clause.clauseKey))
+        .map((clause) => clause.clauseKey),
+      ["1", "2", "2.1", "4", "4.6", "4.6.1", "4.6.2"]
+    );
+    assert.match(
+      generation.clauses.find((clause) => clause.clauseKey === "1").rawText,
+      /נספח א'/u
+    );
+  });
+
   test("contracts R2 parser policy changes create immutable generation identity", () => {
     const input = {
       pages: [{ pdfPage: 1, text: "1. General\n1.1. Exact source text" }],
@@ -2549,6 +2619,8 @@ export function registerContractsAgentTests(test) {
       }),
       (error) => error.code === "contracts_clause_parser_coverage_failed"
         && error.issueCodes.includes("coverage.duplicate_clause_key")
+        && Array.isArray(error.details?.duplicateKeys)
+        && error.details.duplicateKeys.includes("1.1")
     );
     assert.throws(
       () => buildContractsClauseGeneration({

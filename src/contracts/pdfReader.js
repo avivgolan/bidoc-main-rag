@@ -3,12 +3,14 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 import * as pdfjsWorker from "pdfjs-dist/legacy/build/pdf.worker.mjs";
-import { CONTRACTS_PDF_READER_VERSION } from "./constants.js";
+import {
+  CONTRACTS_MAX_PAGES,
+  CONTRACTS_MAX_TEXT_CHARACTERS,
+  CONTRACTS_PDF_READER_VERSION
+} from "./constants.js";
 import { ContractsAgentError } from "./errors.js";
 
-export { CONTRACTS_PDF_READER_VERSION };
-export const CONTRACTS_MAX_PAGES = 80;
-export const CONTRACTS_MAX_TEXT_CHARACTERS = 160_000;
+export { CONTRACTS_MAX_PAGES, CONTRACTS_MAX_TEXT_CHARACTERS, CONTRACTS_PDF_READER_VERSION };
 
 const BIDI_MARKS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 const PDFJS_CDN_VERSION = "4.10.38";
