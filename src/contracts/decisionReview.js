@@ -400,12 +400,16 @@ export async function persistContractsDecisionProposals({
       accepted.conflictRegistry = { published: 0, skipped: "publish_failed" };
     }
     if (contractsR6Phase3Approved(env)) {
-      await persistContractsR6Embeddings({
-        config,
-        workspaceId: parseContractsClauseWorkspaceId(workspaceId),
-        fetchImpl,
-        timeoutMs
-      });
+      try {
+        await persistContractsR6Embeddings({
+          config,
+          workspaceId: parseContractsClauseWorkspaceId(workspaceId),
+          fetchImpl,
+          timeoutMs
+        });
+      } catch (error) {
+        console.warn("[contracts-r6] embeddings skipped after decision persist", error?.message || error);
+      }
     }
     return accepted;
   } catch (error) {
@@ -447,12 +451,16 @@ export async function reviewContractsDecision({
     });
     const accepted = assertProjection(projection, { reviewRequired: true });
     if (contractsR6Phase3Approved(env)) {
-      await persistContractsR6Embeddings({
-        config,
-        workspaceId: parseContractsClauseWorkspaceId(workspaceId),
-        fetchImpl,
-        timeoutMs
-      });
+      try {
+        await persistContractsR6Embeddings({
+          config,
+          workspaceId: parseContractsClauseWorkspaceId(workspaceId),
+          fetchImpl,
+          timeoutMs
+        });
+      } catch (error) {
+        console.warn("[contracts-r6] embeddings skipped after decision review", error?.message || error);
+      }
     }
     return accepted;
   } catch (error) {
