@@ -1726,6 +1726,40 @@ export function registerContractsAgentTests(test) {
     const server = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
     assert.match(server, /x-contracts-ingestion-secret/);
     assert.match(server, /authorizeContractsExtractionRequest\(req\)/);
+    assert.match(server, /isContractsMachineIngestPath/);
+    assert.match(server, /resolveContractsReviewerId/);
+    assert.match(server, /clauses\/workspaces\/extract/);
+  });
+
+  test("file-classify machine ingest can persist clauses and run automatic steps", async () => {
+    const {
+      isContractsMachineIngestPath,
+      resolveContractsReviewerId,
+      CONTRACTS_MACHINE_REVIEWER_FALLBACK_ID
+    } = await import("../src/apiSecurity.js");
+    assert.equal(isContractsMachineIngestPath("POST", "/api/contracts/clauses/workspaces/extract"), true);
+    assert.equal(
+      isContractsMachineIngestPath("POST", "/api/contracts/automatic/workspaces/11111111-1111-4111-8111-111111111111/steps/explicit"),
+      true
+    );
+    assert.equal(isContractsMachineIngestPath("GET", "/api/contracts/clauses/workspaces"), false);
+    assert.equal(isContractsMachineIngestPath("POST", "/api/contracts/decisions/workspaces/x/auto-review"), false);
+    assert.equal(
+      resolveContractsReviewerId(
+        { headers: { "x-contracts-ingestion-secret": "expected" } },
+        null,
+        { CONTRACTS_INGESTION_SECRET: "expected", BIDOC_API_SECRET: "" }
+      ),
+      CONTRACTS_MACHINE_REVIEWER_FALLBACK_ID
+    );
+    assert.equal(
+      resolveContractsReviewerId(
+        { headers: { "x-contracts-ingestion-secret": "expected" } },
+        { sub: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
+        { CONTRACTS_INGESTION_SECRET: "expected" }
+      ),
+      "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    );
   });
 
   test("contracts response cap measures the exact pretty UTF-8 bytes sent on the wire", () => {

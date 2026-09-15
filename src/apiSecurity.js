@@ -40,17 +40,50 @@ export function authorizeDataQueryRequest(req, { secret = process.env.BIDOC_API_
   });
 }
 
-// n8n may invoke the Contracts extraction-only route without a browser session.
-// A dedicated secret keeps this paid model boundary independent from the broad
-// BIDOC_API_SECRET used by the app BFF and does not grant access to persistence,
-// review, Schedule, or database routes.
+const CONTRACTS_REVIEWER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const CONTRACTS_AUTOMATIC_STEP_PATH = /^\/api\/contracts\/automatic\/workspaces\/[0-9a-f-]+\/steps\/[a-z-]+$/iu;
+
+// File-classify / n8n ingest attributes automatic reviews to this reviewer when
+// no browser session is present. Override with CONTRACTS_MACHINE_REVIEWER_ID.
+export const CONTRACTS_MACHINE_REVIEWER_FALLBACK_ID = "7eda8445-add6-4fe0-be33-8ad562a3b25d";
+
+export const CONTRACTS_MACHINE_INGEST_PATHS = Object.freeze([
+  "/api/contracts/extract",
+  "/api/contracts/clauses/preview",
+  "/api/contracts/clauses/workspaces/extract"
+]);
+
+// n8n File Classify may invoke dry-run parse, R3.2 clause persistence, and the
+// automatic upload pipeline without a browser session. The dedicated ingestion
+// secret does not open GET listing, activity mapping, or arbitrary database
+// routes, and never accepts client database-header overrides.
 export function authorizeContractsExtractionRequest(
   req,
-  { secret = process.env.CONTRACTS_INGESTION_SECRET } = {}
+  { secret = process.env.CONTRACTS_INGESTION_SECRET || process.env.BIDOC_API_SECRET } = {}
 ) {
   return authorizeSecretHeader(req, {
     secret,
     headerName: "x-contracts-ingestion-secret",
     disabledError: "Contracts ingestion API is disabled until CONTRACTS_INGESTION_SECRET is configured"
   });
+}
+
+export function isContractsMachineIngestPath(method, pathname) {
+  if (String(method || "").toUpperCase() !== "POST") return false;
+  const path = String(pathname || "");
+  return CONTRACTS_MACHINE_INGEST_PATHS.includes(path) || CONTRACTS_AUTOMATIC_STEP_PATH.test(path);
+}
+
+export function contractsMachineReviewerId(env = process.env) {
+  const configured = String(env.CONTRACTS_MACHINE_REVIEWER_ID || CONTRACTS_MACHINE_REVIEWER_FALLBACK_ID).trim();
+  return CONTRACTS_REVIEWER_ID_PATTERN.test(configured) ? configured.toLowerCase() : "";
+}
+
+export function resolveContractsReviewerId(req, session, env = process.env) {
+  if (session?.sub && CONTRACTS_REVIEWER_ID_PATTERN.test(session.sub)) return String(session.sub).toLowerCase();
+  const auth = authorizeContractsExtractionRequest(req, {
+    secret: env.CONTRACTS_INGESTION_SECRET || env.BIDOC_API_SECRET
+  });
+  if (!auth.ok) return "";
+  return contractsMachineReviewerId(env);
 }

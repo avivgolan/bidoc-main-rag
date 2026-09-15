@@ -13,7 +13,7 @@ import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventT
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
-import { authorizeContractsExtractionRequest, authorizeDataQueryRequest } from "./apiSecurity.js";
+import { authorizeContractsExtractionRequest, authorizeDataQueryRequest, isContractsMachineIngestPath, resolveContractsReviewerId } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
@@ -198,8 +198,7 @@ async function handleApi(req, res, url) {
   // secret — merely sending the content-supabase-url header is not enough to
   // bypass the login wall. Same-origin calls (the standalone UI) need a session.
   if (!url.pathname.startsWith("/api/auth/")) {
-    const isContractsExtractionRoute = req.method === "POST"
-      && ["/api/contracts/extract", "/api/contracts/clauses/preview"].includes(url.pathname);
+    const isContractsMachineIngestRoute = isContractsMachineIngestPath(req.method, url.pathname);
     const hasContractsIngestionSecret = Object.prototype.hasOwnProperty.call(
       req.headers,
       "x-contracts-ingestion-secret"
@@ -228,9 +227,15 @@ async function handleApi(req, res, url) {
       "x-index-table",
       "x-alerts-table"
     ].some((header) => Object.prototype.hasOwnProperty.call(req.headers, header));
-    if (isContractsExtractionRoute && hasContractsIngestionSecret) {
+    if (isContractsMachineIngestRoute && hasContractsIngestionSecret) {
       const auth = authorizeContractsExtractionRequest(req);
       if (!auth.ok) return sendJson(res, auth.status, { error: auth.error });
+      if (hasContractsDatabaseHeaderOverride) {
+        return sendJson(res, 400, {
+          error: "contracts_workspace_database_override_rejected",
+          message: "Contracts APIs use server-owned MAIN and KAPAIM connections; client database overrides are not accepted."
+        });
+      }
     } else if (isContractsServerOwnedRoute) {
       if (!getSuperadminSession(req)) {
         return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
@@ -983,13 +988,13 @@ async function handleApi(req, res, url) {
   );
   if (req.method === "POST" && contractsAutomaticMatch) {
     try {
-      const reviewer = getSuperadminSession(req);
-      if (!reviewer?.sub) return sendJson(res, 403, { error: "An authenticated reviewer session is required." });
+      const reviewerId = resolveContractsReviewerId(req, getSuperadminSession(req));
+      if (!reviewerId) return sendJson(res, 403, { error: "An authenticated reviewer session is required." });
       const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
       const { runContractsAutomaticStep } = await import("./contracts/automaticPipeline.js");
       const result = await runContractsAutomaticStep({
         workspaceId: contractsAutomaticMatch[1], step: contractsAutomaticMatch[2],
-        reviewerId: reviewer.sub, config: config(), body
+        reviewerId, config: config(), body
       });
       const { sendContractsJson } = await import("./contracts/response.js");
       return sendContractsJson(res, 200, result);
@@ -1113,9 +1118,20 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/contracts/clauses/workspaces/extract") {
     try {
-      const reviewer = getSuperadminSession(req);
-      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
+      const reviewerId = resolveContractsReviewerId(req, getSuperadminSession(req));
+      if (!reviewerId) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const { MAIN_STUDYCASE_SOURCE_PROJECT_ID, isKapaimStudyCaseTwin } = await import("./contracts/studyCase.js");
+      const projectId = body?.projectSelection?.projectId;
+      const boundBody = projectId && isKapaimStudyCaseTwin(projectId)
+        ? {
+          ...body,
+          projectSelection: {
+            ...body.projectSelection,
+            projectId: MAIN_STUDYCASE_SOURCE_PROJECT_ID
+          }
+        }
+        : body;
       const {
         contractsClausePersistenceApproved,
         runContractsClausePersistence
@@ -1127,9 +1143,9 @@ async function handleApi(req, res, url) {
         });
       }
       const result = await runContractsClausePersistence({
-        body,
+        body: boundBody,
         config: config(),
-        reviewerId: reviewer.sub,
+        reviewerId,
         emit: (event) => console.info("[contracts-r3.2]", JSON.stringify(event))
       });
       const { sendContractsJson } = await import("./contracts/response.js");
