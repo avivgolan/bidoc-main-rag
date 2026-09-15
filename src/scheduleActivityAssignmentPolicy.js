@@ -287,10 +287,20 @@ export function buildScheduleAssignmentPolicyArtifact({
     : null;
   if (acceptanceMetrics?.falseAutomaticAssignmentCount > 0) reasons.push("acceptance_false_automatic_assignment_observed");
   if (acceptanceMetrics && acceptanceMetrics.correctAutomaticAssignmentCount === 0) reasons.push("acceptance_has_no_safe_automatic_coverage");
+  const knownEvidenceMetrics = selectedPolicy
+    ? evaluateScheduleAssignmentPolicyConfiguration(
+        safeRows.map((row) => scheduleAssignmentPolicyEvidenceRow(row, calibrationArtifact)),
+        selectedPolicy
+      )
+    : null;
+  if (knownEvidenceMetrics?.falseAutomaticAssignmentCount > 0) {
+    reasons.push("known_evidence_false_automatic_assignment_observed");
+  }
   const readinessReasons = [...new Set(reasons)];
   const configuration = {
     grid,
     selectionRule: "maximize_safe_coverage_after_zero_false_and_mandatory_safety_gates",
+    knownEvidenceSafetyVeto: "reject_selected_policy_if_any_known_label_is_falsely_eligible_without_retuning",
     mandatoryRecommendationGates: {
       requireMatcherValidatorAgreement: true,
       blockHardConflict: true
@@ -322,6 +332,7 @@ export function buildScheduleAssignmentPolicyArtifact({
     diagnosticBestPolicy,
     selectedPolicy: selectedPolicy ? { ...selectedPolicy, enabled: false } : null,
     acceptanceMetrics,
+    knownEvidenceMetrics,
     selectionSweep,
     readyForShadow: readinessReasons.length === 0,
     readyForProduction: false,

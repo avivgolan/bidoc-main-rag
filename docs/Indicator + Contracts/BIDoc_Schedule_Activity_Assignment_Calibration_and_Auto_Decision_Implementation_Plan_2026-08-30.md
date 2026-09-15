@@ -2,7 +2,7 @@
 
 Date: 2026-08-30
 
-Status: Phase 5 is complete, including populated-card visual acceptance. Phase 6 non-writing infrastructure is complete locally: the exact Phase 4 retrieval, calibrator, and disabled policy can record hidden `wouldAutoAssign` observations and compare them with later human labels. Fresh shadow observations have not yet been collected, automatic assignment remains disabled, and Phase 6 acceptance has not passed.
+Status: Phase 5 and Phase 6 non-writing infrastructure are complete. The 2026-09-04 read-only snapshot contains 50 compatible shadow observations, 49 reviewed and 1 pending. The current policy has zero eligible coverage. A recalibrated candidate was rejected after replay found one known false decision. A known-evidence safety veto is implemented locally. Automatic assignment remains disabled and Phase 7 is not approved. See `BIDoc_Schedule_Activity_Assignment_Phase_6_Reviewed_Replay_and_Safety_Veto_Checkpoint_2026-09-04.md` for the current checkpoint.
 
 Current engine: `schedule-assignment.v2.1-rc1`
 Current published configuration: `schedule-assignment-openai.v2.1-rc1`
@@ -732,7 +732,7 @@ Prevent calibration drift as alerts, activities, Schedule versions, models, prom
 
 ## 18. Immediate next action
 
-Phase 5 and the local Phase 6 shadow infrastructure are complete while the policy remains disabled and `readyForShadow`. The immediate next action is to publish the reviewed shadow code and collect the fresh non-writing sample:
+Phase 6 collection and reviewed replay have now exposed a concrete false match. The current stop is an engineering correction, not another broad labeling request:
 
 1. Completed: collected 100 explicit review labels and froze 148 usable evaluation cases.
 2. Completed: ran the full non-persisting 148-case hybrid evaluation.
@@ -741,8 +741,10 @@ Phase 5 and the local Phase 6 shadow infrastructure are complete while the polic
 5. Completed: separated raw ranking scores from calibrated probability in the review UI and audit record.
 6. Completed: added human-readable failed-gate reasons while preserving shared review choices and compatibility aliases.
 7. Completed: visually verified populated review cards in the connected system.
-8. Completed locally: forced all browser agent runs to `commit:false`, pinned the exact Phase 4 hybrid path, and added hidden durable shadow observations plus an aggregate report.
-9. Current stop: review and publish the Phase 6 infrastructure through the normal commit-triggered deployment path.
-10. After publication, collect at least 50 new compatible reviewed shadow outcomes, including 10 negative and 5 shadow-eligible outcomes.
-11. Freeze the report and stop after any false eligibility, write violation, incompatibility, or material drift.
-12. Do not activate an automatic policy or change remote settings without explicit Phase 7 approval.
+8. Completed: published non-writing shadow collection and collected 50 compatible observations, of which 49 are reviewed.
+9. Completed locally: corrected mapped Schedule loading, prepared 149 labeled cases, reused 121 compatible model outputs, and reran 28 new or changed cases.
+10. Completed locally: reran calibration and 392 policy configurations. Rejected the 70% / 10-point candidate after diagnostic shadow replay produced 2 correct and 1 false eligible decisions.
+11. Completed locally: added a safety veto preventing a selected policy from being marked ready when it makes any known false decision across the labeled dataset.
+12. Next: tighten Validator decision semantics and material/work-scope matching around the known counterexample, then re-evaluate the same evidence before requesting more labels.
+13. The one pending review may be completed independently. Do not treat reused reviewed observations as fresh acceptance evidence.
+14. Do not publish a replacement candidate or activate automatic writes without the corresponding approval. Phase 7 remains blocked.

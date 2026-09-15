@@ -51,6 +51,7 @@ import { registerQaPhase1Tests } from "./qa-phase1.tests.js";
 import { registerChatQualityTests } from "./chat-quality.tests.js";
 import { registerChatCompletionIntegrityTests } from "./chat-completion-integrity.tests.js";
 import { registerMainEvidenceTests } from "./main-evidence.tests.js";
+import { registerMainCitationTests } from "./main-citations.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
@@ -60,6 +61,7 @@ registerQaPhase1Tests(test);
 registerChatQualityTests(test);
 registerChatCompletionIntegrityTests(test);
 registerMainEvidenceTests(test);
+registerMainCitationTests(test);
 const testJwt = (claims) => [
   Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
   Buffer.from(JSON.stringify(claims)).toString("base64url"),
@@ -6312,7 +6314,9 @@ test("main agent requires inline source links instead of a consolidated footer",
   assert.match(agentSource, /Do NOT create a separate "\*\*מקורות:\*\*" section/);
   assert.match(agentSource, /source_url: unavailable/);
   assert.match(agentSource, /return uniqueByUrl\(\[\.\.\.\(Array\.isArray\(sources\) \? sources : \[\]\), \.\.\.retrievedSources\]\)/);
-  assert.match(mainPrompt, /End each factual bullet with its directly matching Markdown source link/);
+  assert.match(mainPrompt, /When source_map is not supplied, end each factual bullet with its directly matching Markdown source link/);
+  assert.match(mainPrompt, /\[Source: S1\]/);
+  assert.match(mainPrompt, /Use only IDs present in source_map/);
   assert.match(mainPrompt, /Do not create a separate sources section at the bottom/);
   assert.match(mainPrompt, /identify the single latest dated supported record first/);
   assert.match(mainPrompt, /strongest 5-7 supported findings/);

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { getConfig } from "../src/config.js";
 import { buildQaRunSummary } from "../src/qaSummary.js";
+import { buildContentRowSource } from "../src/subagents/contentTools.js";
 import {
   buildCanonicalEvidenceRecords,
   buildCompactMainPayload,
@@ -10,6 +11,49 @@ import {
 } from "../src/mainEvidence.js";
 
 export function registerMainEvidenceTests(test) {
+  test("chat payload joins a content-tool link to indexed evidence by exact typed identity", () => {
+    const source = buildContentRowSource("emails", {
+      id: 42,
+      subject: "Original email subject",
+      mail_id: "mail/42",
+      received_date: "2026-05-12"
+    });
+    const result = buildCompactMainPayload({
+      retrievalResults: [{
+        id: "index-900",
+        source_id: "42",
+        source_table: "emails",
+        title: "Indexed summary title",
+        content: "The supplier confirmed that the delivery was delayed by seven days."
+      }],
+      toolResults: [{ toolName: "emails", ok: true, sources: [source] }]
+    });
+    assert.equal(source.source_table, "emails");
+    assert.equal(source.source_id, "42");
+    assert.equal(result.payload.retrieval_context.records.length, 1);
+    const sourceId = result.payload.retrieval_context.records[0].source_id;
+    assert.equal(result.payload.source_map[sourceId].url, "https://outlook.office.com/mail/inbox/id/mail%2F42");
+    assert.equal(result.metrics.evidence.linkable_evidence_records, 1);
+    assert.equal(result.metrics.evidence.duplicates_removed, 1);
+  });
+
+  test("chat payload never borrows a same-title link from a different typed record", () => {
+    const source = buildContentRowSource("emails", {
+      id: 43, subject: "Same title", mail_id: "mail-43", received_date: "2026-05-12"
+    });
+    const result = buildCompactMainPayload({
+      retrievalResults: [{
+        source_id: "42", source_table: "emails", title: "Same title", primary_date: "2026-05-12",
+        content: "The project evidence belongs to email 42, not to email 43."
+      }],
+      toolResults: [{ toolName: "emails", ok: true, sources: [source] }]
+    });
+    const sourceId = result.payload.retrieval_context.records[0].source_id;
+    assert.equal(result.payload.source_map[sourceId].url, null);
+    assert.equal(result.metrics.evidence.linkable_evidence_records, 0);
+    assert.equal(result.metrics.evidence.source_map_linkable_records, 1);
+  });
+
   test("chat payload builds stable canonical evidence IDs, ordering, and source mappings", () => {
     const input = {
       retrievalResults: [
@@ -176,6 +220,7 @@ export function registerMainEvidenceTests(test) {
     assert.equal(result.payload.project_graph_findings, undefined);
     assert.equal(result.payload.sources, undefined);
     assert.equal(result.payload.retrieval_context.records.length, 1);
+    assert.match(result.payload.retrieval_context.instruction, /\[Source: S1\]/u);
     assert.ok(result.payload.retrieval_context.records[0].evidence_excerpt.length <= 360);
     assert.ok(result.payload.source_map[result.payload.retrieval_context.records[0].source_id]);
     assert.doesNotMatch(JSON.stringify(result.payload), /internal_canary|must-not-enter|embedding|tail-canary/);
@@ -287,7 +332,15 @@ export function registerMainEvidenceTests(test) {
             retry_input_budget_ok: true
           },
           output: {
-            completion: null,
+            completion: {
+              citations: {
+                contract: "inline_source_links.v1",
+                status: "passed",
+                resolved_citations: 3,
+                unresolved_citations: 0,
+                markdown_links_after: 3
+              }
+            },
             sources: []
           }
         }]
@@ -299,6 +352,8 @@ export function registerMainEvidenceTests(test) {
     assert.equal(summary.grounding_inputs.input_budget_ok, true);
     assert.equal(summary.grounding_inputs.retry_estimated_input_tokens, 4200);
     assert.equal(summary.grounding_inputs.retry_input_budget_ok, true);
+    assert.equal(summary.source_and_citation_signals.citation_integrity.status, "passed");
+    assert.equal(summary.source_and_citation_signals.citation_integrity.resolved_citations, 3);
     assert.doesNotMatch(JSON.stringify(summary.grounding_inputs), /project evidence|evidence_excerpt/);
   });
 }

@@ -44,5 +44,6 @@ console.log(JSON.stringify({
   diagnosticBestPolicy: artifact.diagnosticBestPolicy,
   selectedPolicy: artifact.selectedPolicy,
   acceptanceMetrics: artifact.acceptanceMetrics,
+  knownEvidenceMetrics: artifact.knownEvidenceMetrics,
   evaluatedConfigurationCount: artifact.selectionSweep.length
 }, null, 2));

@@ -72,7 +72,12 @@ async function prepareDataset() {
     sourceProjectId: context.sourceProjectId,
     scheduleProjectId: context.scheduleProjectId
   });
-  const scheduleSource = await loadScheduleSource({ config, projectId, settings, fetchImpl: timeoutFetch });
+  const scheduleSource = await loadScheduleSource({
+    config,
+    projectId: context.scheduleProjectId,
+    settings,
+    fetchImpl: timeoutFetch
+  });
   const inputs = { tasks: scheduleSource.tasks, scheduleMeta: scheduleSource.scheduleMeta };
   const cutoffMs = Date.parse(dataCutoff);
   const [rawLinks, rawRejectedRuns, sharedLabelResult] = await Promise.all([

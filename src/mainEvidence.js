@@ -131,6 +131,8 @@ export function buildCompactMainPayload({
         duplicates_removed: Math.max(0, candidates.length - deduplicated.length),
         selected_records: assembled.selectedCount,
         source_map_records: assembled.sourceMapCount,
+        linkable_evidence_records: assembled.linkableEvidenceCount,
+        source_map_linkable_records: assembled.linkableSourceCount,
         record_limit: recordLimit,
         excerpt_limit: excerptLimit,
         graph_limit: graphLimit,
@@ -247,7 +249,7 @@ function assembleCompactPayload({
     answer_mode: answerMode,
     retrieval_context: {
       format: MAIN_EVIDENCE_CONTRACT,
-      instruction: "Use only these canonical evidence records for retrieved project facts. Match source_id to source_map for citations.",
+      instruction: "Use only these canonical evidence records for retrieved project facts. End every supported factual bullet with the exact marker [Source: S1], replacing S1 with the supporting record's source_id. Use one marker per supporting source. Never cite a title or source_table in place of source_id. The application validates each marker against source_map and converts it to a clickable link.",
       records
     },
     graph_context: compactGraphContext(graphContext, {
@@ -267,7 +269,9 @@ function assembleCompactPayload({
   return {
     payload: removeUndefined(payload),
     selectedCount: records.length,
-    sourceMapCount: Object.keys(registry.sourceMap).length
+    sourceMapCount: Object.keys(registry.sourceMap).length,
+    linkableEvidenceCount: records.filter((record) => registry.sourceMap[record.source_id]?.url).length,
+    linkableSourceCount: Object.values(registry.sourceMap).filter((source) => source.url).length
   };
 }
 
@@ -409,6 +413,7 @@ function deduplicateCandidates(candidates) {
       const indexes = titleDateMap.get(candidate.titleDateIdentity) || [];
       duplicateIndex = indexes.find((index) => {
         const existing = entries[index];
+        if (existing.typedIdentity && candidate.typedIdentity && existing.typedIdentity !== candidate.typedIdentity) return false;
         return !existing.excerpt || !candidate.excerpt || existing.fingerprint === candidate.fingerprint;
       });
     }

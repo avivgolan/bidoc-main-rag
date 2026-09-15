@@ -2,6 +2,7 @@ import { createEmbedding } from "./openrouter.js";
 import { supabaseHeaders } from "./config.js";
 import { addDurationToLink, TIMELINE_RELATION_TYPES } from "./timelineLinks.js";
 import { CACHE_TTL, cachedOperation } from "./cache.js";
+import { hydrateRetrievedSourceLinks, indexedSourceLinkReadPath, INDEXED_SOURCE_LINK_CONTRACT } from "./sourceLinks.js";
 
 const MESSAGES_TABLE = "chat_messages_gf";
 const SESSION_MEMORY_TABLE = "chat_session_memory";
@@ -873,6 +874,7 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
       hashtags: payload.hashtags,
       topK,
       rpc: contentConfig.hybridRpcName,
+      source_link_contract: config.rag?.mainCompactEvidence === true ? INDEXED_SOURCE_LINK_CONTRACT : "legacy",
       vectorWeight: payload.vector_weight,
       keywordWeight: payload.keyword_weight,
       ...(config.projectId ? { projectId: config.projectId } : {})
@@ -881,8 +883,9 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
     savedCall: "search",
     estimatedCost: 0.0002,
     operation: async () => {
+      let results;
       try {
-        return await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
+        results = await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
           method: "POST",
           body: JSON.stringify(payload)
         });
@@ -897,11 +900,21 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
         const hasOptionalParams = payload.project_id_filter || payload.hashtags.length;
         if (!hasOptionalParams) throw error;
         const { project_id_filter: _pid, hashtags: _hashtags, ...payloadBase } = payload;
-        return supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
+        results = await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
           method: "POST",
           body: JSON.stringify(payloadBase)
         });
       }
+      if (config.rag?.mainCompactEvidence !== true) return results;
+      return hydrateRetrievedSourceLinks({
+        results,
+        projectId: config.projectId || null,
+        readIndexRows: (ids) => supabaseFetch(contentConfig, indexedSourceLinkReadPath({
+          table: contentConfig.indexTable,
+          ids,
+          projectId: config.projectId || null
+        }), { timeoutMs: 3000 })
+      });
     }
   });
 }
@@ -909,10 +922,11 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
 export const vectorSearch = hybridSearch;
 
 async function supabaseFetch(config, path, options = {}) {
+  const { timeoutMs = 20_000, ...requestOptions } = options;
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), 20_000);
+  const id = setTimeout(() => controller.abort(), Math.min(20_000, Math.max(100, Number(timeoutMs) || 20_000)));
   const response = await fetch(`${config.supabaseUrl}${path}`, {
-    ...options,
+    ...requestOptions,
     signal: controller.signal,
     headers: {
       ...supabaseHeaders(config.supabaseServiceRoleKey),

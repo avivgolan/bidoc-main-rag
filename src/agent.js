@@ -4,6 +4,7 @@ import { heuristicClassification, isHebrew } from "./heuristics.js";
 import { chatCompletion, chatCompletionDetailed, extractJsonObject, rerankWithLlm } from "./openrouter.js";
 import { mainCompletionFailureCode, runBoundedMainCompletion, validateMainCompletion } from "./mainCompletion.js";
 import { buildCompactMainPayload, measureMainRequest } from "./mainEvidence.js";
+import { resolveMainAnswerCitations } from "./mainCitations.js";
 import { graphSearch, hybridSearch, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks, buildInternalSourceUrl, isInternalProjectTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
@@ -2399,6 +2400,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
 
   let payloadMetrics = null;
   let retryPayloadMetrics = null;
+  let retrySourceMap = null;
   try {
     const answerMode = listIntent ? "ranked_entity_list" : "standard_grounded_answer";
     const projectedToolResults = projectToolCallsForMain(toolCalls);
@@ -2548,6 +2550,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
           }
         });
         retryPayloadMetrics = retryBuild.metrics;
+        retrySourceMap = retryBuild.payload?.source_map || null;
         emitRunEvent(runId, "main_agent", "Main Agent retrying with compact context", {
           reason: retryPolicy.reason,
           model: retryPolicy.model,
@@ -2573,6 +2576,14 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
         });
       }
     });
+    const activeSourceMap = completion.status === "retried"
+      ? retrySourceMap
+      : mainPayload?.source_map || null;
+    const citationResolution = resolveMainAnswerCitations(completion.content, {
+      sourceMap: activeSourceMap,
+      sources,
+      enforceCanonicalUrls: Boolean(activeSourceMap)
+    });
     const mainSynthesis = {
       status: completion.status,
       reason: completion.reason,
@@ -2580,7 +2591,8 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
       retryReason: completion.status === "retried" ? completion.reason : null,
       attempts: completion.attempts,
       payload: payloadMetrics,
-      retryPayload: retryPayloadMetrics
+      retryPayload: retryPayloadMetrics,
+      citations: citationResolution.metrics
     };
     trace.push({ step: "mainAgent",
       ok: true,
@@ -2594,11 +2606,12 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
       {
         reason: completion.reason,
         length: completion.content.length,
-        attempts: completion.attempts.length
+        attempts: completion.attempts.length,
+        citations: citationResolution.metrics
       }
     );
     return {
-      answer: appendEmailSemanticLatestBoundary(linkifyCitations(completion.content, sources), { message }),
+      answer: appendEmailSemanticLatestBoundary(citationResolution.answer, { message }),
       mainSynthesis
     };
   } catch (error) {
@@ -2698,10 +2711,12 @@ INVESTIGATION MODE:
 - Do not invent root causes or responsibility without project evidence.
 
 INLINE SOURCE CONTRACT:
-- Put the relevant source link immediately after every factual bullet or finding, using Markdown exactly like: [למסמך לחץ כאן](https://...).
-- Match each claim to the URL from the same retrieval record or tool result. Do not attach an unrelated URL merely because it appears in the general sources list.
+- When source_map is present, put the exact supporting source marker immediately after every factual bullet or finding, exactly like: [Source: S1]. Use only source_id values present in source_map. The application validates and converts each marker into a clickable link.
+- When source_map is absent, put the relevant source link immediately after every factual bullet or finding, using Markdown exactly like: [למסמך לחץ כאן](https://...).
+- Match each claim to the same retrieval record or tool result. Do not attach an unrelated source merely because it appears in the source map or general sources list.
 - When one bullet is supported by multiple records, place the relevant links together at the end of that bullet.
-- If a claim has no directly matching URL, omit the citation rather than borrowing an unrelated source or writing a placeholder.
+- When source_map is present and the matching record has no URL, use its exact source_id marker. The application will identify the evidence without inventing a link. When source_map is absent, omit a missing link rather than borrowing an unrelated source or writing a placeholder.
+- When source_map is present, never cite a title, table name, or generic source category in place of its source_id.
 - Do NOT create a separate "**מקורות:**" section or a consolidated list of links at the bottom.
 - Do NOT print raw URLs.`;
 }
@@ -3024,35 +3039,6 @@ function rowKey(row) {
     row?.text ||
     JSON.stringify(row)
   ).slice(0, 500);
-}
-
-// Deterministic safety net: despite the INLINE SOURCE CONTRACT / Citation
-// Rules instructing the model to always wrap a citation as a Markdown link
-// when a source_url is available, it sometimes still writes a bare bracket
-// like "[מקור: emails, כותרת, 29.01.2025]" or "[ישיבה: ..., 21.01.2025]" with
-// no "(url)" — which Markdown renders as plain, non-clickable text. Rather
-// than rely purely on prompt compliance, find these bare brackets after
-// generation and attach the matching URL from the retrieved sources by
-// matching the record title that the model already copied into the bracket.
-const BARE_CITATION_BRACKET = /\[(מקור|ישיבה)\s*:\s*([^\]]+)\](?!\()/g;
-
-function linkifyCitations(text, sources = []) {
-  const value = String(text || "");
-  if (!value || !Array.isArray(sources) || !sources.length) return value;
-  const candidates = sources
-    .filter((source) => source?.url && (source.title || source.label))
-    .map((source) => ({ url: source.url, normalizedTitle: normalizeForCitationMatch(source.title || source.label) }))
-    .filter((source) => source.normalizedTitle);
-  if (!candidates.length) return value;
-  return value.replace(BARE_CITATION_BRACKET, (full, label, inner) => {
-    const normalizedInner = normalizeForCitationMatch(inner);
-    const match = candidates.find((source) => normalizedInner.includes(source.normalizedTitle));
-    return match ? `[${label}: ${inner}](${match.url})` : full;
-  });
-}
-
-function normalizeForCitationMatch(value) {
-  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 // Hebrew display labels for tool names, kept out of the fallback answer's
@@ -6021,6 +6007,26 @@ export function mainWorkflowStatus(mainSynthesis = {}) {
   return "error";
 }
 
+export function projectMainCompletionForWorkflow(mainSynthesis = {}) {
+  const bounded = (value, limit = 120) => value == null ? null : String(value).slice(0, limit);
+  return {
+    status: bounded(mainSynthesis.status),
+    reason: bounded(mainSynthesis.reason),
+    integrityStatus: bounded(mainSynthesis.integrityStatus),
+    retryReason: bounded(mainSynthesis.retryReason),
+    attempts: (Array.isArray(mainSynthesis.attempts) ? mainSynthesis.attempts : []).slice(0, 2).map((attempt) => ({
+      stage: bounded(attempt.stage),
+      status: bounded(attempt.status),
+      reason: bounded(attempt.reason),
+      finishReason: bounded(attempt.finishReason),
+      nativeFinishReason: bounded(attempt.nativeFinishReason),
+      model: bounded(attempt.model),
+      callId: bounded(attempt.callId, 180)
+    })),
+    citations: mainSynthesis.citations || null
+  };
+}
+
 export function conflictWorkflowStatus(conflicts = []) {
   return Array.isArray(conflicts) && conflicts.length ? "warning" : "done";
 }
@@ -6246,11 +6252,14 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
         payload_contract: mainSynthesis.payload?.contract || null,
         estimated_input_tokens: mainSynthesis.payload?.total?.estimated_tokens ?? null,
         evidence_records: mainSynthesis.payload?.evidence?.selected_records ?? null,
+        linkable_evidence_records: mainSynthesis.payload?.evidence?.linkable_evidence_records ?? null,
+        source_map_linkable_records: mainSynthesis.payload?.evidence?.source_map_linkable_records ?? null,
         duplicate_records_removed: mainSynthesis.payload?.evidence?.duplicates_removed ?? null,
         input_budget_tokens: mainSynthesis.payload?.budget_tokens ?? null,
         retry_estimated_input_tokens: mainSynthesis.retryPayload?.total?.estimated_tokens ?? null,
         retry_input_budget_ok: mainSynthesis.retryPayload?.within_budget ?? null,
-        input_budget_ok: mainSynthesis.payload?.within_budget ?? null
+        input_budget_ok: mainSynthesis.payload?.within_budget ?? null,
+        citation_integrity_status: mainSynthesis.citations?.status || null
       }, {
         answer: String(result.answer || "").slice(0, 800),
         answer_chars: String(result.answer || "").length,
@@ -6260,7 +6269,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
           url: String(source?.url || "").slice(0, 240),
           toolName: String(source?.toolName || source?.source || "").slice(0, 120)
         })),
-        completion: mainSynthesis,
+        completion: projectMainCompletionForWorkflow(mainSynthesis),
         fallback: mainSynthesis.status === "fallback"
       })
     );

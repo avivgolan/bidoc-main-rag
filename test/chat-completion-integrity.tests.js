@@ -14,7 +14,8 @@ import {
   dataQueryFailureReasonCode,
   fallbackRagAnswer,
   mainSynthesisRetryPolicy,
-  mainWorkflowStatus
+  mainWorkflowStatus,
+  projectMainCompletionForWorkflow
 } from "../src/agent.js";
 
 const complete = (overrides = {}) => ({
@@ -266,6 +267,23 @@ export function registerChatCompletionIntegrityTests(test) {
     assert.match(tryBlock, /payloadMetrics = compactBuild\?\.metrics \|\| measureMainRequest\(/);
     assert.doesNotMatch(tryBlock, /(?:const|let) payloadMetrics =/);
     assert.doesNotMatch(tryBlock, /let retryPayloadMetrics =/);
+  });
+
+  test("chat completion integrity keeps citation diagnostics structured below the workflow preview limit", () => {
+    const projected = projectMainCompletionForWorkflow({
+      status: "done",
+      reason: "completion_complete",
+      integrityStatus: "complete",
+      attempts: [{ stage: "initial", status: "complete", finishReason: "stop", model: "test-model" }],
+      payload: { sections: { evidence: "large payload metadata".repeat(500) } },
+      retryPayload: { sections: { evidence: "large retry metadata".repeat(500) } },
+      citations: { contract: "inline_source_links.v1", status: "passed", resolved_citations: 8 }
+    });
+    assert.equal(projected.integrityStatus, "complete");
+    assert.equal(projected.citations.resolved_citations, 8);
+    assert.equal(projected.payload, undefined);
+    assert.equal(projected.retryPayload, undefined);
+    assert.ok(JSON.stringify(projected, null, 2).length < 2000);
   });
 
   test("chat completion integrity customer fallback distinguishes missing evidence", () => {

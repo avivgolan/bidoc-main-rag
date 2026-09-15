@@ -87,6 +87,7 @@ import {
   buildScheduleAssignmentPolicySweep,
   buildScheduleAssignmentEvaluationManifest,
   evaluateScheduleAssignmentCase,
+  relabelScheduleAssignmentEvaluationRow,
   summarizeScheduleAssignmentEvaluation
 } from "../src/scheduleActivityAssignmentEvaluation.js";
 import {
@@ -1296,6 +1297,59 @@ test("schedule assignment evaluation: frozen edge cases expose recall, false-aut
   }]);
 });
 
+test("schedule assignment evaluation: a reusable row is recomputed against the latest human label", () => {
+  const confirmedFixture = {
+    id: "review:1",
+    sourceId: "1",
+    label: { type: "confirmed_match", expectedActivityKey: "gantt:schedule-v1:activity-1" }
+  };
+  const original = evaluateScheduleAssignmentCase({
+    fixture: confirmedFixture,
+    result: {
+      decision: {
+        type: "match",
+        selectedActivityKey: "gantt:schedule-v1:activity-1",
+        wouldAutoAssign: true,
+        gates: { requiredRolesCompleted: true }
+      },
+      candidates: [{ activityKey: "gantt:schedule-v1:activity-1" }],
+      candidateStages: { final: [{ activityKey: "gantt:schedule-v1:activity-1" }] }
+    }
+  });
+  const relabeled = relabelScheduleAssignmentEvaluationRow({
+    fixture: {
+      ...confirmedFixture,
+      id: "review:2",
+      label: { type: "ambiguous" },
+      provenance: { source: "schedule_assignment_reviews" }
+    },
+    row: original
+  });
+  assert.equal(relabeled.caseId, "review:2");
+  assert.equal(relabeled.labelType, "ambiguous");
+  assert.equal(relabeled.expectedActivityKey, null);
+  assert.equal(relabeled.candidateRecallAt1, null);
+  assert.equal(relabeled.candidateRecallByStage.final.at1, null);
+  assert.equal(relabeled.correctAutomaticAssignment, false);
+  assert.equal(relabeled.falseAutomaticAssignment, true);
+  assert.match(relabeled.explanation, /must abstain for ambiguous/u);
+  assert.equal(relabeled.provenance.source, "schedule_assignment_reviews");
+  assert.equal(original.labelType, "confirmed_match");
+  assert.equal(original.correctAutomaticAssignment, true);
+  assert.deepEqual(relabeled.allCandidates, original.allCandidates);
+  assert.equal(relabeled.rankingScore, original.rankingScore);
+  const forbidden = relabelScheduleAssignmentEvaluationRow({
+    fixture: {
+      ...confirmedFixture,
+      label: { ...confirmedFixture.label, forbiddenActivityKeys: [confirmedFixture.label.expectedActivityKey] }
+    },
+    row: original
+  });
+  assert.equal(forbidden.correctAutomaticAssignment, false);
+  assert.equal(forbidden.falseAutomaticAssignment, true);
+  assert.match(forbidden.explanation, /explicitly forbidden/u);
+});
+
 test("schedule assignment evaluation: non-persisting dry-run cannot be combined with commit and exposes policy eligibility", () => {
   const source = fs.readFileSync(new URL("../src/subagents/scheduleActivityAssignmentAgent.js", import.meta.url), "utf8");
   assert.match(source, /if \(commit === true\) throw new Error\("Schedule assignment automatic writes are disabled during Phase 6 shadow validation"\)/u);
@@ -1303,6 +1357,12 @@ test("schedule assignment evaluation: non-persisting dry-run cannot be combined 
   assert.match(source, /buildScheduleAssignmentShadowObservation\(/u);
   assert.match(source, /wouldAutoAssign: shadow\.wouldAutoAssign/u);
   assert.match(source, /auditPersistenceSkipped = persistAudit === false/iu);
+});
+
+test("schedule assignment evaluation: dataset preparation loads the mapped Schedule project", () => {
+  const source = fs.readFileSync(new URL("../scripts/run-schedule-activity-assignment-evaluation.mjs", import.meta.url), "utf8");
+  assert.match(source, /loadScheduleSource\(\{[\s\S]*?projectId: context\.scheduleProjectId,[\s\S]*?fetchImpl: timeoutFetch[\s\S]*?\}\)/u);
+  assert.doesNotMatch(source, /loadScheduleSource\(\{ config, projectId, settings, fetchImpl: timeoutFetch \}\)/u);
 });
 
 test("schedule assignment evaluation: frozen fixture lane completes without database persistence", async () => {
@@ -1666,6 +1726,28 @@ test("schedule assignment policy: artifact selects on validation, accepts on hel
   assert.equal(blocked.readyForShadow, false);
   assert.equal(blocked.selectedPolicy, null);
   assert.ok(blocked.readinessReasons.includes("calibration_artifact_not_ready"));
+  const knownFailure = buildScheduleAssignmentPolicyArtifact({
+    rows: [row("validation-positive", true), row("validation-negative", false),
+      row("acceptance-positive", true), row("acceptance-negative", false),
+      { ...row("training-negative", false), rankingScore: 90 }],
+    calibrationArtifact: {
+      ...calibrationArtifact,
+      split: { ...calibrationArtifact.split, trainCaseIds: ["training-negative"] }
+    },
+    grid: {
+      probabilityThresholds: [0.7],
+      rankingMargins: [10],
+      requireMatcherValidatorAgreement: [true],
+      requireJudgeMatchWhenRun: [false],
+      blockHardConflict: [true]
+    }
+  });
+  assert.equal(knownFailure.acceptanceMetrics.falseAutomaticAssignmentCount, 0);
+  assert.equal(knownFailure.knownEvidenceMetrics.falseAutomaticAssignmentCount, 1);
+  assert.equal(knownFailure.readyForShadow, false);
+  assert.equal(knownFailure.readyForProduction, false);
+  assert.equal(knownFailure.selectedPolicy.enabled, false);
+  assert.ok(knownFailure.readinessReasons.includes("known_evidence_false_automatic_assignment_observed"));
 });
 
 test("schedule assignment calibration: small evidence remains advisory and cannot emit probability", () => {

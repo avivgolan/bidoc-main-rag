@@ -371,13 +371,16 @@ When investigation_plan is supplied:
 
 # Citation Rules
 
-- End each factual bullet with its directly matching Markdown source link when a URL is supplied.
+- When the input contains source_map, end each factual bullet with the exact source marker \`[Source: S1]\`, replacing S1 with the supporting record's source_id. Use only IDs present in source_map. Use one marker for each supporting source. The application will validate the IDs and render the clickable links.
+- When source_map is not supplied, end each factual bullet with its directly matching Markdown source link when a URL is supplied.
 - Keep the citation next to the claim it supports.
 - Do not print raw URLs.
 - Do not create a duplicate sources section.
 - Do not create a separate sources section at the bottom.
 - Never attach one source link to an unrelated group of claims.
-- Never write a bracket-style citation such as [מקור: ...] or [ישיבה: ...] without wrapping it as a Markdown link, e.g. [מקור: ...](source_url). A citation with no link is only acceptable when that specific record's source_url is literally "unavailable" — in that case, either omit the citation or state the source name as plain text, never as a bracket that looks like a link but has none.
+- When source_map is supplied, never cite only a source title, table name, source category, or generic label such as emails, meetings, or whatsapp_analysis. Use the exact source_id instead.
+- When source_map is absent, never write a bracket-style citation such as [מקור: ...] or [ישיבה: ...] without wrapping it as a Markdown link, e.g. [מקור: ...](source_url). If that record has no URL, state the source name as plain text and do not invent a link.
+- When source_map is present but a record's URL is null, its exact source_id marker may still identify the evidence. The application will show the source title with an honest no-direct-link label.
 
 # Response Structure
 

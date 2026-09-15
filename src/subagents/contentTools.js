@@ -404,7 +404,7 @@ export async function callInternalContentTool({ config, toolName, query, dateFro
       data,
       ...(data.answer ? { answer: data.answer } : {}),
       sources: data.results
-        .map((row) => rowSource(toolName, row))
+        .map((row) => buildContentRowSource(toolName, row, { table: data.table }))
         .filter(Boolean)
         .slice(0, 8)
     };
@@ -578,12 +578,18 @@ export async function fetchSafetyAttachmentByReference({
   return row;
 }
 
-function rowSource(toolName, row) {
+export function buildContentRowSource(toolName, row, { table = null } = {}) {
   const spec = CONTENT_TOOL_SPECS[toolName];
   const label = String(row?.[spec?.titleField] || row?.title || "צפייה במקור").slice(0, 120);
-  if (row?.data_link) return { url: row.data_link, label };
-  if (toolName === "emails" && row?.mail_id) {
-    return { url: `https://outlook.office.com/mail/inbox/id/${encodeURIComponent(row.mail_id)}`, label };
-  }
-  return null;
+  const url = row?.data_link || (toolName === "emails" && row?.mail_id
+    ? `https://outlook.office.com/mail/inbox/id/${encodeURIComponent(row.mail_id)}`
+    : null);
+  if (!url) return null;
+  return {
+    url,
+    label,
+    source_table: table || spec?.defaultTable || toolName,
+    source_id: row?.id == null ? null : String(row.id),
+    date: row?.date || row?.[spec?.roles?.dateColumn] || null
+  };
 }

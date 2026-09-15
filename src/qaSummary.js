@@ -158,6 +158,8 @@ function buildGroundingInputs(nodes = [], aiResponse = "") {
     answer_mode: cleanText(main?.input?.answer_mode || "", 80),
     retrieval_records: numberOrNull(main?.input?.retrieval_records),
     evidence_records: numberOrNull(main?.input?.evidence_records),
+    linkable_evidence_records: numberOrNull(main?.input?.linkable_evidence_records),
+    source_map_linkable_records: numberOrNull(main?.input?.source_map_linkable_records),
     graph_relationships: numberOrNull(main?.input?.graph_relationships),
     tool_calls: numberOrNull(main?.input?.tool_calls),
     payload_mode: cleanText(main?.input?.payload_mode || "", 40),
@@ -171,7 +173,7 @@ function buildGroundingInputs(nodes = [], aiResponse = "") {
       : typeof main?.output?.completion?.retryPayload?.within_budget === "boolean"
         ? main.output.completion.retryPayload.within_budget
         : null,
-    source_count: asArray(main?.output?.sources).length,
+    source_count: numberOrNull(main?.output?.source_count) ?? asArray(main?.output?.sources).length,
     sources: asArray(main?.output?.sources).slice(0, MAX_EVIDENCE_ITEMS).map((source) => ({
       title: cleanText(source.title || source.label || "", 180),
       url: cleanText(source.url || "", 500),
@@ -216,14 +218,16 @@ function buildErrorsAndFallbacks(nodes = [], trace = []) {
 function buildSourceSignals(nodes = [], aiResponse = "") {
   const byId = nodeMap(nodes);
   const mainOutput = byId.main_agent?.output || {};
+  const citationIntegrity = mainOutput.completion?.citations || null;
   const response = String(aiResponse || mainOutput.answer || "");
   const markdownLinks = [...response.matchAll(/\[[^\]]+\]\((https?:\/\/[^)]+)\)/g)].map((match) => match[1]);
   return {
     answer_markdown_link_count: markdownLinks.length,
     answer_has_no_direct_source_marker: /ללא קישור ישיר|no direct/i.test(response),
-    source_count: asArray(mainOutput.sources).length,
+    source_count: numberOrNull(mainOutput.source_count) ?? asArray(mainOutput.sources).length,
     conflict_count: asArray(mainOutput.conflicts).length,
     source_quality: sanitizeValue(mainOutput.source_quality || null, 3),
+    citation_integrity: citationIntegrity ? sanitizeValue(citationIntegrity, 3) : null,
     sample_links: markdownLinks.slice(0, 10).map((url) => cleanText(url, 500))
   };
 }

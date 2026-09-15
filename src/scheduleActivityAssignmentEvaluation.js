@@ -284,6 +284,51 @@ export function evaluateScheduleAssignmentCase({ fixture, result = {}, durationM
   };
 }
 
+export function relabelScheduleAssignmentEvaluationRow({ fixture, row = {} } = {}) {
+  const item = normalizeScheduleAssignmentEvaluationCase(fixture);
+  const allCandidates = Array.isArray(row.allCandidates) ? row.allCandidates : [];
+  const candidateKeys = allCandidates.map((candidate) => safeText(candidate?.activityKey, 500)).filter(Boolean);
+  const selectedActivityKey = safeText(row.selectedActivityKey, 500) || null;
+  const expectedActivityKey = item.label.expectedActivityKey;
+  const positiveLabel = item.label.type === SCHEDULE_ASSIGNMENT_LABEL_TYPES.CONFIRMED_MATCH;
+  const wouldAutoAssign = row.wouldAutoAssign === true;
+  const selectedExpected = Boolean(expectedActivityKey && selectedActivityKey === expectedActivityKey);
+  const forbiddenSelection = Boolean(selectedActivityKey && item.label.forbiddenActivityKeys.includes(selectedActivityKey));
+  const correctAutomaticAssignment = wouldAutoAssign && positiveLabel && selectedExpected && !forbiddenSelection;
+  const falseAutomaticAssignment = wouldAutoAssign && !correctAutomaticAssignment;
+  const failedGates = Array.isArray(row.failedGates) ? row.failedGates : [];
+  const candidateStages = row.candidateStages && typeof row.candidateStages === "object" ? row.candidateStages : {};
+  const candidateRecallByStage = Object.fromEntries(Object.entries(candidateStages).map(([stage, candidates]) => {
+    const keys = (Array.isArray(candidates) ? candidates : [])
+      .map((candidate) => safeText(candidate?.activityKey, 500))
+      .filter(Boolean);
+    return [stage, recallForKeys(keys, expectedActivityKey, positiveLabel)];
+  }));
+  const reasons = [];
+  if (positiveLabel && candidateKeys[0] !== expectedActivityKey) reasons.push("expected activity was not ranked first");
+  if (positiveLabel && !candidateKeys.slice(0, 5).includes(expectedActivityKey)) reasons.push("expected activity was absent from top 5");
+  if (falseAutomaticAssignment) reasons.push(positiveLabel ? "automatic policy selected the wrong activity" : `automatic policy must abstain for ${item.label.type}`);
+  if (!wouldAutoAssign && failedGates.length) reasons.push(`failed safety gates: ${failedGates.join(", ")}`);
+  if (forbiddenSelection) reasons.push("selected activity is explicitly forbidden by the label");
+  if (finiteNumber(row.roleFailureCount, 0) > 0) reasons.push(`${finiteNumber(row.roleFailureCount, 0)} model role failure(s)`);
+  if (!reasons.length) reasons.push(wouldAutoAssign ? "automatic decision agrees with the label" : "policy abstained without contradicting the label");
+  return {
+    ...row,
+    caseId: item.id,
+    sourceId: item.sourceId,
+    labelType: item.label.type,
+    expectedActivityKey,
+    candidateRecallAt1: positiveLabel ? candidateKeys[0] === expectedActivityKey : null,
+    candidateRecallAt5: positiveLabel ? candidateKeys.slice(0, 5).includes(expectedActivityKey) : null,
+    candidateRecallByStage,
+    correctAutomaticAssignment,
+    falseAutomaticAssignment,
+    abstained: !wouldAutoAssign,
+    explanation: reasons.join("; "),
+    provenance: item.provenance
+  };
+}
+
 export function buildScheduleAssignmentPolicySweep(rows = [], {
   thresholds = [40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95],
   margins = [0, 1, 3, 5, 10, 12, 15, 20]

@@ -1,8 +1,10 @@
 # BiDoc Chat Improvement Master Implementation Plan
 
 Status: implementation in progress. Phases 0 and 1 completed locally. Phase 2
-completed local automated and controlled live payload verification; direct
-semantic citation links remain open. No deployment or production change occurred.
+completed local automated and controlled live payload verification. Phase 2.1
+citation resolution passed focused tests and one controlled live run; manual
+source opening, claim review, and broader rollout validation remain open.
+No deployment or production change occurred.
 Prepared: 2026-08-22  
 Repository: `main-rag-backend/bidoc-main-rag`
 
@@ -303,6 +305,21 @@ input size and enough room to produce a complete answer.
 - Structured sources were present, but the broad answer rendered no clickable
   inline source links. This blocks rollout and is carried into the answer and
   citation phase.
+
+### Phase 2.1 citation follow-up, 2026-09-04
+
+- Canonical source-ID markers now resolve through the active request or retry
+  source map, with non-canonical Markdown links rejected.
+- A read-only probe confirmed that the deployed search RPC omitted an existing
+  index `source_url`. Compact mode now restores missing URLs through bounded,
+  exact-identity index reads without changing the RPC or database.
+- The final local email answer produced 13 inline links, 11/11 cited bullet
+  lines, zero unresolved references, and `STOP` without retry.
+- Reference matching is not semantic entailment validation. Authenticated link
+  opening, human claim review, representative repeats, and rollout approval
+  remain required. The compact flag stays off by default.
+- See `docs/evaluations/chat-citation-resolution-phase2-1-2026-09-04.md` for
+  implementation, test results, before/after evidence, and manual checks.
 
 ### Rollback
 
