@@ -18,6 +18,7 @@ const PARSER_GENERATION_PATTERN = /^parser-generation:sha256:[0-9a-f]{64}$/u;
 const MAX_LINE_CHARACTERS = 20_000;
 const MAX_CLAUSE_CHARACTERS = 100_000;
 const MAX_RAW_SEGMENTS = 500;
+const MAX_CONTEXT_RECORD_CHARACTERS = 1_200;
 
 const HEBREW_APPENDIX_KEYS = Object.freeze({
   "א": "a", "ב": "b", "ג": "c", "ד": "d", "ה": "e", "ו": "f", "ז": "g", "ח": "h",
@@ -376,8 +377,18 @@ function ensureContextBuilder(state) {
 }
 
 function addLine(state, line) {
+  if (state.current?.clauseType === "document_context"
+      && state.current.lineRefs.length
+      && contextRecordCharacterCount(state.current) + line.text.length + 1 > MAX_CONTEXT_RECORD_CHARACTERS) {
+    flushCurrent(state);
+    ensureContextBuilder(state);
+  }
   state.current.lineRefs.push(line);
   state.assigned.set(line.id, (state.assigned.get(line.id) || 0) + 1);
+}
+
+function contextRecordCharacterCount(record) {
+  return record.lineRefs.reduce((total, item) => total + item.text.length, 0) + Math.max(0, record.lineRefs.length - 1);
 }
 
 function excludeLine(state, line, reason) {

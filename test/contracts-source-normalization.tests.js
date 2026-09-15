@@ -29,6 +29,19 @@ test("splits unnumbered document context at each page boundary", () => {
   assert.deepEqual(contexts.map((clause) => [clause.pageStart, clause.pageEnd]), [[1, 1], [2, 2]]);
 });
 
+test("bounds each document context record without dropping source lines", () => {
+  const sourceLines = Array.from({ length: 20 }, (_, index) => `פרט הקשר ${index + 1}: ${"א".repeat(100)}`);
+  const generation = buildContractsClauseGeneration({
+    pages: [{ pdfPage: 1, text: [...sourceLines, "1. תחולת ההסכם"].join("\n") }],
+    documentVersionId: `sha256:${SHA}`,
+    documentSha256: SHA
+  });
+  const contexts = generation.clauses.filter((clause) => clause.clauseType === "document_context");
+  assert.ok(contexts.length > 1);
+  assert.ok(contexts.every((clause) => clause.rawText.length <= 1_200));
+  assert.equal(contexts.flatMap((clause) => clause.rawText.split("\n")).length, sourceLines.length);
+});
+
 test("uses Hebrew tags by default for clause enrichment", async () => {
   const generation = buildContractsClauseGeneration({
     pages: [{ pdfPage: 1, text: "1. הקבלן אחראי לביצוע העבודה." }],
