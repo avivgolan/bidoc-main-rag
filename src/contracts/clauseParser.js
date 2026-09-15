@@ -8,8 +8,8 @@ import { ContractsAgentError } from "./errors.js";
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v5";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v5";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v6";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v6";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -33,6 +33,7 @@ const CONTEXT_BOUNDARIES = [
   /^בכבוד\s+רב[,،]?$/u
 ];
 const DURATION_REMAINDER_PATTERN = /^(?:יום|ימים?|ימי\s+עבודה|חודשים?|שנים?|שעות?|שבועות?|days?|working\s+days?|months?|years?|hours?|weeks?)(?:\s|[,.;:()/-]|$)/iu;
+const MONEY_OR_QUANTITY_REMAINDER_PATTERN = /^(?:₪|\$|€|£|%|ש["״']?ח|NIS|ILS|USD|EUR|מע["״']?מ|אחוזים?|שקלים?|דולרים?|יח['׳.]?|יחידות?|כולל|לא\s+כולל)/iu;
 const APPENDIX_INVENTORY_PATTERN = /(?:רשימת|פירוט)\s+נספחים/u;
 
 export function createContractsClauseParserGeneration({
@@ -755,7 +756,22 @@ function parseLeadingClauseMarker(text) {
   const dotted = match[1].includes(".");
   if (!match[2] && !dotted) return null;
   if (!match[2] && DURATION_REMAINDER_PATTERN.test(match[3])) return null;
+  if (looksLikeBareAmountMarker(match[1], match[2], match[3])) return null;
   return normalizeClauseMarker(match[1], match[3]);
+}
+
+function looksLikeBareAmountMarker(number, delimiter, remainder) {
+  if (delimiter) return false;
+  if (MONEY_OR_QUANTITY_REMAINDER_PATTERN.test(remainder)) return true;
+  const parts = String(number).split(".");
+  if (parts.length !== 2) return false;
+  const major = Number(parts[0]);
+  const minor = Number(parts[1]);
+  if (!Number.isInteger(major) || !Number.isInteger(minor)) return false;
+  // Prices such as 28.35 / 94.50 / 24.16 / 85.5 are not clause 28.35.
+  if (minor >= 16 && major >= 16) return true;
+  if (parts[1].length === 1 && minor === 5 && major >= 20) return true;
+  return false;
 }
 
 function parseTrailingClauseMarker(text) {
