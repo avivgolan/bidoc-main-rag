@@ -42,7 +42,10 @@ export const CONTRACTS_CLAUSE_PERSISTENCE_APPLY_RPC = "bidoc_contracts_persist_c
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const MAX_CLAUSES = 500;
-const DEFAULT_DEADLINE_MS = 240_000;
+// The BFF and deployment allow 300s. Large signed contracts can spend over two
+// minutes in bounded enrichment, so retain enough time for the final workspace
+// write instead of aborting it with the remaining default budget.
+const DEFAULT_DEADLINE_MS = 285_000;
 
 function persistenceError(code, message, status = 400, cause = null) {
   return new ContractsAgentError(code, message, status, cause ? { cause } : {});
