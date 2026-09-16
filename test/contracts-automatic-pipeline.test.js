@@ -107,6 +107,24 @@ test("provider failure retries the saved stage and never skips ahead", async () 
   assert.equal(calls.length, 3); assert.equal(saved[0].nextStep, "schedule"); assert.equal(saved.at(-1), null);
 });
 
+test("a rejected auto-review write still advances so findings can record unresolved decisions", async () => {
+  const result = await runContractsAutomaticStep({
+    ...base,
+    step: "decision-review",
+    services: {
+      loadContractsDecisionReview: async () => ({ items: [{ reviewStatus: "proposed" }], metrics: { proposedCount: 1 } }),
+      autoReviewContractsDecisions: async () => {
+        throw Object.assign(new Error("rpc failed"), {
+          code: "contracts_decision_auto_review_rpc_failed",
+          status: 400
+        });
+      }
+    }
+  });
+  assert.equal(result.nextStep, "decision-findings");
+  assert.equal(result.skipped, "decision_auto_review_failed");
+});
+
 test("incomplete semantic analysis does not block later automatic stages", async () => {
   const result = await runContractsAutomaticStep({
     ...base,

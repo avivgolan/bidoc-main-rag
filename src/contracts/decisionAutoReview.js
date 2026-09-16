@@ -46,6 +46,7 @@ const REASON_CODES = new Set([
   "insufficient_evidence"
 ]);
 const DEFAULT_BATCH_SIZE = 4;
+const MAX_AUTO_REVIEW_APPLY_ITEMS = 100;
 const DEFAULT_CONCURRENCY = 2;
 const DEFAULT_TIMEOUT_MS = 75_000;
 const DEFAULT_DEADLINE_MS = 300_000;
@@ -620,32 +621,35 @@ export async function autoReviewContractsDecisions({
     };
   }
   try {
-    const applied = await workspaceRpc({
-      config,
-      rpc: CONTRACTS_DECISION_AUTO_REVIEW_APPLY_RPC,
-      payload: {
-        p_workspace_id: normalizedWorkspaceId,
-        p_requested_by_reviewer_id: normalizedReviewerId,
-        p_auto_policy_version: CONTRACTS_DECISION_AUTO_REVIEW_POLICY_VERSION,
-        p_verifier_model_version: plan.verifierModelVersion,
-        p_items: eligible.map((candidate) => ({
-          decisionId: candidate.decisionId,
-          expectedRevision: candidate.expectedRevision,
-          reasonHe: candidate.reasonHe,
-          policyEvidence: candidate.policyEvidence
-        }))
-      },
-      fetchImpl,
-      timeoutMs: Math.max(1_000, effectiveDeadline - Date.now())
-    });
-    if (applied?.autoReview?.atomic !== true
-        || Number(applied?.autoReview?.approvedCount) !== eligible.length
-        || Number(applied?.metrics?.scheduleWriteCount) !== 0) {
-      throw autoReviewError(
-        "contracts_decision_auto_review_response_invalid",
-        "The decision auto-review database response is invalid.",
-        502
-      );
+    for (let offset = 0; offset < eligible.length; offset += MAX_AUTO_REVIEW_APPLY_ITEMS) {
+      const chunk = eligible.slice(offset, offset + MAX_AUTO_REVIEW_APPLY_ITEMS);
+      const applied = await workspaceRpc({
+        config,
+        rpc: CONTRACTS_DECISION_AUTO_REVIEW_APPLY_RPC,
+        payload: {
+          p_workspace_id: normalizedWorkspaceId,
+          p_requested_by_reviewer_id: normalizedReviewerId,
+          p_auto_policy_version: CONTRACTS_DECISION_AUTO_REVIEW_POLICY_VERSION,
+          p_verifier_model_version: plan.verifierModelVersion,
+          p_items: chunk.map((candidate) => ({
+            decisionId: candidate.decisionId,
+            expectedRevision: candidate.expectedRevision,
+            reasonHe: candidate.reasonHe,
+            policyEvidence: candidate.policyEvidence
+          }))
+        },
+        fetchImpl,
+        timeoutMs: Math.max(1_000, effectiveDeadline - Date.now())
+      });
+      if (applied?.autoReview?.atomic !== true
+          || Number(applied?.autoReview?.approvedCount) !== chunk.length
+          || Number(applied?.metrics?.scheduleWriteCount) !== 0) {
+        throw autoReviewError(
+          "contracts_decision_auto_review_response_invalid",
+          "The decision auto-review database response is invalid.",
+          502
+        );
+      }
     }
     await persistContractsR6Embeddings({
       config,

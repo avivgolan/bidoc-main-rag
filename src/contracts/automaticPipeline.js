@@ -120,14 +120,24 @@ export async function runContractsAutomaticStep({
     }
   }
   if (step === "decision-review") {
-    const automatic = await services.autoReviewContractsDecisions({ ...args, deadlineAt });
-    // Failed verifier batches stay proposed; decision-findings records them as unresolved
-    // so File Classify can continue to Indicator instead of retrying the same stage forever.
-    return result({
-      decisionReview: automatic.review,
-      approvedCount: automatic.autoReview?.approvedCount || 0,
-      failedVerifierBatches: Number(automatic.plan?.metrics?.failedBatchCount || 0)
-    });
+    try {
+      const automatic = await services.autoReviewContractsDecisions({ ...args, deadlineAt });
+      // Failed verifier batches stay proposed; decision-findings records them as unresolved
+      // so File Classify can continue to Indicator instead of retrying the same stage forever.
+      return result({
+        decisionReview: automatic.review,
+        approvedCount: automatic.autoReview?.approvedCount || 0,
+        failedVerifierBatches: Number(automatic.plan?.metrics?.failedBatchCount || 0)
+      });
+    } catch (error) {
+      if (error?.code !== "contracts_decision_auto_review_rpc_failed") throw error;
+      return result({
+        decisionReview: await services.loadContractsDecisionReview(args),
+        approvedCount: 0,
+        failedVerifierBatches: 1,
+        skipped: "decision_auto_review_failed"
+      });
+    }
   }
   if (step === "decision-findings") {
     const current = await services.loadContractsDecisionReview(args);
