@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {
+  CONTRACTS_DOCX_READER_VERSION,
   CONTRACTS_MAX_PAGES,
   CONTRACTS_MAX_PDF_BYTES,
   CONTRACTS_MAX_TEXT_CHARACTERS
@@ -49,7 +50,8 @@ export function createContractsClauseParserGeneration({
   const generationInput = {
     extractionSchemaVersion: boundedVersion(extractionSchemaVersion, "extractionSchemaVersion"),
     parserPolicyVersion: boundedVersion(parserPolicyVersion, "parserPolicyVersion"),
-    parserVersion: boundedVersion(parserVersion, "parserVersion")
+    parserVersion: boundedVersion(parserVersion, "parserVersion"),
+    docxReaderVersion: CONTRACTS_DOCX_READER_VERSION
   };
   const digest = sha256(canonicalJson(generationInput));
   return {

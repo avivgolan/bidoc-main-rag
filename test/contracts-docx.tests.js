@@ -52,6 +52,63 @@ export function registerContractsDocxTests(test) {
     const xml = '<w:p><w:r><w:t>A &amp; B &lt;C&gt;</w:t></w:r></w:p>';
     assert.equal(extractDocxText(xml), "A & B <C>");
   });
+
+  test("contracts docx reader materializes Word list numbering missing from run text", async () => {
+    const bytes = makeNumberedDocx([
+      { text: "תחולת ההסכם", ilvl: 0 },
+      { text: "הקבלן יבצע את העבודות בהתאם להסכם זה ולנספחיו.", ilvl: null },
+      { text: "הסכם זה יחול על כל העבודות באתר.", ilvl: 1 },
+      { text: "תמורה", ilvl: 0 },
+      { text: "התמורה תשולם לפי חשבון מאושר על ידי המזמין.", ilvl: null }
+    ]);
+    const parsed = await readContractDocx({ pdfBytes: bytes });
+    assert.match(parsed.pages[0].text, /^1\.\s+תחולת ההסכם/m);
+    assert.match(parsed.pages[0].text, /^1\.1\.\s+הסכם זה יחול/m);
+    assert.match(parsed.pages[0].text, /^2\.\s+תמורה/m);
+    const generation = await runContractsClauseParser({ pdfBytes: bytes });
+    assert.equal(generation.clauses.some((clause) => clause.clauseKey === "1"), true);
+    assert.equal(generation.clauses.some((clause) => clause.clauseKey === "1.1"), true);
+    assert.equal(generation.clauses.some((clause) => clause.clauseKey === "2"), true);
+  });
+
+  test("contracts docx reader inherits list numbering from paragraph styles", async () => {
+    const numbering = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0">
+      <w:start w:val="1"/>
+      <w:numFmt w:val="decimal"/>
+      <w:lvlText w:val="%1."/>
+    </w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="2">
+    <w:abstractNumId w:val="0"/>
+  </w:num>
+</w:numbering>`;
+    const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="2"/></w:numPr></w:pPr>
+  </w:style>
+</w:styles>`;
+    const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>
+      <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>תחולת ההסכם</w:t></w:r></w:p>
+      <w:p><w:r><w:t>הקבלן יבצע את העבודות בהתאם להסכם זה ולנספחיו.</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>תמורה</w:t></w:r></w:p>
+      <w:p><w:r><w:t>התמורה תשולם לפי חשבון מאושר על ידי המזמין.</w:t></w:r></w:p>
+    </w:body></w:document>`;
+    const bytes = zipStore([
+      { name: "word/document.xml", data: Buffer.from(document, "utf8") },
+      { name: "word/numbering.xml", data: Buffer.from(numbering, "utf8") },
+      { name: "word/styles.xml", data: Buffer.from(styles, "utf8") }
+    ]);
+    const parsed = await readContractDocx({ pdfBytes: bytes });
+    assert.match(parsed.pages[0].text, /^1\.\s+תחולת ההסכם/m);
+    assert.match(parsed.pages[0].text, /^2\.\s+תמורה/m);
+    const generation = await runContractsClauseParser({ pdfBytes: bytes });
+    assert.equal(generation.clauses.some((clause) => clause.clauseKey === "1"), true);
+    assert.equal(generation.clauses.some((clause) => clause.clauseKey === "2"), true);
+  });
 }
 
 function crc32(buf) {
@@ -120,4 +177,38 @@ function makeDocx(paragraphs, { pageBreakAfter = [] } = {}) {
   }).join("");
   const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`;
   return zipStore([{ name: "word/document.xml", data: Buffer.from(xml, "utf8") }]);
+}
+
+function makeNumberedDocx(paragraphs) {
+  const numbering = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:abstractNum w:abstractNumId="1">
+    <w:lvl w:ilvl="0">
+      <w:start w:val="1"/>
+      <w:numFmt w:val="decimal"/>
+      <w:lvlText w:val="%1."/>
+    </w:lvl>
+    <w:lvl w:ilvl="1">
+      <w:start w:val="1"/>
+      <w:numFmt w:val="decimal"/>
+      <w:lvlText w:val="%1.%2."/>
+    </w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1">
+    <w:abstractNumId w:val="1"/>
+  </w:num>
+</w:numbering>`;
+  const body = paragraphs.map((item) => {
+    const text = typeof item === "string" ? item : item.text;
+    const ilvl = typeof item === "string" ? 0 : item.ilvl;
+    if (ilvl === null || ilvl === undefined) {
+      return `<w:p><w:r><w:t>${escapeXml(text)}</w:t></w:r></w:p>`;
+    }
+    return `<w:p><w:pPr><w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="1"/></w:numPr></w:pPr><w:r><w:t>${escapeXml(text)}</w:t></w:r></w:p>`;
+  }).join("");
+  const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`;
+  return zipStore([
+    { name: "word/document.xml", data: Buffer.from(xml, "utf8") },
+    { name: "word/numbering.xml", data: Buffer.from(numbering, "utf8") }
+  ]);
 }
