@@ -584,6 +584,27 @@ export function registerContractsAgentTests(test) {
     }
   });
 
+  test("contracts Phase 3F.1 accepts a private PDF and DOCX bucket", async () => {
+    const status = await assertPrivateStorageBucket({
+      config: activityMappingTestConfig(),
+      bucket: "contracts-private",
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          name: "contracts-private",
+          public: false,
+          allowed_mime_types: [
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          ],
+          file_size_limit: 20_000_000
+        })
+      })
+    });
+    assert.equal(status.name, "contracts-private");
+  });
+
   test("contracts Phase 3F.1 reload validates the canonical stored extraction", async () => {
     const extraction = representativeOutput("signed_fixed_completion");
     extraction.projectBinding.projectId = MAPPING_SOURCE_PROJECT_ID;

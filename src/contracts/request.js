@@ -1,5 +1,12 @@
 import { ContractsAgentError } from "./errors.js";
 import { CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES } from "./constants.js";
+import { isDocxArchive } from "./docxReader.js";
+import {
+  CONTRACTS_DOCX_MEDIA_TYPE,
+  CONTRACTS_PDF_MEDIA_TYPE,
+  isAllowedContractDeclaredMediaType,
+  isPdfSignature
+} from "./media.js";
 
 export { CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES };
 
@@ -86,11 +93,11 @@ export function parseContractExtractionRequest(body) {
     );
   }
 
-  const mediaType = String(body.mediaType || "").trim().toLowerCase();
-  if (mediaType !== "application/pdf") {
+  const declaredMediaType = String(body.mediaType || "").trim().toLowerCase();
+  if (!isAllowedContractDeclaredMediaType(declaredMediaType)) {
     throw new ContractsAgentError(
       "contracts_media_type_unsupported",
-      "mediaType must be application/pdf.",
+      "mediaType must be application/pdf or a Word document (DOCX).",
       415
     );
   }
@@ -99,17 +106,11 @@ export function parseContractExtractionRequest(body) {
   if (pdfBytes.length > CONTRACTS_MAX_PDF_BYTES) {
     throw new ContractsAgentError(
       "contracts_pdf_too_large",
-      `Decoded PDF exceeds the ${CONTRACTS_MAX_PDF_BYTES}-byte Phase 1 limit.`,
+      `Decoded document exceeds the ${CONTRACTS_MAX_PDF_BYTES}-byte Phase 1 limit.`,
       413
     );
   }
-  if (pdfBytes.subarray(0, 5).toString("ascii") !== "%PDF-") {
-    throw new ContractsAgentError(
-      "contracts_pdf_signature_invalid",
-      "The uploaded payload is not a valid PDF document.",
-      422
-    );
-  }
+  const mediaType = sniffContractMediaType(pdfBytes);
 
   return {
     filename,
@@ -118,6 +119,16 @@ export function parseContractExtractionRequest(body) {
     projectSelection: normalizeProjectSelection(body.projectSelection),
     sourceId: normalizeNullableIdentifier(body.sourceId, "sourceId")
   };
+}
+
+function sniffContractMediaType(pdfBytes) {
+  if (isPdfSignature(pdfBytes)) return CONTRACTS_PDF_MEDIA_TYPE;
+  if (isDocxArchive(pdfBytes)) return CONTRACTS_DOCX_MEDIA_TYPE;
+  throw new ContractsAgentError(
+    "contracts_pdf_signature_invalid",
+    "The uploaded payload is not a valid PDF or DOCX document.",
+    422
+  );
 }
 
 function decodeStrictBase64(value) {

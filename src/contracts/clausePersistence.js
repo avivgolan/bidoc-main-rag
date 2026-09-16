@@ -16,6 +16,7 @@ import {
 import { projectContractsClausePreview } from "./clausePreview.js";
 import { decorateContractsClausePreview } from "./clausePresentation.js";
 import { ContractsAgentError } from "./errors.js";
+import { contractStorageExtension } from "./media.js";
 import { parseContractExtractionRequest } from "./request.js";
 import {
   assertPrivateStorageBucket,
@@ -296,12 +297,13 @@ export async function runContractsClausePersistence({
   const storageBucket = contractsWorkspaceStorageBucket(env);
   progress("storage_check_started");
   await assertPrivateStorageBucket({ config, bucket: storageBucket, fetchImpl, timeoutMs: remainingMs(deadlineAt) });
-  const storageObjectKey = `${sourceProjectId}/${documentSha256}.pdf`;
+  const storageObjectKey = `${sourceProjectId}/${documentSha256}${contractStorageExtension(request.mediaType)}`;
   await uploadImmutablePdf({
     config,
     storageBucket,
     storageObjectKey,
     pdfBytes: request.pdfBytes,
+    mediaType: request.mediaType,
     documentSha256,
     fetchImpl,
     timeoutMs: remainingMs(deadlineAt)
@@ -313,6 +315,7 @@ export async function runContractsClausePersistence({
     sourceProjectId,
     projectSite: request.projectSelection?.projectSite || null,
     filename: request.filename,
+    mediaType: request.mediaType,
     byteCount: request.pdfBytes.length,
     storageBucket,
     storageObjectKey,
@@ -496,6 +499,7 @@ async function uploadImmutablePdf({
   storageBucket,
   storageObjectKey,
   pdfBytes,
+  mediaType,
   documentSha256,
   fetchImpl,
   timeoutMs
@@ -507,7 +511,7 @@ async function uploadImmutablePdf({
     method: "POST",
     body: pdfBytes,
     headers: {
-      "Content-Type": "application/pdf",
+      "Content-Type": mediaType || "application/pdf",
       "Cache-Control": "private, max-age=0, no-store",
       "x-upsert": "false"
     },
@@ -531,6 +535,7 @@ async function uploadImmutablePdf({
     storageObjectKey,
     expectedSha256: documentSha256,
     expectedByteCount: pdfBytes.length,
+    expectedMediaType: mediaType,
     fetchImpl,
     timeoutMs
   });

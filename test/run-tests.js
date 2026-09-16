@@ -47,6 +47,7 @@ import { buildTimelineSearchText, createTimelineSearchController, timelineEventM
 import { calDaysInMonth, calClampDay, calDateKey, calNavigateByDays, calNavigateByMonths, calWeekBoundary } from "../public/calendarHelpers.js";
 import { cleanChatUrl, renderChatMarkdown } from "../public/chatMarkdown.js";
 import { registerContractsAgentTests } from "./contracts-agent.tests.js";
+import { registerContractsDocxTests } from "./contracts-docx.tests.js";
 import { registerQaPhase1Tests } from "./qa-phase1.tests.js";
 import { registerChatQualityTests } from "./chat-quality.tests.js";
 import { registerChatCompletionIntegrityTests } from "./chat-completion-integrity.tests.js";
@@ -57,6 +58,7 @@ import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 registerContractsAgentTests(test);
+registerContractsDocxTests(test);
 registerQaPhase1Tests(test);
 registerChatQualityTests(test);
 registerChatCompletionIntegrityTests(test);

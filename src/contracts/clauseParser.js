@@ -5,6 +5,11 @@ import {
   CONTRACTS_MAX_TEXT_CHARACTERS
 } from "./constants.js";
 import { ContractsAgentError } from "./errors.js";
+import {
+  CONTRACTS_DOCX_MEDIA_TYPE,
+  CONTRACTS_PDF_MEDIA_TYPE,
+  normalizeMediaType
+} from "./media.js";
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
@@ -69,7 +74,7 @@ export async function runContractsClauseParser({
   if (!bytes.length || bytes.length > CONTRACTS_MAX_PDF_BYTES) {
     throw new ContractsAgentError(
       "contracts_clause_parser_pdf_size_invalid",
-      `The Contracts clause parser requires a non-empty PDF of at most ${CONTRACTS_MAX_PDF_BYTES} bytes.`,
+      `The Contracts clause parser requires a non-empty PDF or DOCX of at most ${CONTRACTS_MAX_PDF_BYTES} bytes.`,
       413,
       { issueCodes: ["clause_parser.pdf_size_invalid"] }
     );
@@ -85,7 +90,7 @@ export async function runContractsClauseParser({
       { issueCodes: ["clause_parser.document_version_mismatch"] }
     );
   }
-  const parsePdf = readPdf ?? (await import("./pdfReader.js")).readContractPdf;
+  const parsePdf = readPdf ?? (await import("./documentReader.js")).readContractDocument;
   const parsedPdf = await parsePdf({ pdfBytes: bytes, deadlineAt, signal });
   const generation = buildContractsClauseGeneration({
     pages: parsedPdf.pages,
@@ -199,7 +204,7 @@ export function buildContractsClauseWorkspacePayload({
     documentVersionId: generation.documentVersionId,
     documentSha256: generation.documentSha256,
     filename: requiredBoundedText(filename, 255, "filename"),
-    mediaType: mediaType === "application/pdf" ? mediaType : invalid("mediaType must be application/pdf."),
+    mediaType: allowedWorkspaceMediaType(mediaType),
     byteCount: positiveInteger(byteCount, CONTRACTS_MAX_PDF_BYTES, "byteCount"),
     storageBucket: requiredBoundedText(storageBucket, 100, "storageBucket"),
     storageObjectKey: requiredBoundedText(storageObjectKey, 500, "storageObjectKey"),
@@ -910,6 +915,14 @@ function positiveInteger(value, max, field) {
   const number = Number(value);
   if (!Number.isSafeInteger(number) || number < 1 || number > max) invalid(`${field} is invalid.`);
   return number;
+}
+
+function allowedWorkspaceMediaType(value) {
+  const mediaType = normalizeMediaType(value) || CONTRACTS_PDF_MEDIA_TYPE;
+  if (mediaType !== CONTRACTS_PDF_MEDIA_TYPE && mediaType !== CONTRACTS_DOCX_MEDIA_TYPE) {
+    invalid("mediaType must be application/pdf or a Word document (DOCX).");
+  }
+  return mediaType;
 }
 
 function invalid(message) {

@@ -2,6 +2,13 @@ import crypto from "node:crypto";
 import { supabaseHeaders } from "../config.js";
 import { scheduleSupabaseConfig } from "../scheduleIngestion.js";
 import { CONTRACTS_AGENT_VERSION, CONTRACTS_MAX_PDF_BYTES } from "./constants.js";
+import {
+  CONTRACTS_DOCX_MEDIA_TYPE,
+  CONTRACTS_PDF_MEDIA_TYPE,
+  contractStorageExtension,
+  isAllowedContractsStorageMimeTypes,
+  normalizeMediaType
+} from "./media.js";
 import { CONTRACTS_COMPILER_VERSION } from "./compiler.js";
 import { ContractsAgentError } from "./errors.js";
 import { parseContractExtractionRequest } from "./request.js";
@@ -295,6 +302,7 @@ export async function verifyExistingStorageObject({
   storageObjectKey,
   expectedSha256,
   expectedByteCount,
+  expectedMediaType = CONTRACTS_PDF_MEDIA_TYPE,
   fetchImpl = fetch,
   timeoutMs = CONTRACTS_WORKSPACE_TIMEOUT_MS
 }) {
@@ -310,7 +318,7 @@ export async function verifyExistingStorageObject({
         method: "GET",
         signal: controller.signal,
         headers: supabaseHeaders(connection.supabaseServiceRoleKey, {
-          Accept: "application/pdf",
+          Accept: expectedMediaType || CONTRACTS_PDF_MEDIA_TYPE,
           "Cache-Control": "no-store"
         })
       }
@@ -329,14 +337,24 @@ export async function verifyExistingStorageObject({
   if (!response.ok) {
     throw workspaceError("contracts_workspace_storage_object_mismatch", "The existing Contracts Storage object could not be read for verification.", 409);
   }
-  const contentType = String(headerValue(response.headers, "content-type") || "").split(";", 1)[0].trim().toLocaleLowerCase("en");
-  if (contentType !== "application/pdf") {
-    throw workspaceError("contracts_workspace_storage_object_mismatch", "The existing Contracts Storage object is not a PDF.", 409);
+  const contentType = normalizeMediaType(headerValue(response.headers, "content-type"));
+  if (!storageContentTypeMatches(contentType, expectedMediaType)) {
+    throw workspaceError("contracts_workspace_storage_object_mismatch", "The existing Contracts Storage object is not the uploaded document.", 409);
   }
   const bytes = await readStorageObjectBounded(response);
   if (bytes.length !== expectedByteCount || contractPdfSha256(bytes) !== expectedSha256) {
-    throw workspaceError("contracts_workspace_storage_object_mismatch", "The existing Contracts Storage object does not match the uploaded PDF.", 409);
+    throw workspaceError("contracts_workspace_storage_object_mismatch", "The existing Contracts Storage object does not match the uploaded document.", 409);
   }
+}
+
+function storageContentTypeMatches(contentType, expectedMediaType) {
+  const actual = normalizeMediaType(contentType);
+  const expected = normalizeMediaType(expectedMediaType) || CONTRACTS_PDF_MEDIA_TYPE;
+  if (actual === expected) return true;
+  if (actual === "application/octet-stream" || actual === "application/zip") {
+    return expected === CONTRACTS_DOCX_MEDIA_TYPE || expected === CONTRACTS_PDF_MEDIA_TYPE;
+  }
+  return false;
 }
 
 export function parseWorkspaceExtractionRequest(body) {
@@ -516,19 +534,18 @@ export async function assertPrivateStorageBucket({ config, bucket, fetchImpl = f
   }
   const allowedMimeTypes = data.allowed_mime_types ?? data.allowedMimeTypes;
   const normalizedMimeTypes = Array.isArray(allowedMimeTypes)
-    ? [...new Set(allowedMimeTypes.map((value) => String(value || "").trim().toLocaleLowerCase("en")))]
+    ? [...new Set(allowedMimeTypes.map((value) => normalizeMediaType(value)))]
     : [];
   const fileSizeLimit = Number(data.file_size_limit ?? data.fileSizeLimit);
   if (
-    normalizedMimeTypes.length !== 1
-    || normalizedMimeTypes[0] !== "application/pdf"
+    !isAllowedContractsStorageMimeTypes(normalizedMimeTypes)
     || !Number.isSafeInteger(fileSizeLimit)
     || fileSizeLimit < 1
     || fileSizeLimit > CONTRACTS_MAX_PDF_BYTES
   ) {
     throw workspaceError(
       "contracts_workspace_storage_bucket_unsafe",
-      `The Contracts Storage bucket must allow only application/pdf and cap files at ${CONTRACTS_MAX_PDF_BYTES} bytes or less.`,
+      `The Contracts Storage bucket must allow only PDF and DOCX and cap files at ${CONTRACTS_MAX_PDF_BYTES} bytes or less.`,
       503
     );
   }
@@ -590,7 +607,7 @@ export async function persistExtractedContractWorkspace({
   }
   const storageBucket = contractsWorkspaceStorageBucket(env);
   await assertPrivateStorageBucket({ config, bucket: storageBucket, fetchImpl, timeoutMs });
-  const storageObjectKey = `${parsedExtraction.projectSelection.projectId}/${documentSha256}.pdf`;
+  const storageObjectKey = `${parsedExtraction.projectSelection.projectId}/${documentSha256}${contractStorageExtension(parsedExtraction.mediaType)}`;
   const objectPath = storageObjectKey.split("/").map(encodeURIComponent).join("/");
   const upload = await workspaceRequest({
     config,
@@ -598,7 +615,7 @@ export async function persistExtractedContractWorkspace({
     method: "POST",
     body: parsedExtraction.pdfBytes,
     headers: {
-      "Content-Type": "application/pdf",
+      "Content-Type": parsedExtraction.mediaType || CONTRACTS_PDF_MEDIA_TYPE,
       "Cache-Control": "private, max-age=0, no-store",
       "x-upsert": "false"
     },
@@ -624,6 +641,7 @@ export async function persistExtractedContractWorkspace({
       storageObjectKey,
       expectedSha256: documentSha256,
       expectedByteCount: parsedExtraction.pdfBytes.length,
+      expectedMediaType: parsedExtraction.mediaType,
       fetchImpl,
       timeoutMs
     });
