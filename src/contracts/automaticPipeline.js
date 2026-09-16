@@ -96,8 +96,13 @@ export async function runContractsAutomaticStep({
         }
       });
     }
-    const generated = await services.generateAndPersistContractsDecisions({ ...args, deadlineAt });
-    return result({ decisionReview: generated.review });
+    try {
+      const generated = await services.generateAndPersistContractsDecisions({ ...args, deadlineAt });
+      return result({ decisionReview: generated.review });
+    } catch (error) {
+      if (error?.code !== "contracts_decision_normalization_input_invalid") throw error;
+      return result({ decisionReview: { items: [] }, skipped: "insufficient_clauses" });
+    }
   }
   if (step === "decision-review") {
     const automatic = await services.autoReviewContractsDecisions({ ...args, deadlineAt });
