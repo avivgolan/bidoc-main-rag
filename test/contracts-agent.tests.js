@@ -48,6 +48,7 @@ import {
 } from "../src/contracts/promotionWriter.js";
 import { compileRepresentativeCases, evaluateRepresentativeCases } from "../src/contracts/representativeEvaluator.js";
 import { contractPdfLoadOptions, contractPdfWorkerSrc, readContractPdf, reconstructPdfPageText } from "../src/contracts/pdfReader.js";
+import { CONTRACTS_MAX_PDF_BYTES } from "../src/contracts/constants.js";
 import { parseContractExtractionRequest, readJsonBounded } from "../src/contracts/request.js";
 import { contractsPhase2ApplyApproved, prepareContractReview } from "../src/contracts/reviewWorkflow.js";
 import { CONTRACT_REVIEW_SUBMISSION_MODE, contractReviewSubmissionMode } from "../src/contracts/reviewMode.js";
@@ -566,7 +567,7 @@ export function registerContractsAgentTests(test) {
       { name: "contracts-private", public: false, file_size_limit: 3_000_000 },
       { name: "contracts-private", public: false, allowed_mime_types: ["application/pdf"], file_size_limit: null },
       { name: "contracts-private", public: false, allowed_mime_types: ["application/pdf", "text/plain"], file_size_limit: 3_000_000 },
-      { name: "contracts-private", public: false, allowed_mime_types: ["application/pdf"], file_size_limit: 3_000_001 }
+      { name: "contracts-private", public: false, allowed_mime_types: ["application/pdf"], file_size_limit: CONTRACTS_MAX_PDF_BYTES + 1 }
     ]) {
       await assert.rejects(
         () => assertPrivateStorageBucket({
@@ -1702,6 +1703,7 @@ export function registerContractsAgentTests(test) {
       () => parseContractExtractionRequest({ filename: "contract.pdf", mediaType: "application/pdf", pdfBase64: "not-base64" }),
       (error) => error.code === "contracts_pdf_base64_invalid"
     );
+    assert.equal(CONTRACTS_MAX_PDF_BYTES, 20_000_000);
 
     const body = JSON.stringify({ value: "1234567890" });
     const request = Readable.from([Buffer.from(body)]);

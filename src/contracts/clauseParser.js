@@ -200,7 +200,7 @@ export function buildContractsClauseWorkspacePayload({
     documentSha256: generation.documentSha256,
     filename: requiredBoundedText(filename, 255, "filename"),
     mediaType: mediaType === "application/pdf" ? mediaType : invalid("mediaType must be application/pdf."),
-    byteCount: positiveInteger(byteCount, 3_000_000, "byteCount"),
+    byteCount: positiveInteger(byteCount, CONTRACTS_MAX_PDF_BYTES, "byteCount"),
     storageBucket: requiredBoundedText(storageBucket, 100, "storageBucket"),
     storageObjectKey: requiredBoundedText(storageObjectKey, 500, "storageObjectKey"),
     extractionSchemaVersion: generation.extractionSchemaVersion,
