@@ -8,8 +8,8 @@ import { ContractsAgentError } from "./errors.js";
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v9";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v9";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v10";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v10";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -804,6 +804,8 @@ function looksLikeUnsupportedNumberedLine(value) {
   const text = String(value || "").trim();
   const compact = text.match(/^(\d{1,2}(?:\.\d{1,2}){1,4})[.)](\S.*)$/u);
   if (compact && looksLikeBareAmountMarker(compact[1], ".", compact[2])) return false;
+  const standalone = text.match(/^(\d{1,2}(?:\.\d{1,2}){1,4})[.)]\s*$/u);
+  if (standalone && looksLikeBareAmountMarker(standalone[1], ".", "")) return false;
   return /^\s*\d{1,2}(?:\.\d{1,2}){0,4}(?!\.\d)[.)]\S/u.test(text);
 }
 

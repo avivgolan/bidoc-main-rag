@@ -19,6 +19,7 @@ test("ignores payment amounts that look like dotted clause numbers", () => {
         "85.5. יחידות מזגן",
         "85.5.יחידות מזגן",
         "שורת כמות .5 .85",
+        "85.5.",
         "2. תמורה",
         "התמורה תשולם לפי חשבון."
       ].join("\n")
