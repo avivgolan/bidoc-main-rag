@@ -14,7 +14,7 @@ import {
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v11";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v12";
 export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v11";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
@@ -682,20 +682,12 @@ function groupLinesByPage(lines) {
   return segments.map((segment) => ({ ...segment, text: segment.lines.join("\n") }));
 }
 
-function recordPage(record) {
-  return record?.lineRefs?.[0]?.pdfPage ?? 0;
-}
-
 function maybeStartAppendixNumberingRestart(state, marker, line) {
   const proposed = state.appendixKey
     ? `appendix_${state.appendixKey}.${marker.number}`
     : marker.number;
   const existing = state.records.find((record) => record.clauseKey === proposed);
   if (!existing) return;
-  const laterPage = line.pdfPage > recordPage(existing);
-  const sequenceRestart = Boolean(state.lastNumberedNumber)
-    && compareDottedNumbers(marker.number, state.lastNumberedNumber) < 0;
-  if (!laterPage && !sequenceRestart) return;
   const appendixKey = nextRestartAppendixKey(state, line.pdfPage);
   state.appendixKey = appendixKey;
   state.records.push(createRecordBuilder({

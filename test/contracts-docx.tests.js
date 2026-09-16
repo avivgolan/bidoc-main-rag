@@ -109,6 +109,24 @@ export function registerContractsDocxTests(test) {
     assert.equal(generation.clauses.some((clause) => clause.clauseKey === "1"), true);
     assert.equal(generation.clauses.some((clause) => clause.clauseKey === "2"), true);
   });
+
+  test("contracts clause parser splits colliding appendix item numbers instead of failing coverage", async () => {
+    const bytes = makeDocx([
+      "1. תחולת ההסכם",
+      "הקבלן יבצע את העבודות בהתאם להסכם זה ולנספחיו.",
+      "2. תמורה",
+      "התמורה תשולם לפי חשבון מאושר על ידי המזמין.",
+      "נספח ז' – נוסח ערבות בנקאית לביצוע",
+      "1. הננו ערבים בזאת כלפיכם לתשלום של כל סכום שהוא עד לסך הערבות.",
+      "1. סכום הערבות כאמור, יוצמד במלואו למדד תשומות הבניה למגורים.",
+      "2. לפי דרישתכם הראשונה בכתב, אנו נשלם לכם את הסכום הנדרש."
+    ]);
+    const generation = await runContractsClauseParser({ pdfBytes: bytes });
+    assert.equal(generation.coverageLedger.accepted, true);
+    assert.equal(generation.coverageLedger.duplicateKeys.length, 0);
+    const appendixItems = generation.clauses.filter((clause) => clause.clauseType === "appendix_item");
+    assert.equal(appendixItems.length >= 3, true);
+  });
 }
 
 function crc32(buf) {
