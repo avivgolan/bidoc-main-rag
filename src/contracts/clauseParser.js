@@ -8,8 +8,8 @@ import { ContractsAgentError } from "./errors.js";
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v8";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v8";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v9";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v9";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -781,7 +781,11 @@ function looksLikeBareAmountMarker(number, delimiter, remainder) {
 function parseTrailingClauseMarker(text) {
   if (/^\s*\d/u.test(text)) return null;
   const split = text.match(/^(.*\S)\s+\.(\d{1,2}(?:\.\d{1,2}){0,3})\s+\.(\d{1,2})\s*$/u);
-  if (split) return normalizeClauseMarker(`${split[3]}.${split[2]}`, split[1]);
+  if (split) {
+    const marker = normalizeClauseMarker(`${split[3]}.${split[2]}`, split[1]);
+    if (marker && looksLikeBareAmountMarker(marker.number, null, marker.remainder)) return null;
+    return marker;
+  }
   const trailing = text.match(/^(.*\S)\s+\.(\d{1,2}(?:\.\d{1,2}){0,4})\s*$/u);
   if (!trailing) return null;
   const marker = normalizeClauseMarker(trailing[2], trailing[1]);

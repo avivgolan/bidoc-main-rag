@@ -18,6 +18,7 @@ test("ignores payment amounts that look like dotted clause numbers", () => {
         "66.15 תוספת ברזל",
         "85.5. יחידות מזגן",
         "85.5.יחידות מזגן",
+        "שורת כמות .5 .85",
         "2. תמורה",
         "התמורה תשולם לפי חשבון."
       ].join("\n")
@@ -62,4 +63,14 @@ test("keeps an explicitly delimited low-numbered clause", () => {
   });
   assert.equal(generation.coverageLedger.accepted, true);
   assert.ok(generation.clauses.some((clause) => clause.clauseKey === "1.5"));
+});
+
+test("keeps RTL trailing clause markers outside a table-number range", () => {
+  const generation = buildContractsClauseGeneration({
+    pages: [{ pdfPage: 1, text: "4. שכר החוזה\nכל העבודות .6.1 .4" }],
+    documentVersionId: `sha256:${SHA}`,
+    documentSha256: SHA
+  });
+  assert.equal(generation.coverageLedger.accepted, true);
+  assert.ok(generation.clauses.some((clause) => clause.clauseKey === "4.6.1"));
 });
