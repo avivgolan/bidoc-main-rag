@@ -47,6 +47,9 @@ const MAX_CLAUSES = 500;
 // minutes in bounded enrichment, so retain enough time for the final workspace
 // write instead of aborting it with the remaining default budget.
 const DEFAULT_DEADLINE_MS = 285_000;
+// n8n's reverse proxy aborts around 100s. Embeddings are best-effort and can
+// resume on a later step, so the extract HTTP response must return after persist.
+const EMBEDDING_REQUEST_BUDGET_MS = 12_000;
 
 function persistenceError(code, message, status = 400, cause = null) {
   return new ContractsAgentError(code, message, status, cause ? { cause } : {});
@@ -435,7 +438,7 @@ async function bestEffortR6Embeddings({
       config,
       workspaceId,
       fetchImpl,
-      timeoutMs
+      timeoutMs: Math.max(1, Math.min(Number(timeoutMs) || 0, EMBEDDING_REQUEST_BUDGET_MS))
     });
     progress?.("embeddings_completed", result || {});
   } catch (error) {

@@ -55,12 +55,27 @@ export async function runContractsAutomaticStep({
       return result({ relationshipReview: relationships, reused: true });
     }
     try {
-      const analysis = await services.previewContractsSemanticRelationships({ ...args, deadlineAt });
+      const analysis = await services.previewContractsSemanticRelationships({
+        ...args,
+        deadlineAt: Math.min(deadlineAt, Date.now() + 80_000)
+      });
       const review = await services.persistContractsSemanticRelationshipProposals({ ...args, semanticResult: analysis });
       return result({ relationshipReview: review });
     } catch (error) {
-      if (error?.code !== "contracts_semantic_relationships_input_invalid") throw error;
-      return result({ relationshipReview: { items: [] }, skipped: "insufficient_clauses" });
+      if (error?.code === "contracts_semantic_relationships_input_invalid") {
+        return result({ relationshipReview: { items: [] }, skipped: "insufficient_clauses" });
+      }
+      if (
+        error?.code === "contracts_relationship_review_analysis_incomplete"
+        || error?.code === "contracts_semantic_relationships_time_budget_exceeded"
+        || error?.code === "contracts_semantic_relationships_provider_failed"
+      ) {
+        return result({
+          relationshipReview: await services.loadContractsRelationshipReview(args),
+          skipped: "semantic_incomplete"
+        });
+      }
+      throw error;
     }
   }
   if (step === "relationship-review") {

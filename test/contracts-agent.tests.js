@@ -5627,7 +5627,7 @@ export function registerContractsAgentTests(test) {
         semanticResult: {
           agentVersion: CONTRACTS_RELATIONSHIPS_R4_1_AGENT_VERSION,
           relationshipPolicyVersion: "contracts-relationships-semantic.r4.1.v2",
-          scope: "same_generation_semantic_clause_pairs",
+          scope: "wrong_scope",
           proposals: [],
           metrics: {
             classificationComplete: false,

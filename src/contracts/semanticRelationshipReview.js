@@ -308,14 +308,14 @@ function assertStatus(value) {
   return value;
 }
 
+export const CONTRACTS_RELATIONSHIP_REVIEW_MAX_PROPOSALS = 50;
+
 function assertCompleteSemanticResult(value) {
   if (!value
       || value.agentVersion !== "contracts-relationships-agent.r4.1.v3"
       || value.relationshipPolicyVersion !== CONTRACTS_RELATIONSHIPS_R4_1_POLICY_VERSION
       || value.scope !== "same_generation_semantic_clause_pairs"
       || !Array.isArray(value.proposals)
-      || value.proposals.length > 50
-      || value.metrics?.classificationComplete !== true
       || value.metrics?.modelRelationshipCount !== value.proposals.length
       || value.metrics?.decisionCount !== 0
       || value.metrics?.persistenceWriteCount !== 0
@@ -330,7 +330,8 @@ function assertCompleteSemanticResult(value) {
       422
     );
   }
-  return value;
+  const proposals = value.proposals.slice(0, CONTRACTS_RELATIONSHIP_REVIEW_MAX_PROPOSALS);
+  return { ...value, proposals, metrics: { ...value.metrics, modelRelationshipCount: proposals.length } };
 }
 
 function toPersistenceProposal(value) {

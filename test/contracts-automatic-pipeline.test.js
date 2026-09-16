@@ -107,6 +107,26 @@ test("provider failure retries the saved stage and never skips ahead", async () 
   assert.equal(calls.length, 3); assert.equal(saved[0].nextStep, "schedule"); assert.equal(saved.at(-1), null);
 });
 
+test("incomplete semantic analysis does not block later automatic stages", async () => {
+  const result = await runContractsAutomaticStep({
+    ...base,
+    step: "semantic",
+    services: {
+      loadContractsRelationshipReview: async () => ({ items: [], metrics: { proposedCount: 0 } }),
+      loadContractsDecisionReview: async () => ({ metrics: { currentDecisionCount: 0 } }),
+      previewContractsSemanticRelationships: async () => ({ marker: "semantic-result" }),
+      persistContractsSemanticRelationshipProposals: async () => {
+        throw Object.assign(new Error("incomplete"), {
+          code: "contracts_relationship_review_analysis_incomplete",
+          status: 422
+        });
+      }
+    }
+  });
+  assert.equal(result.nextStep, "relationship-review");
+  assert.equal(result.skipped, "semantic_incomplete");
+});
+
 test("failed verifier batches still advance so findings can record unresolved decisions", async () => {
   const result = await runContractsAutomaticStep({ ...base, step: "decision-review", services: {
     autoReviewContractsDecisions: async () => ({

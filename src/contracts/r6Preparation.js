@@ -15,6 +15,7 @@ const HEBREW_PATTERN = /[\u0590-\u05ff]/u;
 const EMBEDDING_DIMENSIONS = 3072;
 const EMBEDDING_CONCURRENCY = 2;
 const EMBEDDING_APPLY_BATCH_SIZE = 8;
+const EMBEDDING_REQUEST_BUDGET_MS = 12_000;
 
 function r6Error(code, message, status = 502, cause = null) {
   return new ContractsAgentError(code, message, status, cause ? { cause } : {});
@@ -157,6 +158,8 @@ export async function persistContractsR6EmbeddingItems({
 }
 
 export async function persistContractsR6Embeddings(options = {}) {
-  const items = await loadContractsR6EmbeddingWork(options);
-  return persistContractsR6EmbeddingItems({ ...options, items });
+  const timeoutMs = Math.max(1, Math.min(Number(options.timeoutMs) || EMBEDDING_REQUEST_BUDGET_MS, EMBEDDING_REQUEST_BUDGET_MS));
+  const bounded = { ...options, timeoutMs };
+  const items = await loadContractsR6EmbeddingWork(bounded);
+  return persistContractsR6EmbeddingItems({ ...bounded, items });
 }
