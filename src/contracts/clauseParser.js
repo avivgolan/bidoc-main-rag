@@ -8,8 +8,8 @@ import { ContractsAgentError } from "./errors.js";
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v6";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v6";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v7";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v7";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -761,15 +761,16 @@ function parseLeadingClauseMarker(text) {
 }
 
 function looksLikeBareAmountMarker(number, delimiter, remainder) {
-  if (delimiter) return false;
   if (MONEY_OR_QUANTITY_REMAINDER_PATTERN.test(remainder)) return true;
   const parts = String(number).split(".");
   if (parts.length !== 2) return false;
   const major = Number(parts[0]);
   const minor = Number(parts[1]);
   if (!Number.isInteger(major) || !Number.isInteger(minor)) return false;
-  // Prices such as 28.35 / 94.50 / 24.16 / 85.5 are not clause 28.35.
-  if (minor >= 16 && major >= 16) return true;
+  // Keep real headings like 1.15. / 2.5. A dotted price such as 66.15 or 85.5
+  // is not a subclause even when a period follows the number.
+  if (delimiter && major < 16) return false;
+  if (minor >= 15 && major >= 16) return true;
   if (parts[1].length === 1 && minor === 5 && major >= 20) return true;
   return false;
 }
@@ -780,7 +781,9 @@ function parseTrailingClauseMarker(text) {
   if (split) return normalizeClauseMarker(`${split[3]}.${split[2]}`, split[1]);
   const trailing = text.match(/^(.*\S)\s+\.(\d{1,2}(?:\.\d{1,2}){0,4})\s*$/u);
   if (!trailing) return null;
-  return normalizeClauseMarker(trailing[2], trailing[1]);
+  const marker = normalizeClauseMarker(trailing[2], trailing[1]);
+  if (marker && looksLikeBareAmountMarker(marker.number, null, marker.remainder)) return null;
+  return marker;
 }
 
 function normalizeClauseMarker(number, remainder) {

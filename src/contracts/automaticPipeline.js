@@ -10,7 +10,7 @@ import { loadContractsIndicatorHandoff } from "./indicatorHandoff.js";
 import { reconcileContractConditions } from "../indicator/contractConditions.js";
 import { runScheduleSweep } from "../subagents/schedule.js";
 import { reviewAutomaticRelationshipBatch } from "./automaticRelationshipReview.js";
-import { CONTRACTS_AUTOMATIC_PIPELINE_VERSION, CONTRACTS_AUTOMATIC_STEPS, unresolvedAutomaticRelationship } from "./automaticPipelinePolicy.js";
+import { AUTOMATIC_RELATIONSHIP_UNRESOLVED_PREFIX, CONTRACTS_AUTOMATIC_PIPELINE_VERSION, CONTRACTS_AUTOMATIC_STEPS, unresolvedAutomaticRelationship } from "./automaticPipelinePolicy.js";
 
 const SERVICES = {
   getSavedContractsClauseWorkspace, persistContractsExplicitRelationships,
@@ -54,9 +54,14 @@ export async function runContractsAutomaticStep({
     if (relationships.items.some((item) => item.origin === "model") || decisions.metrics.currentDecisionCount > 0) {
       return result({ relationshipReview: relationships, reused: true });
     }
-    const analysis = await services.previewContractsSemanticRelationships({ ...args, deadlineAt });
-    const review = await services.persistContractsSemanticRelationshipProposals({ ...args, semanticResult: analysis });
-    return result({ relationshipReview: review });
+    try {
+      const analysis = await services.previewContractsSemanticRelationships({ ...args, deadlineAt });
+      const review = await services.persistContractsSemanticRelationshipProposals({ ...args, semanticResult: analysis });
+      return result({ relationshipReview: review });
+    } catch (error) {
+      if (error?.code !== "contracts_semantic_relationships_input_invalid") throw error;
+      return result({ relationshipReview: { items: [] }, skipped: "insufficient_clauses" });
+    }
   }
   if (step === "relationship-review") {
     const automatic = await services.autoReviewContractsSemanticRelationships(args);

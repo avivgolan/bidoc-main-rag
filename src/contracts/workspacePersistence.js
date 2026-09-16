@@ -16,7 +16,7 @@ export const CONTRACTS_WORKSPACE_FIND_RPC = "bidoc_contracts_find_workspace_v1";
 export const CONTRACTS_WORKSPACE_GET_RPC = "bidoc_contracts_get_workspace_v1";
 export const CONTRACTS_WORKSPACE_LIST_RPC = "bidoc_contracts_list_workspaces_v1";
 export const CONTRACTS_WORKSPACE_SAVE_DRAFT_RPC = "bidoc_contracts_save_review_draft_v1";
-export const CONTRACTS_WORKSPACE_TIMEOUT_MS = 30_000;
+export const CONTRACTS_WORKSPACE_TIMEOUT_MS = 180_000;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
