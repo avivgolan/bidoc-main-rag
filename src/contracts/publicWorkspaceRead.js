@@ -114,6 +114,8 @@ export async function getPublicContractWorkspace({
       semanticDecisions: decisions.map((decision) => ({
         title: decision.title,
         summary: decision.summary,
+        decisionTextHe: decision.decision_text_he || "",
+        conflictStatus: decision.conflict_status || "none",
         evidenceClauseKeys: decision.evidence_clause_keys || []
       }))
     }
