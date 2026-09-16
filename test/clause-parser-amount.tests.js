@@ -17,6 +17,7 @@ test("ignores payment amounts that look like dotted clause numbers", () => {
         "85.5 יח'",
         "66.15 תוספת ברזל",
         "85.5. יחידות מזגן",
+        "85.5.יחידות מזגן",
         "2. תמורה",
         "התמורה תשולם לפי חשבון."
       ].join("\n")
@@ -51,4 +52,14 @@ test("still reads real subclauses with an explicit delimiter", () => {
       .map((clause) => clause.clauseKey),
     ["1", "1.10", "2"]
   );
+});
+
+test("keeps an explicitly delimited low-numbered clause", () => {
+  const generation = buildContractsClauseGeneration({
+    pages: [{ pdfPage: 1, text: "1. תחולה\n1.5.תנאי ביצוע\n2. תמורה" }],
+    documentVersionId: `sha256:${SHA}`,
+    documentSha256: SHA
+  });
+  assert.equal(generation.coverageLedger.accepted, true);
+  assert.ok(generation.clauses.some((clause) => clause.clauseKey === "1.5"));
 });

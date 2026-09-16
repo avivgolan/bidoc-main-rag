@@ -8,8 +8,8 @@ import { ContractsAgentError } from "./errors.js";
 
 export const CONTRACTS_CLAUSE_PARSER_AGENT_VERSION = "contracts-clause-parser.r2.v3";
 export const CONTRACTS_CLAUSE_SCHEMA_VERSION = "contracts-clause-extraction.r2.v1";
-export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v7";
-export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v7";
+export const CONTRACTS_CLAUSE_PARSER_VERSION = "contracts-clause-parser.r2.v8";
+export const CONTRACTS_CLAUSE_PARSER_POLICY_VERSION = "contracts-clause-parser-policy.r2.v8";
 export const CONTRACTS_CLAUSE_PARSER_PROMPT_VERSION = "not_applicable";
 
 const DOCUMENT_VERSION_PATTERN = /^sha256:([0-9a-f]{64})$/u;
@@ -751,7 +751,10 @@ function parseLeadingClauseMarker(text) {
   const compactMatch = match
     ? null
     : text.match(/^\s*(\d{1,2}(?:\.\d{1,2}){1,4})[.)](\p{L}.*)$/u);
-  if (compactMatch) return normalizeClauseMarker(compactMatch[1], compactMatch[2]);
+  if (compactMatch) {
+    if (looksLikeBareAmountMarker(compactMatch[1], ".", compactMatch[2])) return null;
+    return normalizeClauseMarker(compactMatch[1], compactMatch[2]);
+  }
   if (!match) return null;
   const dotted = match[1].includes(".");
   if (!match[2] && !dotted) return null;
@@ -794,7 +797,10 @@ function normalizeClauseMarker(number, remainder) {
 }
 
 function looksLikeUnsupportedNumberedLine(value) {
-  return /^\s*\d{1,2}(?:\.\d{1,2}){0,4}(?!\.\d)[.)]\S/u.test(String(value || ""));
+  const text = String(value || "").trim();
+  const compact = text.match(/^(\d{1,2}(?:\.\d{1,2}){1,4})[.)](\S.*)$/u);
+  if (compact && looksLikeBareAmountMarker(compact[1], ".", compact[2])) return false;
+  return /^\s*\d{1,2}(?:\.\d{1,2}){0,4}(?!\.\d)[.)]\S/u.test(text);
 }
 
 function parentClauseKey(number) {
