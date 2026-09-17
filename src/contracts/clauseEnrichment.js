@@ -60,11 +60,12 @@ const MAX_MODEL_RESPONSE_CHARACTERS = 80_000;
 const DEFAULT_DEADLINE_MS = 180_000;
 const DEFAULT_MODEL_TIMEOUT_MS = 75_000;
 const DEFAULT_MODEL_MAX_TOKENS = 1_600;
-const DEFAULT_MAX_TOTAL_MODEL_TOKENS = 96_000;
+const DEFAULT_MAX_TOTAL_MODEL_TOKENS = 160_000;
 // Numbered DOCX contracts in this study-case batch reach 26 primary batches
 // (~202 clauses). Five bounded repairs plus one provider retry at 1,600 tokens
-// is (26 + 5 + 1) * 1,600 = 51,200, which exceeded the old 48,000 lock. 96,000
-// covers ~54 primary batches (~432 small clauses) without raising per-call size.
+// is (26 + 5 + 1) * 1,600 = 51,200, which exceeded the old 48,000 lock. Character-
+// split batches on denser Word files (1869/1441) still exceeded 96,000. 160,000
+// is the existing settings cap and covers ~94 primary batches.
 const DEFAULT_MAX_REPAIR_BATCHES = 5;
 const DEFAULT_MAX_PROVIDER_RETRIES = 1;
 const DEFAULT_CONCURRENCY = 2;

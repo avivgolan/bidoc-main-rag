@@ -7,6 +7,7 @@ import { autoReviewContractsSemanticRelationships } from "./semanticRelationship
 import { generateAndPersistContractsDecisions, loadContractsDecisionReview, reviewContractsDecision } from "./decisionReview.js";
 import { autoReviewContractsDecisions } from "./decisionAutoReview.js";
 import { loadContractsIndicatorHandoff } from "./indicatorHandoff.js";
+import { promoteLabDecisionsToApp } from "./publicDecisionPromote.js";
 import { reconcileContractConditions } from "../indicator/contractConditions.js";
 import { runScheduleSweep } from "../subagents/schedule.js";
 import { reviewAutomaticRelationshipBatch } from "./automaticRelationshipReview.js";
@@ -18,8 +19,8 @@ const SERVICES = {
   persistContractsSemanticRelationshipProposals, reviewContractsSemanticRelationship,
   autoReviewContractsSemanticRelationships, generateAndPersistContractsDecisions,
   loadContractsDecisionReview, reviewContractsDecision, autoReviewContractsDecisions,
-  loadContractsIndicatorHandoff, reconcileContractConditions, runScheduleSweep,
-  reviewAutomaticRelationshipBatch
+  loadContractsIndicatorHandoff, promoteLabDecisionsToApp, reconcileContractConditions,
+  runScheduleSweep, reviewAutomaticRelationshipBatch
 };
 
 // Each bounded request completes one persisted stage (or one review batch).
@@ -159,8 +160,15 @@ export async function runContractsAutomaticStep({
   if (review.metrics.pendingRelationshipCount > 0 || review.metrics.proposedCount > 0) {
     throw new ContractsAgentError("contracts_automatic_review_incomplete", "Automatic review has not finished for this workspace.", 409);
   }
+  const promote = typeof services.promoteLabDecisionsToApp === "function"
+    ? services.promoteLabDecisionsToApp
+    : async () => ({ ok: true, skipped: true });
   if (step === "handoff") {
-    return result({ handoff: await services.loadContractsIndicatorHandoff(args) });
+    const handoff = await services.loadContractsIndicatorHandoff(args);
+    return result({
+      handoff,
+      promoted: await promote({ ...args, workspaceId: id })
+    });
   }
   if (step === "indicator") {
     const sync = await services.reconcileContractConditions({ ...args, commit: true });
@@ -182,6 +190,7 @@ export async function runContractsAutomaticStep({
       indicators: schedule.indicators, contractConditionSync: schedule.contractConditionSync,
       conditionResolution: schedule.conditionResolution, warnings: schedule.warnings || []
     },
-    unresolvedDecisions: review.items.filter((item) => item.reviewStatus === "unresolved").length
+    unresolvedDecisions: review.items.filter((item) => item.reviewStatus === "unresolved").length,
+    promoted: await promote({ ...args, workspaceId: id })
   });
 }

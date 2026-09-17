@@ -68,6 +68,10 @@ function fixtureServices() {
     runScheduleSweep: async ({ projectId, persist }) => {
       assert.equal(projectId, "server-owned-project"); assert.equal(persist, true);
       return { indicators: [], contractConditionSync: { ok: true }, conditionResolution: { ok: true, summary: { not_found: 1, error: 0 } } };
+    },
+    promoteLabDecisionsToApp: async ({ workspaceId: id }) => {
+      writes.push(["promoted", id]);
+      return { ok: true, decisionCount: decisions.length };
     }
   };
   return { services, writes, decisionProjection };
@@ -88,7 +92,11 @@ test("upload continuation completes every stage, batches unresolved findings, an
   assert.equal(completed.completed, true);
   assert.deepEqual([...new Set(stages)], CONTRACTS_AUTOMATIC_STEPS);
   assert.equal(stages.filter((step) => step === "decision-findings").length, 2);
-  assert.deepEqual(writes, [["decision-0"]]);
+  assert.deepEqual(writes, [
+    ["promoted", workspaceId],
+    ["decision-0"],
+    ["promoted", workspaceId]
+  ]);
   assert.equal(decisionProjection().metrics.proposedCount, 0);
   assert.equal(final.unresolvedDecisions, 6);
   assert.equal(checkpoints.at(-1), null);

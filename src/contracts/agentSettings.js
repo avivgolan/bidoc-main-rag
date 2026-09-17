@@ -20,7 +20,7 @@ const DEFAULTS = Object.freeze({
     model: "",
     temperature: 0,
     maxTokensPerCall: 1_600,
-    maxTotalModelTokens: 96_000,
+    maxTotalModelTokens: 160_000,
     timeoutMs: 75_000,
     totalBudgetMs: 180_000,
     concurrency: 2,
