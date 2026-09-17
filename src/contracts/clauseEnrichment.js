@@ -218,12 +218,15 @@ export async function runContractsClauseEnrichment({
     DEFAULT_MODEL_MAX_TOKENS,
     DEFAULT_MODEL_MAX_TOKENS
   );
-  const maxTotalTokens = boundedInteger(
+  const configuredTotal = boundedInteger(
     stageSettings.maxTotalModelTokens,
     maxTokens,
-    DEFAULT_MAX_TOTAL_MODEL_TOKENS,
+    160_000,
     DEFAULT_MAX_TOTAL_MODEL_TOKENS
   );
+  // Stored project settings may still pin 48,000. Preview uses defaults and
+  // succeeds; extract overlays those settings and would reject 199-clause DOCX.
+  const maxTotalTokens = Math.max(DEFAULT_MAX_TOTAL_MODEL_TOKENS, configuredTotal);
   const concurrency = boundedInteger(stageSettings.concurrency, 1, 4, DEFAULT_CONCURRENCY);
   const maxRepairBatches = boundedInteger(
     stageSettings.maxRepairBatches,
