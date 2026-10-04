@@ -80,6 +80,8 @@ export function DashboardPage() {
   const automaticRefresh=useRef(null);
   const [aiJob,setAiJob]=useState(null),[aiOpen,setAiOpen]=useState(false);
   const [section,setSection]=useState('overview');
+  const [scheduleTarget,setScheduleTarget]=useState(null);
+  const scheduleRequest=useRef(0);
   const [projectsLoading,setProjectsLoading]=useState(true);
   useEffect(()=>{
     const panel=document.getElementById('dashboard');const observer=new MutationObserver(()=>setActive(panel.classList.contains('active')));
@@ -121,6 +123,17 @@ export function DashboardPage() {
     try {const r=await api('/snapshots',{body:{token:view.queryToken}});if(current!==generation.current)return;setView(r.overview);setNotice(r.saved.reused?'תמונת מצב זהה כבר שמורה.':'תמונת המצב נשמרה.');const h=await api(`/history?project_id=${projectId}`);if(current===generation.current)setHistory(h);}
     catch(e){if(current===generation.current)setError(e.message);}finally{setSaving(false);}
   }
+  async function openSchedule(item) {
+    const request=++scheduleRequest.current,current=generation.current;
+    const show=sources=>{if(request===scheduleRequest.current&&current===generation.current)setScheduleTarget({item,sources,request,projectId:view.project.id});};
+    if(item.activityKey){show([]);return;}
+    try{
+      let result;
+      try{result=await api('/evidence?token='+encodeURIComponent(view.queryToken)+'&id='+encodeURIComponent(item.id));}
+      catch(e){if(e.code!=='context_expired')throw e;const fresh=await refreshExpired();result=await api('/evidence?token='+encodeURIComponent(fresh.queryToken)+'&id='+encodeURIComponent(item.id));}
+      show(result.sources || []);
+    }catch{show([]);}
+  }
   function ask(item,text) {
     setDetail(null);
     if(window.__bidocRunDashboardChat){
@@ -142,7 +155,7 @@ export function DashboardPage() {
     {aiJob&&!aiOpen&&<button className="db-ai-reopen" onClick={()=>{setAiJob(window.__bidocRunDashboardChat(aiJob.context));setAiOpen(true);}}>פתח ניתוח BIDOC AI האחרון</button>}
     {!view&&loading&&<div className="db-loading" role="status"><div className="db-skeleton"/><div className="db-skeleton"/><p>מחבר את תמונת הפרויקט מהמקורות…</p></div>}
     {!view&&!loading&&!error&&<Empty>{projectsLoading?'טוען את סביבת העבודה…':projects.length?'בחר פרויקט כדי להציג את הנתונים.':'לא נמצאו פרויקטים פעילים בחיבור.'}</Empty>}
-    {view&&<DashboardOverview view={view} history={history} onDetail={setDetail} onAsk={ask}/>}
+    {view&&<DashboardOverview view={view} history={history} onDetail={setDetail} onAsk={ask} onSchedule={openSchedule} scheduleTarget={scheduleTarget}/>}
     {view&&<div className="db-version-footer"><label htmlFor="db-version">גרסת לוח</label><select id="db-version" value={fileId || view.schedule.fileId || ''} onChange={e=>setFileId(e.target.value)}>{view.schedule.files.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}</select></div>}
     {detail&&view&&<Details detail={detail} view={view} onClose={()=>setDetail(null)} onAsk={ask} onExpired={refreshExpired}/>}
     {aiOpen&&aiJob&&<DashboardAiDialog key={aiJob.sessionId} job={aiJob} onClose={()=>setAiOpen(false)} onRefresh={()=>setAiJob(window.__bidocRunDashboardChat(aiJob.context,{force:true}))}/>}

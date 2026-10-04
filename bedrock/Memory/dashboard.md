@@ -9,6 +9,8 @@ last_updated: 2026-10-04
 
 ## Current State
 
+- Attention-card Open Schedule now passes a navigation target to the miniature Gantt. It reads item evidence (recovering expired context), matches a saved alert source ID or a unique exact event title/summary, scrolls to the saved activity row, highlights its event and expands the date window to include it. Missing activity links show the event on the general track with an explicit message; missing events do not fabricate associations. Project/request guards prevent late navigation from older clicks.
+
 - Detail drawers recover context_expired automatically: refresh the selected project/schedule overview, update dashboard counts/token, and reload the open evidence/metric drawer. One recovery per opened detail prevents loops; shared refresh promise and generation checks avoid concurrent refreshes and stale project updates. Other errors remain visible.
 
 - Dashboard final-answer synthesis receives separate server-owned popup instructions (never included in routing/retrieval text): key findings first, then up to three next actions, then concise detail and citations (target 150–250 words maximum, no wide tables). The visible question/cache key remain unchanged; cached answers retain daily reuse and require recheck for the new format. Main chat follow-ups remain unrestricted.
@@ -48,6 +50,20 @@ last_updated: 2026-10-04
 - Source table names and databases are project-specific; reuse [Schedule](schedule.md) project resolution and production Company DB conventions.
 
 ## Recent Changes
+
+- 2026-10-05 — Timeline dots/feed entries and task bars now open DashboardEventDialog instead of inline details. Dots expose a viewport-clamped top-layer title tooltip on hover/focus, dismissed on leave/blur/wheel/touch. Schedule navigation highlights without automatically opening the modal. Build and Chromium regression passed including hover, popup content, and Escape closing only the event while fullscreen Gantt stays open.
+
+- 2026-10-05 — Removed fullscreen controls/wrappers from all six top metric cards at user request, restoring their original spacing and detail click behavior. Fullscreen remains on the six main widgets. Build passed.
+
+- 2026-10-05 — Fixed fullscreen control/header action overlap on narrow widgets using a shrinking title column, fixed action column and reserved expand-button space. Live DOM geometry verifies disjoint coverage/expand buttons with vertically aligned centers.
+
+- 2026-10-05 — Refined widget expansion control to a 13px thin-stroke muted icon, transparent borderless button and subtle hover background. Retained 28px click area in both modes.
+
+- 2026-10-04 — Added diagonal-arrow fullscreen controls to all twelve dashboard widgets using a persistent native dialog wrapper. Content stays mounted; Escape/minimize restores the widget. Fullscreen Gantt gets more visible rows and readable typography. Build and UI regression cover all twelve viewport-sized expansions and Escape; live browser Gantt expansion verified.
+
+- 2026-10-04 — Fixed Open Schedule React crash: public overview deliberately omits items, so navigation now validates explicit projectId instead of reading view.items. UI fixture now mirrors public overview shape and checks React page errors. Build/UI regression passed. Live browser confirmed the electrical-drilling update opens its general-track event without crashing; it has no available activity association in the selected version.
+
+- 2026-10-04 — Added item-specific Gantt navigation from attention cards. Build and Chromium regression passed for off-screen linked activity, event outside the task window, and unassigned event fallback.
 
 - 2026-10-04 — Compact AI popup header: 13px brand, 17px emblem, inline project name and 9px vertical padding. Question now 14px with tight spacing and no redundant label; expanded answer height allowance and matching mobile padding. CSS-only update.
 

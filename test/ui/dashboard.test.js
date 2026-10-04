@@ -4,6 +4,8 @@ import {buildDashboard} from '../../src/dashboard/model.js';
 import {SOURCES} from '../../src/dashboard/sources.js';
 
 test('dashboard renders missing progress, opens detail, prepares chat and fits mobile',async({page})=>{
+  await page.emulateMedia({reducedMotion:'reduce'});
+  const pageErrors=[];page.on('pageerror',error=>{if(error.stack?.includes('/react/bidoc-react.js'))pageErrors.push(error.message);});
   const id='11111111-1111-4111-8111-111111111111';
   const payload=Buffer.from(JSON.stringify({sub:id,role:'סופראדמין',exp:Date.now()+3600000})).toString('base64url');
   const sig=crypto.createHmac('sha256','playwright-test-session-secret').update(payload).digest('base64url');
@@ -21,13 +23,25 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
     const url=new URL(r.request().url()),p=url.pathname;
     if(p.endsWith('/refresh')){refreshes++;view.queryToken='renewed-'+refreshes;expireDetails=false;}
     if(expireDetails&&(p.endsWith('/evidence')||p.endsWith('/items')))return r.fulfill({status:409,json:{error:'תמונת הנתונים השתנתה או פגה. יש לרענן את הדשבורד.',code:'context_expired'}});
-    const json=p.endsWith('/projects')?{projects:[view.project]}:p.endsWith('/history')?{available:true,snapshots:[]}:p.endsWith('/evidence')?{item:view.attention[0],sources:[]}:p.endsWith('/items')?{items:view.items}:view;
+    const json=p.endsWith('/projects')?{projects:[view.project]}:p.endsWith('/history')?{available:true,snapshots:[]}:p.endsWith('/evidence')?{item:view.attention[0],sources:[]}:p.endsWith('/items')?{items:view.items}:{...view,items:undefined,metrics:view.metrics.map(({memberIds,...metric})=>metric)};
     return r.fulfill({json});
   });
   await page.goto('/#dashboard');
   await expect(page.locator('.db-page h1')).toContainText('פרויקט בדיקה');
   await expect(page.locator('#appSidebar')).toBeHidden();
   await expect(page.locator('.ref-metric')).toHaveCount(6);
+  const expanders=page.getByRole('button',{name:/^הגדל למסך מלא:/});
+  await expect(expanders).toHaveCount(6);
+  for(let i=0;i<6;i++){
+    await expanders.nth(i).click();
+    const full=page.locator('.db-widget[open]');
+    await expect(full).toBeVisible();
+    const box=await full.boundingBox();
+    expect(Math.round(box.width)).toBe(page.viewportSize().width);
+    expect(Math.round(box.height)).toBe(page.viewportSize().height);
+    await page.keyboard.press('Escape');
+    await expect(full).toHaveCount(0);
+  }
   const layout=await page.evaluate(()=>({a:document.querySelector('.ref-attention').getBoundingClientRect().x,c:document.querySelector('.ref-schedule').getBoundingClientRect().x,ai:document.querySelector('.ref-ai').getBoundingClientRect().x}));
   expect(layout.a).toBeLessThan(layout.c);expect(layout.c).toBeLessThan(layout.ai);
   await expect(page.locator('.db-kpi-progress .db-kpi-value')).toHaveText('—');
@@ -51,7 +65,8 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await expect(page.locator('.db-feed-event')).toHaveCount(2);
   await page.getByRole('button',{name:'פעילות: עבודות שלד',exact:true}).click();
   await expect(page.locator('.db-feed-event')).toHaveCount(1);
-  await expect(page.getByRole('region',{name:'פרטי אירוע'})).toContainText('עבודות שלד');
+  await expect(page.getByRole('dialog',{name:'פרטי אירוע'})).toContainText('עבודות שלד');
+  await page.keyboard.press('Escape');
   // The date axis follows the first and last actually visible activity rows.
   view.schedule.timeline=Array.from({length:12},(_,i)=>({id:String(i),activityKey:`gantt:f:${i}`,title:`פעילות ${i+1}`,start:`2026-01-${String(i+1).padStart(2,'0')}`,end:`2026-01-${String(i+2).padStart(2,'0')}`}));
   await page.reload();
@@ -67,8 +82,33 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await scroll.evaluate(node=>{node.scrollTop=node.scrollHeight;});
   await expect(axis).toHaveAttribute('data-range-start','2026-01-08T00:00:00.000Z');
   await expect(axis).toHaveAttribute('data-range-end','2026-01-13T00:00:00.000Z');
+  view.timeline.events=[{id:'jump-event',title:view.attention[0].title,date:'2026-02-01',activityKey:'gantt:f:10'}];
+  await page.reload();
+  await page.locator('.ref-issue-actions').getByRole('button',{name:'פתח לו״ז',exact:true}).click();
+  await expect(page.locator('.db-gantt-row.selected')).toContainText('פעילות 11');
+  await expect.poll(()=>scroll.evaluate(node=>node.scrollTop)).toBeGreaterThan(0);
+  await expect(page.locator('.db-gantt-row.selected .db-event-dot.is-target')).toBeVisible();
+  await expect(axis).toHaveAttribute('data-range-end','2026-02-01T00:00:00.000Z');
+  const eventDot=page.locator('.db-gantt-row.selected .db-event-dot.is-target');
+  await eventDot.hover();
+  await expect(page.getByRole('tooltip')).toContainText(view.attention[0].title);
+  await eventDot.click();
+  await expect(page.getByRole('dialog',{name:'פרטי אירוע'})).toContainText(view.attention[0].title);
+  await expect(page.locator('.db-timeline-selection')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:'הגדל למסך מלא: לו״ז וציר אירועים',exact:true}).click();
+  await eventDot.click();
+  await expect(page.getByRole('dialog',{name:'פרטי אירוע'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.db-widget[open]')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  view.timeline.events[0].activityKey=null;
+  await page.reload();
+  await page.locator('.ref-issue-actions').getByRole('button',{name:'פתח לו״ז',exact:true}).click();
+  await expect(page.locator('#db-planning')).toContainText('לעדכון אין פעילות זמינה');
+  await expect(page.locator('.db-event-track .db-event-dot.is-target')).toBeVisible();
   await page.setViewportSize({width:390,height:844});
-  expect(await page.locator('.db-page').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
+  await expect.poll(()=>page.locator('.db-page').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
   const chatRequests=[];
   let complete;
   await page.route('**/api/chat',async r=>{
@@ -120,4 +160,6 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await page.setViewportSize({width:1280,height:900});
   await expect(page.locator('#appSidebar')).toBeVisible();
   await expect(page.locator('#messageInput')).toHaveValue('');
+  expect(pageErrors).toEqual([]);
 });
+
