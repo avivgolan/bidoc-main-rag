@@ -1,6 +1,6 @@
 import React,{useEffect,useRef,useState} from 'react';
 
-export default function DashboardAiDialog({job,onClose}) {
+export default function DashboardAiDialog({job,onClose,onRefresh}) {
   const dialog=useRef(null),answer=useRef(null);
   const [result,setResult]=useState(null),[error,setError]=useState(''),[opening,setOpening]=useState(false);
   useEffect(()=>{dialog.current?.showModal();return()=>dialog.current?.close();},[]);
@@ -23,6 +23,6 @@ export default function DashboardAiDialog({job,onClose}) {
       {result&&<><div className="db-ai-answer" ref={answer}/>{!result.dashboardSaved&&<p className="db-ai-save-warning">התקבלה תשובה אך שמירת השיחה לא אושרה. המשך בצ׳אט אינו זמין.</p>}</>}
       {error&&<p role="alert" className="db-ai-error">{error}</p>}
     </div>
-    <footer><span>{result?.dashboardSaved?'השיחה נשמרה בהיסטוריית הצ׳אט':error?'הפעולה לא הושלמה':'התשובה תופיע כאן כשהניתוח יסתיים'}</span><button type="button" onClick={onClose}>סגור חלון</button><button className="db-ai-continue" type="button" disabled={!result?.dashboardSaved||opening} onClick={continueChat}>{opening?'פותח…':'המשך בצ׳אט ←'}</button></footer>
+    <footer><span>{result?.dashboardSaved?'השיחה נשמרה בהיסטוריית הצ׳אט':error?'הפעולה לא הושלמה':'התשובה תופיע כאן כשהניתוח יסתיים'}</span><button type="button" disabled={(!result&&!error)||opening} onClick={onRefresh}>בדוק מחדש</button><button type="button" onClick={onClose}>סגור חלון</button><button className="db-ai-continue" type="button" disabled={!result?.dashboardSaved||opening} onClick={continueChat}>{opening?'פותח…':'המשך בצ׳אט ←'}</button></footer>
   </dialog>;
 }

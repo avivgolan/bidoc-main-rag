@@ -2404,7 +2404,7 @@ async function synthesizeAnswer({ message, classification, memory, memorySummary
   try {
     const answerMode = listIntent ? "ranked_entity_list" : "standard_grounded_answer";
     const projectedToolResults = projectToolCallsForMain(toolCalls);
-    const systemPrompt = mainSystemPrompt(classification, config);
+    const systemPrompt = mainSystemPrompt(classification, config) + (config.dashboardAnswerInstructions ? `\n\n${config.dashboardAnswerInstructions}` : "");
     const legacyMainPayload = {
       user_message: message,
       answer_mode: answerMode,

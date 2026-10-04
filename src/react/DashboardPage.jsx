@@ -106,7 +106,7 @@ export function DashboardPage() {
   function ask(item,text) {
     setDetail(null);
     if(window.__bidocRunDashboardChat){
-      const job=window.__bidocRunDashboardChat({projectId:view.project.id,projectName:view.project.name,token:view.queryToken,itemId:item?.id || null,
+      const job=window.__bidocRunDashboardChat({projectId:view.project.id,projectName:view.project.name,fileId:fileId || null,token:view.queryToken,itemId:item?.id || null,
         question:text || `מה המצב של ״${item.title}״, על מה הוא מבוסס ומה נדרש לעשות?`});
       setAiJob(job);setAiOpen(true);
     }
@@ -121,12 +121,12 @@ export function DashboardPage() {
     <header className="db-page-header"><div><span className="db-eyebrow">סביבת עבודה / ניהול פרויקט</span><h1>{view?.project.name || 'מרכז בקרה'}<span className="db-title-dot">.</span></h1><p>לוח בקרה ראשי</p></div><div className="db-project-picker"><label htmlFor="db-project">הפרויקט שלי</label><select id="db-project" value={projectId} onChange={e=>{setProjectId(e.target.value);setFileId('');try{localStorage.setItem('bidoc-dashboard-project',e.target.value);}catch{}}}><option value="" disabled>בחר פרויקט</option>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></div></header>
     <div className="db-toolbar"><div className="db-time"><span className="db-live-dot"/><span>מצב נוכחי</span><span className="db-separator"/>נכון ל־{fmt(view?.asOf || new Date())}</div><div className="db-toolbar-actions"><button type="button" disabled={!view} onClick={()=>setDetail({type:'health'})}><Icon name="grid" size={15}/>{partial?`${partial} מקורות לא זמינים`:'מקורות ועדכניות'}</button><button type="button" disabled={!projectId||loading||saving} onClick={refresh}><Icon name="refresh" size={15}/>{loading?'מרענן…':'רענון'}</button><button type="button" disabled={!view||saving||loading||history?.available===false} onClick={save}><Icon name="save" size={15}/>{saving?'שומר…':'שמור תמונת מצב'}</button></div></div>
     {notice&&<div className="db-notice" role="status">{notice}</div>}{error&&<div className="db-error" role="alert">{error}<button type="button" onClick={refresh} disabled={!projectId||loading}>נסה שוב</button></div>}
-    {aiJob&&!aiOpen&&<button className="db-ai-reopen" onClick={()=>setAiOpen(true)}>פתח ניתוח BIDOC AI האחרון</button>}
+    {aiJob&&!aiOpen&&<button className="db-ai-reopen" onClick={()=>{setAiJob(window.__bidocRunDashboardChat(aiJob.context));setAiOpen(true);}}>פתח ניתוח BIDOC AI האחרון</button>}
     {!view&&loading&&<div className="db-loading" role="status"><div className="db-skeleton"/><div className="db-skeleton"/><p>מחבר את תמונת הפרויקט מהמקורות…</p></div>}
     {!view&&!loading&&!error&&<Empty>{projectsLoading?'טוען את סביבת העבודה…':projects.length?'בחר פרויקט כדי להציג את הנתונים.':'לא נמצאו פרויקטים פעילים בחיבור.'}</Empty>}
     {view&&<DashboardOverview view={view} history={history} onDetail={setDetail} onAsk={ask}/>}
     {view&&<div className="db-version-footer"><label htmlFor="db-version">גרסת לוח</label><select id="db-version" value={fileId || view.schedule.fileId || ''} onChange={e=>setFileId(e.target.value)}>{view.schedule.files.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}</select></div>}
     {detail&&view&&<Details detail={detail} view={view} onClose={()=>setDetail(null)} onAsk={ask}/>}
-    {aiOpen&&aiJob&&<DashboardAiDialog key={aiJob.sessionId} job={aiJob} onClose={()=>setAiOpen(false)}/>}
+    {aiOpen&&aiJob&&<DashboardAiDialog key={aiJob.sessionId} job={aiJob} onClose={()=>setAiOpen(false)} onRefresh={()=>setAiJob(window.__bidocRunDashboardChat(aiJob.context,{force:true}))}/>}
   </div>;
 }

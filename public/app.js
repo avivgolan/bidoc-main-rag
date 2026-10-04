@@ -1115,15 +1115,36 @@ function activateTab(tabId, pushHistory = true, options = {}) {
 }
 
 window.__bidocActivateTab = activateTab;
-let dashboardPopupPending = null;
-window.__bidocRunDashboardChat = (context) => {
-  if (dashboardPopupPending) return dashboardPopupPending;
+const dashboardPopupJobs = new Map();
+const dashboardAiDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+window.__bidocRunDashboardChat = (context, { force = false } = {}) => {
+  const day = dashboardAiDay();
+  const cacheKey = JSON.stringify([context.projectId, context.fileId || null, context.itemId || null, context.question.trim()]);
+  for (const [key, value] of dashboardPopupJobs) if (value.day !== day) dashboardPopupJobs.delete(key);
+  const previous = dashboardPopupJobs.get(cacheKey);
+  if (previous && (!previous.settled || !force)) return previous;
+  const storageKey = 'bidoc-dashboard-ai-v1';
+  let savedCache = { day, entries: {} };
+  try { const stored = JSON.parse(sessionStorage.getItem(storageKey)); if (stored?.day === day) savedCache = stored; } catch {}
+  const cached = !force && savedCache.entries[cacheKey];
   const sessionId = createSessionId();
-  const job = { sessionId, context, question: context.question, settled: false };
-  job.promise = apiStream('/api/chat', {
+  const job = { sessionId, context, question: context.question, settled: false, day };
+  job.promise = (async () => {
+    if (cached) {
+      try {
+        const saved = await api('/api/sessions/' + encodeURIComponent(cached.sessionId) + '/messages');
+        if ((saved.messages || []).some(row => String(row.id) === String(cached.result.messageId) && Boolean(row.ai_response))) {
+          job.sessionId = cached.sessionId; job.messageId = cached.result.messageId;
+          return cached.result;
+        }
+      } catch {}
+    }
+    const fresh = await api('/api/dashboard/v1/refresh', { method: 'POST', body: { project_id: context.projectId, file_id: context.fileId || null } });
+    job.context = { ...context, token: fresh.queryToken };
+    return apiStream('/api/chat', {
     method: 'POST', timeoutMs: 280000,
     body: { message: context.question, sessionId, projectId: context.projectId,
-      dashboardContext: { token: context.token, itemId: context.itemId },
+      dashboardContext: { token: job.context.token, itemId: context.itemId },
       runId: `dashboard_${Date.now()}_${Math.random().toString(16).slice(2)}`,
       sourcesEnabled: true, deepResearch: false, attachments: [] },
     onEvent: () => {} // Keep the separate popup run out of the active chat's progress UI.
@@ -1137,9 +1158,19 @@ window.__bidocRunDashboardChat = (context) => {
     }
     job.messageId = result.messageId;
     refreshChatSessions().catch(() => {});
-    return { ...result, dashboardSaved };
-  }).finally(() => { job.settled = true; if (dashboardPopupPending === job) dashboardPopupPending = null; });
-  dashboardPopupPending = job;
+    const answer = { ...result, dashboardSaved };
+    if (dashboardSaved && day === dashboardAiDay()) {
+      try {
+        const stored = JSON.parse(sessionStorage.getItem(storageKey));
+        if (stored?.day === day) savedCache = stored;
+        savedCache.entries[cacheKey] = { sessionId, result: answer };
+        sessionStorage.setItem(storageKey, JSON.stringify(savedCache));
+      } catch {}
+    }
+    return answer;
+  });
+  })().catch(error => { dashboardPopupJobs.delete(cacheKey); throw error; }).finally(() => { job.settled = true; });
+  dashboardPopupJobs.set(cacheKey, job);
   return job;
 };
 window.__bidocRenderDashboardAnswer = (node, result) => {

@@ -9,6 +9,10 @@ last_updated: 2026-10-04
 
 ## Current State
 
+- Dashboard final-answer synthesis receives separate server-owned popup instructions (never included in routing/retrieval text): key findings first, then up to three next actions, then concise detail and citations (target 150–250 words maximum, no wide tables). The visible question/cache key remain unchanged; cached answers retain daily reuse and require recheck for the new format. Main chat follow-ups remain unrestricted.
+
+- AI answers are reused per project, schedule file, item and trimmed question for the Israel calendar day. A per-key job map deduplicates in-flight calls; tab sessionStorage retains completed saved answers across reloads, with session-message authorization verification before replay. New-day clicks and the popup “בדוק מחדש” trigger a fresh dashboard source refresh and a new chat session. UI regression verifies same-day reuse, reload, forced refresh and date rollover.
+
 - Dashboard AI now sends immediately via the existing `/api/chat` SSE pipeline with a dedicated session ID. `DashboardAiDialog.jsx` shows loading, formatted answer/sources and close/continue actions; it stays on the dashboard. Popup closure does not abort the run; a reopen action retains the last job and overlapping clicks reuse the pending job. Existing chat drafts/active conversations are untouched until explicit continuation.
 - Before reporting saved or enabling continuation, the bridge rereads the normal session messages and verifies the returned message ID has an answer. Continue revalidates, loads that exact session, restores project context for follow-ups and navigates to chat. Existing message persistence is reused, with no new storage or schema. UI test mocks the SSE/session APIs and verifies immediate single send, close/reopen, formatted result, same-session continuation and mobile layout; live LLM generation was not part of this regression.
 
@@ -42,6 +46,12 @@ last_updated: 2026-10-04
 - Source table names and databases are project-specific; reuse [Schedule](schedule.md) project resolution and production Company DB conventions.
 
 ## Recent Changes
+
+- 2026-10-04 — Fixed popup prompt contamination: the formatting word ציטוטים caused the capability classifier to select meeting_evidence for the approvals question. Reproduced before/after routing locally (meeting_evidence vs hybrid_search). Moved formatting to final Main system instructions after dashboard authorization; original question remains the request text. Existing UI and seven dashboard tests passed; local server restarted. Live answer quality still requires a fresh run.
+
+- 2026-10-04 — Added popup-oriented answer instructions to dashboard AI requests: summary points before actions and supporting detail.
+
+- 2026-10-04 — Added daily AI answer reuse and explicit recheck; build and expanded Chromium regression passed with mocked chat responses.
 
 - 2026-10-04 — Prepared a dashboard-only main commit, excluding unrelated local QA, schedule and pilot edits. Built the exact staged tree in isolation; all seven model/API tests and the Chromium dashboard/AI regression passed.
 

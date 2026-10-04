@@ -20779,37 +20779,37 @@ function Ci({ view: e, history: t, onDetail: n, onAsk: r }) {
 }
 //#endregion
 //#region src/react/DashboardAiDialog.jsx
-function wi({ job: e, onClose: t }) {
-	let n = (0, b.useRef)(null), r = (0, b.useRef)(null), [i, a] = (0, b.useState)(null), [o, s] = (0, b.useState)(""), [c, l] = (0, b.useState)(!1);
-	(0, b.useEffect)(() => (n.current?.showModal(), () => n.current?.close()), []), (0, b.useEffect)(() => {
+function wi({ job: e, onClose: t, onRefresh: n }) {
+	let r = (0, b.useRef)(null), i = (0, b.useRef)(null), [a, o] = (0, b.useState)(null), [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(!1);
+	(0, b.useEffect)(() => (r.current?.showModal(), () => r.current?.close()), []), (0, b.useEffect)(() => {
 		let t = !0;
-		return a(null), s(""), e.promise.then((e) => {
-			t && a(e);
+		return o(null), c(""), e.promise.then((e) => {
+			t && o(e);
 		}, (e) => {
-			t && s(e.message || "לא ניתן להשלים את הניתוח.");
+			t && c(e.message || "לא ניתן להשלים את הניתוח.");
 		}), () => {
 			t = !1;
 		};
 	}, [e]), (0, b.useEffect)(() => {
-		i && r.current && window.__bidocRenderDashboardAnswer?.(r.current, i);
-	}, [i]);
-	async function u() {
-		l(!0), s("");
+		a && i.current && window.__bidocRenderDashboardAnswer?.(i.current, a);
+	}, [a]);
+	async function d() {
+		u(!0), c("");
 		try {
 			await window.__bidocContinueDashboardChat(e), t();
 		} catch (e) {
-			s(e.message);
+			c(e.message);
 		} finally {
-			l(!1);
+			u(!1);
 		}
 	}
 	return /* @__PURE__ */ (0, x.jsxs)("dialog", {
-		ref: n,
+		ref: r,
 		className: "db-ai-dialog",
 		"aria-labelledby": "db-ai-dialog-title",
 		onCancel: t,
 		onClick: (e) => {
-			e.target === n.current && t();
+			e.target === r.current && t();
 		},
 		children: [
 			/* @__PURE__ */ (0, x.jsxs)("header", { children: [
@@ -20834,9 +20834,9 @@ function wi({ job: e, onClose: t }) {
 			}),
 			/* @__PURE__ */ (0, x.jsxs)("div", {
 				className: "db-ai-response",
-				"aria-busy": !i && !o,
+				"aria-busy": !a && !s,
 				children: [
-					!i && !o && /* @__PURE__ */ (0, x.jsxs)("div", {
+					!a && !s && /* @__PURE__ */ (0, x.jsxs)("div", {
 						role: "status",
 						className: "db-ai-working",
 						children: [
@@ -20846,22 +20846,28 @@ function wi({ job: e, onClose: t }) {
 							/* @__PURE__ */ (0, x.jsx)("small", { children: "אפשר לסגור את החלון; הבקשה תמשיך ברקע." })
 						]
 					}),
-					i && /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("div", {
+					a && /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("div", {
 						className: "db-ai-answer",
-						ref: r
-					}), !i.dashboardSaved && /* @__PURE__ */ (0, x.jsx)("p", {
+						ref: i
+					}), !a.dashboardSaved && /* @__PURE__ */ (0, x.jsx)("p", {
 						className: "db-ai-save-warning",
 						children: "התקבלה תשובה אך שמירת השיחה לא אושרה. המשך בצ׳אט אינו זמין."
 					})] }),
-					o && /* @__PURE__ */ (0, x.jsx)("p", {
+					s && /* @__PURE__ */ (0, x.jsx)("p", {
 						role: "alert",
 						className: "db-ai-error",
-						children: o
+						children: s
 					})
 				]
 			}),
 			/* @__PURE__ */ (0, x.jsxs)("footer", { children: [
-				/* @__PURE__ */ (0, x.jsx)("span", { children: i?.dashboardSaved ? "השיחה נשמרה בהיסטוריית הצ׳אט" : o ? "הפעולה לא הושלמה" : "התשובה תופיע כאן כשהניתוח יסתיים" }),
+				/* @__PURE__ */ (0, x.jsx)("span", { children: a?.dashboardSaved ? "השיחה נשמרה בהיסטוריית הצ׳אט" : s ? "הפעולה לא הושלמה" : "התשובה תופיע כאן כשהניתוח יסתיים" }),
+				/* @__PURE__ */ (0, x.jsx)("button", {
+					type: "button",
+					disabled: !a && !s || l,
+					onClick: n,
+					children: "בדוק מחדש"
+				}),
 				/* @__PURE__ */ (0, x.jsx)("button", {
 					type: "button",
 					onClick: t,
@@ -20870,9 +20876,9 @@ function wi({ job: e, onClose: t }) {
 				/* @__PURE__ */ (0, x.jsx)("button", {
 					className: "db-ai-continue",
 					type: "button",
-					disabled: !i?.dashboardSaved || c,
-					onClick: u,
-					children: c ? "פותח…" : "המשך בצ׳אט ←"
+					disabled: !a?.dashboardSaved || l,
+					onClick: d,
+					children: l ? "פותח…" : "המשך בצ׳אט ←"
 				})
 			] })
 		]
@@ -21231,6 +21237,7 @@ function Ni() {
 		h(null), window.__bidocRunDashboardChat ? (A(window.__bidocRunDashboardChat({
 			projectId: c.project.id,
 			projectName: c.project.name,
+			fileId: o || null,
 			token: c.queryToken,
 			itemId: e?.id || null,
 			question: t || `מה המצב של ״${e.title}״, על מה הוא מבוסס ומה נדרש לעשות?`
@@ -21390,7 +21397,9 @@ function Ni() {
 			}),
 			k && !j && /* @__PURE__ */ (0, x.jsx)("button", {
 				className: "db-ai-reopen",
-				onClick: () => M(!0),
+				onClick: () => {
+					A(window.__bidocRunDashboardChat(k.context)), M(!0);
+				},
 				children: "פתח ניתוח BIDOC AI האחרון"
 			}),
 			!c && u && /* @__PURE__ */ (0, x.jsxs)("div", {
@@ -21432,7 +21441,8 @@ function Ni() {
 			}),
 			j && k && /* @__PURE__ */ (0, x.jsx)(wi, {
 				job: k,
-				onClose: () => M(!1)
+				onClose: () => M(!1),
+				onRefresh: () => A(window.__bidocRunDashboardChat(k.context, { force: !0 }))
 			}, k.sessionId)
 		]
 	});

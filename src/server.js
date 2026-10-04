@@ -1,3 +1,4 @@
+import { dashboardAnswerInstructions } from './dashboard/answerPrompt.js';
 import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -305,6 +306,7 @@ async function handleApi(req, res, url) {
     const sessionId = body.sessionId || `session_${Date.now()}`;
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const cfg = buildRequestConfig(req, body);
+    if (body.dashboardContext) cfg.dashboardAnswerInstructions = dashboardAnswerInstructions;
     createRun(runId);
 
     // Opt-in inline-stream mode (body.stream === true, used by the standalone
