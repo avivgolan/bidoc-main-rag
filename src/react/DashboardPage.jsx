@@ -10,7 +10,7 @@ const statuses={critical:'קריטי',high:'גבוה',medium:'בינוני',low:
 async function api(path,{signal,body}={}) {
   const r=await fetch(`/api/dashboard/v1${path}`,{signal,cache:'no-store',method:body?'POST':'GET',
     headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});
-  const json=await r.json(); if(!r.ok)throw new Error(json.error || 'לא ניתן לטעון את המידע'); return json;
+  const json=await r.json(); if(!r.ok)throw Object.assign(new Error(json.error || 'לא ניתן לטעון את המידע'),{code:json.code,status:r.status}); return json;
 }
 function Icon({name,size=20}) {
   const paths={grid:<><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></>,
@@ -35,8 +35,9 @@ function ItemCard({item,onEvidence,onAsk,compact=false}) {
     </div>
   </article>;
 }
-function Details({detail,view,onClose,onAsk}) {
+function Details({detail,view,onClose,onAsk,onExpired}) {
   const dialog=useRef(null); const [data,setData]=useState(null);const [error,setError]=useState('');
+  const recovery=useRef(null);
   useEffect(()=>{dialog.current?.showModal();return ()=>dialog.current?.close();},[]);
   useEffect(()=>{
     setData(null);setError('');const controller=new AbortController();
@@ -44,7 +45,13 @@ function Details({detail,view,onClose,onAsk}) {
     if(detail.type==='item')path=`/evidence?token=${view.queryToken}&id=${encodeURIComponent(detail.item.id)}`;
     if(detail.type==='metric')path=`/items?token=${view.queryToken}&metric=${encodeURIComponent(detail.metric.key)}`;
     if(detail.type==='historyItems')path=`/snapshot-items?project_id=${view.project.id}&snapshot_id=${detail.snapshot.id}&metric=${detail.metric.key}`;
-    if(path)api(path,{signal:controller.signal}).then(setData).catch(e=>{if(e.name!=='AbortError')setError(e.message);});
+    if(path)api(path,{signal:controller.signal}).then(setData).catch(async e=>{
+      if(controller.signal.aborted)return;
+      if(e.code==='context_expired'&&recovery.current!==detail){
+        recovery.current=detail;
+        try{await onExpired();}catch(refreshError){if(!controller.signal.aborted)setError(refreshError.message);}
+      }else if(e.name!=='AbortError')setError(e.message);
+    });
     else setData({});
     return ()=>controller.abort();
   },[detail,view.queryToken]);
@@ -70,6 +77,7 @@ export function DashboardPage() {
   const [detail,setDetail]=useState(null);const [history,setHistory]=useState(null);const [notice,setNotice]=useState('');
   const [saving,setSaving]=useState(false);const [days,setDays]=useState(7);const [question,setQuestion]=useState('');
   const generation=useRef(0);
+  const automaticRefresh=useRef(null);
   const [aiJob,setAiJob]=useState(null),[aiOpen,setAiOpen]=useState(false);
   const [section,setSection]=useState('overview');
   const [projectsLoading,setProjectsLoading]=useState(true);
@@ -97,6 +105,16 @@ export function DashboardPage() {
     const current=generation.current;setLoading(true);setError('');
     try{const r=await api('/refresh',{body:{project_id:projectId,file_id:fileId || null}});if(current===generation.current){setView(r);setNotice('הנתונים נרעננו. מקורות הפרויקט לא שונו.');}}
     catch(e){if(current===generation.current)setError(e.message);}finally{if(current===generation.current)setLoading(false);}
+  }
+  function refreshExpired() {
+    const current=generation.current;
+    if(automaticRefresh.current?.generation===current)return automaticRefresh.current.promise;
+    const job={generation:current};
+    job.promise=api('/refresh',{body:{project_id:projectId,file_id:fileId || null}}).then(r=>{
+      if(current!==generation.current)throw new DOMException('Aborted','AbortError');
+      setView(r);return r;
+    }).finally(()=>{if(automaticRefresh.current===job)automaticRefresh.current=null;});
+    automaticRefresh.current=job;return job.promise;
   }
   async function save() {
     const current=generation.current;setSaving(true);setError('');
@@ -126,7 +144,7 @@ export function DashboardPage() {
     {!view&&!loading&&!error&&<Empty>{projectsLoading?'טוען את סביבת העבודה…':projects.length?'בחר פרויקט כדי להציג את הנתונים.':'לא נמצאו פרויקטים פעילים בחיבור.'}</Empty>}
     {view&&<DashboardOverview view={view} history={history} onDetail={setDetail} onAsk={ask}/>}
     {view&&<div className="db-version-footer"><label htmlFor="db-version">גרסת לוח</label><select id="db-version" value={fileId || view.schedule.fileId || ''} onChange={e=>setFileId(e.target.value)}>{view.schedule.files.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}</select></div>}
-    {detail&&view&&<Details detail={detail} view={view} onClose={()=>setDetail(null)} onAsk={ask}/>}
+    {detail&&view&&<Details detail={detail} view={view} onClose={()=>setDetail(null)} onAsk={ask} onExpired={refreshExpired}/>}
     {aiOpen&&aiJob&&<DashboardAiDialog key={aiJob.sessionId} job={aiJob} onClose={()=>setAiOpen(false)} onRefresh={()=>setAiJob(window.__bidocRunDashboardChat(aiJob.context,{force:true}))}/>}
   </div>;
 }

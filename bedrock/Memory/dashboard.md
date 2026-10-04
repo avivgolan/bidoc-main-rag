@@ -9,6 +9,8 @@ last_updated: 2026-10-04
 
 ## Current State
 
+- Detail drawers recover context_expired automatically: refresh the selected project/schedule overview, update dashboard counts/token, and reload the open evidence/metric drawer. One recovery per opened detail prevents loops; shared refresh promise and generation checks avoid concurrent refreshes and stale project updates. Other errors remain visible.
+
 - Dashboard final-answer synthesis receives separate server-owned popup instructions (never included in routing/retrieval text): key findings first, then up to three next actions, then concise detail and citations (target 150–250 words maximum, no wide tables). The visible question/cache key remain unchanged; cached answers retain daily reuse and require recheck for the new format. Main chat follow-ups remain unrestricted.
 
 - AI answers are reused per project, schedule file, item and trimmed question for the Israel calendar day. A per-key job map deduplicates in-flight calls; tab sessionStorage retains completed saved answers across reloads, with session-message authorization verification before replay. New-day clicks and the popup “בדוק מחדש” trigger a fresh dashboard source refresh and a new chat session. UI regression verifies same-day reuse, reload, forced refresh and date rollover.
@@ -46,6 +48,10 @@ last_updated: 2026-10-04
 - Source table names and databases are project-specific; reuse [Schedule](schedule.md) project resolution and production Company DB conventions.
 
 ## Recent Changes
+
+- 2026-10-04 — Compact AI popup header: 13px brand, 17px emblem, inline project name and 9px vertical padding. Question now 14px with tight spacing and no redundant label; expanded answer height allowance and matching mobile padding. CSS-only update.
+
+- 2026-10-04 — Replaced expired-context manual refresh errors in detail drawers with automatic refresh/retry. Build and browser regression passed, including separate evidence and metric expiry cases.
 
 - 2026-10-04 — Fixed popup prompt contamination: the formatting word ציטוטים caused the capability classifier to select meeting_evidence for the approvals question. Reproduced before/after routing locally (meeting_evidence vs hybrid_search). Moved formatting to final Main system instructions after dashboard authorization; original question remains the request text. Existing UI and seven dashboard tests passed; local server restarted. Live answer quality still requires a fresh run.
 

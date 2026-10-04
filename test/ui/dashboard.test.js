@@ -16,8 +16,11 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   view.timeline={complete:true,linksComplete:true,events:[{id:'e1',title:'עיכוב ביציקת שלד',date:'2026-02-01',activityKey:'gantt:f:1'},{id:'e2',title:'אירוע לאחר תקופת הלוח',date:'2026-06-01',activityKey:null}]};
   await page.route('**/api/**',r=>r.fulfill({json:{}}));
   await page.route(/^https?:\/\/(?!localhost)/,r=>r.abort());
+  let refreshes=0, expireDetails=true;
   await page.route('**/api/dashboard/v1/**',r=>{
-    const p=new URL(r.request().url()).pathname;
+    const url=new URL(r.request().url()),p=url.pathname;
+    if(p.endsWith('/refresh')){refreshes++;view.queryToken='renewed-'+refreshes;expireDetails=false;}
+    if(expireDetails&&(p.endsWith('/evidence')||p.endsWith('/items')))return r.fulfill({status:409,json:{error:'תמונת הנתונים השתנתה או פגה. יש לרענן את הדשבורד.',code:'context_expired'}});
     const json=p.endsWith('/projects')?{projects:[view.project]}:p.endsWith('/history')?{available:true,snapshots:[]}:p.endsWith('/evidence')?{item:view.attention[0],sources:[]}:p.endsWith('/items')?{items:view.items}:view;
     return r.fulfill({json});
   });
@@ -31,8 +34,17 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await expect(page.locator('.db-kpi-approvals .db-kpi-value')).toHaveText('1');
   await page.getByRole('button',{name:'פרטים ומקורות: אישור תכנון חסר',exact:true}).click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('dialog')).toContainText('הראיות שמאחורי הנושא');
+  expect(refreshes).toBe(1);
+  await expect(page.getByRole('dialog').getByRole('alert')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  expireDetails=true;
+  await page.locator('.db-kpi-approvals').click();
+  await expect(page.getByRole('dialog')).toContainText('אישור תכנון חסר');
+  expect(refreshes).toBe(2);
+  await expect(page.getByRole('dialog').getByRole('alert')).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('heading',{name:'לו״ז וציר אירועים'})).toBeVisible();
   await expect(page.locator('.db-feed-event')).toHaveCount(1);
   await page.getByRole('button',{name:'כל התקופה',exact:true}).click();
