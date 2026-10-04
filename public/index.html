@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BiDoc — AI Document Intelligence</title>
     <link rel="stylesheet" href="/styles.css?v=20260705-internal-agents" />
+    <link rel="stylesheet" href="/dashboard.css?v=20261004" />
   </head>
   <body>
     <a class="skipLink" href="#chatMain">דלג לתוכן הצ׳אט</a>
@@ -44,6 +45,10 @@
 
         <!-- Navigation — SVG icons from Lucide (per UI/UX Pro Max: no emoji icons) -->
         <nav>
+          <button class="tab" data-tab="dashboard">
+            <span class="tabIcon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span>
+            <span class="tabLabel">דשבורד הפרויקט</span>
+          </button>
           <button class="tab active" data-tab="chat">
             <span class="tabIcon">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -169,6 +174,7 @@
       <!-- ======================================================
            CHAT
            ====================================================== -->
+      <section class="panel" id="dashboard"><div data-react-island="dashboard"></div></section>
       <section class="panel active" id="chat">
         <input id="sessionId" type="hidden" />
         <header class="chatHeader">

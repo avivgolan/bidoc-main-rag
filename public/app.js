@@ -424,6 +424,8 @@ function setCurrentSession(sessionId) {
 }
 
 function startNewSession(options = {}) {
+  state.dashboardProjectId = null;
+  state.dashboardChatContext = null;
   const { showToast: shouldShowToast = true } = options;
   if (state.eventSource) {
     state.eventSource.close();
@@ -1113,6 +1115,59 @@ function activateTab(tabId, pushHistory = true, options = {}) {
 }
 
 window.__bidocActivateTab = activateTab;
+let dashboardPopupPending = null;
+window.__bidocRunDashboardChat = (context) => {
+  if (dashboardPopupPending) return dashboardPopupPending;
+  const sessionId = createSessionId();
+  const job = { sessionId, context, question: context.question, settled: false };
+  job.promise = apiStream('/api/chat', {
+    method: 'POST', timeoutMs: 280000,
+    body: { message: context.question, sessionId, projectId: context.projectId,
+      dashboardContext: { token: context.token, itemId: context.itemId },
+      runId: `dashboard_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      sourcesEnabled: true, deepResearch: false, attachments: [] },
+    onEvent: () => {} // Keep the separate popup run out of the active chat's progress UI.
+  }).then(async result => {
+    let dashboardSaved = false;
+    if (result.messageId && !String(result.messageId).startsWith('local_')) {
+      try {
+        const saved = await api(`/api/sessions/${encodeURIComponent(sessionId)}/messages`);
+        dashboardSaved = (saved.messages || []).some(row => String(row.id) === String(result.messageId) && Boolean(row.ai_response));
+      } catch { /* The answer still displays, but unverified persistence is not reported as saved. */ }
+    }
+    job.messageId = result.messageId;
+    refreshChatSessions().catch(() => {});
+    return { ...result, dashboardSaved };
+  }).finally(() => { job.settled = true; if (dashboardPopupPending === job) dashboardPopupPending = null; });
+  dashboardPopupPending = job;
+  return job;
+};
+window.__bidocRenderDashboardAnswer = (node, result) => {
+  renderMessageContent(node, result.answer || 'לא התקבלה תשובה.', 'assistant');
+  renderSources(node, result.sources || []);
+};
+window.__bidocContinueDashboardChat = async (job) => {
+  if (state.chatRequest) throw new Error('יש תשובה שנוצרת כעת בצ׳אט. יש להמתין לסיומה לפני מעבר לשיחה.');
+  await loadSessionMessages(job.sessionId, { requiredMessageId: job.messageId });
+  setCurrentSession(job.sessionId);
+  state.dashboardProjectId = job.context.projectId;
+  if ($('chatTitle')) $('chatTitle').textContent = conversationTitle(job.question);
+  activateTab('chat');
+  $('messageInput').value = '';
+  localStorage.removeItem('bidocChatDraft');
+  resizeChatInput();
+  $('messageInput').focus();
+};
+window.__bidocOpenDashboardChat = (context) => {
+  if (state.chatRequest) return;
+  startNewSession({ showToast: false });
+  state.dashboardChatContext = { token: context.token, itemId: context.itemId };
+  activateTab("chat");
+  $("messageInput").value = context.question;
+  if ($("chatTitle")) $("chatTitle").textContent = `שאלה על ${context.projectName}`;
+  resizeChatInput();
+  $("messageInput").focus();
+};
 window.__bidocSetWorkflowFromReact = (result = {}) => {
   state.lastWorkflow = result.workflowLog || null;
   state.currentWorkflowMessageId = result.workflowRunId || result.runId || null;
@@ -1275,6 +1330,8 @@ function wireChat() {
         body: {
           message,
           sessionId: $("sessionId").value,
+          ...(state.dashboardProjectId ? { projectId: state.dashboardProjectId } : {}),
+          ...(state.dashboardChatContext ? { dashboardContext: state.dashboardChatContext } : {}),
           runId,
           sourcesEnabled: state.chatSourcesEnabled,
           deepResearch: state.deepResearchEnabled,
@@ -6968,8 +7025,13 @@ function timeAgo(date) {
   return `לפני ${d} ימים`;
 }
 
-async function loadSessionMessages(sessionId) {
+async function loadSessionMessages(sessionId, { requiredMessageId = null } = {}) {
+  state.dashboardProjectId = null;
+  state.dashboardChatContext = null;
   const result = await api(`/api/sessions/${encodeURIComponent(sessionId)}/messages`);
+  if (requiredMessageId && !(result.messages || []).some(row => String(row.id) === String(requiredMessageId) && row.ai_response)) {
+    throw new Error('השיחה השמורה עדיין אינה זמינה. אפשר לנסות שוב בעוד רגע.');
+  }
   $("messages").innerHTML = "";
   $("chatWelcome")?.setAttribute("hidden", "");
   for (const row of result.messages) {
@@ -10876,6 +10938,7 @@ async function apiStream(path, options = {}) {
         } else {
           try {
             const item = JSON.parse(data);
+            if (options.onEvent) { options.onEvent(item); continue; }
             appendLiveRunEvent(item);
             if (item.step === "complete" || item.step === "error") {
               $("liveRunStatus").textContent = item.step === "complete" ? "הסתיים" : "שגיאה";

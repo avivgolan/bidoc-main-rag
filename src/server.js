@@ -192,6 +192,12 @@ async function handleApi(req, res, url) {
     return sendJson(res, 200, { authenticated: Boolean(session), email: session?.email || null });
   }
 
+  // Dedicated read-only source boundary. Snapshot writes target new dashboard tables only.
+  if (url.pathname.startsWith("/api/dashboard/v1/")) {
+    const { handleDashboardApi } = await import("./dashboard/http.js");
+    return handleDashboardApi(req, res, url, { config: config(), readJson, sendJson });
+  }
+
   // Every route is gated here up front (rather than per-route) so routes that
   // never had their own checkBidocSecretForRead guard (e.g. /api/messages/:id/annotate)
   // are covered too. Cross-tenant calls (bidoc's BFF) must carry a valid shared
@@ -281,6 +287,21 @@ async function handleApi(req, res, url) {
     if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req);
     if (!body.message) return sendJson(res, 400, { error: "message is required" });
+    if (body.dashboardContext) {
+      try {
+        if (['contentSupabaseUrl', 'contentSupabaseKey', 'hybridRpcName', 'indexTable', 'alertsTable'].some(key => body[key] != null)) {
+          return sendJson(res, 400, { error: 'Dashboard chat uses the server connection only' });
+        }
+        const { authorizeDashboard } = await import("./dashboard/http.js");
+        const { dashboardService } = await import("./dashboard/service.js");
+        const actor = authorizeDashboard(req);
+        const context = await dashboardService.chatContext(config(), actor, body.dashboardContext.token, body.dashboardContext.itemId);
+        body.projectId = context.projectId;
+        body.message = `${body.message}\n\nהקשר דשבורד מאומת: ${JSON.stringify(context)}\nהנתונים מתארים תצפית. בדוק את המקורות לפני הסקת מסקנות עדכניות.`;
+      } catch (error) {
+        return sendJson(res, error.status || 500, { error: error.message });
+      }
+    }
     const sessionId = body.sessionId || `session_${Date.now()}`;
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const cfg = buildRequestConfig(req, body);
