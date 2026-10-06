@@ -43,7 +43,9 @@ export default function DashboardTimeline({view,target,compact=false}) {
   const follow=scope==='plan'&&first&&last;
   const baseMin=follow?stamp(first.start):dates.length?Math.min(...dates):Date.now();
   const baseMax=follow?Math.max(baseMin,stamp(last.end)):dates.length?Math.max(...dates):baseMin+86400000;
-  const min=jump?Math.min(baseMin,stamp(jump.date)):baseMin,max=jump?Math.max(baseMax,stamp(jump.date)):baseMax;
+  const rawMin=jump?Math.min(baseMin,stamp(jump.date)):baseMin,rawMax=jump?Math.max(baseMax,stamp(jump.date)):baseMax;
+  const min=view.dateRange?.from?Math.max(rawMin,stamp(view.dateRange.from)):rawMin;
+  const max=Math.max(min,view.dateRange?.to?Math.min(rawMax,stamp(view.dateRange.to)):rawMax);
   const span=Math.max(1,max-min),pos=d=>Math.max(0,Math.min(100,(stamp(d)-min)/span*100));
   const visibleEvents=events.filter(e=>stamp(e.date)>=min&&stamp(e.date)<=max&&(!activity||e.activityKey===activity));
   const rows=tasks;

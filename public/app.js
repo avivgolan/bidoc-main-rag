@@ -1119,7 +1119,7 @@ const dashboardPopupJobs = new Map();
 const dashboardAiDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 window.__bidocRunDashboardChat = (context, { force = false } = {}) => {
   const day = dashboardAiDay();
-  const cacheKey = JSON.stringify([context.projectId, context.fileId || null, context.itemId || null, context.question.trim()]);
+  const cacheKey = JSON.stringify([context.projectId, context.fileId || null, context.itemId || null, context.dateFrom || null, context.dateTo || null, context.question.trim()]);
   for (const [key, value] of dashboardPopupJobs) if (value.day !== day) dashboardPopupJobs.delete(key);
   const previous = dashboardPopupJobs.get(cacheKey);
   if (previous && (!previous.settled || !force)) return previous;
@@ -1139,7 +1139,7 @@ window.__bidocRunDashboardChat = (context, { force = false } = {}) => {
         }
       } catch {}
     }
-    const fresh = await api('/api/dashboard/v1/refresh', { method: 'POST', body: { project_id: context.projectId, file_id: context.fileId || null } });
+    const fresh = await api('/api/dashboard/v1/refresh', { method: 'POST', body: { project_id: context.projectId, file_id: context.fileId || null, date_from: context.dateFrom || null, date_to: context.dateTo || null } });
     job.context = { ...context, token: fresh.queryToken };
     return apiStream('/api/chat', {
     method: 'POST', timeoutMs: 280000,

@@ -15,7 +15,7 @@ export function snapshotPayload(view) {
       native_status:i.status,severity:i.severity,source_revision:i.updatedAt,contribution:1 };
   }));
   return { metricVersion:METRIC_VERSION, metrics, members, sourceHealth:view.sourceHealth,
-    sourceVersions:{scheduleFile:view.schedule.fileId,scheduleAsOf:view.schedule.cohortAsOf},
+    sourceVersions:{scheduleFile:view.schedule.fileId,scheduleAsOf:view.schedule.cohortAsOf,dateRange:view.dateRange},
     capturedAt:view.computedAt, asOf:view.asOf,
     status:view.metrics.some(m=>m.status==='partial')?'partial':'ready' };
 }
@@ -32,14 +32,17 @@ export function createDashboardService({ fetchImpl=fetch, clock=()=>new Date() }
     return {c,entry};
   }
   async function projects(config) { return listDashboardProjects(reader(dashboardConnection(config))); }
-  async function overview(config,actor,{projectId,fileId=null,force=false}={}) {
+  async function overview(config,actor,{projectId,fileId=null,force=false,dateFrom=null,dateTo=null}={}) {
+    for(const value of [dateFrom,dateTo])if(value&&(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(Date.parse(value))||new Date(value).toISOString().slice(0,10)!==value))throw new DashboardError('תאריך לא תקף',400,'invalid_date_range');
+    dateFrom=dateFrom||null;dateTo=dateTo||null;
+    if(dateFrom&&dateTo&&dateFrom>dateTo)throw new DashboardError('תאריך ההתחלה חייב להיות לפני תאריך הסיום',400,'invalid_date_range');
     sweep(); const c=dashboardConnection(config); const day=projectToday(clock(),config.timezone || 'Asia/Jerusalem');
-    const key=[c.identity,actor,projectId,fileId || '',day].join('|');
+    const key=[c.identity,actor,projectId,fileId || '',day,dateFrom||'',dateTo||''].join('|');
     if(!force && cache.has(key)) return publicView(cache.get(key));
     if(inFlight.has(key)) return inFlight.get(key);
     const operation=(async()=>{
-      const loaded=await loadDashboardSources({read:reader(c),projectId,fileId,indexTable:c.indexTable,alertsTable:c.alertsTable});
-      const view=buildDashboard({...loaded,now:clock().toISOString(),asOf:day});
+      const loaded=await loadDashboardSources({read:reader(c),projectId,fileId,indexTable:c.indexTable,alertsTable:c.alertsTable,dateFrom,dateTo});
+      const view=buildDashboard({...loaded,now:clock().toISOString(),asOf:day,dateFrom,dateTo});
       const entry={view,token:randomBytes(24).toString('hex'),actor,connection:c.identity,expires:clock().getTime()+TTL};
       cache.set(key,entry); sweep(); return publicView(entry);
     })();
@@ -82,7 +85,7 @@ export function createDashboardService({ fetchImpl=fetch, clock=()=>new Date() }
   async function saveSnapshot(config,actor,token,{runKind='manual'}={}) {
     const {c,entry}=context(config,actor,token);
     // Re-read sources; a stale browser token must never publish an old result as a new observation.
-    const fresh=await overview(config,actor,{projectId:entry.view.project.id,fileId:entry.view.schedule.fileId,force:true});
+    const fresh=await overview(config,actor,{projectId:entry.view.project.id,fileId:entry.view.schedule.fileId,dateFrom:entry.view.dateRange.from,dateTo:entry.view.dateRange.to,force:true});
     const {entry:latest}=context(config,actor,fresh.queryToken);
     const payload=snapshotPayload(latest.view);
     const fingerprint=createHash('sha256').update(JSON.stringify({day:payload.asOf,version:METRIC_VERSION,members:payload.members,
@@ -103,7 +106,7 @@ export function createDashboardService({ fetchImpl=fetch, clock=()=>new Date() }
   async function chatContext(config,actor,token,itemId) {
     const {entry}=context(config,actor,token);
     const item=itemId ? (await evidence(config,actor,token,itemId)).item : null;
-    return { projectId:entry.view.project.id, projectName:entry.view.project.name, asOf:entry.view.asOf,
+    return { projectId:entry.view.project.id, projectName:entry.view.project.name, asOf:entry.view.asOf,dateRange:entry.view.dateRange,
       item:item ? {title:item.title,sourceTable:item.sourceTable,sourceId:item.sourceId,status:item.status,sourceDate:item.sourceDate} : null };
   }
   return {projects,overview,items,evidence,history,saveSnapshot,snapshotItems,chatContext};

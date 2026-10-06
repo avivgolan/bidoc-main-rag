@@ -57,3 +57,21 @@ test('safety counts only active records and reports missing coverage',()=>{
  assert.equal(metric.value,3);assert.deepEqual(metric.memberIds,['open','work','watch'].map(id=>'project_safety_items:'+id));
  f.datasets.safety.complete=false;const partial=buildDashboard(f).metrics.find(m=>m.key==='safety');assert.equal(partial.value,null);assert.equal(partial.knownCount,3);
 });
+
+test('date range is inclusive, filters metric membership and events, and includes overlapping tasks',()=>{
+ const f=fixture();f.datasets.approval.rows=[{id:'a',status:'requested',source_date:'2026-01-01'},{id:'b',status:'requested',created_at:'2026-01-31T23:00:00Z'},{id:'old',status:'requested',source_date:'2025-12-31'},{id:'none',status:'requested'}];
+ f.datasets.timelineAlerts={rows:[{id:1,data_date:'2026-01-31'},{id:2,data_date:'2026-02-01'}],complete:true};
+ f.schedule.tasks=[{task_uid:1,start_date:'2025-12-01',finish_date:'2026-02-01'},{task_uid:2,start_date:'2026-02-01',finish_date:'2026-03-01'}];
+ f.datasets.documents.rows=[{id:'doc',primary_date:'2026-01-12'},{id:'old',primary_date:'2025-01-01'}];
+ const v=buildDashboard({...f,dateFrom:'2026-01-01',dateTo:'2026-01-31'});
+ assert.equal(v.metrics.find(m=>m.key==='approvals').value,2);assert.equal(v.timeline.events.length,1);assert.equal(v.documents.length,1);assert.equal(v.schedule.taskCount,1);assert.ok(v.dateRange.excludedUndated>0);
+ assert.equal(buildDashboard(f).metrics.find(m=>m.key==='approvals').value,4);
+});
+test('range cache separates periods and snapshot refresh preserves the selected scope',async()=>{
+ let payload;const fetchImpl=async(url,opts)=>{const u=new URL(url);if(opts.method==='POST'){payload=JSON.parse(opts.body);return Response.json({snapshotId:'new'});}const rows=u.pathname.endsWith('/projects')?[{id,name:'test',is_active:true,settings:{}}]:[];return new Response(JSON.stringify(rows),{headers:{'content-range':`0-0/${rows.length}`}});};
+ const service=createDashboardService({fetchImpl});
+ const all=await service.overview(config,id,{projectId:id});const range=await service.overview(config,id,{projectId:id,dateFrom:'2026-01-01',dateTo:'2026-01-31'});
+ assert.notEqual(all.queryToken,range.queryToken);assert.equal((await service.overview(config,id,{projectId:id,dateFrom:'2026-01-01',dateTo:'2026-01-31'})).queryToken,range.queryToken);
+ await service.saveSnapshot(config,id,range.queryToken);assert.equal(payload.p_payload.sourceVersions.dateRange.from,'2026-01-01');
+ for(const dates of [{dateFrom:'2026-02-30'},{dateFrom:'2026-02-01',dateTo:'2026-01-01'}])await assert.rejects(service.overview(config,id,{projectId:id,...dates}),e=>e.code==='invalid_date_range');
+});

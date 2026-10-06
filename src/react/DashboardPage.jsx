@@ -73,6 +73,8 @@ function Details({detail,view,onClose,onAsk,onExpired}) {
 
 export function DashboardPage() {
   const [active,setActive]=useState(location.hash==='#dashboard');const [projects,setProjects]=useState([]);
+  const [dateFrom,setDateFrom]=useState(''),[dateTo,setDateTo]=useState('');
+  const [range,setRange]=useState({from:'',to:''});
   const [projectId,setProjectId]=useState('');const [fileId,setFileId]=useState('');
   const [view,setView]=useState(null);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
   const [detail,setDetail]=useState(null);const [history,setHistory]=useState(null);const [notice,setNotice]=useState('');
@@ -102,22 +104,22 @@ export function DashboardPage() {
   useEffect(()=>{
     if(!active||!projectId)return;const controller=new AbortController();const current=++generation.current;
     setView(null);setDetail(null);setError('');setLoading(true);setNotice('');setHistory(null);
-    api(`/overview?project_id=${projectId}${fileId?'&file_id='+encodeURIComponent(fileId):''}`,{signal:controller.signal})
+    api(`/overview?project_id=${projectId}${fileId?'&file_id='+encodeURIComponent(fileId):''}&date_from=${range.from}&date_to=${range.to}`,{signal:controller.signal})
       .then(r=>{if(current===generation.current)setView(r);}).catch(e=>{if(e.name!=='AbortError'&&current===generation.current)setError(e.message);})
       .finally(()=>{if(current===generation.current)setLoading(false);});
     api(`/history?project_id=${projectId}`,{signal:controller.signal}).then(r=>{if(current===generation.current)setHistory(r);}).catch(()=>{});
     return ()=>{controller.abort();generation.current++;};
-  },[active,projectId,fileId]);
+  },[active,projectId,fileId,range]);
   async function refresh() {
     const current=generation.current;setLoading(true);setError('');
-    try{const r=await api('/refresh',{body:{project_id:projectId,file_id:fileId || null}});if(current===generation.current){setView(r);setNotice('הנתונים נרעננו. מקורות הפרויקט לא שונו.');}}
+    try{const r=await api('/refresh',{body:{project_id:projectId,file_id:fileId || null,date_from:range.from,date_to:range.to}});if(current===generation.current){setView(r);setNotice('הנתונים נרעננו. מקורות הפרויקט לא שונו.');}}
     catch(e){if(current===generation.current)setError(e.message);}finally{if(current===generation.current)setLoading(false);}
   }
   function refreshExpired() {
     const current=generation.current;
     if(automaticRefresh.current?.generation===current)return automaticRefresh.current.promise;
     const job={generation:current};
-    job.promise=api('/refresh',{body:{project_id:projectId,file_id:fileId || null}}).then(r=>{
+    job.promise=api('/refresh',{body:{project_id:projectId,file_id:fileId || null,date_from:range.from,date_to:range.to}}).then(r=>{
       if(current!==generation.current)throw new DOMException('Aborted','AbortError');
       setView(r);return r;
     }).finally(()=>{if(automaticRefresh.current===job)automaticRefresh.current=null;});
@@ -142,7 +144,7 @@ export function DashboardPage() {
   function ask(item,text) {
     setDetail(null);
     if(window.__bidocRunDashboardChat){
-      const job=window.__bidocRunDashboardChat({projectId:view.project.id,projectName:view.project.name,fileId:fileId || null,token:view.queryToken,itemId:item?.id || null,
+      const job=window.__bidocRunDashboardChat({projectId:view.project.id,projectName:view.project.name,fileId:fileId || null,dateFrom:range.from,dateTo:range.to,token:view.queryToken,itemId:item?.id || null,
         question:text || `מה המצב של ״${item.title}״, על מה הוא מבוסס ומה נדרש לעשות?`});
       if(job.settled)openAi(job);else startAi(job);
     }
@@ -154,7 +156,12 @@ export function DashboardPage() {
   const partial=view?.sourceHealth.filter(s=>!s.complete).length || 0;
   return <div className="db-page" dir="rtl">
     <div className="db-appbar"><a className="db-wordmark" href="#dashboard">BIDOC<span>PROJECT CONTROL</span></a><nav aria-label="ניווט סביבת הבקרה"><button aria-pressed={section==='overview'} onClick={()=>{setSection('overview');document.getElementById("dashboard")?.scrollTo({top:0,behavior:"smooth"});}}>סקירה</button><button aria-pressed={section==='planning'} onClick={()=>{setSection('planning');document.getElementById("db-planning")?.scrollIntoView({behavior:"smooth",block:"center"});}}>תכנון ואירועים</button><button aria-pressed={section==='work'} onClick={()=>{setSection('work');document.getElementById("db-worklist")?.scrollIntoView({behavior:"smooth",block:"center"});}}>נושאים לטיפול</button></nav></div>
-    <header className="db-page-header"><div><span className="db-eyebrow">סביבת עבודה / ניהול פרויקט</span><h1>{view?.project.name || 'מרכז בקרה'}<span className="db-title-dot">.</span></h1><p>לוח בקרה ראשי</p></div><div className="db-project-picker"><label htmlFor="db-project">הפרויקט שלי</label><select id="db-project" value={projectId} onChange={e=>{setProjectId(e.target.value);setFileId('');try{localStorage.setItem('bidoc-dashboard-project',e.target.value);}catch{}}}><option value="" disabled>בחר פרויקט</option>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></div><DashboardNotifications entries={notifications.entries} toast={aiOpen&&notifications.toast?.job===aiJob?null:notifications.toast} onOpen={openAi} onDismiss={notifications.dismiss}/><button className="db-back" onClick={()=>window.__bidocActivateTab?.("chat")}>חזרה למערכת ↗</button></header>
+    <header className="db-page-header"><div><span className="db-eyebrow">סביבת עבודה / ניהול פרויקט</span><h1>{view?.project.name || 'מרכז בקרה'}<span className="db-title-dot">.</span></h1><p>לוח בקרה ראשי</p></div><div className="db-project-picker"><label htmlFor="db-project">הפרויקט שלי</label><select id="db-project" value={projectId} onChange={e=>{setProjectId(e.target.value);setFileId('');setDateFrom('');setDateTo('');setRange({from:'',to:''});try{localStorage.setItem('bidoc-dashboard-project',e.target.value);}catch{}}}><option value="" disabled>בחר פרויקט</option>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></div><DashboardNotifications entries={notifications.entries} toast={aiOpen&&notifications.toast?.job===aiJob?null:notifications.toast} onOpen={openAi} onDismiss={notifications.dismiss}/><button className="db-back" onClick={()=>window.__bidocActivateTab?.("chat")}>חזרה למערכת ↗</button></header>
+    <form className="db-date-filter" onSubmit={e=>{e.preventDefault();if(dateFrom&&dateTo&&dateFrom>dateTo)return;setRange({from:dateFrom,to:dateTo});}}>
+      <strong>טווח תאריכים</strong><label>מתאריך<input type="date" aria-label="מתאריך" value={dateFrom} max={dateTo||undefined} onChange={e=>setDateFrom(e.target.value)}/></label><label>עד תאריך<input type="date" aria-label="עד תאריך" value={dateTo} min={dateFrom||undefined} onChange={e=>setDateTo(e.target.value)}/></label><button type="submit" disabled={loading}>החל טווח</button><button type="button" onClick={()=>{setDateFrom('');setDateTo('');setRange({from:'',to:''});}}>מאז תחילת הפרויקט</button>
+      <small>{!range.from&&!range.to?'כל תקופת הפרויקט':`${range.from||'תחילת הפרויקט'} — ${range.to||'ללא הגבלת סיום'}`} · לפי תאריך המקור, ובאין תאריך — תאריך הרשומה. הלוח מציג פעילויות החופפות לטווח. המצבים הם המצבים הנוכחיים.</small>
+      {view?.dateRange?.excludedUndated>0&&<small>{view.dateRange.excludedUndated} רשומות ללא תאריך אינן נכללות בטווח.</small>}
+    </form>
     <div className="db-toolbar"><div className="db-time"><span className="db-live-dot"/><span>מצב נוכחי</span><span className="db-separator"/>נכון ל־{fmt(view?.asOf || new Date())}</div><div className="db-toolbar-actions"><button type="button" disabled={!view} onClick={()=>setDetail({type:'health'})}><Icon name="grid" size={15}/>{partial?`${partial} מקורות לא זמינים`:'מקורות ועדכניות'}</button><button type="button" disabled={!projectId||loading||saving} onClick={refresh}><Icon name="refresh" size={15}/>{loading?'מרענן…':'רענון'}</button><button type="button" disabled={!view||saving||loading||history?.available===false} onClick={save}><Icon name="save" size={15}/>{saving?'שומר…':'שמור תמונת מצב'}</button></div></div>
     {notice&&<div className="db-notice" role="status">{notice}</div>}{error&&<div className="db-error" role="alert">{error}<button type="button" onClick={refresh} disabled={!projectId||loading}>נסה שוב</button></div>}
     {aiJob&&!aiOpen&&<button className="db-ai-reopen" onClick={()=>{openAi(aiJob);}}>פתח ניתוח BIDOC AI האחרון</button>}

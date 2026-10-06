@@ -29,6 +29,15 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await page.goto('/#dashboard');
   await expect(page.locator('.db-page h1')).toContainText('פרויקט בדיקה');
   await expect(page.locator('#appSidebar')).toBeHidden();
+  await expect(page.locator('.db-date-filter').getByLabel('מתאריך',{exact:true})).toHaveValue('');
+  await page.locator('.db-date-filter').getByLabel('מתאריך',{exact:true}).fill('2026-01-01');
+  await page.locator('.db-date-filter').getByLabel('עד תאריך',{exact:true}).fill('2026-01-31');
+  const rangedRequest=page.waitForRequest(r=>r.url().includes('/overview?')&&r.url().includes('date_from=2026-01-01')&&r.url().includes('date_to=2026-01-31'));
+  await page.getByRole('button',{name:'החל טווח',exact:true}).click();await rangedRequest;
+  await page.getByRole('button',{name:'מאז תחילת הפרויקט',exact:true}).click();
+  await expect(page.locator('.db-date-filter').getByLabel('מתאריך',{exact:true})).toHaveValue('');
+  await expect(page.locator('.db-date-filter').getByLabel('עד תאריך',{exact:true})).toHaveValue('');
+
   await expect(page.locator('.ref-metric')).toHaveCount(7);
   await expect(page.locator('.db-kpi-safety .db-kpi-value')).toHaveText('0');
   const expanders=page.getByRole('button',{name:/^הגדל למסך מלא:/});

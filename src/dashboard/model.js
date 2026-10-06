@@ -79,7 +79,12 @@ export function selectCohort(rows, fileId, asOf) {
   return { rows: [...unique.values()], asOf: date, dataVersion: selected[0]?.data_version || null };
 }
 
-export function buildDashboard({ project, datasets, schedule, now, asOf }) {
+export function buildDashboard({ project, datasets, schedule, now, asOf, dateFrom=null, dateTo=null }) {
+  const filtered=Boolean(dateFrom||dateTo);
+  const inRange=value=>{const d=toIsoDate(value);return d?(!dateFrom||d>=dateFrom)&&(!dateTo||d<=dateTo):!filtered;};
+  const recordDate=(r,key)=>key==='timelineAlerts'?(r.data_date||r.created_at):key==='documents'?(r.primary_date||r.created_at):(r.source_date||r.event_date||r.first_detected_at||r.created_at||r.updated_at);
+  const excludedUndated=filtered?Object.entries(datasets).filter(([key])=>[...Object.keys(LABELS),'timelineAlerts','documents'].includes(key)).reduce((n,[key,d])=>n+d.rows.filter(r=>!toIsoDate(recordDate(r,key))).length,0):0;
+  datasets=Object.fromEntries(Object.entries(datasets).map(([key,d])=>[key,{...d,rows:[...Object.keys(LABELS),'timelineAlerts','documents'].includes(key)?d.rows.filter(r=>inRange(recordDate(r,key))):d.rows}]));
   const sourceHealth = Object.entries(datasets).map(([key, value]) => ({
     key, label: ({files:'גרסאות לוח',tasks:'פעילויות',indicators:'מדדי לו״ז',documents:'מקורות מאונדקסים',timelineAlerts:'התראות ציר הזמן',timelineLinks:'שיוכי התראות לפעילויות'})[key] || value.label || LABELS[key] || key, status: value.status,
     count: value.rows.length, complete: value.complete, reason: value.reason || null,
@@ -89,7 +94,7 @@ export function buildDashboard({ project, datasets, schedule, now, asOf }) {
   const domains = Object.keys(LABELS).filter(k=>k !== 'schedule');
   const all = domains.flatMap(domain => rows(domain).filter(validRow).map(r=>normalizeItem(r, domain, datasets[domain].table, asOf)));
   const file = schedule.file;
-  const tasks = schedule.tasks;
+  const tasks = schedule.tasks.filter(t=>!filtered||((toIsoDate(t.start_date)||toIsoDate(t.finish_date))&&(!dateTo||(toIsoDate(t.start_date)||toIsoDate(t.finish_date))<=dateTo)&&(!dateFrom||(toIsoDate(t.finish_date)||toIsoDate(t.start_date))>=dateFrom)));
   const taskKeys = new Set(tasks.map(t=>`gantt:${file?.file_id}:${t.task_uid}`));
   const cohort = selectCohort(rows('indicators'), file?.file_id, asOf);
   const indicators = cohort.rows.filter(r=>taskKeys.has(r.activity_key));
@@ -140,7 +145,7 @@ export function buildDashboard({ project, datasets, schedule, now, asOf }) {
   const activity = unique.filter(i=>i.updatedAt).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0,10);
   return {
     schemaVersion: 1, metricVersion: METRIC_VERSION, project: { id: project.id, name: project.name },
-    asOf, computedAt:now, sourceHealth, metrics,
+    asOf, computedAt:now, sourceHealth, metrics, dateRange:{from:dateFrom,to:dateTo,excludedUndated},
     attention: attention.slice(0,5), attentionTotal:attention.length, items:unique,
     breakdown: [...domains,'schedule'].map(domain=>({domain,label:LABELS[domain],complete:healthFor([domain]),
       open:unique.filter(i=>i.domain===domain&&i.open).length,

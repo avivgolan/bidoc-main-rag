@@ -51,6 +51,9 @@ last_updated: 2026-10-04
 
 ## Recent Changes
 
+- 2026-10-06 — Added dashboard from/to date controls with explicit Apply and whole-project reset (default unbounded history; no invented project start). Server validates dates/order and includes range in actor-bound cache keys. Domain records filter by source/event/detected date then created/updated; timeline uses data_date/created, documents primary_date/created, schedule tasks overlap selected bounds. Undated rows stay in default view but are excluded/reported for explicit ranges. Current lifecycle is not historical reconstruction. Snapshot refresh/source_versions and AI cache/context preserve range; final answer instructions constrain source dates. Filtered document reads scan beyond the recent-40 cap. Gantt resets on range changes and clips its axis. Ten backend tests and dashboard browser regression passed.
+
+
 - 2026-10-06 — Added seventh KPI tile for safety incidents, using existing project_safety_items read model. Counts valid open/in_progress/monitoring items, excludes resolved/mitigated/withdrawn/superseded; missing coverage yields null. Standard metric membership powers details and snapshots. Eight model tests plus dashboard UI regression passed. No schema changes.
 
 

@@ -23,7 +23,7 @@ export async function handleDashboardApi(req,res,url,{config,readJson,sendJson,s
     const path=url.pathname.replace('/api/dashboard/v1','');
     if(req.method==='GET') {
       if(path==='/projects') return sendJson(res,200,{projects:await service.projects(config)});
-      if(path==='/overview') return sendJson(res,200,await service.overview(config,actor,{projectId:query.get('project_id'),fileId:query.get('file_id')}));
+      if(path==='/overview') return sendJson(res,200,await service.overview(config,actor,{projectId:query.get('project_id'),fileId:query.get('file_id'),dateFrom:query.get('date_from'),dateTo:query.get('date_to')}));
       if(path==='/items') return sendJson(res,200,{items:service.items(config,actor,query.get('token'),query.get('metric'))});
       if(path==='/evidence') return sendJson(res,200,await service.evidence(config,actor,query.get('token'),query.get('id')));
       if(path==='/history') return sendJson(res,200,await service.history(config,query.get('project_id')));
@@ -31,8 +31,8 @@ export async function handleDashboardApi(req,res,url,{config,readJson,sendJson,s
     }
     if(req.method==='POST' && ['/refresh','/snapshots'].includes(path)) {
       const body=await readJson(req);
-      if(Object.keys(body).some(k=>!['project_id','file_id','token'].includes(k))) throw new DashboardError('שדות בקשה לא מוכרים',400);
-      if(path==='/refresh') return sendJson(res,200,await service.overview(config,actor,{projectId:body.project_id,fileId:body.file_id,force:true}));
+      if(Object.keys(body).some(k=>!['project_id','file_id','token','date_from','date_to'].includes(k))) throw new DashboardError('שדות בקשה לא מוכרים',400);
+      if(path==='/refresh') return sendJson(res,200,await service.overview(config,actor,{projectId:body.project_id,fileId:body.file_id,dateFrom:body.date_from,dateTo:body.date_to,force:true}));
       return sendJson(res,200,await service.saveSnapshot(config,actor,body.token));
     }
     return sendJson(res,404,{error:'הנתיב לא נמצא'});
