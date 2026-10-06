@@ -51,6 +51,12 @@ last_updated: 2026-10-04
 
 ## Recent Changes
 
+- 2026-10-06 — Added seventh KPI tile for safety incidents, using existing project_safety_items read model. Counts valid open/in_progress/monitoring items, excludes resolved/mitigated/withdrawn/superseded; missing coverage yields null. Standard metric membership powers details and snapshots. Eight model tests plus dashboard UI regression passed. No schema changes.
+
+
+- 2026-10-06 — Mini/fullscreen Gantt now places activity title, planned start and planned finish columns left of the bars using an LTR four-column grid with RTL titles. Compact widgets allow horizontal overflow within the Gantt. Shared vertical scrolling/date-follow preserved; build and dashboard UI regression passed including column position/date assertions.
+
+
 - 2026-10-05 — Restored immediate AI progress popup at user request. Users can wait for the answer in place or close and continue working while notifications remain active. Regression covers both waiting and closing during processing.
 
 

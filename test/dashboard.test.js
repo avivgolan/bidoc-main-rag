@@ -50,3 +50,10 @@ test('dashboard rejects anonymous, connection overrides and cross-site writes',(
   assert.throws(()=>authorizeDashboard({method:'GET',headers:{...headers,'x-project-id':id}}),e=>e.status===400);
   assert.throws(()=>authorizeDashboard({method:'POST',headers:{...headers,origin:'https://attacker.test'}}),e=>e.status===403);
 });
+
+test('safety counts only active records and reports missing coverage',()=>{
+ const f=fixture();f.datasets.safety.rows=[{id:'open',status:'open'},{id:'work',status:'in_progress'},{id:'watch',status:'monitoring'},{id:'done',status:'resolved'},{id:'mitigated',status:'mitigated'},{id:'removed',status:'open',withdrawn:true},{id:'old',status:'open',superseded:true}];
+ const metric=buildDashboard(f).metrics.find(m=>m.key==='safety');
+ assert.equal(metric.value,3);assert.deepEqual(metric.memberIds,['open','work','watch'].map(id=>'project_safety_items:'+id));
+ f.datasets.safety.complete=false;const partial=buildDashboard(f).metrics.find(m=>m.key==='safety');assert.equal(partial.value,null);assert.equal(partial.knownCount,3);
+});

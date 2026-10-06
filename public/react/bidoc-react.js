@@ -20441,11 +20441,15 @@ function Ci({ event: e, onClose: t }) {
 //#endregion
 //#region src/react/DashboardTimeline.jsx
 var J = (e) => e ? Date.parse(e) : NaN, wi = (e) => new Date(e).toLocaleDateString("he-IL", {
+	day: "2-digit",
+	month: "2-digit",
+	year: "2-digit"
+}), Y = (e) => new Date(e).toLocaleDateString("he-IL", {
 	day: "numeric",
 	month: "short",
 	year: "2-digit"
 });
-function Y({ view: e, target: t, compact: n = !1 }) {
+function Ti({ view: e, target: t, compact: n = !1 }) {
 	let [r, i] = (0, b.useState)(!1), [a, o] = (0, b.useState)(null), [s, c] = (0, b.useState)(""), l = (0, b.useRef)(null), u = (0, b.useRef)(null), d = (0, b.useId)(), [f, p] = (0, b.useState)(null);
 	function m() {
 		u.current?.hidePopover(), p(null);
@@ -20549,13 +20553,18 @@ function Y({ view: e, target: t, compact: n = !1 }) {
 							className: "db-gantt-axis",
 							"data-range-start": new Date(R).toISOString(),
 							"data-range-end": new Date(z).toISOString(),
-							children: [/* @__PURE__ */ (0, x.jsx)("span", { children: "פעילות מתוכננת" }), /* @__PURE__ */ (0, x.jsx)("div", { children: [
-								0,
-								.25,
-								.5,
-								.75,
-								1
-							].map((e) => /* @__PURE__ */ (0, x.jsx)("time", { children: wi(R + ee * e) }, e)) })]
+							children: [
+								/* @__PURE__ */ (0, x.jsx)("span", { children: "פעילות מתוכננת" }),
+								/* @__PURE__ */ (0, x.jsx)("span", { children: "תאריך התחלה" }),
+								/* @__PURE__ */ (0, x.jsx)("span", { children: "תאריך סיום" }),
+								/* @__PURE__ */ (0, x.jsx)("div", { children: [
+									0,
+									.25,
+									.5,
+									.75,
+									1
+								].map((e) => /* @__PURE__ */ (0, x.jsx)("time", { children: Y(R + ee * e) }, e)) })
+							]
 						}),
 						/* @__PURE__ */ (0, x.jsx)("div", {
 							className: "db-gantt-scroll",
@@ -20568,36 +20577,49 @@ function Y({ view: e, target: t, compact: n = !1 }) {
 							},
 							children: V.map((e) => /* @__PURE__ */ (0, x.jsxs)("div", {
 								className: `db-gantt-row ${E === e.activityKey ? "selected" : ""}`,
-								children: [/* @__PURE__ */ (0, x.jsx)("button", {
-									title: e.title,
-									onClick: () => D(E === e.activityKey ? null : e.activityKey),
-									children: e.title
-								}), /* @__PURE__ */ (0, x.jsxs)("div", {
-									className: "db-gantt-track",
-									children: [/* @__PURE__ */ (0, x.jsx)("button", {
-										className: e.milestone ? "db-gantt-diamond" : "db-gantt-bar",
-										style: {
-											left: `${te(e.start)}%`,
-											width: e.milestone ? 10 : `${Math.max(1, te(e.end) - te(e.start))}%`
-										},
-										title: `${e.title} · ${wi(J(e.start))} — ${wi(J(e.end))}`,
-										"aria-label": `פעילות: ${e.title}`,
-										onClick: () => {
-											T({
-												title: e.title,
-												date: e.start,
-												end: e.end,
-												type: "תכנון בלוח",
-												reportedPercent: e.reportedPercent
-											}), D(e.activityKey);
-										}
-									}), B.filter((t) => t.activityKey === e.activityKey).sort((e, t) => Number(t.id === a?.id) - Number(e.id === a?.id)).slice(0, 25).map((e) => /* @__PURE__ */ (0, x.jsx)("button", {
-										className: `db-event-dot ${a?.id === e.id ? "is-target" : ""}`,
-										style: { left: `${te(e.date)}%` },
-										...g(e),
-										"aria-label": `התראה: ${e.title}`
-									}, e.id))]
-								})]
+								children: [
+									/* @__PURE__ */ (0, x.jsx)("button", {
+										title: e.title,
+										onClick: () => D(E === e.activityKey ? null : e.activityKey),
+										children: e.title
+									}),
+									/* @__PURE__ */ (0, x.jsx)("time", {
+										className: "db-task-date",
+										dateTime: e.start,
+										children: wi(e.start)
+									}),
+									/* @__PURE__ */ (0, x.jsx)("time", {
+										className: "db-task-date",
+										dateTime: e.end,
+										children: wi(e.end)
+									}),
+									/* @__PURE__ */ (0, x.jsxs)("div", {
+										className: "db-gantt-track",
+										children: [/* @__PURE__ */ (0, x.jsx)("button", {
+											className: e.milestone ? "db-gantt-diamond" : "db-gantt-bar",
+											style: {
+												left: `${te(e.start)}%`,
+												width: e.milestone ? 10 : `${Math.max(1, te(e.end) - te(e.start))}%`
+											},
+											title: `${e.title} · ${Y(J(e.start))} — ${Y(J(e.end))}`,
+											"aria-label": `פעילות: ${e.title}`,
+											onClick: () => {
+												T({
+													title: e.title,
+													date: e.start,
+													end: e.end,
+													type: "תכנון בלוח",
+													reportedPercent: e.reportedPercent
+												}), D(e.activityKey);
+											}
+										}), B.filter((t) => t.activityKey === e.activityKey).sort((e, t) => Number(t.id === a?.id) - Number(e.id === a?.id)).slice(0, 25).map((e) => /* @__PURE__ */ (0, x.jsx)("button", {
+											className: `db-event-dot ${a?.id === e.id ? "is-target" : ""}`,
+											style: { left: `${te(e.date)}%` },
+											...g(e),
+											"aria-label": `התראה: ${e.title}`
+										}, e.id))]
+									})
+								]
 							}, e.id))
 						}),
 						!O.length && /* @__PURE__ */ (0, x.jsx)("p", {
@@ -20657,7 +20679,7 @@ function Y({ view: e, target: t, compact: n = !1 }) {
 							className: "db-feed-event",
 							onClick: () => T(e),
 							children: [/* @__PURE__ */ (0, x.jsx)("i", {}), /* @__PURE__ */ (0, x.jsxs)("span", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: e.title }), /* @__PURE__ */ (0, x.jsxs)("small", { children: [
-								wi(J(e.date)),
+								Y(J(e.date)),
 								" · ",
 								e.type || "התראה",
 								" · ",
@@ -20703,9 +20725,10 @@ function Y({ view: e, target: t, compact: n = !1 }) {
 }
 //#endregion
 //#region src/react/DashboardOverview.jsx
-var Ti = (e) => e == null ? "—" : e.toLocaleString("he-IL"), Ei = (e) => e ? new Date(e).toLocaleDateString("he-IL") : "לא דווח";
-function Di({ kind: e }) {
+var Ei = (e) => e == null ? "—" : e.toLocaleString("he-IL"), Di = (e) => e ? new Date(e).toLocaleDateString("he-IL") : "לא דווח";
+function Oi({ kind: e }) {
 	let t = {
+		safety: /* @__PURE__ */ (0, x.jsx)(x.Fragment, { children: /* @__PURE__ */ (0, x.jsx)("path", { d: "M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6zM12 7v6m0 3v1" }) }),
 		progress: /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("rect", {
 			x: "4",
 			y: "5",
@@ -20738,7 +20761,7 @@ function Di({ kind: e }) {
 		children: t[e] || t.decisions
 	});
 }
-function Oi({ tasks: e }) {
+function ki({ tasks: e }) {
 	let t = e.filter((e) => e.end && Number.isFinite(Date.parse(e.end))).map((e) => Date.parse(e.end)).sort((e, t) => e - t);
 	if (!t.length) return /* @__PURE__ */ (0, x.jsx)("div", {
 		className: "ref-no-chart",
@@ -20817,13 +20840,21 @@ function Oi({ tasks: e }) {
 		] })]
 	});
 }
-function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, scheduleTarget: a, pendingJobs: o = [] }) {
+function Ai({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, scheduleTarget: a, pendingJobs: o = [] }) {
 	let [s, c] = (0, b.useState)(""), l = (t) => e.metrics.find((e) => e.key === t), u = {
 		key: "attention",
 		label: "נושאים לטיפול",
 		value: e.attentionTotal,
 		note: "נושאים תקפים שסומנו לתשומת לב או בעלי חריג פתוח."
 	}, d = [
+		{
+			...l("safety"),
+			key: "safety",
+			label: "אירועי בטיחות",
+			color: "orange",
+			icon: "safety",
+			note: "פתוחים, בטיפול או במעקב"
+		},
 		{
 			...l("progress"),
 			label: "התקדמות כוללת",
@@ -20880,7 +20911,7 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 				children: [
 					/* @__PURE__ */ (0, x.jsx)("span", {
 						className: "ref-metric-icon",
-						children: /* @__PURE__ */ (0, x.jsx)(Di, { kind: e.icon })
+						children: /* @__PURE__ */ (0, x.jsx)(Oi, { kind: e.icon })
 					}),
 					/* @__PURE__ */ (0, x.jsxs)("span", {
 						className: "ref-metric-content",
@@ -20888,7 +20919,7 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 							/* @__PURE__ */ (0, x.jsx)("b", { children: e.label }),
 							/* @__PURE__ */ (0, x.jsxs)("strong", {
 								className: "db-kpi-value",
-								children: [Ti(e.value), e.unit === "percent" && e.value != null ? "%" : ""]
+								children: [Ei(e.value), e.unit === "percent" && e.value != null ? "%" : ""]
 							}),
 							/* @__PURE__ */ (0, x.jsx)("small", { children: e.note })
 						]
@@ -20924,13 +20955,13 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 											className: `ref-issue-icon ${o.some((t) => t.context.itemId === e.id) ? "db-ai-pulse" : ""}`,
 											"aria-label": o.some((t) => t.context.itemId === e.id) ? "AI מנתח את הנושא" : void 0,
 											"aria-busy": o.some((t) => t.context.itemId === e.id),
-											children: /* @__PURE__ */ (0, x.jsx)(Di, { kind: t === 0 ? "critical" : t === 1 ? "approvals" : "attention" })
+											children: /* @__PURE__ */ (0, x.jsx)(Oi, { kind: t === 0 ? "critical" : t === 1 ? "approvals" : "attention" })
 										}),
 										/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("h3", {
 											title: e.title,
 											children: e.title
-										}), /* @__PURE__ */ (0, x.jsx)("p", { children: e.overdueDays > 0 ? `מועד היעד חלף ב־${Ti(e.overdueDays)} ימים` : e.reasons?.[0] || "נדרשת בדיקת הנושא" })] }),
-										/* @__PURE__ */ (0, x.jsx)("time", { children: Ei(e.sourceDate) })
+										}), /* @__PURE__ */ (0, x.jsx)("p", { children: e.overdueDays > 0 ? `מועד היעד חלף ב־${Ei(e.overdueDays)} ימים` : e.reasons?.[0] || "נדרשת בדיקת הנושא" })] }),
+										/* @__PURE__ */ (0, x.jsx)("time", { children: Di(e.sourceDate) })
 									]
 								}),
 								/* @__PURE__ */ (0, x.jsx)("p", {
@@ -20987,19 +21018,19 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "ref-schedule-stats",
 							children: [
-								/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: "סיום מתוכנן" }), /* @__PURE__ */ (0, x.jsx)("b", { children: Ei(f.endDate) })] }),
+								/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: "סיום מתוכנן" }), /* @__PURE__ */ (0, x.jsx)("b", { children: Di(f.endDate) })] }),
 								/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: "תאריך דיווח בלוח" }), /* @__PURE__ */ (0, x.jsx)("b", {
 									className: "ref-red",
-									children: Ei(f.sourceDate)
+									children: Di(f.sourceDate)
 								})] }),
-								/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: "התקדמות" }), /* @__PURE__ */ (0, x.jsx)("b", { children: Ti(l("progress").value) })] })
+								/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("small", { children: "התקדמות" }), /* @__PURE__ */ (0, x.jsx)("b", { children: Ei(l("progress").value) })] })
 							]
 						}),
 						/* @__PURE__ */ (0, x.jsxs)("div", {
 							className: "ref-chart-title",
 							children: [/* @__PURE__ */ (0, x.jsx)("h3", { children: "תכנון מצטבר" }), /* @__PURE__ */ (0, x.jsx)("span", { children: "● תאריכי סיום בלוח" })]
 						}),
-						/* @__PURE__ */ (0, x.jsx)(Oi, { tasks: f.timeline }),
+						/* @__PURE__ */ (0, x.jsx)(ki, { tasks: f.timeline }),
 						/* @__PURE__ */ (0, x.jsxs)("p", {
 							className: "ref-data-note",
 							children: [f.status === "stale" ? "נדרש אימות עדכניות הלוח. " : "", "הגרף מציג תכנון; אין בסיס להשוואת ביצוע בפועל."]
@@ -21018,7 +21049,7 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 									}),
 									children: [/* @__PURE__ */ (0, x.jsx)("strong", {
 										className: "ref-orange",
-										children: Ti(l("schedule").value)
+										children: Ei(l("schedule").value)
 									}), /* @__PURE__ */ (0, x.jsx)("span", { children: "התראות פתוחות" })]
 								}),
 								/* @__PURE__ */ (0, x.jsxs)("button", {
@@ -21069,7 +21100,7 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 						].map((e, t) => /* @__PURE__ */ (0, x.jsxs)("button", {
 							className: "ref-ai-question",
 							onClick: () => r(null, e),
-							children: [/* @__PURE__ */ (0, x.jsx)(Di, { kind: [
+							children: [/* @__PURE__ */ (0, x.jsx)(Oi, { kind: [
 								"progress",
 								"attention",
 								"approvals",
@@ -21105,9 +21136,9 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 									metric: e.metrics.find((e) => e.key === "approvals")
 								}),
 								children: [
-									Ei(e.captured_at),
+									Di(e.captured_at),
 									" · אישורים ",
-									Ti(e.metrics.find((e) => e.key === "approvals")?.value)
+									Ei(e.metrics.find((e) => e.key === "approvals")?.value)
 								]
 							}, e.id))]
 						})
@@ -21116,7 +21147,7 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 				/* @__PURE__ */ (0, x.jsx)(yi, {
 					title: "לו״ז וציר אירועים",
 					className: "ref-gantt",
-					children: /* @__PURE__ */ (0, x.jsx)(Y, {
+					children: /* @__PURE__ */ (0, x.jsx)(Ti, {
 						view: e,
 						target: a,
 						compact: !0
@@ -21130,12 +21161,12 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 						children: "כיסוי ←"
 					})] }), e.documents.slice(0, 4).map((e) => /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "ref-doc-row",
-						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: /* @__PURE__ */ (0, x.jsx)(Di, { kind: "decisions" }) }), /* @__PURE__ */ (0, x.jsxs)("div", { children: [e.url ? /* @__PURE__ */ (0, x.jsx)("a", {
+						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: /* @__PURE__ */ (0, x.jsx)(Oi, { kind: "decisions" }) }), /* @__PURE__ */ (0, x.jsxs)("div", { children: [e.url ? /* @__PURE__ */ (0, x.jsx)("a", {
 							href: e.url,
 							target: "_blank",
 							rel: "noreferrer",
 							children: e.title
-						}) : /* @__PURE__ */ (0, x.jsx)("b", { children: e.title }), /* @__PURE__ */ (0, x.jsx)("small", { children: Ei(e.ingestedAt) })] })]
+						}) : /* @__PURE__ */ (0, x.jsx)("b", { children: e.title }), /* @__PURE__ */ (0, x.jsx)("small", { children: Di(e.ingestedAt) })] })]
 					}, e.id))]
 				}),
 				/* @__PURE__ */ (0, x.jsxs)(yi, {
@@ -21147,7 +21178,7 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 							type: "item",
 							item: e
 						}),
-						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: /* @__PURE__ */ (0, x.jsx)(Di, { kind: "progress" }) }), /* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("b", { children: e.title }), /* @__PURE__ */ (0, x.jsxs)("small", { children: [Ei(e.updatedAt), " · עדכון רשומה"] })] })]
+						children: [/* @__PURE__ */ (0, x.jsx)("span", { children: /* @__PURE__ */ (0, x.jsx)(Oi, { kind: "progress" }) }), /* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("b", { children: e.title }), /* @__PURE__ */ (0, x.jsxs)("small", { children: [Di(e.updatedAt), " · עדכון רשומה"] })] })]
 					}, e.id))]
 				})
 			]
@@ -21156,7 +21187,7 @@ function ki({ view: e, history: t, onDetail: n, onAsk: r, onSchedule: i, schedul
 }
 //#endregion
 //#region src/react/DashboardAiDialog.jsx
-function Ai({ job: e, onClose: t, onRefresh: n }) {
+function ji({ job: e, onClose: t, onRefresh: n }) {
 	let r = (0, b.useRef)(null), i = (0, b.useRef)(null), [a, o] = (0, b.useState)(null), [s, c] = (0, b.useState)(""), [l, u] = (0, b.useState)(!1);
 	(0, b.useEffect)(() => (r.current?.showModal(), () => r.current?.close()), []), (0, b.useEffect)(() => {
 		let t = !0;
@@ -21263,15 +21294,15 @@ function Ai({ job: e, onClose: t, onRefresh: n }) {
 }
 //#endregion
 //#region src/react/DashboardPage.jsx
-var ji = new Intl.DateTimeFormat("he-IL", {
+var Mi = new Intl.DateTimeFormat("he-IL", {
 	day: "numeric",
 	month: "short",
 	year: "numeric"
-}), Mi = (e) => {
+}), Ni = (e) => {
 	if (!e) return "לא דווח";
 	let t = new Date(e);
-	return Number.isNaN(t.getTime()) ? "לא דווח" : ji.format(t);
-}, Ni = (e) => e == null ? "—" : new Intl.NumberFormat("he-IL").format(e), Pi = {
+	return Number.isNaN(t.getTime()) ? "לא דווח" : Mi.format(t);
+}, Pi = (e) => e == null ? "—" : new Intl.NumberFormat("he-IL").format(e), Fi = {
 	intelligence: "החלטות",
 	approval: "אישורים",
 	question: "שאלות פתוחות",
@@ -21282,7 +21313,7 @@ var ji = new Intl.DateTimeFormat("he-IL", {
 	progress: "ביצוע",
 	conflict: "חוזים",
 	schedule: "לו״ז"
-}, Fi = {
+}, Ii = {
 	critical: "קריטי",
 	high: "גבוה",
 	medium: "בינוני",
@@ -21295,7 +21326,7 @@ var ji = new Intl.DateTimeFormat("he-IL", {
 	empty: "אין פריטים",
 	error: "לא זמין"
 };
-async function Ii(e, { signal: t, body: n } = {}) {
+async function Li(e, { signal: t, body: n } = {}) {
 	let r = await fetch(`/api/dashboard/v1${e}`, {
 		signal: t,
 		cache: "no-store",
@@ -21309,7 +21340,7 @@ async function Ii(e, { signal: t, body: n } = {}) {
 	});
 	return i;
 }
-function Li({ name: e, size: t = 20 }) {
+function Ri({ name: e, size: t = 20 }) {
 	let n = {
 		grid: /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [
 			/* @__PURE__ */ (0, x.jsx)("rect", {
@@ -21373,18 +21404,18 @@ function Li({ name: e, size: t = 20 }) {
 		children: n[e] || n.grid
 	});
 }
-function Ri({ children: e }) {
+function zi({ children: e }) {
 	return /* @__PURE__ */ (0, x.jsxs)("div", {
 		className: "db-empty",
-		children: [/* @__PURE__ */ (0, x.jsx)(Li, { name: "document" }), /* @__PURE__ */ (0, x.jsx)("p", { children: e })]
+		children: [/* @__PURE__ */ (0, x.jsx)(Ri, { name: "document" }), /* @__PURE__ */ (0, x.jsx)("p", { children: e })]
 	});
 }
-function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
+function Bi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 	let a = (0, b.useRef)(null), [o, s] = (0, b.useState)(null), [c, l] = (0, b.useState)(""), u = (0, b.useRef)(null);
 	(0, b.useEffect)(() => (a.current?.showModal(), () => a.current?.close()), []), (0, b.useEffect)(() => {
 		s(null), l("");
 		let n = new AbortController(), r;
-		return e.type === "item" && (r = `/evidence?token=${t.queryToken}&id=${encodeURIComponent(e.item.id)}`), e.type === "metric" && (r = `/items?token=${t.queryToken}&metric=${encodeURIComponent(e.metric.key)}`), e.type === "historyItems" && (r = `/snapshot-items?project_id=${t.project.id}&snapshot_id=${e.snapshot.id}&metric=${e.metric.key}`), r ? Ii(r, { signal: n.signal }).then(s).catch(async (t) => {
+		return e.type === "item" && (r = `/evidence?token=${t.queryToken}&id=${encodeURIComponent(e.item.id)}`), e.type === "metric" && (r = `/items?token=${t.queryToken}&metric=${encodeURIComponent(e.metric.key)}`), e.type === "historyItems" && (r = `/snapshot-items?project_id=${t.project.id}&snapshot_id=${e.snapshot.id}&metric=${e.metric.key}`), r ? Li(r, { signal: n.signal }).then(s).catch(async (t) => {
 			if (!n.signal.aborted) if (t.code === "context_expired" && u.current !== e) {
 				u.current = e;
 				try {
@@ -21395,7 +21426,7 @@ function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 			} else t.name !== "AbortError" && l(t.message);
 		}) : s({}), () => n.abort();
 	}, [e, t.queryToken]);
-	let d = e.type === "item" ? e.item.title : e.type === "metric" ? e.metric.label : e.type === "health" ? "עדכניות וכיסוי המידע" : e.type === "schedule" ? "לוח הזמנים — קריאה בלבד" : e.type === "historyItems" ? `${e.metric.label} · ${Mi(e.snapshot.as_of_date)}` : "תמונות מצב שמורות";
+	let d = e.type === "item" ? e.item.title : e.type === "metric" ? e.metric.label : e.type === "health" ? "עדכניות וכיסוי המידע" : e.type === "schedule" ? "לוח הזמנים — קריאה בלבד" : e.type === "historyItems" ? `${e.metric.label} · ${Ni(e.snapshot.as_of_date)}` : "תמונות מצב שמורות";
 	return /* @__PURE__ */ (0, x.jsxs)("dialog", {
 		ref: a,
 		className: "db-dialog",
@@ -21410,7 +21441,7 @@ function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 			type: "button",
 			"aria-label": "סגור פרטים",
 			onClick: n,
-			children: /* @__PURE__ */ (0, x.jsx)(Li, { name: "close" })
+			children: /* @__PURE__ */ (0, x.jsx)(Ri, { name: "close" })
 		})] }), /* @__PURE__ */ (0, x.jsxs)("div", {
 			className: "db-dialog-body",
 			children: [
@@ -21428,23 +21459,23 @@ function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 						className: "db-explanation",
 						children: e.metric.note
 					}),
-					o?.items?.length === 0 && /* @__PURE__ */ (0, x.jsx)(Ri, { children: "אין פריטים במדד זה. מידע חסר מפורט בכיסוי המקורות." }),
+					o?.items?.length === 0 && /* @__PURE__ */ (0, x.jsx)(zi, { children: "אין פריטים במדד זה. מידע חסר מפורט בכיסוי המקורות." }),
 					o?.items?.map((e) => /* @__PURE__ */ (0, x.jsxs)("article", {
 						className: "db-detail-row",
 						children: [
 							/* @__PURE__ */ (0, x.jsx)("strong", { children: e.title }),
 							/* @__PURE__ */ (0, x.jsx)("p", { children: e.summary }),
 							/* @__PURE__ */ (0, x.jsxs)("small", { children: [
-								Pi[e.domain],
+								Fi[e.domain],
 								" · ",
-								Mi(e.sourceDate),
+								Ni(e.sourceDate),
 								" · ",
 								e.closed ? "סגור במקור" : "מצב: " + e.status
 							] }),
 							/* @__PURE__ */ (0, x.jsxs)("button", {
 								type: "button",
 								onClick: () => r(e),
-								children: ["שאל את BIDoc על הפריט ", /* @__PURE__ */ (0, x.jsx)(Li, {
+								children: ["שאל את BIDoc על הפריט ", /* @__PURE__ */ (0, x.jsx)(Ri, {
 									name: "arrow",
 									size: 14
 								})]
@@ -21461,20 +21492,20 @@ function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 						className: "db-fact-grid",
 						children: [
 							/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("dt", { children: "מצב במקור" }), /* @__PURE__ */ (0, x.jsx)("dd", { children: o.item.status })] }),
-							/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("dt", { children: "מועד יעד" }), /* @__PURE__ */ (0, x.jsx)("dd", { children: Mi(o.item.dueDate) })] }),
+							/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("dt", { children: "מועד יעד" }), /* @__PURE__ */ (0, x.jsx)("dd", { children: Ni(o.item.dueDate) })] }),
 							/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("dt", { children: "אחראי" }), /* @__PURE__ */ (0, x.jsx)("dd", { children: o.item.owner || "לא זוהה" })] }),
-							/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("dt", { children: "עודכן במקור" }), /* @__PURE__ */ (0, x.jsx)("dd", { children: Mi(o.item.updatedAt) })] })
+							/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("dt", { children: "עודכן במקור" }), /* @__PURE__ */ (0, x.jsx)("dd", { children: Ni(o.item.updatedAt) })] })
 						]
 					}),
 					/* @__PURE__ */ (0, x.jsx)("h3", { children: "הראיות שמאחורי הנושא" }),
-					!o.sources?.length && /* @__PURE__ */ (0, x.jsx)(Ri, { children: o.note || "לא נמצאו מקורות מקושרים לפריט זה. אין בכך אימות של המסקנה." }),
+					!o.sources?.length && /* @__PURE__ */ (0, x.jsx)(zi, { children: o.note || "לא נמצאו מקורות מקושרים לפריט זה. אין בכך אימות של המסקנה." }),
 					o.sources?.map((e) => /* @__PURE__ */ (0, x.jsxs)("article", {
 						className: "db-evidence",
 						children: [
 							/* @__PURE__ */ (0, x.jsxs)("small", { children: [
 								e.sourceTable,
 								" · ",
-								Mi(e.date)
+								Ni(e.date)
 							] }),
 							/* @__PURE__ */ (0, x.jsx)("blockquote", { children: e.excerpt || "אין ציטוט שמור" }),
 							/* @__PURE__ */ (0, x.jsxs)("bdi", { children: ["מזהה מקור: ", e.sourceId] }),
@@ -21490,7 +21521,7 @@ function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 						type: "button",
 						className: "db-primary",
 						onClick: () => r(o.item),
-						children: [/* @__PURE__ */ (0, x.jsx)(Li, { name: "spark" }), "שאל את BIDoc"]
+						children: [/* @__PURE__ */ (0, x.jsx)(Ri, { name: "spark" }), "שאל את BIDoc"]
 					})
 				] }),
 				e.type === "health" && /* @__PURE__ */ (0, x.jsxs)(x.Fragment, { children: [/* @__PURE__ */ (0, x.jsx)("p", {
@@ -21499,11 +21530,11 @@ function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 				}), t.sourceHealth.map((e) => /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "db-health-row",
 					children: [
-						/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: e.label }), /* @__PURE__ */ (0, x.jsx)("small", { children: e.reason || `עדכון רשומה אחרון: ${Mi(e.sourceUpdatedAt)}` })] }),
-						/* @__PURE__ */ (0, x.jsxs)("span", { children: [Ni(e.count), " רשומות"] }),
+						/* @__PURE__ */ (0, x.jsxs)("div", { children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: e.label }), /* @__PURE__ */ (0, x.jsx)("small", { children: e.reason || `עדכון רשומה אחרון: ${Ni(e.sourceUpdatedAt)}` })] }),
+						/* @__PURE__ */ (0, x.jsxs)("span", { children: [Pi(e.count), " רשומות"] }),
 						/* @__PURE__ */ (0, x.jsx)("span", {
 							className: `db-badge is-${e.status}`,
-							children: Fi[e.status] || e.status
+							children: Ii[e.status] || e.status
 						})
 					]
 				}, e.key))] }),
@@ -21515,16 +21546,16 @@ function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 					t.schedule.timeline.map((e) => /* @__PURE__ */ (0, x.jsxs)("div", {
 						className: "db-detail-row",
 						children: [/* @__PURE__ */ (0, x.jsx)("strong", { children: e.title }), /* @__PURE__ */ (0, x.jsxs)("p", { children: [
-							Mi(e.start),
+							Ni(e.start),
 							" — ",
-							Mi(e.end)
+							Ni(e.end)
 						] })]
 					}, e.id)),
 					/* @__PURE__ */ (0, x.jsxs)("p", {
 						className: "db-footnote",
 						children: [
 							"פעילויות בגרסה הנבחרת; ",
-							Ni(t.schedule.taskCount),
+							Pi(t.schedule.taskCount),
 							" פעילויות בלוח המקור."
 						]
 					})
@@ -21542,13 +21573,13 @@ function zi({ detail: e, view: t, onClose: n, onAsk: r, onExpired: i }) {
 							e.source_id
 						] }), /* @__PURE__ */ (0, x.jsxs)("p", { children: ["מצב בזמן השמירה: ", e.native_status] })]
 					}, e.member_key)),
-					o?.rows?.length === 0 && /* @__PURE__ */ (0, x.jsx)(Ri, { children: "אין פריטים שמורים למדד זה." })
+					o?.rows?.length === 0 && /* @__PURE__ */ (0, x.jsx)(zi, { children: "אין פריטים שמורים למדד זה." })
 				] })
 			]
 		})]
 	});
 }
-function Bi() {
+function Vi() {
 	let [e, t] = (0, b.useState)(location.hash === "#dashboard"), [n, r] = (0, b.useState)([]), [i, a] = (0, b.useState)(""), [o, s] = (0, b.useState)(""), [c, l] = (0, b.useState)(null), [u, d] = (0, b.useState)(!1), [f, p] = (0, b.useState)(""), [m, h] = (0, b.useState)(null), [g, _] = (0, b.useState)(null), [v, y] = (0, b.useState)(""), [S, C] = (0, b.useState)(!1), [w, T] = (0, b.useState)(7), [E, D] = (0, b.useState)(""), O = (0, b.useRef)(0), k = (0, b.useRef)(null), [A, j] = (0, b.useState)(null), [M, N] = (0, b.useState)(!1), P = gi();
 	(0, b.useEffect)(() => {
 		M && P.toast?.job === A && P.read(A);
@@ -21573,7 +21604,7 @@ function Bi() {
 	}, []), (0, b.useEffect)(() => {
 		if (!e || n.length) return;
 		let t = new AbortController();
-		return Ii("/projects", { signal: t.signal }).then((e) => {
+		return Li("/projects", { signal: t.signal }).then((e) => {
 			r(e.projects);
 			let t;
 			try {
@@ -21588,13 +21619,13 @@ function Bi() {
 	}, [e, n.length]), (0, b.useEffect)(() => {
 		if (!e || !i) return;
 		let t = new AbortController(), n = ++O.current;
-		return l(null), h(null), p(""), d(!0), y(""), _(null), Ii(`/overview?project_id=${i}${o ? "&file_id=" + encodeURIComponent(o) : ""}`, { signal: t.signal }).then((e) => {
+		return l(null), h(null), p(""), d(!0), y(""), _(null), Li(`/overview?project_id=${i}${o ? "&file_id=" + encodeURIComponent(o) : ""}`, { signal: t.signal }).then((e) => {
 			n === O.current && l(e);
 		}).catch((e) => {
 			e.name !== "AbortError" && n === O.current && p(e.message);
 		}).finally(() => {
 			n === O.current && d(!1);
-		}), Ii(`/history?project_id=${i}`, { signal: t.signal }).then((e) => {
+		}), Li(`/history?project_id=${i}`, { signal: t.signal }).then((e) => {
 			n === O.current && _(e);
 		}).catch(() => {}), () => {
 			t.abort(), O.current++;
@@ -21608,7 +21639,7 @@ function Bi() {
 		let e = O.current;
 		d(!0), p("");
 		try {
-			let t = await Ii("/refresh", { body: {
+			let t = await Li("/refresh", { body: {
 				project_id: i,
 				file_id: o || null
 			} });
@@ -21623,7 +21654,7 @@ function Bi() {
 		let e = O.current;
 		if (k.current?.generation === e) return k.current.promise;
 		let t = { generation: e };
-		return t.promise = Ii("/refresh", { body: {
+		return t.promise = Li("/refresh", { body: {
 			project_id: i,
 			file_id: o || null
 		} }).then((t) => {
@@ -21637,10 +21668,10 @@ function Bi() {
 		let e = O.current;
 		C(!0), p("");
 		try {
-			let t = await Ii("/snapshots", { body: { token: c.queryToken } });
+			let t = await Li("/snapshots", { body: { token: c.queryToken } });
 			if (e !== O.current) return;
 			l(t.overview), y(t.saved.reused ? "תמונת מצב זהה כבר שמורה." : "תמונת המצב נשמרה.");
-			let n = await Ii(`/history?project_id=${i}`);
+			let n = await Li(`/history?project_id=${i}`);
 			e === O.current && _(n);
 		} catch (t) {
 			e === O.current && p(t.message);
@@ -21664,11 +21695,11 @@ function Bi() {
 		try {
 			let t;
 			try {
-				t = await Ii("/evidence?token=" + encodeURIComponent(c.queryToken) + "&id=" + encodeURIComponent(e.id));
+				t = await Li("/evidence?token=" + encodeURIComponent(c.queryToken) + "&id=" + encodeURIComponent(e.id));
 			} catch (n) {
 				if (n.code !== "context_expired") throw n;
 				let r = await re();
-				t = await Ii("/evidence?token=" + encodeURIComponent(r.queryToken) + "&id=" + encodeURIComponent(e.id));
+				t = await Li("/evidence?token=" + encodeURIComponent(r.queryToken) + "&id=" + encodeURIComponent(e.id));
 			}
 			r(t.sources || []);
 		} catch {
@@ -21796,7 +21827,7 @@ function Bi() {
 						/* @__PURE__ */ (0, x.jsx)("span", { children: "מצב נוכחי" }),
 						/* @__PURE__ */ (0, x.jsx)("span", { className: "db-separator" }),
 						"נכון ל־",
-						Mi(c?.asOf || /* @__PURE__ */ new Date())
+						Ni(c?.asOf || /* @__PURE__ */ new Date())
 					]
 				}), /* @__PURE__ */ (0, x.jsxs)("div", {
 					className: "db-toolbar-actions",
@@ -21805,7 +21836,7 @@ function Bi() {
 							type: "button",
 							disabled: !c,
 							onClick: () => h({ type: "health" }),
-							children: [/* @__PURE__ */ (0, x.jsx)(Li, {
+							children: [/* @__PURE__ */ (0, x.jsx)(Ri, {
 								name: "grid",
 								size: 15
 							}), se ? `${se} מקורות לא זמינים` : "מקורות ועדכניות"]
@@ -21814,7 +21845,7 @@ function Bi() {
 							type: "button",
 							disabled: !i || u || S,
 							onClick: ne,
-							children: [/* @__PURE__ */ (0, x.jsx)(Li, {
+							children: [/* @__PURE__ */ (0, x.jsx)(Ri, {
 								name: "refresh",
 								size: 15
 							}), u ? "מרענן…" : "רענון"]
@@ -21823,7 +21854,7 @@ function Bi() {
 							type: "button",
 							disabled: !c || S || u || g?.available === !1,
 							onClick: ie,
-							children: [/* @__PURE__ */ (0, x.jsx)(Li, {
+							children: [/* @__PURE__ */ (0, x.jsx)(Ri, {
 								name: "save",
 								size: 15
 							}), S ? "שומר…" : "שמור תמונת מצב"]
@@ -21862,8 +21893,8 @@ function Bi() {
 					/* @__PURE__ */ (0, x.jsx)("p", { children: "מחבר את תמונת הפרויקט מהמקורות…" })
 				]
 			}),
-			!c && !u && !f && /* @__PURE__ */ (0, x.jsx)(Ri, { children: B ? "טוען את סביבת העבודה…" : n.length ? "בחר פרויקט כדי להציג את הנתונים." : "לא נמצאו פרויקטים פעילים בחיבור." }),
-			c && /* @__PURE__ */ (0, x.jsx)(ki, {
+			!c && !u && !f && /* @__PURE__ */ (0, x.jsx)(zi, { children: B ? "טוען את סביבת העבודה…" : n.length ? "בחר פרויקט כדי להציג את הנתונים." : "לא נמצאו פרויקטים פעילים בחיבור." }),
+			c && /* @__PURE__ */ (0, x.jsx)(Ai, {
 				view: c,
 				history: g,
 				onDetail: h,
@@ -21887,14 +21918,14 @@ function Bi() {
 					}, e.id))
 				})]
 			}),
-			m && c && /* @__PURE__ */ (0, x.jsx)(zi, {
+			m && c && /* @__PURE__ */ (0, x.jsx)(Bi, {
 				detail: m,
 				view: c,
 				onClose: () => h(null),
 				onAsk: oe,
 				onExpired: re
 			}),
-			M && A && /* @__PURE__ */ (0, x.jsx)(Ai, {
+			M && A && /* @__PURE__ */ (0, x.jsx)(ji, {
 				job: A,
 				onClose: () => N(!1),
 				onRefresh: () => I(window.__bidocRunDashboardChat(A.context, { force: !0 }))
@@ -21904,36 +21935,36 @@ function Bi() {
 }
 //#endregion
 //#region src/react/main.jsx
-var Vi = /* @__PURE__ */ new WeakMap();
-function Hi({ label: e = "React bridge ready" }) {
+var Hi = /* @__PURE__ */ new WeakMap();
+function Ui({ label: e = "React bridge ready" }) {
 	return /* @__PURE__ */ (0, x.jsx)("span", {
 		className: "reactBridgeStatus",
 		"data-react-ready": "true",
 		children: e
 	});
 }
-var Ui = {
-	status: Hi,
+var Wi = {
+	status: Ui,
 	settings: je,
 	workflow: Ie,
 	insights: $e,
 	schedule: Tn,
 	contracts: hi,
-	dashboard: Bi
+	dashboard: Vi
 };
-function Wi(e) {
-	let t = Ui[e.dataset.reactIsland];
-	if (!t || Vi.has(e)) return !1;
+function Gi(e) {
+	let t = Wi[e.dataset.reactIsland];
+	if (!t || Hi.has(e)) return !1;
 	let n = e.dataset.reactProps ? JSON.parse(e.dataset.reactProps) : {}, r = (0, y.createRoot)(e);
-	return r.render(/* @__PURE__ */ (0, x.jsx)(b.StrictMode, { children: /* @__PURE__ */ (0, x.jsx)(t, { ...n }) })), Vi.set(e, r), !0;
+	return r.render(/* @__PURE__ */ (0, x.jsx)(b.StrictMode, { children: /* @__PURE__ */ (0, x.jsx)(t, { ...n }) })), Hi.set(e, r), !0;
 }
-function Gi(e = document) {
-	return Array.from(e.querySelectorAll("[data-react-island]")).reduce((e, t) => e + +!!Wi(t), 0);
+function Ki(e = document) {
+	return Array.from(e.querySelectorAll("[data-react-island]")).reduce((e, t) => e + +!!Gi(t), 0);
 }
 typeof window < "u" && (window.BiDocReact = {
-	islands: Object.keys(Ui),
-	mountReactIslands: Gi,
+	islands: Object.keys(Wi),
+	mountReactIslands: Ki,
 	version: "0.1.0"
-}, document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => Gi(), { once: !0 }) : Gi());
+}, document.readyState === "loading" ? document.addEventListener("DOMContentLoaded", () => Ki(), { once: !0 }) : Ki());
 //#endregion
-export { Gi as mountReactIslands };
+export { Ki as mountReactIslands };

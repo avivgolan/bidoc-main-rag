@@ -32,7 +32,7 @@ body:has(#dashboard.active),#dashboard.panel{background:#f5f8ff}
 #dashboard .db-appbar{display:contents}#dashboard .db-appbar .db-wordmark,#dashboard .db-appbar nav{display:none}#dashboard .db-appbar .db-back{position:absolute;top:15px;left:22px;font-size:10px;background:white;border:1px solid #e1e9fb;color:#7d8fb5;padding:5px 8px;border-radius:5px}
 #dashboard .db-page-header{height:47px;padding:0;align-items:center}#dashboard .db-page-header .db-eyebrow{display:none}#dashboard .db-page-header h1{font-size:20px;color:#142443}#dashboard .db-page-header p{display:block;font-size:11px;color:#7281a5;margin-top:2px}#dashboard .db-project-picker{margin-left:110px}#dashboard .db-project-picker label{display:none}#dashboard .db-project-picker select{border-color:#e2eafa;border-radius:6px;color:#344c77;height:30px;min-width:230px}
 #dashboard .db-toolbar{border:0;padding:4px 0 8px;margin:0;font-size:10px;color:#8190b2}#dashboard .db-toolbar-actions button{border-color:#e3ebfa;border-radius:5px;background:#fff;color:#657ca9;padding:3px 7px;font-size:10px}#dashboard .db-toolbar-actions button:last-child{background:#f2f6ff;color:#3968c8}#dashboard .db-time{color:#7d8eaf}
-#dashboard .db-page .ref-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;direction:ltr;margin-bottom:10px}
+#dashboard .db-page .ref-metrics{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;direction:ltr;margin-bottom:10px}
 #dashboard .db-page .ref-metric{direction:rtl;display:flex;flex-wrap:wrap;gap:9px;align-items:flex-start;min-width:0;padding:12px 10px 7px;border:1px solid #e9effb;background:white;border-radius:7px;box-shadow:0 2px 8px #436ac008;text-align:right;color:#1b2d4f;position:relative}
 #dashboard .db-page .ref-metric-icon{width:34px;height:34px;border-radius:50%;background:var(--pale);color:var(--tone);display:grid;place-items:center;flex-shrink:0}#dashboard .db-page .ref-metric svg{width:23px;height:23px}#dashboard .db-page .ref-metric-content{flex:1;min-width:0}#dashboard .db-page .ref-metric-content>b{display:block;font-size:11px;white-space:nowrap;font-weight:700}#dashboard .db-page .ref-metric .db-kpi-value{display:block;color:var(--tone);font-family:Arial;font-size:26px;line-height:1.2;margin:5px 0 2px;font-weight:700}#dashboard .db-page .ref-metric-content small{font-size:9px;display:block;color:#8390ae;white-space:nowrap}#dashboard .db-page .ref-metric-bottom{width:100%;display:flex;justify-content:space-between;border-top:1px solid #eff3fb;padding-top:6px;color:#8292b5;font-size:9px}
 #dashboard .db-page .ref-metric.blue{--tone:#115bf3;--pale:#edf5ff}#dashboard .db-page .ref-metric.green{--tone:#00a36e;--pale:#eafaf3}#dashboard .db-page .ref-metric.red{--tone:#f0264f;--pale:#fff0f3}#dashboard .db-page .ref-metric.orange{--tone:#f2930a;--pale:#fff4e5}#dashboard .db-page .ref-metric.purple{--tone:#7944ed;--pale:#f2edff}#dashboard .db-page .ref-metric.teal{--tone:#009879;--pale:#eafaf5}
@@ -118,3 +118,15 @@ body:has(#dashboard.active),#dashboard.panel{background:#f5f8ff}
 #dashboard .db-page .db-page-header{height:auto;min-height:47px;padding:6px 0}
 #dashboard .db-page .db-project-picker{margin-left:0}
 #dashboard .db-page-header>.db-back{position:static;float:none;margin:0;font-size:10px;background:white;border:1px solid #e1e9fb;color:#7d8fb5;padding:7px 9px;border-radius:5px;white-space:nowrap}
+/* Activity table sits to the left of the chronological Gantt tracks. */
+#dashboard .db-page .db-gantt-mini{overflow-x:auto}
+#dashboard .db-page .db-gantt-scroll{direction:ltr;min-width:460px}
+#dashboard .db-page .ref-gantt .db-gantt-axis,#dashboard .db-page .ref-gantt .db-gantt-row,
+#dashboard .db-page .db-widget[open] .db-gantt-axis,#dashboard .db-page .db-widget[open] .db-gantt-row{direction:ltr;grid-template-columns:minmax(100px,24%) 64px 64px minmax(140px,1fr);gap:0}
+#dashboard .db-page .db-gantt-axis,#dashboard .db-page .db-event-track{min-width:450px}
+#dashboard .db-page .db-gantt-axis>span{direction:rtl;text-align:center;font-size:9px;padding:0 4px}
+#dashboard .db-page .db-gantt-row>button{direction:rtl;text-align:right;padding:0 8px;min-width:0}
+#dashboard .db-page .db-gantt-row>.db-task-date{direction:ltr;font-size:10px;font-variant-numeric:tabular-nums;text-align:center;white-space:nowrap;color:#607aa4;border-inline-start:1px solid #edf1f7;height:100%;display:grid;align-items:center}
+#dashboard .db-page .db-event-track>span{grid-column:1 / 4;direction:rtl;text-align:right;padding:0 8px}
+#dashboard .db-page .db-widget[open] .db-gantt-axis,#dashboard .db-page .db-widget[open] .db-gantt-row{grid-template-columns:minmax(150px,24%) 100px 100px minmax(140px,1fr)}
+#dashboard .db-page .db-widget[open] .db-task-date,#dashboard .db-page .db-widget[open] .db-gantt-axis>span{font-size:12px}

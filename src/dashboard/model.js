@@ -116,6 +116,7 @@ export function buildDashboard({ project, datasets, schedule, now, asOf }) {
       note: 'נדרש דיווח ביצוע מאומת ובסיס משקולות; נתון חסר אינו אפס.', memberIds: [],
       coverage: { measured: reported.length, eligible: leaf.length, scopeComplete: false }, metricVersion: METRIC_VERSION, asOf, computedAt: now },
     metric('critical', 'נושאים קריטיים פתוחים', critical, [...domains,'schedule','tasks','files'], 'חומרה קריטית ומצב פתוח במקור; ללא ספירה של החלטות שכבר התקבלו.'),
+    metric('safety', 'אירועי בטיחות', unique.filter(i=>i.domain==='safety' && i.open), ['safety'], 'אירועי בטיחות פתוחים, בטיפול או במעקב; ללא אירועים שטופלו, בוטלו או הוחלפו.'),
     metric('approvals', 'אישורים ממתינים', approvals, ['approval'], 'בקשות ואישורים בבדיקה, ללא רשומות שבוטלו או הוחלפו.'),
     metric('schedule', 'התראות לו״ז פתוחות', openSchedule, ['schedule','tasks','files'], 'התראות המשויכות לגרסת הלוח המוצגת. סגירת התראה אינה סיום פעילות.'),
   ];

@@ -29,7 +29,8 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await page.goto('/#dashboard');
   await expect(page.locator('.db-page h1')).toContainText('פרויקט בדיקה');
   await expect(page.locator('#appSidebar')).toBeHidden();
-  await expect(page.locator('.ref-metric')).toHaveCount(6);
+  await expect(page.locator('.ref-metric')).toHaveCount(7);
+  await expect(page.locator('.db-kpi-safety .db-kpi-value')).toHaveText('0');
   const expanders=page.getByRole('button',{name:/^הגדל למסך מלא:/});
   await expect(expanders).toHaveCount(6);
   for(let i=0;i<6;i++){
@@ -61,6 +62,12 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading',{name:'לו״ז וציר אירועים'})).toBeVisible();
   await expect(page.locator('.db-feed-event')).toHaveCount(1);
+  const firstTask=page.locator('.db-gantt-scroll .db-gantt-row').first();
+  await expect(firstTask.locator('.db-task-date')).toHaveCount(2);
+  await expect(firstTask.locator('.db-task-date').first()).toHaveAttribute('datetime','2026-01-01');
+  const columns=await firstTask.evaluate(row=>[...row.children].map(n=>n.getBoundingClientRect().x));
+  expect(columns[0]).toBeLessThan(columns[1]);expect(columns[1]).toBeLessThan(columns[2]);expect(columns[2]).toBeLessThan(columns[3]);
+
   await page.getByRole('button',{name:'כל התקופה',exact:true}).click();
   await expect(page.locator('.db-feed-event')).toHaveCount(2);
   await page.getByRole('button',{name:'פעילות: עבודות שלד',exact:true}).click();
