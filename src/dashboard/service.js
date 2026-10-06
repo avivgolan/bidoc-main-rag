@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { buildInsightBrief } from './insightBrief.js';
 import { buildDashboard, METRIC_VERSION, safeSourceUrl, validRow, rankItems } from './model.js';
 import { createSourceReader, dashboardConnection, DashboardError, EVIDENCE_TABLES, listDashboardProjects, loadDashboardSources } from './sources.js';
 
@@ -103,11 +104,12 @@ export function createDashboardService({ fetchImpl=fetch, clock=()=>new Date() }
     const result=await reader(c)('dashboard_snapshot_items',{select:'metric_key,member_key,source_table,source_id,native_status,severity,contribution',tenant_key:`eq.${c.tenantKey}`,project_id:`eq.${projectId}`,snapshot_id:`eq.${snapshotId}`,metric_key:`eq.${metricKey}`,order:'id.asc'});
     return result;
   }
-  async function chatContext(config,actor,token,itemId) {
+  async function chatContext(config,actor,token,itemId,includeBrief=false) {
     const {entry}=context(config,actor,token);
     const item=itemId ? (await evidence(config,actor,token,itemId)).item : null;
     return { projectId:entry.view.project.id, projectName:entry.view.project.name, asOf:entry.view.asOf,dateRange:entry.view.dateRange,
-      item:item ? {title:item.title,sourceTable:item.sourceTable,sourceId:item.sourceId,status:item.status,sourceDate:item.sourceDate} : null };
+      item:item ? {title:item.title,sourceTable:item.sourceTable,sourceId:item.sourceId,status:item.status,sourceDate:item.sourceDate} : null,
+      ...(includeBrief?{insightBrief:buildInsightBrief(entry.view)}:{}) };
   }
   return {projects,overview,items,evidence,history,saveSnapshot,snapshotItems,chatContext};
 }

@@ -1119,7 +1119,7 @@ const dashboardPopupJobs = new Map();
 const dashboardAiDay = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 window.__bidocRunDashboardChat = (context, { force = false } = {}) => {
   const day = dashboardAiDay();
-  const cacheKey = JSON.stringify([context.projectId, context.fileId || null, context.itemId || null, context.dateFrom || null, context.dateTo || null, context.question.trim()]);
+  const cacheKey = JSON.stringify([context.projectId, context.fileId || null, context.itemId || null, context.dateFrom || null, context.dateTo || null, context.mode || null, context.question.trim()]);
   for (const [key, value] of dashboardPopupJobs) if (value.day !== day) dashboardPopupJobs.delete(key);
   const previous = dashboardPopupJobs.get(cacheKey);
   if (previous && (!previous.settled || !force)) return previous;
@@ -1144,7 +1144,7 @@ window.__bidocRunDashboardChat = (context, { force = false } = {}) => {
     return apiStream('/api/chat', {
     method: 'POST', timeoutMs: 280000,
     body: { message: context.question, sessionId, projectId: context.projectId,
-      dashboardContext: { token: job.context.token, itemId: context.itemId },
+      dashboardContext: { token: job.context.token, itemId: context.itemId, mode: context.mode || null },
       runId: `dashboard_${Date.now()}_${Math.random().toString(16).slice(2)}`,
       sourcesEnabled: true, deepResearch: false, attachments: [] },
     onEvent: () => {} // Keep the separate popup run out of the active chat's progress UI.

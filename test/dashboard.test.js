@@ -1,4 +1,8 @@
+import {dashboardSynthesisInstructions,dashboardInsightInstructions,dashboardAnswerInstructions} from '../src/dashboard/answerPrompt.js';
 import test from 'node:test';
+import {dashboardInsightMode,dashboardInsightQuestion} from '../src/dashboard/insightQuestions.js';
+import {classifyDataQueryCapability} from '../src/subagents/dataQuery.js';
+import {buildInsightBrief} from '../src/dashboard/insightBrief.js';
 import assert from 'node:assert/strict';
 import {buildDashboard,normalizeItem,selectCohort,validRow,safeSourceUrl} from '../src/dashboard/model.js';
 import {createSourceReader,SOURCES} from '../src/dashboard/sources.js';
@@ -74,4 +78,41 @@ test('range cache separates periods and snapshot refresh preserves the selected 
  assert.notEqual(all.queryToken,range.queryToken);assert.equal((await service.overview(config,id,{projectId:id,dateFrom:'2026-01-01',dateTo:'2026-01-31'})).queryToken,range.queryToken);
  await service.saveSnapshot(config,id,range.queryToken);assert.equal(payload.p_payload.sourceVersions.dateRange.from,'2026-01-01');
  for(const dates of [{dateFrom:'2026-02-30'},{dateFrom:'2026-02-01',dateTo:'2026-01-01'}])await assert.rejects(service.overview(config,id,{projectId:id,...dates}),e=>e.code==='invalid_date_range');
+});
+
+test('period insight synthesis uses a separate concise conclusion contract',()=>{
+ const insight=dashboardSynthesisInstructions('period-insights-v2');
+ assert.ok(insight.includes(dashboardInsightInstructions));assert.ok(!insight.includes(dashboardAnswerInstructions));
+ assert.ok(dashboardSynthesisInstructions(null).includes(dashboardAnswerInstructions));
+ assert.ok(dashboardSynthesisInstructions('arbitrary').includes(dashboardAnswerInstructions));
+});
+
+test('insight retrieval avoids the observed alert-count refusal and keeps date scope',()=>{
+ const old='מהו מוקד הסיכון הבולט בתקופה ומה משמעותו לפרויקט? בדוק קשר מבוסס בין חסמים, בטיחות ולוח הזמנים, במקום למנות התראות. נסח עד שלוש תובנות מסכמות: משפט קצר אחד לכל נושא בולט ולמשמעותו, ולא רשימת אירועים או פעילויות.';
+ assert.equal(classifyDataQueryCapability(old).warning,'alert_lifecycle_status_not_computable');
+ for(const section of ['overview','risks','actions'])for(const range of [{},{dateFrom:'2024-11-01',dateTo:'2024-12-01'}]){
+  const query=dashboardInsightQuestion(section,range);
+  const routed=query+'\n\nהקשר דשבורד מאומת: '+JSON.stringify({projectId:id,projectName:'פרויקט',asOf:'2026-10-06',dateRange:{from:range.dateFrom||null,to:range.dateTo||null,excludedUndated:0},item:null});
+  const capability=classifyDataQueryCapability(routed);
+  assert.equal(capability.suggestedAgent,'hybrid_search');
+  assert.notEqual(capability.status,'not_computable');
+  if(range.dateFrom)assert.ok(query.includes(range.dateFrom)&&query.includes(range.dateTo));
+ }
+ assert.ok(dashboardSynthesisInstructions(dashboardInsightMode).includes(dashboardInsightInstructions));
+ // Explicit count requests must retain the existing data-integrity guard.
+ assert.equal(classifyDataQueryCapability('How many alerts are unresolved?').warning,'alert_lifecycle_status_not_computable');
+});
+
+test('insight brief contains only scoped observations and preserves unknown coverage',()=>{
+ const f=fixture();
+ f.datasets.approval.rows=[{id:'current',title:'אישור בתקופה',status:'requested',source_date:'2026-01-12'},{id:'old',title:'מידע מחוץ לתקופה',status:'requested',source_date:'2024-01-01'}];
+ const view=buildDashboard({...f,dateFrom:'2026-01-01',dateTo:'2026-01-31'});
+ const brief=buildInsightBrief(view);
+ assert.equal(brief.dateRange.from,'2026-01-01');
+ assert.equal(brief.metrics.find(m=>m.key==='approvals').value,1);
+ assert.equal(brief.metrics.find(m=>m.key==='progress').value,null);
+ assert.ok(!JSON.stringify(brief).includes('מידע מחוץ לתקופה'));
+ assert.ok(brief.boundary.includes('not reconstructed historically'));
+ assert.ok(!JSON.stringify(brief).includes('memberIds'));
+ assert.ok(dashboardSynthesisInstructions(dashboardInsightMode).includes('8–16'));
 });

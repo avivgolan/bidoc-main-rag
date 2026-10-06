@@ -9,6 +9,8 @@ last_updated: 2026-10-04
 
 ## Current State
 
+- Period insights v4 renders one unnumbered conclusion per section; evidence lists remain in the full chat popup. Synthesis requests 8–16 words and a separate evidence section. An actor/token-authorized, bounded brief from the date-filtered dashboard (metrics/coverage, attention, activity, documents, schedule, timeline) enters synthesis only, avoiding routing keyword contamination. Unknowns and historical-status limitations are retained. Brief is deterministic, not another LLM call. Cache version forces regeneration.
+
 - Attention-card Open Schedule now passes a navigation target to the miniature Gantt. It reads item evidence (recovering expired context), matches a saved alert source ID or a unique exact event title/summary, scrolls to the saved activity row, highlights its event and expands the date window to include it. Missing activity links show the event on the general track with an explicit message; missing events do not fabricate associations. Project/request guards prevent late navigation from older clicks.
 
 - Detail drawers recover context_expired automatically: refresh the selected project/schedule overview, update dashboard counts/token, and reload the open evidence/metric drawer. One recovery per opened detail prevents loops; shared refresh promise and generation checks avoid concurrent refreshes and stale project updates. Other errors remain visible.
@@ -50,6 +52,19 @@ last_updated: 2026-10-04
 - Source table names and databases are project-specific; reuse [Schedule](schedule.md) project resolution and production Company DB conventions.
 
 ## Recent Changes
+
+- 2026-10-06 — Replaced multi-card insights with one prominent conclusion and popup evidence; added scoped synthesis brief. Thirteen dashboard tests and two mocked Chromium UI tests pass. Restarted local server; live model adherence to the new wording remains unverified.
+
+- 2026-10-06 — Replayed the risks query from chat-memory run dashboard_1791306887588_9f7ef36538d018: negated formatting text triggered alert_lifecycle_status_not_computable before synthesis. Added shared analysis-only insight questions, v3 cache key and synthesis-only presentation instructions. Regression covers all three queries with date context while preserving genuine alert-count guards. Twelve dashboard tests and both mocked browser tests pass; live model output quality remains unverified.
+
+- 2026-10-06 — Period insights now use a dedicated server-owned period-insights-v2 synthesis contract instead of the generic 150–250-word popup report. Requests ask for evidence-grounded cross-record themes and implications; output contract is 1–3 single-sentence conclusions (<=22 words) plus separate supporting sources, no task/alert inventory or invented trends. Mode passes through chat and daily cache key to invalidate old report answers. Preview cards show one conclusion without a second detail paragraph. Eleven unit tests and two mocked UI regressions passed, including mode propagation; server restarted. Live model quality still requires a fresh generated answer.
+
+
+- 2026-10-06 — Period insights now render up to three numbered preview cards per section instead of full scrolling chat answers. Extracts first rendered list (paragraph fallback), preserves bold lead text, bounds preview lengths and clamps to two lines; no generated claims or severity inference. Section tints distinguish overview/risks/actions. Cards and footer open original full answer/citations in popup. Works with cached answers without regeneration. UI regression verifies long Markdown yields nine bounded cards and retains omitted detail in popup.
+
+
+- 2026-10-06 — Added full-width DashboardInsights widget below KPIs with three independent sections: period overview, risks/blockers, recommended actions. Auto-starts three scoped chat jobs 400ms after mount; scope key includes project, schedule, date bounds and as-of day. Uses existing bridge/daily cache, persisted chat, notifications, inline safe answer renderer, individual retry and popup continuation. Unmount/current guards prevent old-range results replacing current insights. Fullscreen supported. Build and two mocked browser regressions passed (automatic execution, period token, late answers, partial failure, retry, existing popup/cache/navigation). Live model content was not part of regression.
+
 
 - 2026-10-06 — Added dashboard from/to date controls with explicit Apply and whole-project reset (default unbounded history; no invented project start). Server validates dates/order and includes range in actor-bound cache keys. Domain records filter by source/event/detected date then created/updated; timeline uses data_date/created, documents primary_date/created, schedule tasks overlap selected bounds. Undated rows stay in default view but are excluded/reported for explicit ranges. Current lifecycle is not historical reconstruction. Snapshot refresh/source_versions and AI cache/context preserve range; final answer instructions constrain source dates. Filtered document reads scan beyond the recent-40 cap. Gantt resets on range changes and clips its axis. Ten backend tests and dashboard browser regression passed.
 

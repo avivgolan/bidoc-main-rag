@@ -167,7 +167,7 @@ export function DashboardPage() {
     {aiJob&&!aiOpen&&<button className="db-ai-reopen" onClick={()=>{openAi(aiJob);}}>פתח ניתוח BIDOC AI האחרון</button>}
     {!view&&loading&&<div className="db-loading" role="status"><div className="db-skeleton"/><div className="db-skeleton"/><p>מחבר את תמונת הפרויקט מהמקורות…</p></div>}
     {!view&&!loading&&!error&&<Empty>{projectsLoading?'טוען את סביבת העבודה…':projects.length?'בחר פרויקט כדי להציג את הנתונים.':'לא נמצאו פרויקטים פעילים בחיבור.'}</Empty>}
-    {view&&<DashboardOverview view={view} history={history} onDetail={setDetail} onAsk={ask} onSchedule={openSchedule} scheduleTarget={scheduleTarget} pendingJobs={notifications.entries.filter(r=>r.status==='pending'&&r.job.context.projectId===view.project.id).map(r=>r.job)}/>}
+    {view&&<DashboardOverview view={view} history={history} onDetail={setDetail} onAsk={ask} onSchedule={openSchedule} scheduleTarget={scheduleTarget} onInsightJob={notifications.track} onInsightOpen={openAi} pendingJobs={notifications.entries.filter(r=>r.status==='pending'&&r.job.context.projectId===view.project.id).map(r=>r.job)}/>}
     {view&&<div className="db-version-footer"><label htmlFor="db-version">גרסת לוח</label><select id="db-version" value={fileId || view.schedule.fileId || ''} onChange={e=>setFileId(e.target.value)}>{view.schedule.files.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}</select></div>}
     {detail&&view&&<Details detail={detail} view={view} onClose={()=>setDetail(null)} onAsk={ask} onExpired={refreshExpired}/>}
     {aiOpen&&aiJob&&<DashboardAiDialog key={aiJob.sessionId} job={aiJob} onClose={()=>setAiOpen(false)} onRefresh={()=>startAi(window.__bidocRunDashboardChat(aiJob.context,{force:true}))}/>}

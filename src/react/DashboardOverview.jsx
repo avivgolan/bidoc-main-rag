@@ -1,3 +1,4 @@
+import DashboardInsights from './DashboardInsights.jsx';
 import DashboardWidget from './DashboardWidget.jsx';
 import React,{useState} from 'react';
 import DashboardTimeline from './DashboardTimeline.jsx';
@@ -20,7 +21,7 @@ function PlanningCurve({tasks}){
  {[0,2,4,6,8].map(i=><text key={i} x={32+i*32} y="155" textAnchor="middle" fontSize="8" fill="#8492b0">{new Date(min+span*i/8).toLocaleDateString('he-IL',{month:'short',year:'2-digit'})}</text>)}
  </svg><span>תכנון מצטבר לפי מועדי סיום · {dated.length} פעילויות עם תאריך</span></div>;
 }
-export default function DashboardOverview({view,history,onDetail,onAsk,onSchedule,scheduleTarget,pendingJobs=[]}){
+export default function DashboardOverview({view,history,onDetail,onAsk,onSchedule,scheduleTarget,pendingJobs=[],onInsightJob,onInsightOpen}){
  const [question,setQuestion]=useState('');
  const metric=k=>view.metrics.find(m=>m.key===k);
  const attention={key:'attention',label:'נושאים לטיפול',value:view.attentionTotal,note:'נושאים תקפים שסומנו לתשומת לב או בעלי חריג פתוח.'};
@@ -28,6 +29,7 @@ export default function DashboardOverview({view,history,onDetail,onAsk,onSchedul
  const s=view.schedule;
  return <div className="ref-dashboard">
   <section className="ref-metrics" aria-label="מדדי הפרויקט">{cards.map(c=><button key={c.key} className={`ref-metric db-kpi-${c.key} ${c.color}`} onClick={()=>onDetail({type:'metric',metric:c})}><span className="ref-metric-icon"><Symbol kind={c.icon}/></span><span className="ref-metric-content"><b>{c.label}</b><strong className="db-kpi-value">{n(c.value)}{c.unit==='percent'&&c.value!=null?'%':''}</strong><small>{c.note}</small></span><span className="ref-metric-bottom">{c.key==='progress'?'נדרש דיווח כולל לפרויקט':c.value==null?'כיסוי מידע חסר':'הצג פירוט'}<span>↗</span></span></button>)}</section>
+  <DashboardInsights view={view} onJob={onInsightJob} onOpen={onInsightOpen}/>
   <div className="ref-layout">
    <DashboardWidget title="דורש את תשומת לבך" className="ref-panel ref-attention" id="db-worklist"><header><h2>דורש את תשומת לבך <span>{view.attentionTotal}</span></h2><button onClick={()=>onDetail({type:'metric',metric:attention})}>הצג הכל ←</button></header>
     {view.attention.slice(0,3).map((i,idx)=><article key={i.id} className={`ref-issue issue-${idx}`}><div className="ref-issue-top"><span className={`ref-issue-icon ${pendingJobs.some(j=>j.context.itemId===i.id)?'db-ai-pulse':''}`} aria-label={pendingJobs.some(j=>j.context.itemId===i.id)?'AI מנתח את הנושא':undefined} aria-busy={pendingJobs.some(j=>j.context.itemId===i.id)}><Symbol kind={idx===0?'critical':idx===1?'approvals':'attention'}/></span><div><h3 title={i.title}>{i.title}</h3><p>{i.overdueDays>0?`מועד היעד חלף ב־${n(i.overdueDays)} ימים`:i.reasons?.[0]||'נדרשת בדיקת הנושא'}</p></div><time>{date(i.sourceDate)}</time></div><p className="ref-issue-summary">{i.summary || 'פרטים נוספים ברשומת המקור'}</p><div className="ref-issue-meta">{i.owner||'אחראי לא זוהה'} · {i.closed?'סגור במקור — סומן לבדיקה':'רשומה פתוחה במקור'}</div><div className="ref-issue-actions"><button aria-label={`פרטים ומקורות: ${i.title}`} onClick={()=>onDetail({type:'item',item:i})}>הצג ראיות</button><button onClick={()=>onAsk(i)}>נתח השפעה</button><button onClick={e=>{e.currentTarget.closest('dialog[open]')?.close();onSchedule(i);}}>פתח לו״ז</button></div></article>)}

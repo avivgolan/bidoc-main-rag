@@ -26,6 +26,7 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
     const json=p.endsWith('/projects')?{projects:[view.project]}:p.endsWith('/history')?{available:true,snapshots:[]}:p.endsWith('/evidence')?{item:view.attention[0],sources:[]}:p.endsWith('/items')?{items:view.items}:{...view,items:undefined,metrics:view.metrics.map(({memberIds,...metric})=>metric)};
     return r.fulfill({json});
   });
+  await page.route('**/api/chat',r=>{const body=r.request().postDataJSON();if(body.dashboardContext?.mode!=='period-insights-v4')return r.fallback();return r.fulfill({contentType:'text/event-stream',body:'event: result\ndata: '+JSON.stringify({answer:'תובנות אוטומטיות לתקופה',messageId:'insight-test',sources:[]})+'\n\n'});});
   await page.goto('/#dashboard');
   await expect(page.locator('.db-page h1')).toContainText('פרויקט בדיקה');
   await expect(page.locator('#appSidebar')).toBeHidden();
@@ -41,8 +42,8 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await expect(page.locator('.ref-metric')).toHaveCount(7);
   await expect(page.locator('.db-kpi-safety .db-kpi-value')).toHaveText('0');
   const expanders=page.getByRole('button',{name:/^הגדל למסך מלא:/});
-  await expect(expanders).toHaveCount(6);
-  for(let i=0;i<6;i++){
+  await expect(expanders).toHaveCount(7);
+  for(let i=0;i<7;i++){
     await expanders.nth(i).click();
     const full=page.locator('.db-widget[open]');
     await expect(full).toBeVisible();
@@ -56,17 +57,19 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   expect(layout.a).toBeLessThan(layout.c);expect(layout.c).toBeLessThan(layout.ai);
   await expect(page.locator('.db-kpi-progress .db-kpi-value')).toHaveText('—');
   await expect(page.locator('.db-kpi-approvals .db-kpi-value')).toHaveText('1');
+  await expect(page.locator('.db-insight-answer')).toHaveCount(3);
+  const refreshBaseline=refreshes;expireDetails=true;
   await page.getByRole('button',{name:'פרטים ומקורות: אישור תכנון חסר',exact:true}).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('dialog')).toContainText('הראיות שמאחורי הנושא');
-  expect(refreshes).toBe(1);
+  expect(refreshes).toBe(refreshBaseline+1);
   await expect(page.getByRole('dialog').getByRole('alert')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expireDetails=true;
   await page.locator('.db-kpi-approvals').click();
   await expect(page.getByRole('dialog')).toContainText('אישור תכנון חסר');
-  expect(refreshes).toBe(2);
+  expect(refreshes).toBe(refreshBaseline+2);
   await expect(page.getByRole('dialog').getByRole('alert')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading',{name:'לו״ז וציר אירועים'})).toBeVisible();
@@ -131,6 +134,7 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   const chatRequests=[];
   let complete;
   await page.route('**/api/chat',async r=>{
+    if(r.request().postDataJSON().dashboardContext?.mode==='period-insights-v4')return r.fallback();
     chatRequests.push(r.request().postDataJSON());
     await new Promise(resolve=>{complete=resolve;});
     await r.fulfill({contentType:'text/event-stream',body:'event: result\ndata: '+JSON.stringify({answer:'## מצב הפרויקט\n\nנדרש לבדוק את לוח הזמנים.',messageId:'saved-message-1',sources:[]})+'\n\n'});
@@ -145,8 +149,8 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   await page.keyboard.press('Escape');
   await expect(page.locator('.ref-ai-header [aria-busy=true]')).toHaveCount(1);
   await page.getByRole('button',{name:'התראות BIDOC AI',exact:true}).click();
-  await expect(page.locator('.db-notification-entry')).toHaveCount(1);
-  await page.locator('.db-notification-entry').click();
+  await expect(page.locator('.db-notification-entry.is-pending')).toHaveCount(1);
+  await page.locator('.db-notification-entry.is-pending').click();
   await expect(page.getByRole('dialog')).toContainText('בודק את המקורות');
   await expect(page.locator('#dashboard')).toHaveClass(/active/);
   await expect.poll(()=>chatRequests.length).toBe(1);
@@ -202,7 +206,7 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   // Independent background requests settle out of order; one failure must not hide another job.
   await page.goto('/#dashboard');
   const pendingRequests=[];
-  await page.route('**/api/chat',async r=>{await new Promise(resolve=>pendingRequests.push({r,resolve}));});
+  await page.route('**/api/chat',async r=>{if(r.request().postDataJSON().dashboardContext?.mode==='period-insights-v4')return r.fallback();await new Promise(resolve=>pendingRequests.push({r,resolve}));});
   await page.getByRole('button',{name:'נתח השפעה',exact:true}).click();
   await expect(popup).toContainText('בודק את המקורות');
   await page.keyboard.press('Escape');
@@ -230,3 +234,51 @@ test('dashboard renders missing progress, opens detail, prepares chat and fits m
   expect(pageErrors).toEqual([]);
 });
 
+
+test('period insights auto-run and late answers never replace the selected range',async({page})=>{
+ const id='11111111-1111-4111-8111-111111111111';
+ const payload=Buffer.from(JSON.stringify({sub:id,role:'סופראדמין',exp:Date.now()+3600000})).toString('base64url');
+ const sig=crypto.createHmac('sha256','playwright-test-session-secret').update(payload).digest('base64url');
+ await page.context().addCookies([{name:'bidoc_session',value:`${payload}.${sig}`,domain:'localhost',path:'/'}]);
+ const datasets=Object.fromEntries(Object.entries(SOURCES).map(([k,[table]])=>[k,{table,rows:[],complete:true,status:'ready'}]));
+ for(const k of ['files','tasks','documents'])datasets[k]={table:k,rows:[],complete:true,status:'ready'};
+ await page.route('**/api/**',r=>r.fulfill({json:{}}));
+ await page.route('**/api/dashboard/v1/**',r=>{
+  const u=new URL(r.request().url()),body=r.request().method()==='POST'?r.request().postDataJSON():{};
+  if(u.pathname.endsWith('/projects'))return r.fulfill({json:{projects:[{id,name:'בדיקת תובנות'}]}});
+  if(u.pathname.endsWith('/history'))return r.fulfill({json:{available:true,snapshots:[]}});
+  const from=body.date_from||u.searchParams.get('date_from')||null,to=body.date_to||u.searchParams.get('date_to')||null;
+  const view=buildDashboard({project:{id,name:'בדיקת תובנות'},datasets,schedule:{file:null,files:[],tasks:[]},now:new Date().toISOString(),asOf:'2026-10-06',dateFrom:from,dateTo:to});
+  return r.fulfill({json:{...view,queryToken:'scope-'+(from||'all')}});
+ });
+ await page.route('**/api/sessions/*/messages',r=>r.fulfill({json:{messages:[{id:'insight',ai_response:'saved'}]}}));
+ const requests=[];
+ await page.route('**/api/chat',async r=>{await new Promise(resolve=>requests.push({route:r,body:r.request().postDataJSON(),resolve}));});
+ const finish=async(request,answer)=>{await request.route.fulfill({contentType:'text/event-stream',body:'event: result\ndata: '+JSON.stringify({answer,messageId:'insight',sources:[]})+'\n\n'});request.resolve();};
+ await page.goto('/#dashboard');
+ await expect.poll(()=>requests.length).toBe(3);
+ await expect(page.locator('.db-insight-section[aria-busy=true]')).toHaveCount(3);
+ await expect(page.locator('.db-ai-dialog')).toHaveCount(0);
+ await page.locator('.db-date-filter').getByLabel('מתאריך',{exact:true}).fill('2026-01-01');
+ await page.locator('.db-date-filter').getByLabel('עד תאריך',{exact:true}).fill('2026-01-31');
+ await page.getByRole('button',{name:'החל טווח',exact:true}).click();
+ await expect.poll(()=>requests.length).toBe(6);
+ for(const r of requests.slice(3)){expect(r.body.dashboardContext.token).toBe('scope-2026-01-01');expect(r.body.dashboardContext.mode).toBe('period-insights-v4');}
+ const longDetail='פירוט שמור במקור '.repeat(40);
+ for(const r of requests.slice(3))await finish(r,'### התובנה\n\n**תובנות ינואר החדשות: תיאום האספקות הוא המפתח לרצף הביצוע.**\n\n### על מה התובנה מבוססת\n- '+longDetail+'\n- ראיה נוספת.\n\n### גבולות המסקנה\nמידע מלא שלא מופיע בתקציר');
+ await expect(page.locator('.db-insight-answer')).toHaveCount(3);
+ for(const r of requests.slice(0,3))await finish(r,'תשובה מהטווח הישן');
+ await expect(page.locator('.db-period-insights')).not.toContainText('תשובה מהטווח הישן');
+ await expect(page.locator('.db-insight-answer').first()).toContainText('תובנות ינואר החדשות');
+ await expect(page.locator('.db-insight-card')).toHaveCount(3);
+ await expect(page.locator('.db-period-insights')).not.toContainText('מידע מלא שלא מופיע בתקציר');
+ expect((await page.locator('.db-insight-card').first().innerText()).length).toBeLessThan(300);
+ await page.locator('.db-insight-card').first().click();
+ await expect(page.locator('.db-ai-dialog')).toContainText('מידע מלא שלא מופיע בתקציר');
+ await page.keyboard.press('Escape');
+ await page.locator('.db-insight-section').first().getByRole('button',{name:'בדוק מחדש',exact:true}).click();
+ await expect.poll(()=>requests.length).toBe(7);
+ await requests[6].route.fulfill({status:500,json:{error:'כשל זמני'}});requests[6].resolve();
+ await expect(page.locator('.db-insight-section').first()).toContainText('כשל זמני');
+ await expect(page.locator('.db-insight-answer')).toHaveCount(2);
+});
