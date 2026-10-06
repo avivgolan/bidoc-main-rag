@@ -24,9 +24,9 @@ test('partial sources yield unknown counts, not zero',()=>{
   const f=fixture();f.datasets.approval.complete=false;const m=buildDashboard(f).metrics.find(m=>m.key==='approvals');assert.equal(m.value,null);assert.equal(m.knownCount,1);
 });
 test('timeline preserves saved activity associations and rejects unsafe source links',()=>{
-  const f=fixture();f.datasets.timelineAlerts={complete:true,rows:[{id:12,summary:'event',data_date:'2026-02-01',data_link:'javascript:alert(1)'},{id:13,summary:'unassigned',data_date:'2026-03-01'}]};
+  const f=fixture();f.datasets.timelineAlerts={complete:true,rows:[{id:12,summary:'event',input_data_type:'whatsapp',input_data_id:'msg-12',analyzed_data:'מקור בדיקה',data_date:'2026-02-01',data_link:'javascript:alert(1)'},{id:13,summary:'unassigned',data_date:'2026-03-01'}]};
   f.datasets.timelineLinks={complete:true,rows:[{source_id:'12',activity_key:'gantt:a:1'}]};
-  const v=buildDashboard(f);assert.equal(v.timeline.events[0].activityKey,'gantt:a:1');assert.equal(v.timeline.events[0].url,null);assert.equal(v.timeline.events[1].activityKey,null);
+  const v=buildDashboard(f);assert.equal(v.timeline.events[0].activityKey,'gantt:a:1');assert.equal(v.timeline.events[0].url,null);assert.equal(v.timeline.events[0].sourceType,'whatsapp');assert.equal(v.timeline.events[0].sourceId,'msg-12');assert.equal(v.timeline.events[0].sourceExcerpt,'מקור בדיקה');assert.equal(v.timeline.events[1].sourceType,null);assert.equal(v.timeline.events[1].activityKey,null);
   assert.equal(v.breakdown.reduce((sum,d)=>sum+d.attention,0),v.attentionTotal);
 });
 test('schedule cohort isolates version, engine and date and deduplicates subject',()=>{

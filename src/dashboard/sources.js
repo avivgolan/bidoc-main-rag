@@ -82,7 +82,7 @@ export async function loadDashboardSources({ read, projectId, fileId, indexTable
   if(selected) await collect('tasks',tasksTable,'id,project_id,file_id,task_uid,task_name,start_date,finish_date,percent_complete,is_summary,is_milestone', {file_id:`eq.${selected.file_id}`});
   else datasets.tasks={rows:[],complete:datasets.files.complete,status:'empty',table:tasksTable,label:'פעילויות'};
   await collect('documents',validTable(indexTable),'id,project_id,title,summary,source_table,source_id,source_url,primary_date,created_at',{order:'created_at.desc,id.desc'}, {maxRows:40,recent:true});
-  await collect('timelineAlerts',validTable(alertsTable),'id,project_id,data_date,created_at,summary,alert_description,alert_type,severity_level,item_status,data_link',{order:'data_date.desc.nullslast,id.desc'});
+  await collect('timelineAlerts',validTable(alertsTable),'id,project_id,data_date,created_at,summary,alert_description,alert_type,severity_level,item_status,data_link,input_data_type,input_data_id,analyzed_data,metadata',{order:'data_date.desc.nullslast,id.desc'});
   await collect('timelineLinks','schedule_activity_alert_links','id,project_id,source_id,activity_key,event_date',{source_table:'eq.alerts'});
   return {project,datasets,schedule:{file:selected || null,files,tasks:datasets.tasks.rows,selectionBasis:fileId?'selected':'latest_available_unapproved'}};
 }

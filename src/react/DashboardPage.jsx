@@ -1,3 +1,4 @@
+import DashboardNotifications,{useDashboardNotifications} from './DashboardNotifications.jsx';
 import DashboardOverview from './DashboardOverview.jsx';
 import DashboardAiDialog from './DashboardAiDialog.jsx';
 import React, { useEffect, useRef, useState } from 'react';
@@ -79,6 +80,10 @@ export function DashboardPage() {
   const generation=useRef(0);
   const automaticRefresh=useRef(null);
   const [aiJob,setAiJob]=useState(null),[aiOpen,setAiOpen]=useState(false);
+  const notifications=useDashboardNotifications();
+  useEffect(()=>{if(aiOpen&&notifications.toast?.job===aiJob)notifications.read(aiJob);},[aiOpen,aiJob,notifications.toast]);
+  function openAi(job){notifications.read(job);setAiJob(job);setAiOpen(true);}
+  function startAi(job){notifications.track(job);setAiJob(job);setAiOpen(true);}
   const [section,setSection]=useState('overview');
   const [scheduleTarget,setScheduleTarget]=useState(null);
   const scheduleRequest=useRef(0);
@@ -139,7 +144,7 @@ export function DashboardPage() {
     if(window.__bidocRunDashboardChat){
       const job=window.__bidocRunDashboardChat({projectId:view.project.id,projectName:view.project.name,fileId:fileId || null,token:view.queryToken,itemId:item?.id || null,
         question:text || `מה המצב של ״${item.title}״, על מה הוא מבוסס ומה נדרש לעשות?`});
-      setAiJob(job);setAiOpen(true);
+      if(job.settled)openAi(job);else startAi(job);
     }
     else setError('הצ׳אט עדיין נטען. נסה שוב בעוד רגע.');
   }
@@ -148,16 +153,16 @@ export function DashboardPage() {
   const metrics=view?.metrics.slice(0,4) || [];
   const partial=view?.sourceHealth.filter(s=>!s.complete).length || 0;
   return <div className="db-page" dir="rtl">
-    <div className="db-appbar"><a className="db-wordmark" href="#dashboard">BIDOC<span>PROJECT CONTROL</span></a><nav aria-label="ניווט סביבת הבקרה"><button aria-pressed={section==='overview'} onClick={()=>{setSection('overview');document.getElementById("dashboard")?.scrollTo({top:0,behavior:"smooth"});}}>סקירה</button><button aria-pressed={section==='planning'} onClick={()=>{setSection('planning');document.getElementById("db-planning")?.scrollIntoView({behavior:"smooth",block:"center"});}}>תכנון ואירועים</button><button aria-pressed={section==='work'} onClick={()=>{setSection('work');document.getElementById("db-worklist")?.scrollIntoView({behavior:"smooth",block:"center"});}}>נושאים לטיפול</button></nav><button className="db-back" onClick={()=>window.__bidocActivateTab?.("chat")}>חזרה למערכת ↗</button></div>
-    <header className="db-page-header"><div><span className="db-eyebrow">סביבת עבודה / ניהול פרויקט</span><h1>{view?.project.name || 'מרכז בקרה'}<span className="db-title-dot">.</span></h1><p>לוח בקרה ראשי</p></div><div className="db-project-picker"><label htmlFor="db-project">הפרויקט שלי</label><select id="db-project" value={projectId} onChange={e=>{setProjectId(e.target.value);setFileId('');try{localStorage.setItem('bidoc-dashboard-project',e.target.value);}catch{}}}><option value="" disabled>בחר פרויקט</option>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></div></header>
+    <div className="db-appbar"><a className="db-wordmark" href="#dashboard">BIDOC<span>PROJECT CONTROL</span></a><nav aria-label="ניווט סביבת הבקרה"><button aria-pressed={section==='overview'} onClick={()=>{setSection('overview');document.getElementById("dashboard")?.scrollTo({top:0,behavior:"smooth"});}}>סקירה</button><button aria-pressed={section==='planning'} onClick={()=>{setSection('planning');document.getElementById("db-planning")?.scrollIntoView({behavior:"smooth",block:"center"});}}>תכנון ואירועים</button><button aria-pressed={section==='work'} onClick={()=>{setSection('work');document.getElementById("db-worklist")?.scrollIntoView({behavior:"smooth",block:"center"});}}>נושאים לטיפול</button></nav></div>
+    <header className="db-page-header"><div><span className="db-eyebrow">סביבת עבודה / ניהול פרויקט</span><h1>{view?.project.name || 'מרכז בקרה'}<span className="db-title-dot">.</span></h1><p>לוח בקרה ראשי</p></div><div className="db-project-picker"><label htmlFor="db-project">הפרויקט שלי</label><select id="db-project" value={projectId} onChange={e=>{setProjectId(e.target.value);setFileId('');try{localStorage.setItem('bidoc-dashboard-project',e.target.value);}catch{}}}><option value="" disabled>בחר פרויקט</option>{projects.map(p=><option value={p.id} key={p.id}>{p.name}</option>)}</select></div><DashboardNotifications entries={notifications.entries} toast={aiOpen&&notifications.toast?.job===aiJob?null:notifications.toast} onOpen={openAi} onDismiss={notifications.dismiss}/><button className="db-back" onClick={()=>window.__bidocActivateTab?.("chat")}>חזרה למערכת ↗</button></header>
     <div className="db-toolbar"><div className="db-time"><span className="db-live-dot"/><span>מצב נוכחי</span><span className="db-separator"/>נכון ל־{fmt(view?.asOf || new Date())}</div><div className="db-toolbar-actions"><button type="button" disabled={!view} onClick={()=>setDetail({type:'health'})}><Icon name="grid" size={15}/>{partial?`${partial} מקורות לא זמינים`:'מקורות ועדכניות'}</button><button type="button" disabled={!projectId||loading||saving} onClick={refresh}><Icon name="refresh" size={15}/>{loading?'מרענן…':'רענון'}</button><button type="button" disabled={!view||saving||loading||history?.available===false} onClick={save}><Icon name="save" size={15}/>{saving?'שומר…':'שמור תמונת מצב'}</button></div></div>
     {notice&&<div className="db-notice" role="status">{notice}</div>}{error&&<div className="db-error" role="alert">{error}<button type="button" onClick={refresh} disabled={!projectId||loading}>נסה שוב</button></div>}
-    {aiJob&&!aiOpen&&<button className="db-ai-reopen" onClick={()=>{setAiJob(window.__bidocRunDashboardChat(aiJob.context));setAiOpen(true);}}>פתח ניתוח BIDOC AI האחרון</button>}
+    {aiJob&&!aiOpen&&<button className="db-ai-reopen" onClick={()=>{openAi(aiJob);}}>פתח ניתוח BIDOC AI האחרון</button>}
     {!view&&loading&&<div className="db-loading" role="status"><div className="db-skeleton"/><div className="db-skeleton"/><p>מחבר את תמונת הפרויקט מהמקורות…</p></div>}
     {!view&&!loading&&!error&&<Empty>{projectsLoading?'טוען את סביבת העבודה…':projects.length?'בחר פרויקט כדי להציג את הנתונים.':'לא נמצאו פרויקטים פעילים בחיבור.'}</Empty>}
-    {view&&<DashboardOverview view={view} history={history} onDetail={setDetail} onAsk={ask} onSchedule={openSchedule} scheduleTarget={scheduleTarget}/>}
+    {view&&<DashboardOverview view={view} history={history} onDetail={setDetail} onAsk={ask} onSchedule={openSchedule} scheduleTarget={scheduleTarget} pendingJobs={notifications.entries.filter(r=>r.status==='pending'&&r.job.context.projectId===view.project.id).map(r=>r.job)}/>}
     {view&&<div className="db-version-footer"><label htmlFor="db-version">גרסת לוח</label><select id="db-version" value={fileId || view.schedule.fileId || ''} onChange={e=>setFileId(e.target.value)}>{view.schedule.files.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}</select></div>}
     {detail&&view&&<Details detail={detail} view={view} onClose={()=>setDetail(null)} onAsk={ask} onExpired={refreshExpired}/>}
-    {aiOpen&&aiJob&&<DashboardAiDialog key={aiJob.sessionId} job={aiJob} onClose={()=>setAiOpen(false)} onRefresh={()=>setAiJob(window.__bidocRunDashboardChat(aiJob.context,{force:true}))}/>}
+    {aiOpen&&aiJob&&<DashboardAiDialog key={aiJob.sessionId} job={aiJob} onClose={()=>setAiOpen(false)} onRefresh={()=>startAi(window.__bidocRunDashboardChat(aiJob.context,{force:true}))}/>}
   </div>;
 }

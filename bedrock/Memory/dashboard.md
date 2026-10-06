@@ -51,6 +51,15 @@ last_updated: 2026-10-04
 
 ## Recent Changes
 
+- 2026-10-05 — Restored immediate AI progress popup at user request. Users can wait for the answer in place or close and continue working while notifications remain active. Regression covers both waiting and closing during processing.
+
+
+- 2026-10-05 — Dashboard AI opens its progress popup immediately and continues in the background if closed, with a header notification inbox, unread counts and a 6.5-second nonblocking top-layer toast on success/failure. Each job is tracked once, independent concurrent jobs retain their results, project-matched widget icons pulse while pending. Inbox/toast opens the original job; cached settled answers open directly, recheck keeps the progress popup open, same chat continuation unchanged. Inbox is page-lifetime state, not durable storage. UI regression covers pending/dedup/cache/reload/day rollover, out-of-order success/failure and toast expiry.
+- 2026-10-05 — Restyled timeline event dialog with icon header, date/status strip and tinted source card; whatsapp_analysis/email_analysis now have friendly source labels. Live WhatsApp popup verified. Vite build and Chromium dashboard regression passed.
+
+
+- 2026-10-05 — Event popup now shows stored alert input type (localized email/WhatsApp/document/meeting variants), input record ID, alert description, expandable analyzed source text and safe source link. Source reader includes existing input_data_type/input_data_id/analyzed_data/metadata fields; missing origin/link explicitly disclosed, no inference from title. Seven model tests and UI regression passed; local server restarted.
+
 - 2026-10-05 — Timeline dots/feed entries and task bars now open DashboardEventDialog instead of inline details. Dots expose a viewport-clamped top-layer title tooltip on hover/focus, dismissed on leave/blur/wheel/touch. Schedule navigation highlights without automatically opening the modal. Build and Chromium regression passed including hover, popup content, and Escape closing only the event while fullscreen Gantt stays open.
 
 - 2026-10-05 — Removed fullscreen controls/wrappers from all six top metric cards at user request, restoring their original spacing and detail click behavior. Fullscreen remains on the six main widgets. Build passed.

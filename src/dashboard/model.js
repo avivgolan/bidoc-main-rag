@@ -157,7 +157,7 @@ export function buildDashboard({ project, datasets, schedule, now, asOf }) {
       timeline:tasks.filter(t=>!t.is_summary).map(t=>({id:String(t.task_uid),activityKey:`gantt:${file?.file_id}:${t.task_uid}`,title:t.task_name,start:toIsoDate(t.start_date),end:toIsoDate(t.finish_date),milestone:t.is_milestone,reportedPercent:finite(t.percent_complete)})),
     },
     timeline: {complete:healthFor(['timelineAlerts']),linksComplete:healthFor(['timelineLinks']),
-      events:rows('timelineAlerts').map(r=>({id:String(r.id),title:r.summary || r.alert_description || r.alert_type || 'התראה',date:toIsoDate(r.data_date || r.created_at),type:r.alert_type,status:r.item_status,severity:r.severity_level,url:safeSourceUrl(r.data_link),activityKey:rows('timelineLinks').find(l=>String(l.source_id)===String(r.id))?.activity_key || null})),
+      events:rows('timelineAlerts').map(r=>({id:String(r.id),title:r.summary || r.alert_description || r.alert_type || 'התראה',date:toIsoDate(r.data_date || r.created_at),type:r.alert_type,status:r.item_status,severity:r.severity_level,url:safeSourceUrl(r.data_link || r.metadata?.data_link || r.metadata?.url),sourceType:r.input_data_type || r.metadata?.input_data_type || null,sourceId:r.input_data_id ?? r.metadata?.input_data_id ?? null,description:typeof r.alert_description==='string'?r.alert_description:null,sourceExcerpt:typeof (r.analyzed_data ?? r.metadata?.analyzed_data)==='string'?String(r.analyzed_data ?? r.metadata?.analyzed_data).slice(0,4000):null,activityKey:rows('timelineLinks').find(l=>String(l.source_id)===String(r.id))?.activity_key || null})),
     },
     documents, activity,
     questions:['מה הנושאים שדורשים טיפול בפרויקט?', 'אילו אישורים חוסמים את ההתקדמות?', 'מה חסר כדי להעריך את מועד המסירה?'],
