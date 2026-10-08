@@ -40,6 +40,17 @@ export function authorizeDataQueryRequest(req, { secret = process.env.BIDOC_API_
   });
 }
 
+// Trusted BiDoc chat callers may attach a prebuilt dashboard context. Unlike the
+// legacy cross-tenant check, this path fails closed when no secret is configured
+// and compares the secret in constant time.
+export function authorizeBidocChatRequest(req, { secret = process.env.BIDOC_API_SECRET } = {}) {
+  return authorizeSecretHeader(req, {
+    secret,
+    headerName: "x-bidoc-api-secret",
+    disabledError: "Trusted BiDoc dashboard chat is disabled until BIDOC_API_SECRET is configured"
+  });
+}
+
 const CONTRACTS_REVIEWER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const CONTRACTS_AUTOMATIC_STEP_PATH = /^\/api\/contracts\/automatic\/workspaces\/[0-9a-f-]+\/steps\/[a-z-]+$/iu;
 
