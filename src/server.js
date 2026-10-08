@@ -303,7 +303,7 @@ async function handleApi(req, res, url) {
     const cfg = buildRequestConfig(req, body);
     // Dashboard presentation instructions apply only at final synthesis.
     if (dashboardChat) cfg.dashboardAnswerInstructions = dashboardChat.synthesisInstructions;
-    const ephemeral = dashboardChat?.ephemeral === true;
+    const ephemeral = Boolean(dashboardChat?.ephemeral);
     createRun(runId);
 
     // Opt-in inline-stream mode (body.stream === true, used by the standalone
