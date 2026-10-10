@@ -237,6 +237,23 @@ export function registerChatCompletionIntegrityTests(test) {
     assert.equal(mainCompletionFailureCode(Object.assign(new Error("secret provider text"), { httpStatus: 503 })), "provider_unavailable");
   });
 
+  test("chat completion integrity retries a context-length rejection with compact context", () => {
+    const tooLong = Object.assign(new Error("This endpoint's maximum context length is 128000 tokens. However, you requested about 139560 tokens (135464 of text input, 4096 in the output)."), { httpStatus: 400 });
+    assert.deepEqual(mainSynthesisRetryPolicy(tooLong, {
+      models: { main: "openai/gpt-main" },
+      ai: { main: { maxTokens: 4096 } }
+    }), {
+      reason: "context_length",
+      model: "openai/gpt-main",
+      maxTokens: 4096,
+      recordLimit: 5,
+      chunkTextLimit: 700
+    });
+    assert.equal(mainSynthesisRetryPolicy(tooLong, { models: { main: "m" } }, { broad: true }).recordLimit, 8);
+    // Any other bad request is still not retried.
+    assert.equal(mainSynthesisRetryPolicy(Object.assign(new Error("Invalid model"), { httpStatus: 400 }), {}), null);
+  });
+
   test("chat completion integrity maps workflow recovery, fallback, skip, and conflicts truthfully", () => {
     assert.equal(mainWorkflowStatus({ status: "done" }), "done");
     assert.equal(mainWorkflowStatus({ status: "retried" }), "retried");
