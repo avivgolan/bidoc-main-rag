@@ -2346,6 +2346,17 @@ export function mainSynthesisRetryPolicy(error, config = {}, { broad = false } =
       chunkTextLimit: 700
     };
   }
+  // The prompt exceeded the model's context window (e.g. a whole-period question retrieving many
+  // records): retry once with fewer, shorter records instead of falling back.
+  if ([400, 413].includes(Number(error?.httpStatus)) && /maximum context length|context length|too many tokens|prompt is too long/i.test(message)) {
+    return {
+      reason: "context_length",
+      model: config.models?.main,
+      maxTokens: configuredMainTokens,
+      recordLimit: broad ? 8 : 5,
+      chunkTextLimit: 700
+    };
+  }
   const providerCapacityFailure = Number(error?.httpStatus) === 402 || /more credits|can only afford/i.test(message);
   if (!providerCapacityFailure) return null;
   const parsedAffordable = Number(error?.affordableMaxTokens || String(message).match(/can\s+only\s+afford\s+([\d,]+)/i)?.[1]?.replaceAll(",", ""));
