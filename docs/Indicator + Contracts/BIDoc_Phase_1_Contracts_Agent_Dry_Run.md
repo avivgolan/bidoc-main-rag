@@ -71,6 +71,24 @@ Request body:
 }
 ```
 
+Instead of `pdfBase64`, a caller may send `pdfUrl` (and optionally `pdfSha256`, the
+document's lowercase hex SHA-256): a short-lived Supabase Storage signed URL
+(`https://<ref>.supabase.co/storage/v1/object/sign/<bucket>/<path>?token=…`) that
+main-agent fetches itself, so a large contract never travels as base64 through
+Vercel's 4.5 MB request-body limit. This applies to `/api/contracts/extract`,
+`/api/contracts/clauses/preview`, `/api/contracts/clauses/workspaces/extract`, and
+`extractionRequest` of `/api/contracts/workspaces/extract`. The URL must be https on
+the default port, without credentials, on a `*.supabase.co` / `*.supabase.in` host
+(or a host listed in `CONTRACTS_PDF_URL_ALLOWED_HOSTS`, comma-separated; a leading
+dot allows a suffix), and must be a Storage signed-object path carrying `token`.
+Redirects are refused, the body is streamed with the decoded-document byte cap, and
+the URL is never echoed. Sending both `pdfBase64` and `pdfUrl` is
+`contracts_pdf_source_ambiguous` (400); an invalid URL is `contracts_pdf_url_invalid`
+(400); Storage 4xx (expired or unknown object) is `contracts_pdf_url_rejected` (422);
+network errors and Storage 5xx are `contracts_pdf_url_fetch_failed` (502); a hash
+mismatch is `contracts_pdf_sha256_mismatch` (422); an oversized document is
+`contracts_pdf_too_large` (413).
+
 Guards:
 
 - JSON request: 4,250,000 bytes maximum.

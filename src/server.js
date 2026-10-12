@@ -25,6 +25,7 @@ import { runScheduleConditionResolver } from "./subagents/scheduleConditionResol
 import { CONTRACTS_AGENT_VERSION, CONTRACTS_EXTRACTION_BUDGET_MS, CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES, CONTRACTS_MAX_RESPONSE_BYTES, CONTRACTS_PDF_READER_VERSION } from "./contracts/constants.js";
 import { contractsErrorResponse } from "./contracts/errors.js";
 import { readJsonBounded } from "./contracts/request.js";
+import { resolveContractDocumentSource } from "./contracts/documentSource.js";
 import { listScheduleProjects, loadScheduleSource, saveScheduleProjectEndDate, scheduleSettings } from "./scheduleIngestion.js";
 import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
@@ -1028,9 +1029,12 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // Contract routes take the File as pdfBase64 (n8n) or as pdfUrl, a Supabase
+  // Storage signed URL main-agent fetches itself (BiDoc web), so a contract over
+  // ~3.3 MB never travels as base64 through Vercel's 4.5 MB body limit.
   if (req.method === "POST" && url.pathname === "/api/contracts/extract") {
     try {
-      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const body = await resolveContractDocumentSource(await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES));
       const { runContractsExtractionRequest, safeContractTelemetry } = await import("./subagents/contracts.js");
       const { sendContractsJson } = await import("./contracts/response.js");
       const result = await runContractsExtractionRequest({
@@ -1060,7 +1064,7 @@ async function handleApi(req, res, url) {
       if (!hasIngestionSecret && !getSuperadminSession(req)) {
         return sendJson(res, 401, { error: "נדרשת התחברות כסופראדמין" });
       }
-      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const body = await resolveContractDocumentSource(await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES));
       const { runContractsClausePreview } = await import("./contracts/clausePreview.js");
       const { sendContractsJson } = await import("./contracts/response.js");
       const result = await runContractsClausePreview({ body, config: config() });
@@ -1143,7 +1147,7 @@ async function handleApi(req, res, url) {
     try {
       const reviewerId = resolveContractsReviewerId(req, getSuperadminSession(req));
       if (!reviewerId) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
-      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const body = await resolveContractDocumentSource(await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES));
       const { MAIN_STUDYCASE_SOURCE_PROJECT_ID, isKapaimStudyCaseTwin } = await import("./contracts/studyCase.js");
       const projectId = body?.projectSelection?.projectId;
       const boundBody = projectId && isKapaimStudyCaseTwin(projectId)
@@ -1995,7 +1999,11 @@ async function handleApi(req, res, url) {
     try {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
-      const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const rawBody = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
+      const body = rawBody && typeof rawBody === "object" && !Array.isArray(rawBody)
+        && rawBody.extractionRequest && typeof rawBody.extractionRequest === "object"
+        ? { ...rawBody, extractionRequest: await resolveContractDocumentSource(rawBody.extractionRequest) }
+        : rawBody;
       const {
         contractPdfSha256,
         contractsWorkspacePersistenceApproved,
