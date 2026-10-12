@@ -13,7 +13,7 @@ import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventT
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
-import { authorizeContractsExtractionRequest, authorizeDataQueryRequest, isContractsMachineIngestPath, resolveContractsReviewerId } from "./apiSecurity.js";
+import { authorizeContractsExtractionRequest, authorizeDataQueryRequest, isTrustedMachineSecret, isContractsMachineIngestPath, resolveContractsReviewerId } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
@@ -80,7 +80,8 @@ async function reconcileIndicatorAfterContractMutation({ workspaceId }) {
 function checkBidocSecret(req) {
   const secret = process.env.BIDOC_API_SECRET;
   if (!secret) return true;
-  return req.headers["x-bidoc-api-secret"] === secret;
+  // BIDOC_API_SECRET (web app) or INGEST_API_SECRET (ingest engine).
+  return isTrustedMachineSecret(req.headers["x-bidoc-api-secret"]);
 }
 
 /**
