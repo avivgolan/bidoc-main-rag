@@ -8106,9 +8106,20 @@ test("indexing agent derives event and document dates from source-native columns
   assert.deepEqual(safety, { event_date: "2023-02-07", document_date: "2023-02-07" });
 });
 
+test("indexing agent dates an Other document by its attachment date, never by when it was written", () => {
+  assert.deepEqual(
+    computeIndexDates({
+      sourceTable: "other_documents",
+      sourceRow: { attachment_date: "2025-11-06T09:12:00+00:00", created_at: "2026-10-12T13:16:00+00:00" },
+      primaryDate: "2025-11-06T09:12:00+00:00"
+    }),
+    { event_date: null, document_date: "2025-11-06" }
+  );
+});
+
 test("indexing agent never invents dates when the source has none", () => {
   assert.deepEqual(
-    computeIndexDates({ sourceTable: "other_documents", sourceRow: { created_at: "2026-06-03T15:09:32+00:00" }, primaryDate: "2026-06-03T15:09:32+00:00" }),
+    computeIndexDates({ sourceTable: "other_documents", sourceRow: { created_at: "2026-06-03T15:09:32+00:00" }, primaryDate: null }),
     { event_date: null, document_date: null }
   );
   assert.deepEqual(
