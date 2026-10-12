@@ -53,8 +53,9 @@ export const SOURCE_TABLE_SPECS = {
     dateJoin: { table: "whatsapp_conversations", sourceKey: "conversation_id", dateColumn: "conversation_start" }
   },
   other_documents: {
-    // Only created_at (ingestion time) exists — no reliable dates at all.
-    documentDateColumn: null,
+    // attachment_date: when the File arrived (its Email's date). created_at is only when the row
+    // was written — a Backfill writes old Files today — so it is never used as a date.
+    documentDateColumn: "attachment_date",
     eventDateColumn: null
   }
 };
@@ -465,7 +466,6 @@ function indexPrimaryDate(sourceTable, row, joinedDate = null) {
   const spec = SOURCE_TABLE_SPECS[sourceTable] || {};
   if (spec.documentDateColumn && row[spec.documentDateColumn]) return row[spec.documentDateColumn];
   if (spec.dateJoin && joinedDate) return joinedDate;
-  if (sourceTable === "other_documents") return row.created_at || null;
   return null;
 }
 
