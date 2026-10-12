@@ -365,7 +365,9 @@ export async function runContractsClauseEnrichment({
       return items;
     };
     const completeFromSourceIfKeysMissing = (error, candidateRaw) => {
-      if (!isKeyCompletenessError(error) && error?.code !== "contracts_clause_enrichment_tags_invalid") throw error;
+      if (!isKeyCompletenessError(error)
+          && !isSummaryOutputError(error)
+          && error?.code !== "contracts_clause_enrichment_tags_invalid") throw error;
       const completed = completeBatchFromSource(candidateRaw, batch, {
         controlledTags: tags,
         sanitizeUnknownTags: true,
@@ -749,7 +751,9 @@ function validateModelBatch(raw, batch, {
   onUnknownKeysCorrected = null,
   onCatalogFallback = null,
   sanitizeUnsupportedNumericFacts = false,
-  onNumericSanitized = null
+  onNumericSanitized = null,
+  fallbackInvalidSummaries = false,
+  onSummaryFallback = null
 } = {}) {
   if (String(raw || "").length > MAX_MODEL_RESPONSE_CHARACTERS) {
     throw enrichmentError("contracts_clause_enrichment_response_too_large", "The R3 model response exceeded its bound.", 502, "enrichment.response_too_large");
@@ -807,7 +811,7 @@ function validateModelBatch(raw, batch, {
     unknownLeftovers.length = 0;
   }
   if (correctedKeyCount) onUnknownKeysCorrected?.(correctedKeyCount);
-  const items = accepted.map((item) => {
+  const groundedSummary = (item) => {
     const clauseKey = item.clauseKey;
     let summaryHe = validateSummary(item.summaryHe, clauseKey);
     if (sanitizeUnsupportedNumericFacts) {
@@ -818,6 +822,21 @@ function validateModelBatch(raw, batch, {
       }
     }
     assertSummaryGrounding(summaryHe, expected.get(clauseKey).rawText, clauseKey);
+    return summaryHe;
+  };
+  const items = accepted.map((item) => {
+    const clauseKey = item.clauseKey;
+    let summaryHe;
+    try {
+      summaryHe = groundedSummary(item);
+    } catch (error) {
+      // One empty, over-long, non-Hebrew or ungrounded summary must not fail the
+      // whole contract once repair is spent: that clause gets the same
+      // source-grounded summary as a clause the model omitted.
+      if (!fallbackInvalidSummaries || !isSummaryOutputError(error)) throw error;
+      summaryHe = deterministicEnrichmentItem(expected.get(clauseKey)).summaryHe;
+      onSummaryFallback?.(clauseKey);
+    }
     return {
       clauseKey,
       summaryHe,
@@ -833,6 +852,11 @@ function validateModelBatch(raw, batch, {
     throw enrichmentError("contracts_clause_enrichment_batch_incomplete", "The R3 model omitted one or more clauses from a batch.", 502, "enrichment.batch_incomplete");
   }
   return items;
+}
+
+function isSummaryOutputError(error) {
+  return error?.code === "contracts_clause_enrichment_summary_invalid"
+    || error?.code === "contracts_clause_enrichment_ungrounded_numeric_fact";
 }
 
 function isKeyCompletenessError(error) {
@@ -853,7 +877,10 @@ function deterministicEnrichmentItem(clause, controlledTags = null) {
     ? grounded
     : (tags.includes("אחר") ? ["אחר"] : tags.slice(0, 1));
   const source = String(clause.rawText || "").trim().replace(/\s+/gu, " ");
-  const clipped = source.slice(0, Math.max(0, MAX_SUMMARY_CHARACTERS - 24));
+  const limit = Math.max(0, MAX_SUMMARY_CHARACTERS - 24);
+  // Clip on a word boundary so a number is never cut into one the source lacks.
+  const wordClipped = source.length > limit ? source.slice(0, limit).replace(/\s+\S*$/u, "") : source;
+  const clipped = sanitizeSummaryNumericGrounding(wordClipped || source.slice(0, limit), clause.rawText);
   const prefixed = HEBREW_CHARACTER_PATTERN.test(clipped) && clipped.length >= 5
     ? clipped
     : `סעיף מתוך המקור. ${clipped}`.trim();
@@ -869,11 +896,15 @@ function deterministicEnrichmentItem(clause, controlledTags = null) {
 function completeBatchFromSource(raw, batch, options = {}) {
   let partial = [];
   let correctedKeyCount = 0;
+  let summaryFallbackCount = 0;
   try {
     partial = validateModelBatch(raw, batch, {
       ...options,
       sanitizeUnknownKeys: true,
       allowIncomplete: true,
+      sanitizeUnsupportedNumericFacts: true,
+      fallbackInvalidSummaries: true,
+      onSummaryFallback: () => { summaryFallbackCount += 1; },
       onUnknownKeysCorrected: (count) => { correctedKeyCount += count; }
     });
   } catch (error) {
@@ -885,7 +916,7 @@ function completeBatchFromSource(raw, batch, options = {}) {
     items: batch.map((clause) => have.has(clause.clauseKey)
       ? partial.find((item) => item.clauseKey === clause.clauseKey)
       : deterministicEnrichmentItem(clause, options.controlledTags)),
-    fallbackCount: batch.length - have.size,
+    fallbackCount: batch.length - have.size + summaryFallbackCount,
     correctedKeyCount
   };
 }

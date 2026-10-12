@@ -7,6 +7,7 @@ import {
   isAllowedContractDeclaredMediaType,
   isPdfSignature
 } from "./media.js";
+import { RESOLVED_CONTRACT_BYTES } from "./documentSource.js";
 
 export { CONTRACTS_MAX_JSON_BYTES, CONTRACTS_MAX_PDF_BYTES };
 
@@ -67,6 +68,15 @@ export function parseContractExtractionRequest(body) {
     );
   }
 
+  if (Object.prototype.hasOwnProperty.call(body, "pdfUrl")) {
+    // resolveContractDocumentSource must run first (it fetches and removes pdfUrl).
+    throw new ContractsAgentError(
+      "contracts_pdf_url_unresolved",
+      "pdfUrl is not accepted on this route.",
+      400
+    );
+  }
+
   const unknownField = Object.keys(body).find((key) => !REQUEST_FIELDS.has(key));
   if (unknownField) {
     throw new ContractsAgentError(
@@ -102,7 +112,8 @@ export function parseContractExtractionRequest(body) {
     );
   }
 
-  const pdfBytes = decodeStrictBase64(body.pdfBase64);
+  const resolvedBytes = body[RESOLVED_CONTRACT_BYTES];
+  const pdfBytes = Buffer.isBuffer(resolvedBytes) ? resolvedBytes : decodeStrictBase64(body.pdfBase64);
   if (pdfBytes.length > CONTRACTS_MAX_PDF_BYTES) {
     throw new ContractsAgentError(
       "contracts_pdf_too_large",
