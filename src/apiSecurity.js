@@ -6,6 +6,20 @@ function constantTimeEqual(left, right) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * Machine secrets main-agent trusts for cross-tenant calls (requests that carry
+ * x-content-supabase-* headers): the shared BIDOC_API_SECRET used by the BiDoc web
+ * app, and INGEST_API_SECRET, a dedicated secret for the ingest engine, so the
+ * engine never has to share the web app's secret.
+ */
+export function isTrustedMachineSecret(provided, env = process.env) {
+  const accepted = [env.BIDOC_API_SECRET, env.INGEST_API_SECRET]
+    .map((secret) => String(secret || "").trim())
+    .filter(Boolean);
+  const value = Array.isArray(provided) ? provided[0] : provided;
+  return accepted.some((secret) => constantTimeEqual(value, secret));
+}
+
 function authorizeSecretHeader(req, {
   secret,
   headerName,
