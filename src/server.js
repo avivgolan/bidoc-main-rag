@@ -13,7 +13,7 @@ import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventT
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
-import { authorizeContractsExtractionRequest, authorizeDataQueryRequest, isTrustedMachineSecret, isContractsMachineIngestPath, resolveContractsReviewerId } from "./apiSecurity.js";
+import { authorizeBidocRead, authorizeContractsExtractionRequest, authorizeDataQueryRequest, checkBidocSecretHeader, isBidocContextRequest, isContractsMachineIngestPath, resolveContractsReviewerId } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
@@ -33,8 +33,8 @@ import { aggregateInsightQualityMetrics, collectInsightHashtags, runProjectInsig
 import { consolidateGraphEntities, runGraphEnrichment } from "./subagents/graphEnrichment.js";
 import { runEmbeddingBackfill, runIncrementalIndexing, runIndexDatesBackfill } from "./subagents/indexing.js";
 import { callInternalContentTool, CONTENT_TOOL_SPECS, isInternalContentTool } from "./subagents/contentTools.js";
-import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
-import { requestProjectId, resolveRequestProjectId, sameProjectId } from "./projectScope.js";
+import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, runVisibleToRequest, subscribeRun } from "./runLog.js";
+import { bidocChatSessionPrefix, chatSessionInProject, chatSessionProjectId, requestProjectId, resolveRequestProjectId, resolveScopedProjectId, sameProjectId } from "./projectScope.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession } from "./auth.js";
@@ -76,26 +76,49 @@ async function reconcileIndicatorAfterContractMutation({ workspaceId }) {
 // ─── Multi-tenant helpers ─────────────────────────────────────────────────────
 
 /**
- * Validates the X-Bidoc-Api-Secret header when BIDOC_API_SECRET is set.
- * If no secret is configured, all requests are allowed (backward compat).
+ * Validates the X-Bidoc-Api-Secret header against BIDOC_API_SECRET (web app)
+ * or INGEST_API_SECRET (ingest engine). Fails closed: with neither secret
+ * configured no cross-tenant request is accepted.
  */
 function checkBidocSecret(req) {
-  const secret = process.env.BIDOC_API_SECRET;
-  if (!secret) return true;
-  // BIDOC_API_SECRET (web app) or INGEST_API_SECRET (ingest engine).
-  return isTrustedMachineSecret(req.headers["x-bidoc-api-secret"]);
+  return checkBidocSecretHeader(req);
 }
 
 /**
- * For read-only GET endpoints: only enforce the secret when the request
- * carries cross-tenant headers (i.e. it's coming from an external proxy).
- * Same-origin UI requests (no x-content-supabase-url) are allowed through
- * so the app's own interface can still load history/hashtags.
+ * Read endpoints: a cross-tenant (BiDoc-context) request needs the machine
+ * secret; a same-origin request needs the standalone UI's superadmin session.
  */
 function checkBidocSecretForRead(req) {
-  const isCrossTenant = Boolean(req.headers["x-content-supabase-url"]);
-  if (!isCrossTenant) return true;
-  return checkBidocSecret(req);
+  return authorizeBidocRead(req, { hasSession: Boolean(getSuperadminSession(req)) });
+}
+
+// The request Project from x-project-id / ?project_id (never the body).
+function requestScopeProjectId(req) {
+  return resolveRequestProjectId({ header: req.headers["x-project-id"], query: requestQueryProjectId(req) });
+}
+
+// App DB chat history (chat_messages_gf, qa_reports) has no project_id: a
+// BiDoc-context caller sees only sessions BiDoc tagged bidoc:<projectId>:
+// for its request Project. Returns { bidoc: false } for the standalone UI,
+// { bidoc: true, projectId } for a BiDoc caller (projectId may be null).
+function bidocChatScope(req) {
+  if (!isBidocContextRequest(req)) return { bidoc: false, projectId: null };
+  return { bidoc: true, projectId: requestScopeProjectId(req) };
+}
+
+function chatMessageVisible(scope, message) {
+  if (!scope.bidoc) return true;
+  return chatSessionInProject(message?.session_id, scope.projectId);
+}
+
+function projectRequired(res) {
+  return sendJson(res, 400, { error: "project_required", message: "A BiDoc request must name its Project (x-project-id)" });
+}
+
+// Schedule routes name their Project in the query/body (projectId); it must
+// agree with the request Project. Throws project_mismatch (400) otherwise.
+function scheduleRouteProjectId(req, routeProjectId) {
+  return resolveScopedProjectId(requestScopeProjectId(req), routeProjectId) || "";
 }
 
 /**
@@ -285,6 +308,10 @@ async function handleApi(req, res, url) {
   // caller needs the shared secret. A runId alone no longer opens the stream.
   if (req.method === "GET" && url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/events")) {
     const runId = decodeURIComponent(url.pathname.split("/")[3] || "");
+    // A BiDoc-context caller follows only a run started for its own Project.
+    if (!runVisibleToRequest(runId, { bidocContext: isBidocContextRequest(req), projectId: requestScopeProjectId(req) })) {
+      return sendJson(res, 404, { error: "run_not_found" });
+    }
     res.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
@@ -306,11 +333,14 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname.startsWith("/api/qa/")) {
+    // A BiDoc-context caller must name its Project and is confined to it.
+    const qaScope = bidocChatScope(req);
+    if (qaScope.bidoc && !qaScope.projectId) return projectRequired(res);
     const qaResponse = await handleQaHttpRequest({
       req,
       url,
       service: qaHarnessService,
-      context: createHttpQaContext(req, { session: getSuperadminSession(req) }),
+      context: createHttpQaContext(req, { session: getSuperadminSession(req), projectId: qaScope.projectId }),
       readJson
     });
     return sendJson(res, qaResponse.status, qaResponse.body);
@@ -331,13 +361,23 @@ async function handleApi(req, res, url) {
       body.projectId = dashboardChat.projectId;
       body.message = dashboardChat.message;
     }
-    const sessionId = body.sessionId || `session_${Date.now()}`;
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const cfg = buildRequestConfig(req, body);
+    // Chat memory reads the session's history: a BiDoc-context caller may only
+    // use a session BiDoc tagged for its own Project (bidoc:<projectId>:...).
+    const chatProjectId = requestProjectId(cfg);
+    let sessionId = body.sessionId || `session_${Date.now()}`;
+    if (isBidocContextRequest(req)) {
+      if (!body.sessionId && chatProjectId) sessionId = `${bidocChatSessionPrefix(chatProjectId)}session_${Date.now()}`;
+      const sessionProjectId = chatSessionProjectId(sessionId);
+      if (sessionProjectId ? !chatSessionInProject(sessionId, chatProjectId) : Boolean(chatProjectId)) {
+        return sendJson(res, 400, { error: "project_mismatch", message: "The chat session belongs to a different Project" });
+      }
+    }
     // Dashboard presentation instructions apply only at final synthesis.
     if (dashboardChat) cfg.dashboardAnswerInstructions = dashboardChat.synthesisInstructions;
     const ephemeral = Boolean(dashboardChat?.ephemeral);
-    createRun(runId);
+    createRun(runId, { projectId: requestProjectId(cfg) });
 
     // Opt-in inline-stream mode (body.stream === true, used by the standalone
     // UI): subscribes *this same response* to the run's live log before the
@@ -404,17 +444,34 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/sessions") {
-    const sessions = await listSessions({ config: config() }).catch(() => []);
+    const chatScope = bidocChatScope(req);
+    if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
+    const sessions = await listSessions({
+      config: config(),
+      sessionPrefix: chatScope.bidoc ? bidocChatSessionPrefix(chatScope.projectId) : null
+    }).catch(() => []);
     return sendJson(res, 200, { sessions });
   }
 
   if (req.method === "GET" && url.pathname === "/api/run-history") {
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
+    // A BiDoc-context caller sees its Project's chat runs and in-memory runs
+    // only; schedule-assignment runs are a superadmin reviewer tool.
+    const chatScope = bidocChatScope(req);
+    if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
     const [dbRuns, scheduleAssignmentRuns] = await Promise.all([
-      listRunHistory({ config: config(), limit }).catch(() => []),
-      listScheduleActivityAssignmentWorkflowRuns({ config: config(), limit }).catch(() => [])
+      listRunHistory({
+        config: config(),
+        limit,
+        sessionPrefix: chatScope.bidoc ? bidocChatSessionPrefix(chatScope.projectId) : null
+      }).catch(() => []),
+      chatScope.bidoc
+        ? Promise.resolve([])
+        : listScheduleActivityAssignmentWorkflowRuns({ config: config(), limit }).catch(() => [])
     ]);
-    const localRuns = listLocalRunHistory({ limit });
+    const localRuns = chatScope.bidoc
+      ? listLocalRunHistory({ limit, projectId: chatScope.projectId })
+      : listLocalRunHistory({ limit });
     const seen = new Set();
     const runs = [...localRuns, ...scheduleAssignmentRuns, ...dbRuns]
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
@@ -438,7 +495,7 @@ async function handleApi(req, res, url) {
         continue;
       }
       const runId = `eval_${Date.now()}_${index}_${Math.random().toString(16).slice(2)}`;
-      createRun(runId);
+      createRun(runId, { projectId: requestProjectId(evalConfig) });
       try {
         const output = await runChatPipeline({
           message,
@@ -546,7 +603,7 @@ async function handleApi(req, res, url) {
       ? { ...cfg, insights: { ...(cfg.insights || {}), ...requestInsights } }
       : cfg;
     const runId = body.runId || `project_insights_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    createRun(runId, { projectId: requestProjectId(cfg) });
     const excludedSourceKeys = Array.isArray(body.excludeSourceKeys) ? body.excludeSourceKeys : [];
     const parentRunId = body.parentRunId || body.parent_run_id || null;
     // Persist a "running" row immediately so clients that leave/return can show
@@ -729,7 +786,7 @@ async function handleApi(req, res, url) {
     if (!(await delayClaimCaseInProject({ config: cfg, caseId }))) return sendJson(res, 404, { error: "delay_claim_not_found" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `delay_claim_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    createRun(runId, { projectId: requestProjectId(cfg) });
     try {
       const result = await runDelayClaimAnalysis({
         config: cfg,
@@ -764,7 +821,7 @@ async function handleApi(req, res, url) {
     if (!(await delayClaimCaseInProject({ config: cfg, caseId }))) return sendJson(res, 404, { error: "delay_claim_not_found" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `delay_package_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    createRun(runId, { projectId: requestProjectId(cfg) });
     try {
       const result = await runDelayClaimPackageAnalysis({
         config: cfg,
@@ -812,7 +869,7 @@ async function handleApi(req, res, url) {
     if (!(await delayEventInProject({ config: cfg, eventId }))) return sendJson(res, 404, { error: "delay_event_not_found" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `delay_event_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    createRun(runId, { projectId: requestProjectId(cfg) });
     try {
       const result = await runDelayEventDeepAnalysis({
         config: cfg,
@@ -867,7 +924,13 @@ async function handleApi(req, res, url) {
 
   const messagesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/);
   if (req.method === "GET" && messagesMatch) {
-    const messages = await listMessages({ config: config(), sessionId: decodeURIComponent(messagesMatch[1]) }).catch(() => []);
+    const sessionId = decodeURIComponent(messagesMatch[1]);
+    const chatScope = bidocChatScope(req);
+    if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
+    if (chatScope.bidoc && !chatSessionInProject(sessionId, chatScope.projectId)) {
+      return sendJson(res, 404, { error: "session_not_found" });
+    }
+    const messages = await listMessages({ config: config(), sessionId }).catch(() => []);
     return sendJson(res, 200, { messages });
   }
 
@@ -2365,7 +2428,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/indicator") {
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const result = await runScheduleIndicator({
@@ -2384,7 +2447,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && (url.pathname === "/api/schedule/sweep" || url.pathname === "/api/subagents/schedule")) {
     const body = await readJson(req).catch(() => ({}));
-    const projectId = body.projectId || body.project_id || "";
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const result = await runScheduleSweep({
@@ -2401,7 +2464,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/health") {
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const health = await runScheduleHealth({
@@ -2417,7 +2480,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/schedule/recalculate") {
     const body = await readJson(req).catch(() => ({}));
-    const projectId = body.projectId || body.project_id || "";
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const result = await runScheduleSweep({
@@ -2454,7 +2517,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/schedule/alert-scan") {
     const body = await readJson(req).catch(() => ({}));
-    const projectId = body.projectId || body.project_id || "";
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const result = await runScheduleAlertScan({
@@ -2469,7 +2532,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/alerts") {
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const alerts = await listScheduleAlerts({
@@ -2489,7 +2552,7 @@ async function handleApi(req, res, url) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     const body = await readJson(req).catch(() => ({}));
-    const projectId = body.projectId || body.project_id || "";
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const result = await saveScheduleProjectEndDate({
@@ -2504,7 +2567,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/activity-updates") {
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const result = await listScheduleActivityUpdates({ projectId, config: buildRequestConfig(req) });
@@ -2518,7 +2581,7 @@ async function handleApi(req, res, url) {
     res.setHeader("Cache-Control", "private, no-store");
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const [result, labels, shadowValidation] = await Promise.all([
@@ -2545,7 +2608,7 @@ async function handleApi(req, res, url) {
     res.setHeader("Cache-Control", "private, no-store");
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const report = await listSharedScheduleAssignmentShadowValidation({ projectId, config: getConfig() });
@@ -2559,7 +2622,7 @@ async function handleApi(req, res, url) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     const body = await readJson(req).catch(() => ({}));
-    const projectId = body.projectId || body.project_id || "";
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
     if (!projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
     try {
       const item = await assignScheduleActivityUpdate({
@@ -2592,7 +2655,7 @@ async function handleApi(req, res, url) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     const body = await readJson(req).catch(() => ({}));
-    const projectId = body.projectId || body.project_id || "";
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
     if (!projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
     const runId = crypto.randomUUID();
     createRun(runId);
@@ -2794,7 +2857,7 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && assignmentRunMatch) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const result = await getScheduleActivityAssignmentRun({ projectId, runId: decodeURIComponent(assignmentRunMatch[1]), config: getConfig() });
@@ -2805,7 +2868,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/conditions") {
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const result = await listScheduleConditions({
@@ -2822,10 +2885,10 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/schedule/conditions/resolve") {
     const body = await readJson(req).catch(() => ({}));
-    const projectId = body.projectId || body.project_id || "";
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     const runId = body.runId || `schedule_conditions_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    createRun(runId, { projectId });
     try {
       // This agent is SETTINGS-owned. Refresh MAIN.agent_settings on every
       // explicit row action so a stale process can never use the env fallback.
@@ -2850,7 +2913,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/schedule/versions") {
-    const projectId = url.searchParams.get("projectId") || "";
+    const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
       const source = await loadScheduleSource({ config: buildRequestConfig(req), projectId, settings: scheduleSettings() });
@@ -2893,18 +2956,33 @@ async function handleApi(req, res, url) {
     const body = await readJson(req).catch(() => ({}));
     const question = body.question || body.query || "";
     const runId = String(body.runId || body.run_id || `dq_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+    // Request config: x-content-supabase-* / x-project-id. The header (or
+    // ?project_id) Project wins; a body/context Project that differs is
+    // project_mismatch.
+    const dqBaseConfig = buildRequestConfig(req);
+    let dqProjectId;
+    try {
+      dqProjectId = resolveScopedProjectId(
+        requestProjectId(dqBaseConfig),
+        body.projectId || body.project_id || body.context?.projectId || body.context?.project_id || null
+      );
+    } catch (error) {
+      if (error?.code === "project_mismatch") return sendJson(res, 400, { error: "project_mismatch", message: error.message });
+      throw error;
+    }
+    const dqConfig = dqProjectId ? { ...dqBaseConfig, projectId: dqProjectId } : dqBaseConfig;
     const dqContext = {
       ...(body.context && typeof body.context === "object" ? body.context : {}),
       dateFrom: body.dateFrom || body.date_from || body.context?.dateFrom || body.context?.date_from || null,
       dateTo: body.dateTo || body.date_to || body.context?.dateTo || body.context?.date_to || null,
-      projectId: body.projectId || body.project_id || body.context?.projectId || body.context?.project_id || null,
+      projectId: dqProjectId || null,
       caseId: body.caseId || body.case_id || body.context?.caseId || body.context?.case_id || null,
       source: body.source || body.context?.source || "api",
       runId,
       callerNodeId: body.callerNodeId || body.caller_node_id || body.context?.callerNodeId || body.context?.caller_node_id || null,
       budget: body.budget && typeof body.budget === "object" ? body.budget : body.context?.budget || {}
     };
-    createRun(runId);
+    createRun(runId, { projectId: dqProjectId || null });
     emitRunEvent(runId, "chat_input", "שאלת בדיקה התקבלה", { question, context: dqContext });
     const dqOpenRouterCalls = [];
     const dqTelemetry = {
@@ -2917,7 +2995,7 @@ async function handleApi(req, res, url) {
     };
     try {
       const result = await runDataQueryAgent({
-        config: config(),
+        config: dqConfig,
         question,
         context: dqContext,
         requestedMetrics: body.requestedMetrics || body.requested_metrics || [],
@@ -2972,6 +3050,17 @@ async function handleApi(req, res, url) {
     const messageId = decodeURIComponent(url.pathname.split("/")[3]);
     const body = await readJson(req);
     const annotation = body.annotation === "V" || body.annotation === "X" ? body.annotation : null;
+    // A BiDoc-context caller annotates only messages of its Project's tagged
+    // sessions. BiDoc's annotate proxy does not send x-project-id yet; without
+    // one, only BiDoc-tagged sessions (never UI/QA sessions) are accepted.
+    const chatScope = bidocChatScope(req);
+    if (chatScope.bidoc) {
+      const message = await getMessage({ config: config(), messageId }).catch(() => null);
+      const visible = chatScope.projectId
+        ? chatMessageVisible(chatScope, message)
+        : Boolean(chatSessionProjectId(message?.session_id));
+      if (!visible) return sendJson(res, 404, { ok: false, error: "message_not_found" });
+    }
     try {
       await annotateMessage({ config: config(), messageId, annotation });
       return sendJson(res, 200, { ok: true });
@@ -3016,8 +3105,8 @@ async function handleApi(req, res, url) {
     const smart = ["1", "true", "yes", "ai", "smart"].includes(String(url.searchParams.get("smart") || "").toLowerCase());
     const focusEventId = String(url.searchParams.get("eventId") || "").trim();
     const runId = String(url.searchParams.get("runId") || "").trim();
-    if (runId) createRun(runId);
     const cfg = buildRequestConfig(req);
+    if (runId) createRun(runId, { projectId: requestProjectId(cfg) });
     const linkAgent = cfg.timelineLinks || {};
     const requestedLimit = Math.min(Math.max(Number(url.searchParams.get("limit") || 0) || (focusEventId ? linkAgent.suggestionLimit || 12 : 40), 1), 200);
     const trace = [];
@@ -3191,10 +3280,11 @@ async function handleApi(req, res, url) {
     if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `graph_enrichment_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    const runConfig = buildRequestConfig(req, body);
+    createRun(runId, { projectId: requestProjectId(runConfig) });
     try {
       const summary = await runGraphEnrichment({
-        config: buildRequestConfig(req, body),
+        config: runConfig,
         source: body.source === "alerts" ? "alerts" : "index",
         dateFrom: body.dateFrom || body.date_from || null,
         dateTo: body.dateTo || body.date_to || null,
@@ -3217,10 +3307,11 @@ async function handleApi(req, res, url) {
     if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `indexing_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    const runConfig = buildRequestConfig(req, body);
+    createRun(runId, { projectId: requestProjectId(runConfig) });
     try {
       const summary = await runIndexDatesBackfill({
-        config: buildRequestConfig(req, body),
+        config: runConfig,
         dryRun: body.dryRun !== false,
         limit: Math.max(1, Math.min(Number(body.limit) || 3000, 10000)),
         runId,
@@ -3240,10 +3331,11 @@ async function handleApi(req, res, url) {
     if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `indexing_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    const runConfig = buildRequestConfig(req, body);
+    createRun(runId, { projectId: requestProjectId(runConfig) });
     try {
       const summary = await runEmbeddingBackfill({
-        config: buildRequestConfig(req, body),
+        config: runConfig,
         tables: Array.isArray(body.tables) ? body.tables : null,
         dryRun: body.dryRun !== false,
         limit: Math.max(1, Math.min(Number(body.limit) || 150, 500)),
@@ -3262,10 +3354,11 @@ async function handleApi(req, res, url) {
     if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `indexing_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    createRun(runId);
+    const runConfig = buildRequestConfig(req, body);
+    createRun(runId, { projectId: requestProjectId(runConfig) });
     try {
       const summary = await runIncrementalIndexing({
-        config: buildRequestConfig(req, body),
+        config: runConfig,
         dryRun: body.dryRun !== false,
         limit: Math.max(1, Math.min(Number(body.limit) || 50, 200)),
         tables: Array.isArray(body.tables) ? body.tables : null,
@@ -3359,12 +3452,16 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // AI reports read App DB chat messages and qa_reports (keyed by message):
+  // a BiDoc-context caller reaches only its Project's tagged sessions.
+  const aiReportScope = bidocChatScope(req);
   const aiReportRunMatch = url.pathname.match(/^\/api\/ai-report\/([^/]+)\/run$/);
   if (req.method === "POST" && aiReportRunMatch) {
     const messageId = decodeURIComponent(aiReportRunMatch[1]);
+    if (aiReportScope.bidoc && !aiReportScope.projectId) return projectRequired(res);
     const body = await readJson(req).catch(() => ({}));
     const row = await getMessage({ config: config(), messageId });
-    if (!row) return sendJson(res, 404, { error: "Run was not found in history" });
+    if (!row || !chatMessageVisible(aiReportScope, row)) return sendJson(res, 404, { error: "Run was not found in history" });
     try {
       const report = await runQaAgent({
         config: config(),
@@ -3397,7 +3494,9 @@ async function handleApi(req, res, url) {
   const aiReportMatch = url.pathname.match(/^\/api\/ai-report\/([^/]+)$/);
   if (req.method === "GET" && aiReportMatch) {
     const messageId = decodeURIComponent(aiReportMatch[1]);
+    if (aiReportScope.bidoc && !aiReportScope.projectId) return projectRequired(res);
     const row = await getMessage({ config: config(), messageId }).catch(() => null);
+    if (aiReportScope.bidoc && !chatMessageVisible(aiReportScope, row)) return sendJson(res, 404, { error: "No AI report found" });
     if (row?.workflow_log?.ai_report) return sendJson(res, 200, { report: row.workflow_log.ai_report });
     const saved = await getLatestQaReport({ config: config(), messageId }).catch(() => null);
     if (saved?.report?.kind === "ai_report") return sendJson(res, 200, { report: saved.report });

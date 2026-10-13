@@ -646,8 +646,18 @@ function validatePhase1ConfigReference(reference) {
   }
 }
 
+// A row stored without a Project belongs to no Project: only an unscoped
+// context (or a wildcard one) may read it, never a Project-scoped caller.
 function assertStoredProjectAccess(context, projectId) {
-  if (projectId) assertProjectAccess(context, projectId, { optional: false });
+  if (projectId) {
+    assertProjectAccess(context, projectId, { optional: false });
+    return;
+  }
+  const allowed = Array.isArray(context?.allowedProjectIds) ? context.allowedProjectIds.map(String) : [];
+  if (allowed.includes("*")) return;
+  if (context?.currentProjectId || allowed.length) {
+    throw new QaServiceError("AUTHORIZATION_DENIED", "This QA record is not tied to the authenticated Project", { status: 403 });
+  }
 }
 
 function acceptedRun(run, workload, idempotentReplay) {

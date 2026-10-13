@@ -16,6 +16,7 @@
 
 import { getConfig, readLocalSettings, supabaseHeaders } from "./config.js";
 import { contentSupabaseConfig } from "./supabase.js";
+import { requestProjectId, sameProjectId } from "./projectScope.js";
 
 export const SCHEDULE_SOURCE_PROFILES = {
   app_data: { filesTable: "gantt_files", tasksTable: "gantt_tasks" },
@@ -453,6 +454,9 @@ export async function loadContractMilestones({ config = null, projectId, setting
 export async function listScheduleProjects({ config = null, settings: settingsInput = null } = {}) {
   const settings = settingsInput || scheduleSettings();
   const cfg = config || getConfig();
+  // A Project-scoped request lists only its own Project.
+  const scopedProjectId = requestProjectId(cfg);
+  const projectFilter = scopedProjectId ? `&id=eq.${encodeURIComponent(scopedProjectId)}` : "";
   const discovered = [];
   for (const database of ["app_data", "main"]) {
     let projects = [];
@@ -461,12 +465,13 @@ export async function listScheduleProjects({ config = null, settings: settingsIn
         config: cfg,
         settings,
         database,
-        path: `/rest/v1/projects?select=${PROJECT_COLUMNS}&is_active=eq.true&order=created_at.asc`
+        path: `/rest/v1/projects?select=${PROJECT_COLUMNS}&is_active=eq.true${projectFilter}&order=created_at.asc`
       });
     } catch {
       continue;
     }
     for (const project of projects) {
+      if (scopedProjectId && !sameProjectId(project?.id, scopedProjectId)) continue;
       const visiblePages = project?.settings?.visible_pages;
       if (Array.isArray(visiblePages) && !visiblePages.includes("schedule")) continue;
       const sourceSettings = scheduleSourceFromProject({ database, project, settings });

@@ -95,6 +95,9 @@ export function computeIndexDates({ sourceTable, sourceRow = null, primaryDate =
 
 export async function runIndexDatesBackfill({ config, dryRun = true, limit = 3000, runId = null, emit = null } = {}) {
   const indexTable = contentSupabaseConfig(config).indexTable;
+  // A Project-scoped run reads and patches only that Project's index rows.
+  const projectId = requestProjectId(config);
+  const projectFilter = projectIdFilterParam(projectId);
   const summary = {
     dates_version: INDEX_DATES_VERSION,
     dryRun,
@@ -112,9 +115,10 @@ export async function runIndexDatesBackfill({ config, dryRun = true, limit = 300
     config,
     table: indexTable,
     select: "id,source_table,source_id,primary_date,event_date,document_date",
-    filter: "or=(event_date.is.null,document_date.is.null)",
+    filter: ["or=(event_date.is.null,document_date.is.null)", projectFilter].filter(Boolean).join("&"),
     max: limit
   });
+  if (projectId) summary.projectId = projectId;
   summary.scanned = rows.length;
 
   const byTable = groupBy(rows, (row) => row.source_table);
@@ -138,7 +142,8 @@ export async function runIndexDatesBackfill({ config, dryRun = true, limit = 300
           config,
           table: sourceTable,
           ids: tableRows.map((row) => row.source_id),
-          select: sourceSelect
+          select: sourceSelect,
+          filter: projectFilter
         })
       : new Map();
     const joinedDates = await fetchJoinedDates({ config, spec, sourceRows });
@@ -187,7 +192,7 @@ export async function runIndexDatesBackfill({ config, dryRun = true, limit = 300
     for (const batch of chunk(groupPlans.map((plan) => plan.source_id), UPSERT_BATCH_SIZE)) {
       const updated = await contentSupabaseRequest({
         config,
-        path: `/rest/v1/${indexTable}?source_table=eq.${encodeURIComponent(sourceTable)}&source_id=in.(${batch.map(encodeURIComponent).join(",")})&select=id`,
+        path: `/rest/v1/${indexTable}?source_table=eq.${encodeURIComponent(sourceTable)}&source_id=in.(${batch.map(encodeURIComponent).join(",")})${projectFilter ? `&${projectFilter}` : ""}&select=id`,
         options: {
           method: "PATCH",
           headers: { Prefer: "return=representation" },
@@ -326,6 +331,10 @@ export async function runEmbeddingBackfill({ config, tables = null, dryRun = tru
   const targetTables = (Array.isArray(tables) && tables.length ? tables : Object.keys(EMBEDDING_BACKFILL_TABLES))
     .filter((table) => EMBEDDING_BACKFILL_TABLES[table]);
   const summary = { dryRun, planned: 0, embedded: 0, skippedNoText: 0, byTable: {} };
+  // A Project-scoped run reads and patches only that Project's rows.
+  const projectId = requestProjectId(config);
+  const projectFilter = projectIdFilterParam(projectId);
+  if (projectId) summary.projectId = projectId;
 
   let remaining = limit;
   const plans = [];
@@ -336,6 +345,7 @@ export async function runEmbeddingBackfill({ config, tables = null, dryRun = tru
       `select=${encodeURIComponent(["id", ...spec.textColumns].join(","))}`,
       "embedding=is.null",
       spec.extraFilter || null,
+      projectFilter,
       "order=id.asc",
       `limit=${remaining}`
     ].filter(Boolean).join("&");
@@ -372,7 +382,7 @@ export async function runEmbeddingBackfill({ config, tables = null, dryRun = tru
       // writer cannot cause an overwrite of an existing vector.
       await contentSupabaseRequest({
         config,
-        path: `/rest/v1/${plan.table}?id=eq.${plan.id}&embedding=is.null`,
+        path: `/rest/v1/${plan.table}?id=eq.${plan.id}&embedding=is.null${projectFilter ? `&${projectFilter}` : ""}`,
         options: {
           method: "PATCH",
           headers: { Prefer: "return=minimal" },

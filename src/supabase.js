@@ -583,10 +583,22 @@ export async function annotateMessage({ config, messageId, annotation }) {
   });
 }
 
-export async function listSessions({ config, limit = 30 }) {
+// sessionPrefix (bidoc:<projectId>:) narrows App DB chat history to one
+// Project's BiDoc sessions; the prefix is re-checked on the rows returned.
+function sessionPrefixFilter(sessionPrefix) {
+  return sessionPrefix ? `&session_id=like.${encodeURIComponent(sessionPrefix)}*` : "";
+}
+
+function rowsInSessionPrefix(rows, sessionPrefix) {
+  if (!sessionPrefix) return rows || [];
+  const prefix = String(sessionPrefix).toLowerCase();
+  return (rows || []).filter((row) => String(row?.session_id || "").toLowerCase().startsWith(prefix));
+}
+
+export async function listSessions({ config, limit = 30, sessionPrefix = null }) {
   if (!isConfigured(config)) return [];
-  const query = `/rest/v1/${MESSAGES_TABLE}?select=session_id,status,created_at,user_message&order=created_at.desc&limit=${limit}`;
-  const rows = await supabaseFetch(config, query);
+  const query = `/rest/v1/${MESSAGES_TABLE}?select=session_id,status,created_at,user_message&order=created_at.desc&limit=${limit}${sessionPrefixFilter(sessionPrefix)}`;
+  const rows = rowsInSessionPrefix(await supabaseFetch(config, query), sessionPrefix);
   const seen = new Map();
   for (const row of rows || []) {
     if (!seen.has(row.session_id)) seen.set(row.session_id, row);
@@ -594,10 +606,10 @@ export async function listSessions({ config, limit = 30 }) {
   return [...seen.entries()].map(([sessionId, row]) => ({ sessionId, ...row }));
 }
 
-export async function listRunHistory({ config, limit = 30 }) {
+export async function listRunHistory({ config, limit = 30, sessionPrefix = null }) {
   if (!isConfigured(config)) return [];
-  const query = `/rest/v1/${MESSAGES_TABLE}?select=id,created_at,user_message,workflow_log,run_events&workflow_log=not.is.null&status=eq.done&order=created_at.desc&limit=${limit}`;
-  return supabaseFetch(config, query);
+  const query = `/rest/v1/${MESSAGES_TABLE}?select=id,created_at,user_message,workflow_log,run_events,session_id&workflow_log=not.is.null&status=eq.done${sessionPrefixFilter(sessionPrefix)}&order=created_at.desc&limit=${limit}`;
+  return rowsInSessionPrefix(await supabaseFetch(config, query), sessionPrefix);
 }
 
 export async function saveProjectInsightRun({ config, run }) {
@@ -1513,7 +1525,8 @@ export async function fetchLegacyAlertsTimelineEvents({ config, ids = [] }) {
   const chunkSize = 100;
   for (let offset = 0; offset < normalizedIds.length; offset += chunkSize) {
     const chunk = normalizedIds.slice(offset, offset + chunkSize);
-    const query = `/rest/v1/${LEGACY_ALERTS_BACKUP_TABLE}?select=${ALERT_TIMELINE_SELECT}&id=in.(${chunk.join(",")})&order=data_date.asc.nullslast,created_at.asc,id.asc`;
+    const projectFilter = projectIdFilterParam(requestProjectId(config));
+    const query = `/rest/v1/${LEGACY_ALERTS_BACKUP_TABLE}?select=${ALERT_TIMELINE_SELECT}&id=in.(${chunk.join(",")})${projectFilter ? `&${projectFilter}` : ""}&order=data_date.asc.nullslast,created_at.asc,id.asc`;
     const batch = await supabaseFetch(contentConfig, query);
     rows.push(...(batch || []));
   }
