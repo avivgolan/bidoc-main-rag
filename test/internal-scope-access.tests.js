@@ -178,6 +178,13 @@ export function registerInternalScopeAccessTests(test) {
       assert.match(route, /bidocChatScope\(req\)|chatMessageVisible\(/, `${start} must scope BiDoc callers to their Project`);
     }
 
+    // Annotate: a BiDoc caller must name its Project (BiDoc PR #85 sends
+    // x-project-id) and may only annotate messages of that Project's sessions.
+    const annotate = routeSource(source, "/^\\/api\\/messages\\/[^/]+\\/annotate$/", 'url.pathname === "/api/timeline")');
+    assert.match(annotate, /if \(chatScope\.bidoc && !chatScope\.projectId\) return projectRequired\(res\);/);
+    assert.match(annotate, /chatMessageVisible\(chatScope, message\)/);
+    assert.doesNotMatch(annotate, /chatSessionProjectId\(/, "no tag-only fallback without a Project");
+
     const qa = routeSource(source, 'url.pathname.startsWith("/api/qa/")', 'url.pathname === "/api/chat")');
     assert.match(qa, /bidocChatScope\(req\)/);
     assert.match(qa, /createHttpQaContext\(req, \{ session: getSuperadminSession\(req\), projectId:/);

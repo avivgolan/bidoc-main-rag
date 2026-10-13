@@ -3050,16 +3050,13 @@ async function handleApi(req, res, url) {
     const messageId = decodeURIComponent(url.pathname.split("/")[3]);
     const body = await readJson(req);
     const annotation = body.annotation === "V" || body.annotation === "X" ? body.annotation : null;
-    // A BiDoc-context caller annotates only messages of its Project's tagged
-    // sessions. BiDoc's annotate proxy does not send x-project-id yet; without
-    // one, only BiDoc-tagged sessions (never UI/QA sessions) are accepted.
+    // A BiDoc-context caller must name its Project (x-project-id) and
+    // annotates only messages of that Project's tagged sessions.
     const chatScope = bidocChatScope(req);
+    if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
     if (chatScope.bidoc) {
       const message = await getMessage({ config: config(), messageId }).catch(() => null);
-      const visible = chatScope.projectId
-        ? chatMessageVisible(chatScope, message)
-        : Boolean(chatSessionProjectId(message?.session_id));
-      if (!visible) return sendJson(res, 404, { ok: false, error: "message_not_found" });
+      if (!chatMessageVisible(chatScope, message)) return sendJson(res, 404, { ok: false, error: "message_not_found" });
     }
     try {
       await annotateMessage({ config: config(), messageId, annotation });
