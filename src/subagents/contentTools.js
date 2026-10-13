@@ -13,6 +13,7 @@ import { getDataQueryAccessToken } from "./dataQueryAuth.js";
 import { analyzeEmails, analyzeFinancial, analyzeGeneric, analyzeMeetings, analyzeSafety, analyzeWhatsapp } from "./contentAnalysis.js";
 import { extractSearchTerms, mergeRetrievalRows, resolveTableRoles } from "./contentRetrieval.js";
 import { toDateOnly } from "./indexing.js";
+import { PROJECT_SCOPED_OVERFETCH, projectIdFilterParam, requestProjectId } from "../projectScope.js";
 
 const DEFAULT_TOP_K = 12;
 const SAFE_TABLE_NAME = /^[A-Za-z0-9_]+$/;
@@ -276,8 +277,12 @@ export async function runContentToolAgent({
 
 // Vector leg: embed the query and call the table's own match_<table> RPC.
 // Enriches RPC hits (id/content/metadata/similarity only) with real columns.
+// The RPC has no project parameter, so a project-scoped (chat) call filters the
+// follow-up row select by project_id and over-fetches RPC candidates. A table
+// without project_id fails that select and the leg returns no rows.
 async function vectorLeg({ config, spec, table, roles, isDefaultTable, searchQuery, effectiveTopK, hasDates, warnings, cacheContext, telemetry }) {
   try {
+    const projectFilter = projectIdFilterParam(requestProjectId(config));
     const embedding = await createEmbedding({
       apiKey: config.openRouterApiKey,
       model: config.models.embedding,
@@ -292,7 +297,7 @@ async function vectorLeg({ config, spec, table, roles, isDefaultTable, searchQue
         method: "POST",
         body: JSON.stringify({
           query_embedding: embedding,
-          match_count: effectiveTopK * (hasDates ? 4 : 2),
+          match_count: effectiveTopK * (hasDates ? 4 : 2) * (projectFilter ? PROJECT_SCOPED_OVERFETCH : 1),
           filter: {},
           match_threshold: 0
         })
@@ -304,6 +309,7 @@ async function vectorLeg({ config, spec, table, roles, isDefaultTable, searchQue
     const params = [
       `select=${select}`,
       `${roles.idColumn || "id"}=in.(${[...bySimilarity.keys()].join(",")})`,
+      projectFilter,
       isDefaultTable && spec.extraFilter ? spec.extraFilter : null
     ].filter(Boolean).join("&");
     const rows = await contentSupabaseRequest({ config, path: `/rest/v1/${table}?${params}` });
@@ -328,6 +334,8 @@ async function textLeg({ config, spec, table, roles, isDefaultTable, searchQuery
       }
       filters.push(`or=(${clauses.join(",")})`);
     }
+    const projectFilter = projectIdFilterParam(requestProjectId(config));
+    if (projectFilter) filters.push(projectFilter);
     if (isDefaultTable && spec.extraFilter) filters.push(spec.extraFilter);
     if (roles.dateColumn && dateFrom) filters.push(`${roles.dateColumn}=gte.${encodeURIComponent(dateFrom)}`);
     if (roles.dateColumn && dateTo) filters.push(`${roles.dateColumn}=lte.${encodeURIComponent(dateTo)}`);

@@ -50,6 +50,7 @@ import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./
 import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, hashValue } from "./cache.js";
 import { appendMemoryLog } from "./memoryLogger.js";
+import { requestProjectId } from "./projectScope.js";
 
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
 
@@ -602,7 +603,21 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     emitRunEvent(runId, "deduplication", "Deduplication skipped for exact structured route", { reason });
   }
 
-  if (hybridResults && config.graph?.enabled !== false) {
+  if (hybridResults && config.graph?.enabled !== false && requestProjectId(config)) {
+    // graph_nodes/graph_edges (App DB) carry no project_id, and graph_search
+    // also matches query_text across every node, so its context cannot be
+    // limited to the requesting Project. Project-scoped chat skips it.
+    toolCalls.push(annotateToolCall({
+      toolName: "graph_search",
+      ok: false,
+      skipped: true,
+      rawQuery: message,
+      data: null,
+      error: "graph_search_not_project_scoped",
+      sources: []
+    }));
+    emitRunEvent(runId, "graph_search", "Project Graph Search skipped", { reason: "graph_search_not_project_scoped" });
+  } else if (hybridResults && config.graph?.enabled !== false) {
     const graphSearchLimit = Number(config.graph?.searchLimit || 30);
     const graphContextLimit = graphContextLimitForQuestion({ config, listIntent });
     const payload = buildGraphSearchPayload({ query: message, records: normalizeRows(hybridResults), maxRows: graphSearchLimit });
@@ -1488,7 +1503,8 @@ async function callProjectTool({
         dateTo: classification?.date_to || null,
         requireQuote: config.meetingsEvidence?.requireQuote !== false,
         cacheContext,
-        telemetry: telemetryFor("meeting_evidence")
+        telemetry: telemetryFor("meeting_evidence"),
+        configOverride: config
       });
       const evidenceText = result.status === "found"
         ? result.evidence.slice(0, 8).map((e) => {
@@ -1511,6 +1527,7 @@ async function callProjectTool({
   if (toolName === "alert") {
     try {
       const result = await runAlertAgent({
+        config,
         ...buildAlertAgentRequest({ message, classification }),
         cacheContext,
         telemetry: telemetryFor("alert_agent")

@@ -54,6 +54,7 @@ import { registerChatQualityTests } from "./chat-quality.tests.js";
 import { registerChatCompletionIntegrityTests } from "./chat-completion-integrity.tests.js";
 import { registerMainEvidenceTests } from "./main-evidence.tests.js";
 import { registerMainCitationTests } from "./main-citations.tests.js";
+import { registerChatProjectScopeTests } from "./chat-project-scope.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
@@ -66,6 +67,7 @@ registerChatQualityTests(test);
 registerChatCompletionIntegrityTests(test);
 registerMainEvidenceTests(test);
 registerMainCitationTests(test);
+registerChatProjectScopeTests(test);
 const testJwt = (claims) => [
   Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
   Buffer.from(JSON.stringify(claims)).toString("base64url"),

@@ -891,19 +891,34 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
         });
       } catch (error) {
         if (!looksLikeRpcSignatureError(error.message)) throw error;
-        // Contractual-date resolution must never widen from one project to the
-        // whole tenant when an older RPC lacks project_id_filter support.
-        if (config.requireProjectScope === true && payload.project_id_filter) throw error;
-        // Graceful degradation: strip all optional params that older company DBs
-        // may not recognise (project_id_filter requires migration 027, hashtags
-        // requires the GIN index from 026). Retry with the minimal required params.
-        const hasOptionalParams = payload.project_id_filter || payload.hashtags.length;
-        if (!hasOptionalParams) throw error;
-        const { project_id_filter: _pid, hashtags: _hashtags, ...payloadBase } = payload;
-        results = await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
-          method: "POST",
-          body: JSON.stringify(payloadBase)
-        });
+        if (payload.project_id_filter) {
+          // A project-scoped call must never widen to the whole Company DB
+          // (one Company DB holds several Projects). Only hashtags (GIN index
+          // from 026) may be dropped; project_id_filter (027) always stays.
+          if (!payload.hashtags.length) throw projectScopeUnsupportedError(error);
+          const { hashtags: _hashtags, ...scopedPayload } = payload;
+          try {
+            results = await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
+              method: "POST",
+              body: JSON.stringify(scopedPayload)
+            });
+          } catch (retryError) {
+            if (looksLikeRpcSignatureError(retryError.message)) throw projectScopeUnsupportedError(retryError);
+            throw retryError;
+          }
+        } else {
+          // Unscoped callers: strip the optional params that older company DBs
+          // may not recognise and retry with the minimal required params.
+          if (!payload.hashtags.length) throw error;
+          const { hashtags: _hashtags, ...payloadBase } = payload;
+          results = await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
+            method: "POST",
+            body: JSON.stringify(payloadBase)
+          });
+        }
+      }
+      if (payload.project_id_filter && Array.isArray(results)) {
+        results = results.filter((row) => rowMatchesProject(row, payload.project_id_filter));
       }
       if (config.rag?.mainCompactEvidence !== true) return results;
       return hydrateRetrievedSourceLinks({
@@ -964,6 +979,21 @@ export function contentSupabaseConfig(config) {
 function normalizeHashtags(hashtags) {
   if (!Array.isArray(hashtags)) return [];
   return [...new Set(hashtags.map((tag) => String(tag || "").trim().replace(/^#+/, "")).filter(Boolean))];
+}
+
+function projectScopeUnsupportedError(cause) {
+  const error = new Error("Hybrid search RPC does not support project_id_filter; refusing to search outside the requested Project");
+  error.code = "project_scope_unsupported";
+  error.cause = cause;
+  return error;
+}
+
+// Rows the RPC labels with another Project are dropped; unlabelled rows were
+// already narrowed by project_id_filter inside the RPC.
+function rowMatchesProject(row, projectId) {
+  const rowProjectId = row?.project_id ?? row?.metadata?.project_id;
+  if (rowProjectId == null || rowProjectId === "") return true;
+  return String(rowProjectId).trim().toLowerCase() === String(projectId).trim().toLowerCase();
 }
 
 function looksLikeRpcSignatureError(message) {
