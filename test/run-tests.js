@@ -56,6 +56,8 @@ import { registerMainEvidenceTests } from "./main-evidence.tests.js";
 import { registerMainCitationTests } from "./main-citations.tests.js";
 import { registerChatProjectScopeTests } from "./chat-project-scope.tests.js";
 import { registerInsightsProjectScopeTests } from "./insights-project-scope.tests.js";
+import { registerInternalScopeTests } from "./internal-scope.tests.js";
+import { registerInternalScopeAccessTests } from "./internal-scope-access.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
@@ -70,6 +72,8 @@ registerMainEvidenceTests(test);
 registerMainCitationTests(test);
 registerChatProjectScopeTests(test);
 registerInsightsProjectScopeTests(test);
+registerInternalScopeTests(test);
+registerInternalScopeAccessTests(test);
 const testJwt = (claims) => [
   Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
   Buffer.from(JSON.stringify(claims)).toString("base64url"),

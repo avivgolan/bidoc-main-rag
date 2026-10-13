@@ -20,6 +20,27 @@ export function isTrustedMachineSecret(provided, env = process.env) {
   return accepted.some((secret) => constantTimeEqual(value, secret));
 }
 
+/**
+ * A BiDoc-context request names a Company DB (x-content-supabase-url): it
+ * comes from the BiDoc web app or the ingest engine, never the standalone UI.
+ */
+export function isBidocContextRequest(req) {
+  const value = req?.headers?.["x-content-supabase-url"];
+  return Boolean(String((Array.isArray(value) ? value[0] : value) || "").trim());
+}
+
+// The x-bidoc-api-secret check for cross-tenant calls. Fails closed: with no
+// BIDOC_API_SECRET / INGEST_API_SECRET configured nothing matches.
+export function checkBidocSecretHeader(req, env = process.env) {
+  return isTrustedMachineSecret(req?.headers?.["x-bidoc-api-secret"], env);
+}
+
+// Read access: a cross-tenant (BiDoc-context) request needs the machine
+// secret; a same-origin request needs the standalone UI's superadmin session.
+export function authorizeBidocRead(req, { env = process.env, hasSession = false } = {}) {
+  return isBidocContextRequest(req) ? checkBidocSecretHeader(req, env) : Boolean(hasSession);
+}
+
 function authorizeSecretHeader(req, {
   secret,
   headerName,

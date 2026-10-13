@@ -342,15 +342,25 @@ export function sanitizeDelayClaimExportPayload(input = {}, defaults = {}) {
   };
 }
 
+// delay_claim_cases (App DB) carries project_id; a Project-scoped request
+// lists only its Project's cases and stamps new ones with it.
 export async function listDelayClaims({ config, limit = 50 } = {}) {
   if (!isConfigured(config)) return [];
   const max = Math.min(Math.max(Number(limit || 50), 1), 200);
-  return supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=*&order=updated_at.desc&limit=${max}`);
+  const projectFilter = projectIdFilterParam(requestProjectId(config));
+  return supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=*${projectFilter ? `&${projectFilter}` : ""}&order=updated_at.desc&limit=${max}`);
 }
 
 export async function createDelayClaim({ config, claim }) {
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
   const payload = sanitizeDelayClaimCasePayload(claim);
+  const projectId = requestProjectId(config);
+  if (projectId) {
+    if (payload.project_id && !sameProjectId(payload.project_id, projectId)) {
+      throw projectMismatchError("The delay claim names a different Project than the request");
+    }
+    payload.project_id = projectId;
+  }
   const rows = await supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}`, {
     method: "POST",
     headers: { Prefer: "return=representation" },
@@ -465,6 +475,31 @@ export async function addDelayEventFinding({ config, eventId, finding }) {
   return rows?.[0] || payload;
 }
 
+// Delay events and their evidence/gaps/change-log hang off a case; a
+// Project-scoped request may only touch cases of its own Project. Calls
+// without a projectId keep their existing (unscoped) behaviour.
+export async function delayClaimCaseInProject({ config, caseId }) {
+  const projectId = requestProjectId(config);
+  if (!projectId) return true;
+  if (!caseId || !isConfigured(config)) return false;
+  const rows = await supabaseFetch(
+    config,
+    `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=id&id=eq.${encodeURIComponent(caseId)}&${projectIdFilterParam(projectId)}&limit=1`
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+export async function delayEventInProject({ config, eventId }) {
+  if (!requestProjectId(config)) return true;
+  if (!eventId || !isConfigured(config)) return false;
+  const rows = await supabaseFetch(
+    config,
+    `/rest/v1/${DELAY_EVENTS_TABLE}?select=case_id&id=eq.${encodeURIComponent(eventId)}&limit=1`
+  );
+  const caseId = Array.isArray(rows) ? rows[0]?.case_id : null;
+  return caseId ? delayClaimCaseInProject({ config, caseId }) : false;
+}
+
 export async function getDelayEvent({ config, eventId }) {
   const rows = await supabaseFetch(config, `/rest/v1/${DELAY_EVENTS_TABLE}?id=eq.${encodeURIComponent(eventId)}&select=*&limit=1`);
   return rows?.[0] || null;
@@ -548,10 +583,22 @@ export async function annotateMessage({ config, messageId, annotation }) {
   });
 }
 
-export async function listSessions({ config, limit = 30 }) {
+// sessionPrefix (bidoc:<projectId>:) narrows App DB chat history to one
+// Project's BiDoc sessions; the prefix is re-checked on the rows returned.
+function sessionPrefixFilter(sessionPrefix) {
+  return sessionPrefix ? `&session_id=like.${encodeURIComponent(sessionPrefix)}*` : "";
+}
+
+function rowsInSessionPrefix(rows, sessionPrefix) {
+  if (!sessionPrefix) return rows || [];
+  const prefix = String(sessionPrefix).toLowerCase();
+  return (rows || []).filter((row) => String(row?.session_id || "").toLowerCase().startsWith(prefix));
+}
+
+export async function listSessions({ config, limit = 30, sessionPrefix = null }) {
   if (!isConfigured(config)) return [];
-  const query = `/rest/v1/${MESSAGES_TABLE}?select=session_id,status,created_at,user_message&order=created_at.desc&limit=${limit}`;
-  const rows = await supabaseFetch(config, query);
+  const query = `/rest/v1/${MESSAGES_TABLE}?select=session_id,status,created_at,user_message&order=created_at.desc&limit=${limit}${sessionPrefixFilter(sessionPrefix)}`;
+  const rows = rowsInSessionPrefix(await supabaseFetch(config, query), sessionPrefix);
   const seen = new Map();
   for (const row of rows || []) {
     if (!seen.has(row.session_id)) seen.set(row.session_id, row);
@@ -559,10 +606,10 @@ export async function listSessions({ config, limit = 30 }) {
   return [...seen.entries()].map(([sessionId, row]) => ({ sessionId, ...row }));
 }
 
-export async function listRunHistory({ config, limit = 30 }) {
+export async function listRunHistory({ config, limit = 30, sessionPrefix = null }) {
   if (!isConfigured(config)) return [];
-  const query = `/rest/v1/${MESSAGES_TABLE}?select=id,created_at,user_message,workflow_log,run_events&workflow_log=not.is.null&status=eq.done&order=created_at.desc&limit=${limit}`;
-  return supabaseFetch(config, query);
+  const query = `/rest/v1/${MESSAGES_TABLE}?select=id,created_at,user_message,workflow_log,run_events,session_id&workflow_log=not.is.null&status=eq.done${sessionPrefixFilter(sessionPrefix)}&order=created_at.desc&limit=${limit}`;
+  return rowsInSessionPrefix(await supabaseFetch(config, query), sessionPrefix);
 }
 
 export async function saveProjectInsightRun({ config, run }) {
@@ -1478,7 +1525,8 @@ export async function fetchLegacyAlertsTimelineEvents({ config, ids = [] }) {
   const chunkSize = 100;
   for (let offset = 0; offset < normalizedIds.length; offset += chunkSize) {
     const chunk = normalizedIds.slice(offset, offset + chunkSize);
-    const query = `/rest/v1/${LEGACY_ALERTS_BACKUP_TABLE}?select=${ALERT_TIMELINE_SELECT}&id=in.(${chunk.join(",")})&order=data_date.asc.nullslast,created_at.asc,id.asc`;
+    const projectFilter = projectIdFilterParam(requestProjectId(config));
+    const query = `/rest/v1/${LEGACY_ALERTS_BACKUP_TABLE}?select=${ALERT_TIMELINE_SELECT}&id=in.(${chunk.join(",")})${projectFilter ? `&${projectFilter}` : ""}&order=data_date.asc.nullslast,created_at.asc,id.asc`;
     const batch = await supabaseFetch(contentConfig, query);
     rows.push(...(batch || []));
   }
@@ -1588,7 +1636,18 @@ function timelineRowMetadata(row = {}) {
   };
 }
 
+// timeline_event_links / timeline_event_entities / timeline_graph_edges live
+// in the App DB and carry no project_id (nor a Company DB identity), so a
+// Project-scoped request reads none of them and may not write them.
+function timelineLinksNotProjectScopedError() {
+  const error = new Error("Timeline links are not Project-scoped; they cannot be changed from a Project request");
+  error.code = "timeline_links_not_project_scoped";
+  error.status = 409;
+  return error;
+}
+
 export async function listTimelineEventLinks({ config, source = "", limit = 1000 } = {}) {
+  if (requestProjectId(config)) return [];
   if (!isConfigured(config)) return [];
   const params = new URLSearchParams({
     select: "*",
@@ -1603,6 +1662,7 @@ export async function listTimelineEventLinks({ config, source = "", limit = 1000
 }
 
 export async function createTimelineEventLink({ config, link }) {
+  if (requestProjectId(config)) throw timelineLinksNotProjectScopedError();
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
   const payload = sanitizeTimelineEventLink(link);
   const rows = await supabaseFetch(config, `/rest/v1/${TIMELINE_LINKS_TABLE}?select=*`, {
@@ -1614,6 +1674,7 @@ export async function createTimelineEventLink({ config, link }) {
 }
 
 export async function deleteTimelineEventLink({ config, id }) {
+  if (requestProjectId(config)) throw timelineLinksNotProjectScopedError();
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
   if (!id) throw new Error("Timeline link id is required");
   await supabaseFetch(config, `/rest/v1/${TIMELINE_LINKS_TABLE}?id=eq.${encodeURIComponent(id)}`, {
@@ -1623,6 +1684,7 @@ export async function deleteTimelineEventLink({ config, id }) {
 }
 
 export async function listTimelineGraphData({ config, source = "index", limit = 5000 } = {}) {
+  if (requestProjectId(config)) return { entities: [], eventEntities: [], graphEdges: [] };
   if (!isConfigured(config)) return { entities: [], eventEntities: [], graphEdges: [] };
   const eventParams = new URLSearchParams({
     select: "*,entity:timeline_entities(*)",
@@ -1808,6 +1870,8 @@ export async function graphSearch({ config, payload = {}, limit = 30, projectId 
 }
 
 export async function listProjectGraph({ config, limit = 300, nodeType = "", edgeType = "", query = "" } = {}) {
+  const projectId = requestProjectId(config);
+  if (projectId) return listScopedProjectGraph({ config, projectId, limit, nodeType, edgeType, query });
   if (!isConfigured(config)) return emptyProjectGraph("App Supabase is not configured");
   const max = Math.min(Math.max(Number(limit || 300), 1), 1000);
   if (nodeType) {
@@ -1834,6 +1898,52 @@ export async function listProjectGraph({ config, limit = 300, nodeType = "", edg
     return projectGraphResponse(rows || [], { nodeType, edgeType, query, limit: max });
   } catch (error) {
     if (/graph_nodes|graph_edges|schema cache|could not find/i.test(error.message)) {
+      return emptyProjectGraph(error.message);
+    }
+    throw error;
+  }
+}
+
+// Project-scoped graph view: the Company DB graph (graph_nodes/graph_edges
+// with project_id), both edge ends in the Project. Nodes are fetched by id
+// rather than through FK embeds, whose names differ between DB templates.
+async function listScopedProjectGraph({ config, projectId, limit = 300, nodeType = "", edgeType = "", query = "" }) {
+  const store = contentSupabaseConfig(config);
+  if (!isConfigured(store)) return emptyProjectGraph("Content Supabase is not configured");
+  const max = Math.min(Math.max(Number(limit || 300), 1), 1000);
+  const needsSemanticFilter = Boolean(
+    query ||
+    nodeType ||
+    (edgeType && !GRAPH_EDGE_TYPES.has(edgeType))
+  );
+  const fetchLimit = needsSemanticFilter ? Math.min(Math.max(max * 200, 5000), 10000) : max;
+  const scope = projectIdFilterParam(projectId);
+  const filters = [scope];
+  if (edgeType && GRAPH_EDGE_TYPES.has(edgeType)) filters.push(`edge_type=eq.${encodeURIComponent(edgeType)}`);
+  if (edgeType && !GRAPH_EDGE_TYPES.has(edgeType)) filters.push(`metadata->>edge_kind=eq.${encodeURIComponent(edgeType)}`);
+  const params = new URLSearchParams({
+    select: "id,from_node_id,to_node_id,edge_type,weight,confidence,evidence_text,metadata,project_id",
+    order: "confidence.desc",
+    limit: String(fetchLimit)
+  });
+  try {
+    const edges = (await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}&${filters.join("&")}`) || [])
+      .filter((edge) => sameProjectId(edge?.project_id, projectId));
+    const nodeIds = [...new Set(edges.flatMap((edge) => [edge.from_node_id, edge.to_node_id]).filter(Boolean).map(String))];
+    const nodes = new Map();
+    for (const batch of chunk(nodeIds, 100)) {
+      const encoded = batch.map((id) => `"${id.replace(/"/g, '\\"')}"`).join(",");
+      const rows = await supabaseFetch(store, `/rest/v1/${GRAPH_NODES_TABLE}?select=*&${scope}&id=in.(${encodeURIComponent(encoded)})`) || [];
+      for (const node of rows) {
+        if (node?.id && sameProjectId(node.project_id, projectId)) nodes.set(String(node.id), node);
+      }
+    }
+    const rows = edges
+      .map((edge) => ({ ...edge, from_node: nodes.get(String(edge.from_node_id)), to_node: nodes.get(String(edge.to_node_id)) }))
+      .filter((row) => row.from_node && row.to_node);
+    return projectGraphResponse(rows, { nodeType, edgeType, query, limit: max });
+  } catch (error) {
+    if (/graph_nodes|graph_edges|project_id|schema cache|could not find/i.test(error.message)) {
       return emptyProjectGraph(error.message);
     }
     throw error;

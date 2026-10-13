@@ -53,3 +53,31 @@ export function resolveRequestProjectId({ header = null, query = null, body = nu
   }
   return fromHeader || fromQuery || clean(body) || null;
 }
+
+// A request Project (x-project-id / ?project_id) and a Project named by the
+// route or body must agree; either one alone is the Project.
+export function resolveScopedProjectId(requestProjectIdValue, candidate) {
+  const fromRequest = String(requestProjectIdValue ?? "").trim() || null;
+  const fromCandidate = String((Array.isArray(candidate) ? candidate[0] : candidate) ?? "").trim() || null;
+  if (fromRequest && fromCandidate && !sameProjectId(fromRequest, fromCandidate)) {
+    throw projectMismatchError("The request names two different Projects");
+  }
+  return fromRequest || fromCandidate;
+}
+
+// BiDoc tags the chat session ids it sends main-agent as
+// bidoc:<projectId>:<sessionId>; App DB chat rows carry no other Project link.
+const BIDOC_SESSION_PATTERN = /^bidoc:([^:]+):/u;
+
+export function chatSessionProjectId(sessionId) {
+  const match = String(sessionId ?? "").match(BIDOC_SESSION_PATTERN);
+  return match ? match[1] : null;
+}
+
+export function chatSessionInProject(sessionId, projectId) {
+  return Boolean(projectId) && sameProjectId(chatSessionProjectId(sessionId), projectId);
+}
+
+export function bidocChatSessionPrefix(projectId) {
+  return `bidoc:${projectId}:`;
+}

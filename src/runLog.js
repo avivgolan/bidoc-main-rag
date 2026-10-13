@@ -1,10 +1,35 @@
 const runs = new Map();
 const subscribers = new Map();
 const runHistory = [];
+// runId -> the Project the run was started for (null: an unscoped run, e.g.
+// from the standalone UI).
+const runProjects = new Map();
 
-export function createRun(runId) {
+function cleanProjectId(value) {
+  return String(value ?? "").trim().toLowerCase() || null;
+}
+
+export function createRun(runId, { projectId = null } = {}) {
+  const project = cleanProjectId(projectId);
+  // A runId re-used for another Project must not stream into the previous
+  // Project's subscribers.
+  if (runs.has(runId) && runProjects.get(runId) !== project) closeRunSubscribers(runId);
+  runProjects.set(runId, project);
   runs.set(runId, []);
   emitRunEvent(runId, "created", "Run created", {});
+}
+
+export function getRunProjectId(runId) {
+  return runProjects.get(runId) ?? null;
+}
+
+// The standalone UI (superadmin session) follows any run. A BiDoc-context
+// caller follows only a known run of its own Project.
+export function runVisibleToRequest(runId, { bidocContext = false, projectId = null } = {}) {
+  if (!bidocContext) return true;
+  const requested = cleanProjectId(projectId);
+  const runProject = runProjects.get(runId) ?? null;
+  return Boolean(requested && runProject && requested === runProject);
 }
 
 export function emitRunEvent(runId, step, message, data = {}) {
@@ -59,7 +84,8 @@ export function recordRunHistory({ id, title, workflowLog = null, runEvents = nu
     user_message: title || id,
     workflow_log: workflowLog,
     run_events: runEvents || getRunEvents(id),
-    kind
+    kind,
+    project_id: runProjects.get(id) ?? null
   };
   const existingIndex = runHistory.findIndex((run) => run.id === id);
   if (existingIndex >= 0) runHistory.splice(existingIndex, 1);
@@ -67,8 +93,12 @@ export function recordRunHistory({ id, title, workflowLog = null, runEvents = nu
   if (runHistory.length > 50) runHistory.splice(50);
 }
 
-export function listLocalRunHistory({ limit = 30 } = {}) {
-  return runHistory.slice(0, limit);
+// projectId given (a BiDoc-context caller): only that Project's runs.
+export function listLocalRunHistory({ limit = 30, projectId = undefined } = {}) {
+  if (projectId === undefined) return runHistory.slice(0, limit);
+  const project = cleanProjectId(projectId);
+  if (!project) return [];
+  return runHistory.filter((run) => run.project_id === project).slice(0, limit);
 }
 
 function closeRunSubscribers(runId) {

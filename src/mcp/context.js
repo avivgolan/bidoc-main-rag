@@ -15,8 +15,10 @@ export function createLocalMcpContext(env = process.env) {
   });
 }
 
-export function createHttpQaContext(req, { session = null, env = process.env } = {}) {
-  const projectId = firstHeader(req, "x-project-id");
+// projectId: the request Project the server resolved (x-project-id or
+// ?project_id). A BiDoc-context caller is confined to exactly that Project.
+export function createHttpQaContext(req, { session = null, env = process.env, projectId: resolvedProjectId = null } = {}) {
+  const projectId = clean(resolvedProjectId) || firstHeader(req, "x-project-id");
   return normalizeContext({
     actorId: session?.sub || firstHeader(req, "x-actor-id") || "bidoc-api",
     organizationId: firstHeader(req, "x-organization-id") || clean(env.BIDOC_MCP_ORGANIZATION_ID) || "default",
