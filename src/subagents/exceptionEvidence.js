@@ -1,6 +1,7 @@
 import { chatCompletion } from "../openrouter.js";
 import { supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig } from "../supabase.js";
+import { requestProjectId, sameProjectId } from "../projectScope.js";
 
 const PROJECT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const UNSAFE_IDENTITY_CHARACTERS = /[\u0000-\u001f\u007f]/;
@@ -44,6 +45,11 @@ export async function runExceptionEvidenceAgent({
 } = {}) {
   const normalizedScope = normalizeScope(scope);
   if (!normalizedScope) {
+    return { status: "not_computable", same_exception_match: false, evidence_count: 0, answer: "" };
+  }
+  // A chat request may only read records of its own Project.
+  const callerProjectId = requestProjectId(config);
+  if (callerProjectId && !sameProjectId(callerProjectId, normalizedScope.projectId)) {
     return { status: "not_computable", same_exception_match: false, evidence_count: 0, answer: "" };
   }
   const connection = contentSupabaseConfig(config);

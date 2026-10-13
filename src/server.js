@@ -3078,19 +3078,27 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/timeline/graph/rebuild") {
+    if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
+    // Request config: a Project-scoped rebuild (x-project-id) reads only that
+    // Project's source rows and writes that Project's Company DB graph.
+    const cfg = buildRequestConfig(req, body);
     const source = normalizeTimelineSource(body.source || url.searchParams.get("source") || "index");
     const events = source === "alerts"
-      ? await fetchAlertsTimelineEvents({ config: config() }).catch(() => [])
-      : await fetchTimelineEvents({ config: config() }).catch(() => []);
+      ? await fetchAlertsTimelineEvents({ config: cfg }).catch(() => [])
+      : await fetchTimelineEvents({ config: cfg }).catch(() => []);
     const rows = buildEntityGraphRowsForEvents(events, source);
-    const saved = await upsertTimelineGraphData({ config: config(), entities: rows.entities, eventEntities: rows.eventEntities });
-    const projectRows = buildGraphRowsFromRecords(events, { defaultSource: source === "alerts" ? "alerts" : config().contentSource?.indexTable || "data_index" });
-    const projectSaved = await upsertProjectGraphData({ config: config(), nodes: projectRows.nodes, edges: projectRows.edges }).catch((error) => ({ nodes: 0, edges: 0, error: error.message }));
+    // timeline_entities / timeline_event_entities (App DB) carry no project_id;
+    // a Project-scoped rebuild leaves them alone.
+    const saved = cfg.projectId
+      ? { entities: 0, eventEntities: 0, skipped: "timeline_entities_not_project_scoped" }
+      : await upsertTimelineGraphData({ config: cfg, entities: rows.entities, eventEntities: rows.eventEntities });
+    const projectRows = buildGraphRowsFromRecords(events, { defaultSource: source === "alerts" ? "alerts" : cfg.contentSource?.indexTable || "data_index" });
+    const projectSaved = await upsertProjectGraphData({ config: cfg, nodes: projectRows.nodes, edges: projectRows.edges }).catch((error) => ({ nodes: 0, edges: 0, error: error.message }));
     // Entity enrichment piggybacks on rebuilds when requested explicitly or enabled in settings.
     let enrichment = null;
-    if (body.enrichEntities === true || config().insights?.graphEnrichment === true) {
-      enrichment = await runGraphEnrichment({ config: config(), source, mode: body.enrichmentMode || "incremental", limit: Number(body.enrichmentLimit || 200) })
+    if (body.enrichEntities === true || cfg.insights?.graphEnrichment === true) {
+      enrichment = await runGraphEnrichment({ config: cfg, source, mode: body.enrichmentMode || "incremental", limit: Number(body.enrichmentLimit || 200) })
         .catch((error) => ({ error: error.message }));
     }
     return sendJson(res, 200, { ok: true, source, events: events.length, ...saved, projectGraph: projectSaved, enrichment });

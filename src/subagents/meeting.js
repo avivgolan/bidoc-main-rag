@@ -1,6 +1,7 @@
 import { createEmbedding } from "../openrouter.js";
 import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig } from "../supabase.js";
+import { requestProjectId, sameProjectId } from "../projectScope.js";
 
 const DEFAULT_MEETINGS_RPC = "hybrid_match_meetings_documents";
 const DEFAULT_MEETINGS_TABLE = "meetings_documents";
@@ -158,10 +159,10 @@ async function callMeetingsRpc(
   return data;
 }
 
-async function fetchAdjacentChunks(config, chunks, adjacentCount = 1, fetchImpl = globalThis.fetch) {
+async function fetchAdjacentChunks(config, chunks, adjacentCount = 1, fetchImpl = globalThis.fetch, scopedProjectId = null) {
   if (!chunks.length || adjacentCount <= 0) return [];
   const contentConfig = contentSupabaseConfig(config);
-  const projectId = config.contentSource?.projectId || process.env.PROJECT_ID || null;
+  const projectId = scopedProjectId || config.contentSource?.projectId || process.env.PROJECT_ID || null;
   const table = DEFAULT_MEETINGS_TABLE;
 
   const adjacentIds = new Set();
@@ -177,7 +178,7 @@ async function fetchAdjacentChunks(config, chunks, adjacentCount = 1, fetchImpl 
 
     const indexFilter = targetIndexes.map((i) => `chunk_index.eq.${i}`).join(",");
     let url = `${contentConfig.supabaseUrl}/rest/v1/${table}?select=id,content,chunk_index,attachment_id&attachment_id=eq.${encodeURIComponent(chunk.attachment_id)}&or=(${indexFilter})`;
-    if (projectId) url += `&project_id=eq.${projectId}`;
+    if (projectId) url += `&project_id=eq.${encodeURIComponent(projectId)}`;
 
     try {
       const resp = await fetchImpl(url, { headers: supabaseHeaders(contentConfig.supabaseServiceRoleKey) });
@@ -1040,6 +1041,11 @@ export async function runMeetingEvidenceAgent({
     if (attachmentId !== null && attachmentId !== undefined && (meetingId === null || meetingId === undefined)) {
       return emptyEvidenceResult("error", "exact_meeting_identity_required", "Attachment-scoped evidence requires a meeting ID");
     }
+    // A chat request may only read meetings of its own Project.
+    const callerProjectId = requestProjectId(config);
+    if (callerProjectId && !sameProjectId(callerProjectId, projectId)) {
+      return emptyEvidenceResult("error", "exact_meeting_scope_invalid", "A valid project scope is required");
+    }
     return fetchExactMeetingEvidence({
       config,
       subagentCfg,
@@ -1185,7 +1191,7 @@ export async function runMeetingEvidenceAgent({
   // expansion is skipped there so it cannot escape the attested result set.
   const adjacentChunks = usedCompatibilityFallback
     ? []
-    : await fetchAdjacentChunks(config, chunks, subagentCfg.adjacentChunks, fetchImpl);
+    : await fetchAdjacentChunks(config, chunks, subagentCfg.adjacentChunks, fetchImpl, semanticProjectScope.projectId);
 
   const conflictsDetected = detectConflicts(chunks);
 

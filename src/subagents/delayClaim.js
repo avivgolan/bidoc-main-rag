@@ -961,7 +961,8 @@ async function maybeCollectMeetingEvidence({ config, candidate, dateFrom, dateTo
     keywords: DELAY_TERMS,
     dateFrom,
     dateTo,
-    requireQuote: true
+    requireQuote: true,
+    configOverride: config
   }).catch(() => null);
   return result?.evidence || [];
 }

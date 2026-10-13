@@ -50,6 +50,7 @@ import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./
 import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, hashValue } from "./cache.js";
 import { appendMemoryLog } from "./memoryLogger.js";
+import { requestProjectId } from "./projectScope.js";
 
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
 
@@ -614,12 +615,14 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
         keyParts: {
           node_ids: payload.source_refs.map((ref) => ref.node_id || `${ref.source_table}:${ref.source_id}`).sort(),
           graph_depth: graphSearchLimit,
-          query: payload.query_text
+          query: payload.query_text,
+          ...(requestProjectId(config) ? { projectId: requestProjectId(config) } : {})
         },
         ttl: CACHE_TTL.graphSearch,
         savedCall: "search",
         estimatedCost: 0.0001,
-        operation: () => graphSearch({ config, payload, limit: graphSearchLimit })
+        // Project-scoped chat reads the Company DB graph of its Project only.
+        operation: () => graphSearch({ config, payload, limit: graphSearchLimit, projectId: requestProjectId(config) })
       });
       graphContext = summarizeGraphContext(graph, graphContextLimit);
       toolCalls.push(annotateToolCall({
@@ -1488,7 +1491,8 @@ async function callProjectTool({
         dateTo: classification?.date_to || null,
         requireQuote: config.meetingsEvidence?.requireQuote !== false,
         cacheContext,
-        telemetry: telemetryFor("meeting_evidence")
+        telemetry: telemetryFor("meeting_evidence"),
+        configOverride: config
       });
       const evidenceText = result.status === "found"
         ? result.evidence.slice(0, 8).map((e) => {
@@ -1511,6 +1515,7 @@ async function callProjectTool({
   if (toolName === "alert") {
     try {
       const result = await runAlertAgent({
+        config,
         ...buildAlertAgentRequest({ message, classification }),
         cacheContext,
         telemetry: telemetryFor("alert_agent")
@@ -1535,6 +1540,18 @@ async function callProjectTool({
       cacheContext,
       telemetry: telemetryFor(toolName)
     });
+  }
+  // Project-scoped chat never calls n8n: its webhooks read a fixed DB with no
+  // Project scope. Tools without an internal replacement are reported skipped.
+  if (requestProjectId(config)) {
+    return {
+      toolName,
+      ok: false,
+      skipped: true,
+      error: "n8n_disabled_for_project_scope",
+      data: null,
+      sources: []
+    };
   }
   if (config.qa?.externalToolsAllowed === false || config.qa?.sideEffectsAllowed === false) {
     return {

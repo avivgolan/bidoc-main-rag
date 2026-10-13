@@ -1,4 +1,5 @@
 import { resolveToolUrl, TOOL_NAMES } from "./config.js";
+import { requestProjectId } from "./projectScope.js";
 
 export const INTERNAL_PROJECT_TOOLS = ["data_query", "meeting_evidence_search"];
 const ALL_PROJECT_TOOLS = [...TOOL_NAMES, ...INTERNAL_PROJECT_TOOLS];
@@ -69,6 +70,10 @@ function extractPrimaryDate(row) {
 
 export async function callN8nTool({ toolName, query, dateFilter = "", dateFrom = null, dateTo = null, sessionId, config }) {
   if (!TOOL_NAMES.includes(toolName)) throw new Error(`Unknown tool: ${toolName}`);
+  // n8n webhooks have no Project scope; a Project-scoped caller never uses them.
+  if (requestProjectId(config)) {
+    return { toolName, ok: false, skipped: true, error: "n8n_disabled_for_project_scope", data: null, sources: [] };
+  }
   const url = resolveToolUrl(toolName, config);
   if (!url) {
     return {

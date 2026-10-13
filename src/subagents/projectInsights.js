@@ -655,7 +655,7 @@ async function runExistingProjectTools({ config, query, records, dateFrom, dateT
   if (config.n8n?.runtime?.alertAgentEnabled !== false) {
     try {
       emit?.(runId, "alert_agent", "Running Alert Agent", { query, status: "running" });
-      alertResult = await runAlertAgent({ query, dateFrom, dateTo });
+      alertResult = await runAlertAgent({ config, query, dateFrom, dateTo });
       toolCalls.push(annotateToolCall({ toolName: "alert", ok: true, rawQuery: query, data: alertResult, sources: [] }));
       emit?.(runId, "alert_agent", "Alert Agent completed", { resultsCount: alertResult.resultsCount || 0, status: "done" });
     } catch (error) {

@@ -13,6 +13,7 @@ import { getDataQueryAccessToken } from "./dataQueryAuth.js";
 import { analyzeEmails, analyzeFinancial, analyzeGeneric, analyzeMeetings, analyzeSafety, analyzeWhatsapp } from "./contentAnalysis.js";
 import { extractSearchTerms, mergeRetrievalRows, resolveTableRoles } from "./contentRetrieval.js";
 import { toDateOnly } from "./indexing.js";
+import { looksLikeRpcSignatureError, PROJECT_SCOPED_OVERFETCH, projectIdFilterParam, requestProjectId } from "../projectScope.js";
 
 const DEFAULT_TOP_K = 12;
 const SAFE_TABLE_NAME = /^[A-Za-z0-9_]+$/;
@@ -90,6 +91,46 @@ export const CONTENT_TOOL_SPECS = {
     },
     titleField: "summary",
     analyze: analyzeSafety
+  },
+  // Formerly n8n-only domains; internal so Project-scoped chat never needs n8n.
+  consultants_reports: {
+    defaultTable: "consultants_reports",
+    label: "סוכן דוחות יועצים פנימי",
+    roles: {
+      idColumn: "id",
+      dateColumn: "report_date",
+      textColumns: ["report_topic", "summary", "main_recommendations", "content"],
+      embeddingColumn: "embedding",
+      selectColumns: ["id", "report_date", "consultant_name", "specialization", "report_topic", "main_recommendations", "proposed_actions", "implementation_status", "document_name", "summary", "item_status", "hashtags"]
+    },
+    titleField: "report_topic",
+    analyze: (rows) => analyzeGeneric(rows, CONTENT_TOOL_SPECS.consultants_reports.roles)
+  },
+  exceptions_report: {
+    defaultTable: "exceptions_report",
+    label: "סוכן חריגים פנימי",
+    roles: {
+      idColumn: "id",
+      dateColumn: "exception_date",
+      textColumns: ["exception_subject", "exception_description", "summary", "content"],
+      embeddingColumn: "embedding",
+      selectColumns: ["id", "exception_date", "exception_number", "exception_subject", "exception_description", "supervision_company", "execution_days", "requested_amount_ex_vat", "total_amount_incl_vat", "urgency_level", "summary", "item_status", "hashtags"]
+    },
+    titleField: "exception_subject",
+    analyze: (rows) => analyzeGeneric(rows, CONTENT_TOOL_SPECS.exceptions_report.roles)
+  },
+  quality_control: {
+    defaultTable: "quality_control",
+    label: "סוכן בקרת איכות פנימי",
+    roles: {
+      idColumn: "id",
+      dateColumn: "inspection_date",
+      textColumns: ["defect_title", "defect_description", "summary", "content"],
+      embeddingColumn: "embedding",
+      selectColumns: ["id", "inspection_date", "defect_title", "defect_severity", "defect_location", "defect_description", "actions_needed", "discipline", "subject", "positive_observations", "summary", "item_status", "hashtags"]
+    },
+    titleField: "defect_title",
+    analyze: (rows) => analyzeGeneric(rows, CONTENT_TOOL_SPECS.quality_control.roles)
   }
 };
 
@@ -148,12 +189,17 @@ export const DEFAULT_TOOL_PROMPTS = {
   emails: `${SYNTHESIS_BASE}\nההתמחות שלך: תכתובת מייל. לכל מייל: תאריך, שולח, נושא ותמצית. השתמש ב-top_senders/by_category מה-analysis לזיהוי דפוסים.`,
   whatsapp_messages: `${SYNTHESIS_BASE}\nההתמחות שלך: שיחות שטח. הדגש משימות פתוחות ודדליינים (open_tasks/upcoming_deadlines ב-analysis), ואז תמציות שיחה עם משתתפים.`,
   financial_transactions: `${SYNTHESIS_BASE}\nההתמחות שלך: כספים. פתח בסכום הכולל ובפילוח לפי סוג (total_amount/sum_by_type ב-analysis). לכל עסקה: תאריך, ספק, סוג, סכום וסטטוס.`,
+  consultants_reports: `${SYNTHESIS_BASE}\nההתמחות שלך: דוחות יועצים. לכל דוח: תאריך, יועץ ותחום, נושא, המלצות עיקריות, פעולות מוצעות וסטטוס יישום. הדגש המלצות שטרם יושמו.`,
+  exceptions_report: `${SYNTHESIS_BASE}\nההתמחות שלך: חריגים. לכל חריג: תאריך, מספר, נושא, תיאור, ימי ביצוע, סכום מבוקש ודחיפות. הדגש חריגים דחופים או פתוחים.`,
+  quality_control: `${SYNTHESIS_BASE}\nההתמחות שלך: בקרת איכות. לכל ממצא: תאריך, ליקוי, חומרה, מיקום ופעולות נדרשות. פתח בליקויים החמורים והפתוחים.`,
   safety_report: `${SYNTHESIS_BASE}\nההתמחות שלך: בטיחות. פתח בסיכום הליקויים לפי חומרה וברמת הסיכון הגרועה (defect_totals/worst_risk_level ב-analysis). הדגש ליקויים מסכני חיים/חמורים.`
 };
 
+// Project-scoped callers (x-project-id) always use the internal tools: n8n
+// webhooks have no Project scope. Others keep the n8n.runtime.internalTools flag.
 export function isInternalContentTool(toolName, config) {
   return Boolean(CONTENT_TOOL_SPECS[toolName])
-    && config?.n8n?.runtime?.internalTools === true
+    && (config?.n8n?.runtime?.internalTools === true || Boolean(requestProjectId(config)))
     && config?.contentTools?.perTool?.[toolName]?.enabled !== false;
 }
 
@@ -276,8 +322,14 @@ export async function runContentToolAgent({
 
 // Vector leg: embed the query and call the table's own match_<table> RPC.
 // Enriches RPC hits (id/content/metadata/similarity only) with real columns.
+// A project-scoped (chat) call passes project_id_filter to the RPC and also
+// filters the follow-up row select by project_id. On an older Company DB whose
+// RPC lacks the param, it retries unfiltered with over-fetch and relies on the
+// row select. A table without project_id fails that select: no rows.
 async function vectorLeg({ config, spec, table, roles, isDefaultTable, searchQuery, effectiveTopK, hasDates, warnings, cacheContext, telemetry }) {
   try {
+    const projectId = requestProjectId(config);
+    const projectFilter = projectIdFilterParam(projectId);
     const embedding = await createEmbedding({
       apiKey: config.openRouterApiKey,
       model: config.models.embedding,
@@ -285,25 +337,36 @@ async function vectorLeg({ config, spec, table, roles, isDefaultTable, searchQue
       cacheContext,
       telemetry
     });
-    const matches = await contentSupabaseRequest({
+    const rpcBody = {
+      query_embedding: embedding,
+      match_count: effectiveTopK * (hasDates ? 4 : 2),
+      filter: {},
+      match_threshold: 0
+    };
+    const callMatch = (body) => contentSupabaseRequest({
       config,
       path: `/rest/v1/rpc/match_${table}`,
-      options: {
-        method: "POST",
-        body: JSON.stringify({
-          query_embedding: embedding,
-          match_count: effectiveTopK * (hasDates ? 4 : 2),
-          filter: {},
-          match_threshold: 0
-        })
-      }
+      options: { method: "POST", body: JSON.stringify(body) }
     });
+    let matches;
+    if (projectId) {
+      try {
+        matches = await callMatch({ ...rpcBody, project_id_filter: projectId });
+      } catch (error) {
+        if (!looksLikeRpcSignatureError(error.message)) throw error;
+        warnings.push("vector_rpc_project_filter_missing");
+        matches = await callMatch({ ...rpcBody, match_count: rpcBody.match_count * PROJECT_SCOPED_OVERFETCH });
+      }
+    } else {
+      matches = await callMatch(rpcBody);
+    }
     const bySimilarity = new Map((Array.isArray(matches) ? matches : []).map((match) => [String(match.id), match.similarity ?? null]));
     if (!bySimilarity.size) return [];
     const select = selectParam(roles);
     const params = [
       `select=${select}`,
       `${roles.idColumn || "id"}=in.(${[...bySimilarity.keys()].join(",")})`,
+      projectFilter,
       isDefaultTable && spec.extraFilter ? spec.extraFilter : null
     ].filter(Boolean).join("&");
     const rows = await contentSupabaseRequest({ config, path: `/rest/v1/${table}?${params}` });
@@ -328,6 +391,8 @@ async function textLeg({ config, spec, table, roles, isDefaultTable, searchQuery
       }
       filters.push(`or=(${clauses.join(",")})`);
     }
+    const projectFilter = projectIdFilterParam(requestProjectId(config));
+    if (projectFilter) filters.push(projectFilter);
     if (isDefaultTable && spec.extraFilter) filters.push(spec.extraFilter);
     if (roles.dateColumn && dateFrom) filters.push(`${roles.dateColumn}=gte.${encodeURIComponent(dateFrom)}`);
     if (roles.dateColumn && dateTo) filters.push(`${roles.dateColumn}=lte.${encodeURIComponent(dateTo)}`);
