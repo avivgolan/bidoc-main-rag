@@ -29,7 +29,7 @@ export const SOURCE_TABLE_SPECS = {
   emails: {
     documentDateColumn: "received_date",
     eventDateColumn: null, // the mail reports events; extracting them is Task A2
-    relevanceFilter: "relevance_status=in.(project_related,multi_project)"
+    relevanceFilter: "relevance_status=eq.project_related" // as n8n's Data Index: only project_related Emails are indexed
   },
   safety_reports: {
     documentDateColumn: "report_date",
@@ -302,7 +302,7 @@ export const EMBEDDING_BACKFILL_TABLES = {
   meetings: { textColumns: ["content", "summary", "subject"] },
   financial_transactions: { textColumns: ["content", "summary", "short_description"] },
   // Only project-classified mails matter (the standing relevance rule).
-  emails: { textColumns: ["content", "summary", "mail_summarize", "mail_body"], extraFilter: "relevance_status=in.(project_related,multi_project)" }
+  emails: { textColumns: ["content", "summary", "mail_summarize", "mail_body"], extraFilter: "relevance_status=eq.project_related" }
 };
 
 export function pickEmbeddingText(row = {}, textColumns = []) {
