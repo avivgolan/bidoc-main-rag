@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { hybridSearch } from "../src/supabase.js";
+import { fetchTimelineEvents, getProjectInsightRun, graphSearch, listProjectInsightRuns, listEntityMentionEdges, upsertProjectGraphData, hybridSearch } from "../src/supabase.js";
+import { callN8nTool } from "../src/tools.js";
+import { CONTENT_TOOL_SPECS, isInternalContentTool } from "../src/subagents/contentTools.js";
+import { INTERNAL_CONTENT_TOOL_NAMES, TOOL_NAMES } from "../src/config.js";
 import { runAlertAgent } from "../src/subagents/alert.js";
 import { runContentToolAgent } from "../src/subagents/contentTools.js";
 import { runExceptionEvidenceAgent } from "../src/subagents/exceptionEvidence.js";
@@ -10,6 +13,7 @@ import { runMeetingEvidenceAgent } from "../src/subagents/meeting.js";
 const PROJECT_A = "11111111-1111-4111-8111-111111111111";
 const PROJECT_B = "22222222-2222-4222-8222-222222222222";
 const CONTENT_URL = "https://content.supabase.test";
+const APP_URL = "https://app.supabase.test";
 
 function scopedConfig(overrides = {}) {
   return {
@@ -263,9 +267,217 @@ export function registerChatProjectScopeTests(test) {
     for (const url of adjacent) assert.match(url, new RegExp(`project_id=eq\\.${PROJECT_A}(&|$)`));
   });
 
-  test("chat project scope: project-scoped chat skips the unscoped project graph search", () => {
+  test("chat project scope: chat runs graph search scoped to its Project", () => {
     const agentSource = fs.readFileSync(new URL("../src/agent.js", import.meta.url), "utf8");
-    assert.match(agentSource, /config\.graph\?\.enabled !== false && requestProjectId\(config\)\)[\s\S]{0,600}graph_search_not_project_scoped/);
+    assert.doesNotMatch(agentSource, /graph_search_not_project_scoped/);
+    assert.match(agentSource, /graphSearch\(\{ config, payload, limit: graphSearchLimit, projectId: requestProjectId\(config\) \}\)/);
+  });
+
+  test("project graph: scoped graph_search reads the Company DB with filter_project_id and project-local refs", async () => {
+    await withFetch(
+      (call) => call.url.startsWith(`${CONTENT_URL}/rest/v1/rpc/graph_search`)
+        ? jsonResponse([{ edge_id: "e1", source_node: { id: "a", project_id: PROJECT_A }, target_node: { id: "b", project_id: PROJECT_A } }])
+        : jsonResponse([], 404),
+      async (calls) => {
+        const graph = await graphSearch({
+          config: scopedConfig({ projectId: PROJECT_A }),
+          payload: { query_text: "pour", source_refs: [{ node_id: "emails:5", source_table: "emails", source_id: "5" }], max_rows: 10 }
+        });
+        assert.equal(graph.results.length, 1);
+        assert.equal(calls.some((call) => call.url.startsWith(APP_URL)), false, "scoped graph never reads the App DB");
+        const rpc = calls.find((call) => call.url.includes("/rest/v1/rpc/graph_search"));
+        assert.equal(rpc.body.filter_project_id, PROJECT_A);
+        assert.deepEqual(rpc.body.source_refs, [{ source_table: "emails", source_id: "5" }]);
+      }
+    );
+  });
+
+  test("project graph: older graph_search without filter_project_id is post-filtered, never widened", async () => {
+    await withFetch(
+      (call) => {
+        if (!call.url.includes("/rest/v1/rpc/graph_search")) return jsonResponse([{ id: "leak" }]);
+        if ("filter_project_id" in call.body) {
+          return jsonResponse({ code: "PGRST202", message: "Could not find the function public.graph_search(filter_project_id, max_rows, query_text, source_refs) in the schema cache" }, 404);
+        }
+        return jsonResponse([
+          { edge_id: "ours", source_node: { project_id: PROJECT_A }, target_node: { project_id: PROJECT_A } },
+          { edge_id: "theirs", source_node: { project_id: PROJECT_B }, target_node: { project_id: PROJECT_B } },
+          { edge_id: "mixed", source_node: { project_id: PROJECT_A }, target_node: { project_id: PROJECT_B } },
+          { edge_id: "unlabelled", source_node: {}, target_node: {} }
+        ]);
+      },
+      async (calls) => {
+        const graph = await graphSearch({ config: scopedConfig({ projectId: PROJECT_A }), payload: { query_text: "x", source_refs: [] } });
+        assert.deepEqual(graph.results.map((row) => row.edge_id), ["ours"]);
+        assert.equal(calls.some((call) => /\/rest\/v1\/graph_(edges|nodes)/.test(call.url)), false, "no unscoped REST fallback");
+      }
+    );
+  });
+
+  test("project graph: scoped graph search returns nothing when the Company DB has no graph", async () => {
+    await withFetch(
+      (call) => call.url.includes("/rest/v1/rpc/graph_search")
+        ? jsonResponse({ code: "PGRST202", message: "Could not find the function public.graph_search in the schema cache" }, 404)
+        : jsonResponse([{ id: "leak" }]),
+      async (calls) => {
+        const graph = await graphSearch({ config: scopedConfig({ projectId: PROJECT_A }), payload: { query_text: "x" } });
+        assert.equal(graph.skipped, true);
+        assert.deepEqual(graph.results, []);
+        assert.equal(calls.some((call) => /\/rest\/v1\/graph_(edges|nodes)/.test(call.url)), false);
+      }
+    );
+  });
+
+  test("project graph: scoped writers stamp project_id and project-local ids on the Company DB", async () => {
+    await withFetch(
+      () => jsonResponse([]),
+      async (calls) => {
+        await upsertProjectGraphData({
+          config: scopedConfig({ projectId: PROJECT_A }),
+          nodes: [
+            { id: "emails:5", node_type: "event", label: "mail", source_table: "emails", source_id: "5" },
+            { id: "supplier:acme", node_type: "supplier", label: "Acme" }
+          ],
+          edges: [{ from_node_id: "emails:5", to_node_id: "supplier:acme", edge_type: "mentions" }]
+        });
+        assert.equal(calls.some((call) => call.url.startsWith(APP_URL)), false);
+        const nodeWrite = calls.find((call) => call.url.startsWith(`${CONTENT_URL}/rest/v1/graph_nodes`));
+        assert.deepEqual(nodeWrite.body.map((node) => [node.id, node.project_id]), [
+          [`p:${PROJECT_A}:emails:5`, PROJECT_A],
+          [`p:${PROJECT_A}:supplier:acme`, PROJECT_A]
+        ]);
+        const edgeWrite = calls.find((call) => call.url.startsWith(`${CONTENT_URL}/rest/v1/graph_edges`) && call.options.method === "POST");
+        assert.deepEqual(edgeWrite.body.map((edge) => [edge.from_node_id, edge.to_node_id, edge.project_id]), [
+          [`p:${PROJECT_A}:emails:5`, `p:${PROJECT_A}:supplier:acme`, PROJECT_A]
+        ]);
+      }
+    );
+  });
+
+  test("project graph: scoped mention-edge reads filter by project and return project-local entity ids", async () => {
+    await withFetch(
+      (call) => call.url.startsWith(`${CONTENT_URL}/rest/v1/graph_edges`)
+        ? jsonResponse([{ to_node_id: `p:${PROJECT_A}:supplier:acme`, metadata: { source_table: "emails", source_id: "5", target_kind: "supplier" } }])
+        : jsonResponse([], 404),
+      async (calls) => {
+        const links = await listEntityMentionEdges({ config: scopedConfig({ projectId: PROJECT_A }) });
+        assert.match(calls[0].url, new RegExp(`project_id=eq\\.${PROJECT_A}`));
+        assert.deepEqual(links, [{ record_ref: "emails:5", entity_id: "supplier:acme", kind: "supplier", label: "acme" }]);
+      }
+    );
+  });
+
+  test("project graph: scoped timeline source reads filter the index by project", async () => {
+    await withFetch(
+      () => jsonResponse([]),
+      async (calls) => {
+        await fetchTimelineEvents({ config: scopedConfig({ projectId: PROJECT_A }) });
+        assert.match(calls[0].url, new RegExp(`[?&]project_id=eq\\.${PROJECT_A}(&|$)`));
+        await fetchTimelineEvents({ config: scopedConfig() });
+        assert.doesNotMatch(calls[1].url, /project_id=eq/);
+      }
+    );
+  });
+
+  test("match RPCs: scoped alert search passes project_id_filter and falls back to post-filtering on older DBs", async () => {
+    await withFetch(
+      (call) => {
+        if (call.url.includes("/rest/v1/rpc/match_alerts")) {
+          if ("project_id_filter" in call.body) return jsonResponse({ code: "PGRST202", message: "Could not find the function public.match_alerts(filter, match_count, match_threshold, project_id_filter, query_embedding) in the schema cache" }, 404);
+          return jsonResponse([{ id: 10, content: "ours" }, { id: 20, content: "theirs" }]);
+        }
+        if (call.url.includes("/rest/v1/alerts?")) return jsonResponse([{ id: 10, data_date: "2026-10-01" }]);
+        return jsonResponse([], 404);
+      },
+      async (calls) => {
+        const result = await runAlertAgent({ config: scopedConfig({ projectId: PROJECT_A }), query: "alerts" });
+        const rpcCalls = calls.filter((call) => call.url.includes("/rest/v1/rpc/match_alerts"));
+        assert.equal(rpcCalls.length, 2);
+        assert.equal(rpcCalls[0].body.project_id_filter, PROJECT_A);
+        assert.equal(rpcCalls[0].body.match_count, 4, "no over-fetch when the RPC filters by project");
+        assert.equal("project_id_filter" in rpcCalls[1].body, false);
+        assert.equal(rpcCalls[1].body.match_count, 12, "fallback over-fetches before the project post-filter");
+        assert.equal(result.resultsCount, 1);
+      }
+    );
+  });
+
+  test("match RPCs: scoped content tool vector leg passes project_id_filter and keeps the row-select filter", async () => {
+    await withFetch(
+      (call) => {
+        if (call.url.includes("/rest/v1/rpc/match_meetings")) return jsonResponse([{ id: 5, similarity: 0.5 }]);
+        if (call.url.includes("/rest/v1/meetings?")) return jsonResponse([{ id: 5, meeting_date: "2026-10-01" }]);
+        return jsonResponse([], 404);
+      },
+      async (calls) => {
+        const config = scopedConfig({ projectId: PROJECT_A, contentTools: { perTool: { meetings: { enabled: true, answerSynthesis: false } } } });
+        await runContentToolAgent({ config, toolName: "meetings", query: "pour" });
+        const rpc = calls.find((call) => call.url.includes("/rest/v1/rpc/match_meetings"));
+        assert.equal(rpc.body.project_id_filter, PROJECT_A);
+        assert.equal(rpc.body.match_count, 24);
+        const vectorSelect = calls.find((call) => call.url.includes("/rest/v1/meetings?") && /id=in\./.test(call.url));
+        assert.match(vectorSelect.url, new RegExp(`project_id=eq\\.${PROJECT_A}`));
+      }
+    );
+  });
+
+  test("n8n: project-scoped calls never reach an n8n webhook", async () => {
+    await withFetch(
+      () => jsonResponse({ ok: true }),
+      async (calls) => {
+        const result = await callN8nTool({
+          toolName: "submittals",
+          query: "q",
+          sessionId: "s",
+          config: scopedConfig({ projectId: PROJECT_A, n8nBaseUrl: "https://n8n.example.test", tools: { submittals: "https://n8n.example.test/webhook/submittals" } })
+        });
+        assert.equal(result.ok, false);
+        assert.equal(result.skipped, true);
+        assert.equal(result.error, "n8n_disabled_for_project_scope");
+        assert.equal(calls.length, 0);
+      }
+    );
+  });
+
+  test("n8n: project-scoped chat uses internal content tools, including the former n8n-only domains", () => {
+    const scoped = scopedConfig({ projectId: PROJECT_A });
+    for (const tool of ["meetings", "emails", "whatsapp_messages", "financial_transactions", "safety_report", "consultants_reports", "exceptions_report", "quality_control"]) {
+      assert.ok(CONTENT_TOOL_SPECS[tool], tool);
+      assert.equal(isInternalContentTool(tool, scoped), true, tool);
+      assert.equal(isInternalContentTool(tool, scopedConfig()), false, `${tool} stays on the legacy flag without a project`);
+    }
+    assert.equal(CONTENT_TOOL_SPECS.consultants_reports.defaultTable, "consultants_reports");
+    assert.equal(CONTENT_TOOL_SPECS.exceptions_report.defaultTable, "exceptions_report");
+    assert.equal(CONTENT_TOOL_SPECS.quality_control.defaultTable, "quality_control");
+    assert.deepEqual([...INTERNAL_CONTENT_TOOL_NAMES].sort(), Object.keys(CONTENT_TOOL_SPECS).sort());
+    // Every n8n tool name is replaced internally except submittals (no Company DB table).
+    const replaced = new Set([...Object.keys(CONTENT_TOOL_SPECS), "alert", "meeting_evidence_search"]);
+    assert.deepEqual(TOOL_NAMES.filter((tool) => !replaced.has(tool)), ["submittals"]);
+  });
+
+  test("n8n: chat refuses n8n for project-scoped requests before the webhook call", () => {
+    const agentSource = fs.readFileSync(new URL("../src/agent.js", import.meta.url), "utf8");
+    assert.match(agentSource, /if \(requestProjectId\(config\)\) \{\s*return \{\s*toolName,\s*ok: false,\s*skipped: true,\s*error: "n8n_disabled_for_project_scope"/);
+  });
+
+  test("re-scan: insight runs are listed and read within the request Project", async () => {
+    await withFetch(
+      () => jsonResponse([]),
+      async (calls) => {
+        await listProjectInsightRuns({ config: scopedConfig({ projectId: PROJECT_A }) });
+        await getProjectInsightRun({ config: scopedConfig({ projectId: PROJECT_A }), runId: "run-1" });
+        for (const call of calls) assert.match(call.url, new RegExp(`[?&]project_id=eq\\.${PROJECT_A}(&|$)`));
+        await listProjectInsightRuns({ config: scopedConfig() });
+        assert.doesNotMatch(calls.at(-1).url, /project_id=eq/);
+      }
+    );
+  });
+
+  test("re-scan: insights and delay-claim subagents run on the caller's config", () => {
+    const insights = fs.readFileSync(new URL("../src/subagents/projectInsights.js", import.meta.url), "utf8");
+    const delay = fs.readFileSync(new URL("../src/subagents/delayClaim.js", import.meta.url), "utf8");
+    assert.match(insights, /runAlertAgent\(\{ config, query, dateFrom, dateTo \}\)/);
+    assert.match(delay, /runMeetingEvidenceAgent\(\{[\s\S]{0,400}?configOverride: config/);
   });
 
   test("chat project scope: chat passes its request config to the alert and meeting subagents", () => {

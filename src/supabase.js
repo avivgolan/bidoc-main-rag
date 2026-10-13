@@ -3,6 +3,7 @@ import { supabaseHeaders } from "./config.js";
 import { addDurationToLink, TIMELINE_RELATION_TYPES } from "./timelineLinks.js";
 import { CACHE_TTL, cachedOperation } from "./cache.js";
 import { hydrateRetrievedSourceLinks, indexedSourceLinkReadPath, INDEXED_SOURCE_LINK_CONTRACT } from "./sourceLinks.js";
+import { projectIdFilterParam, requestProjectId, sameProjectId } from "./projectScope.js";
 
 const MESSAGES_TABLE = "chat_messages_gf";
 const SESSION_MEMORY_TABLE = "chat_session_memory";
@@ -586,14 +587,15 @@ export async function listProjectInsightRuns({ config, limit = 30 }) {
     "insights", "tool_context", "workflow_log", "run_events", "status", "error", "metadata",
     "created_at", "updated_at"
   ].join(",");
-  return supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?select=${select}&order=created_at.desc&limit=${max}`);
+  const projectFilter = projectIdFilterParam(requestProjectId(config));
+  return supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?select=${select}${projectFilter ? `&${projectFilter}` : ""}&order=created_at.desc&limit=${max}`);
 }
 
 export async function getProjectInsightRun({ config, runId }) {
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig) || !runId) return null;
   const rows = await supabaseFetch(contentConfig,
-    `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?run_id=eq.${encodeURIComponent(runId)}&select=*&limit=1`
+    `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?run_id=eq.${encodeURIComponent(runId)}${projectIdFilterParam(requestProjectId(config)) ? `&${projectIdFilterParam(requestProjectId(config))}` : ""}&select=*&limit=1`
   );
   return rows?.[0] || null;
 }
@@ -981,6 +983,160 @@ function normalizeHashtags(hashtags) {
   return [...new Set(hashtags.map((tag) => String(tag || "").trim().replace(/^#+/, "")).filter(Boolean))];
 }
 
+// ── Project-scoped graph ─────────────────────────────────────────────────────
+// The Project-scoped graph lives in the Company DB (graph_nodes/graph_edges
+// with project_id, ids prefixed p:<project>:, graph_search(filter_project_id)),
+// the same convention bidoc's timeline-relationships pipeline writes. Calls
+// without a projectId keep using the legacy App DB graph.
+function graphStoreConfig(config) {
+  return requestProjectId(config) ? contentSupabaseConfig(config) : config;
+}
+
+export function projectGraphNodeId(projectId, id) {
+  const value = String(id || "");
+  const prefix = `p:${projectId}:`;
+  return value.startsWith(prefix) ? value : `${prefix}${value}`;
+}
+
+function projectLocalGraphId(id, projectId) {
+  const prefix = projectId ? `p:${projectId}:` : null;
+  return prefix && id.startsWith(prefix) ? id.slice(prefix.length) : id;
+}
+
+function graphRowInProject(row, projectId) {
+  return sameProjectId(row?.source_node?.project_id, projectId) &&
+    sameProjectId(row?.target_node?.project_id, projectId);
+}
+
+async function scopedGraphSearch({ config, payload = {}, limit = 30, projectId }) {
+  const store = contentSupabaseConfig(config);
+  if (!isConfigured(store)) return { results: [], skipped: true, reason: "Content Supabase is not configured" };
+  const body = {
+    query_text: payload.query_text || "",
+    // Project-local node lookup by source identity; legacy node ids would
+    // bypass the RPC's project-filtered node resolution.
+    source_refs: (Array.isArray(payload.source_refs) ? payload.source_refs : [])
+      .filter((ref) => ref?.source_table && ref?.source_id != null)
+      .map((ref) => ({ source_table: String(ref.source_table), source_id: String(ref.source_id) })),
+    max_rows: Number(payload.max_rows || limit || 30),
+    filter_project_id: projectId
+  };
+  let results;
+  let mode = "rpc_project";
+  try {
+    results = await supabaseFetch(store, "/rest/v1/rpc/graph_search", { method: "POST", body: JSON.stringify(body) });
+  } catch (error) {
+    if (!looksLikeRpcSignatureError(error.message) && !/graph_search/i.test(error.message)) throw error;
+    // Older Company DB without filter_project_id: run unfiltered and keep only
+    // edges whose both nodes are labelled with this Project. Never widens.
+    const { filter_project_id: _projectId, ...legacyBody } = body;
+    try {
+      results = await supabaseFetch(store, "/rest/v1/rpc/graph_search", { method: "POST", body: JSON.stringify(legacyBody) });
+      mode = "rpc_post_filtered";
+    } catch (legacyError) {
+      return { results: [], skipped: true, mode: "unavailable", reason: "Project graph is not available", error: legacyError.message };
+    }
+  }
+  const scoped = (Array.isArray(results) ? results : []).filter((row) => graphRowInProject(row, projectId));
+  return { results: scoped, skipped: false, mode };
+}
+
+async function upsertScopedProjectGraphData({ config, projectId, nodes = [], edges = [] }) {
+  const store = contentSupabaseConfig(config);
+  if (!isConfigured(store)) throw new Error("Content Supabase is not configured");
+  const scopedNodes = uniqueByKey(nodes, (node) => node.id).map((node) => ({
+    ...sanitizeGraphNode(node),
+    id: projectGraphNodeId(projectId, requiredString(node.id, "node.id")),
+    project_id: projectId
+  }));
+  const scopedEdges = uniqueByKey(edges, (edge) => [edge.from_node_id, edge.to_node_id, edge.edge_type || "related_to"].join("|"))
+    .map((edge) => {
+      const clean = sanitizeGraphEdge(edge);
+      return {
+        ...clean,
+        from_node_id: projectGraphNodeId(projectId, clean.from_node_id),
+        to_node_id: projectGraphNodeId(projectId, clean.to_node_id),
+        project_id: projectId
+      };
+    });
+  for (const batch of chunk(scopedNodes, GRAPH_UPSERT_BATCH_SIZE)) {
+    await supabaseFetch(store, `/rest/v1/${GRAPH_NODES_TABLE}?on_conflict=id`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(batch)
+    });
+  }
+  // The Company DB unique key (project_id, from, to, type) is a partial index
+  // PostgREST cannot target, so edges are inserted and duplicates updated.
+  for (const batch of chunk(scopedEdges, GRAPH_UPSERT_BATCH_SIZE)) {
+    try {
+      await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}`, {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify(batch)
+      });
+    } catch {
+      for (const edge of batch) await saveScopedGraphEdge(store, edge);
+    }
+  }
+  return { nodes: scopedNodes.length, edges: scopedEdges.length };
+}
+
+async function saveScopedGraphEdge(store, edge) {
+  const params = new URLSearchParams({
+    select: "id",
+    project_id: `eq.${edge.project_id}`,
+    from_node_id: `eq.${edge.from_node_id}`,
+    to_node_id: `eq.${edge.to_node_id}`,
+    edge_type: `eq.${edge.edge_type}`,
+    limit: "1"
+  });
+  const existing = await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}`);
+  if (Array.isArray(existing) && existing[0]?.id) {
+    await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?id=eq.${encodeURIComponent(existing[0].id)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(edge)
+    });
+    return;
+  }
+  await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}`, {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify(edge)
+  });
+}
+
+async function mergeScopedGraphEntityNodes({ config, projectId, moves = [] }) {
+  const store = contentSupabaseConfig(config);
+  if (!isConfigured(store)) throw new Error("Content Supabase is not configured");
+  const scope = projectIdFilterParam(projectId);
+  let edgesRepointed = 0;
+  let nodesRemoved = 0;
+  for (const move of moves) {
+    if (!move?.from_id || !move?.to_id || move.from_id === move.to_id) continue;
+    const fromId = projectGraphNodeId(projectId, move.from_id);
+    const toId = projectGraphNodeId(projectId, move.to_id);
+    const edges = await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?select=id&${scope}&to_node_id=eq.${encodeURIComponent(fromId)}&limit=2000`);
+    for (const edge of edges || []) {
+      try {
+        await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?id=eq.${encodeURIComponent(edge.id)}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ to_node_id: toId })
+        });
+      } catch {
+        // The canonical node already has this mention; drop the alias copy.
+        await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?id=eq.${encodeURIComponent(edge.id)}`, { method: "DELETE" });
+      }
+      edgesRepointed += 1;
+    }
+    await supabaseFetch(store, `/rest/v1/${GRAPH_NODES_TABLE}?${scope}&id=eq.${encodeURIComponent(fromId)}`, { method: "DELETE" });
+    nodesRemoved += 1;
+  }
+  return { edgesRepointed, nodesRemoved };
+}
+
 function projectScopeUnsupportedError(cause) {
   const error = new Error("Hybrid search RPC does not support project_id_filter; refusing to search outside the requested Project");
   error.code = "project_scope_unsupported";
@@ -1056,6 +1212,8 @@ export async function fetchTimelineEventPage({ config, source = "index", sort = 
   });
   const filters = buildTimelinePageFilters({ primaryDateField, from, to, cursor: decodedCursor, sort, origins });
   if (filters.length) params.set("and", `(${filters.join(",")})`);
+  const projectId = requestProjectId(config);
+  if (projectId) params.set("project_id", `eq.${projectId}`);
 
   const rows = await supabaseFetch(contentConfig, `/rest/v1/${table}?${params.toString()}`);
   const hasMore = rows.length > limit;
@@ -1259,7 +1417,8 @@ export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {
   const pageSize = 500;
   for (let offset = 0; offset < limit; offset += pageSize) {
     const batchLimit = Math.min(pageSize, limit - offset);
-    const query = `/rest/v1/${contentConfig.alertsTable}?select=${ALERT_TIMELINE_SELECT}&order=data_date.asc.nullslast,created_at.asc,id.asc&limit=${batchLimit}&offset=${offset}`;
+    const projectFilter = projectIdFilterParam(requestProjectId(config));
+    const query = `/rest/v1/${contentConfig.alertsTable}?select=${ALERT_TIMELINE_SELECT}${projectFilter ? `&${projectFilter}` : ""}&order=data_date.asc.nullslast,created_at.asc,id.asc&limit=${batchLimit}&offset=${offset}`;
     const batch = await supabaseFetch(contentConfig, query);
     rows.push(...(batch || []));
     if (!Array.isArray(batch) || batch.length < batchLimit) break;
@@ -1327,7 +1486,8 @@ function alertRowMetadata(row = {}) {
 export async function fetchTimelineEvents({ config, limit = 1000 }) {
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig)) return [];
-  const query = `/rest/v1/${contentConfig.indexTable}?select=id,created_at,project_id,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,mail_id,attachment_id,source_url,mentioned_dates&order=primary_date.asc.nullslast,created_at.asc&limit=${limit}`;
+  const projectFilter = projectIdFilterParam(requestProjectId(config));
+  const query = `/rest/v1/${contentConfig.indexTable}?select=id,created_at,project_id,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,mail_id,attachment_id,source_url,mentioned_dates${projectFilter ? `&${projectFilter}` : ""}&order=primary_date.asc.nullslast,created_at.asc&limit=${limit}`;
   const rows = await supabaseFetch(contentConfig, query);
   return (rows || []).map((row) => ({
     id: row.id,
@@ -1469,6 +1629,8 @@ export async function upsertTimelineGraphData({ config, entities = [], eventEnti
 }
 
 export async function upsertProjectGraphData({ config, nodes = [], edges = [] }) {
+  const projectId = requestProjectId(config);
+  if (projectId) return upsertScopedProjectGraphData({ config, projectId, nodes, edges });
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
   const uniqueNodes = uniqueByKey(nodes, (node) => node.id);
   const uniqueEdges = uniqueByKey(edges, (edge) => [
@@ -1497,19 +1659,24 @@ export async function upsertProjectGraphData({ config, nodes = [], edges = [] })
 // metadata.enrichment). Consumed by the insights pipeline for entity-aware
 // clustering and dependency detection (phase-2 Task 4 / spec Task G3).
 export async function listEntityMentionEdges({ config, limit = 2000 } = {}) {
-  if (!isConfigured(config)) return [];
+  const projectId = requestProjectId(config);
+  const store = graphStoreConfig(config);
+  if (!isConfigured(store)) return [];
   const params = new URLSearchParams({
     select: "to_node_id,metadata",
     limit: String(Math.min(Math.max(Number(limit) || 2000, 1), 5000))
   });
+  if (projectId) params.set("project_id", `eq.${projectId}`);
   const rows = await supabaseFetch(
-    config,
+    store,
     `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}&metadata->>enrichment=eq.graph-enrichment-v1`
   );
   return (rows || [])
     .map((row) => {
       const metadata = row.metadata || {};
-      const entityId = String(row.to_node_id || "");
+      // Project-scoped graphs prefix ids with p:<project>:; callers work on the
+      // project-local id and the writers re-prefix it.
+      const entityId = projectLocalGraphId(String(row.to_node_id || ""), projectId);
       return {
         record_ref: `${metadata.source_table || ""}:${metadata.source_id || ""}`,
         entity_id: entityId,
@@ -1525,6 +1692,8 @@ export async function listEntityMentionEdges({ config, limit = 2000 } = {}) {
 // happy), then remove the alias node. Alias rows are all enrichment-created, so
 // they can be regenerated from source records if ever needed.
 export async function mergeGraphEntityNodes({ config, moves = [] } = {}) {
+  const projectId = requestProjectId(config);
+  if (projectId) return mergeScopedGraphEntityNodes({ config, projectId, moves });
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
   let edgesRepointed = 0;
   let nodesRemoved = 0;
@@ -1554,6 +1723,21 @@ export async function mergeGraphEntityNodes({ config, moves = [] } = {}) {
 // Removes junk entity nodes (and their mention edges) outright — used by the
 // consolidation pass for sentence-length extraction artifacts.
 export async function removeGraphEntityNodes({ config, ids = [] } = {}) {
+  const projectId = requestProjectId(config);
+  if (projectId) {
+    const store = graphStoreConfig(config);
+    if (!isConfigured(store)) throw new Error("Content Supabase is not configured");
+    let removed = 0;
+    const scope = projectIdFilterParam(projectId);
+    for (const id of ids) {
+      if (!id) continue;
+      const nodeId = encodeURIComponent(projectGraphNodeId(projectId, id));
+      await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?${scope}&to_node_id=eq.${nodeId}`, { method: "DELETE" });
+      await supabaseFetch(store, `/rest/v1/${GRAPH_NODES_TABLE}?${scope}&id=eq.${nodeId}`, { method: "DELETE" });
+      removed += 1;
+    }
+    return { removed };
+  }
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
   let removed = 0;
   for (const id of ids) {
@@ -1565,7 +1749,8 @@ export async function removeGraphEntityNodes({ config, ids = [] } = {}) {
   return { removed };
 }
 
-export async function graphSearch({ config, payload = {}, limit = 30 } = {}) {
+export async function graphSearch({ config, payload = {}, limit = 30, projectId = requestProjectId(config) } = {}) {
+  if (projectId) return scopedGraphSearch({ config, payload, limit, projectId });
   if (!isConfigured(config)) return { results: [], skipped: true, reason: "App Supabase is not configured" };
   const body = {
     query_text: payload.query_text || "",

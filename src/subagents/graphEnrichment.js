@@ -9,6 +9,7 @@
 import { chatCompletion, extractJsonObject } from "../openrouter.js";
 import { normalizeGraphRecord } from "../projectGraph.js";
 import { fetchAlertsTimelineEvents, fetchTimelineEvents, listEntityMentionEdges, mergeGraphEntityNodes, removeGraphEntityNodes, upsertProjectGraphData } from "../supabase.js";
+import { requestProjectId, sameProjectId } from "../projectScope.js";
 import { extractApprover } from "../timelineLinks.js";
 import { extractLikelyCompanies } from "../timelineGraph.js";
 
@@ -214,9 +215,14 @@ export async function runGraphEnrichment({
   const rawRecords = source === "alerts"
     ? await fetchAlertsTimelineEvents({ config, limit: Math.min(limit * 5, 4000) })
     : await fetchTimelineEvents({ config, limit: Math.min(limit * 5, 4000) });
+  // With a projectId the source reads are already filtered by project_id and
+  // the graph is written to that Project's Company DB graph; a record that
+  // reports another Project is dropped rather than stamped.
+  const projectId = requestProjectId(config);
   let records = (rawRecords || [])
     .map((record) => normalizeGraphRecord(record, source === "alerts" ? "alerts" : config?.contentSource?.indexTable || "data_index"))
-    .filter((record) => record.sourceId && record.text);
+    .filter((record) => record.sourceId && record.text)
+    .filter((record) => !projectId || record.metadata?.project_id == null || sameProjectId(record.metadata.project_id, projectId));
   if (dateFrom) records = records.filter((record) => !record.date || String(record.date).slice(0, 10) >= dateFrom);
   if (dateTo) records = records.filter((record) => !record.date || String(record.date).slice(0, 10) <= dateTo);
 

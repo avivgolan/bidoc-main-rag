@@ -1,7 +1,7 @@
 import { chatCompletion, createEmbedding } from "../openrouter.js";
 import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
-import { PROJECT_SCOPED_OVERFETCH, projectIdFilterParam, requestProjectId } from "../projectScope.js";
+import { looksLikeRpcSignatureError, PROJECT_SCOPED_OVERFETCH, projectIdFilterParam, requestProjectId } from "../projectScope.js";
 
 const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 
@@ -35,23 +35,38 @@ async function searchAlertsEmbeddings(config, query, table, topK = 20, cacheCont
   });
 
   const rpcName = contentConfig.alertsRpcName || `match_${table}`;
-  // The match_* RPC has no project parameter; the Project filter is applied on
-  // the detail select below, so a scoped call over-fetches candidates.
-  const matchCount = requestProjectId(config) ? Math.min(topK * PROJECT_SCOPED_OVERFETCH, 100) : topK;
+  const projectId = requestProjectId(config);
+  // The match_* functions default match_threshold to 0.5 — query-vs-document
+  // similarities top out around 0.4-0.6, so the default silently returns
+  // nothing. Threshold 0 + match_count bounding, like the specialist agents.
+  const body = { query_embedding: embedding, match_count: topK, filter: {}, match_threshold: 0 };
+  let data;
+  if (projectId) {
+    try {
+      data = await postAlertsRpc(contentConfig, rpcName, { ...body, project_id_filter: projectId });
+    } catch (error) {
+      if (!looksLikeRpcSignatureError(error.message)) throw error;
+      // Older Company DB without project_id_filter: rank across the DB and let
+      // the project-filtered detail select below narrow it (over-fetching).
+      data = await postAlertsRpc(contentConfig, rpcName, { ...body, match_count: Math.min(topK * PROJECT_SCOPED_OVERFETCH, 100) });
+    }
+  } else {
+    data = await postAlertsRpc(contentConfig, rpcName, body);
+  }
+  const rows = await enrichAlertRows(config, table, Array.isArray(data) ? data : []);
+  return projectId ? rows.slice(0, topK) : rows;
+}
+
+async function postAlertsRpc(contentConfig, rpcName, body) {
   const response = await fetch(`${contentConfig.supabaseUrl}/rest/v1/rpc/${rpcName}`, {
     method: "POST",
     headers: supabaseHeaders(contentConfig.supabaseServiceRoleKey),
-    // The match_* functions default match_threshold to 0.5 — query-vs-document
-    // similarities top out around 0.4-0.6, so the default silently returns
-    // nothing. Threshold 0 + match_count bounding, like the specialist agents.
-    body: JSON.stringify({ query_embedding: embedding, match_count: matchCount, filter: {}, match_threshold: 0 })
+    body: JSON.stringify(body)
   });
-
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) throw new Error(data?.message || `Supabase RPC failed: ${response.status}`);
-  const rows = await enrichAlertRows(config, table, Array.isArray(data) ? data : []);
-  return requestProjectId(config) ? rows.slice(0, topK) : rows;
+  return data;
 }
 
 // The RPC returns only (id, content, metadata-string, similarity) — no date, so

@@ -534,7 +534,7 @@ const DEFAULT_DATA_QUERY_SETTINGS = {
 // Task M2: per-internal-tool settings (docs/n8n-agents-migration-spec.md).
 // Kept in config.js (not contentTools.js) to avoid an import cycle; a test
 // asserts this list matches Object.keys(CONTENT_TOOL_SPECS).
-export const INTERNAL_CONTENT_TOOL_NAMES = ["meetings", "emails", "whatsapp_messages", "financial_transactions", "safety_report"];
+export const INTERNAL_CONTENT_TOOL_NAMES = ["meetings", "emails", "whatsapp_messages", "financial_transactions", "safety_report", "consultants_reports", "exceptions_report", "quality_control"];
 // Spec B2: each agent runs on ITS OWN Content-DB table (user-editable), with
 // analysis + a phrased answer as the standard output (synthesis default ON).
 export const DEFAULT_CONTENT_TOOL_SETTINGS = { enabled: true, topK: 12, answerSynthesis: true, model: "", prompt: "", table: "" };

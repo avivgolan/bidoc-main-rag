@@ -603,21 +603,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     emitRunEvent(runId, "deduplication", "Deduplication skipped for exact structured route", { reason });
   }
 
-  if (hybridResults && config.graph?.enabled !== false && requestProjectId(config)) {
-    // graph_nodes/graph_edges (App DB) carry no project_id, and graph_search
-    // also matches query_text across every node, so its context cannot be
-    // limited to the requesting Project. Project-scoped chat skips it.
-    toolCalls.push(annotateToolCall({
-      toolName: "graph_search",
-      ok: false,
-      skipped: true,
-      rawQuery: message,
-      data: null,
-      error: "graph_search_not_project_scoped",
-      sources: []
-    }));
-    emitRunEvent(runId, "graph_search", "Project Graph Search skipped", { reason: "graph_search_not_project_scoped" });
-  } else if (hybridResults && config.graph?.enabled !== false) {
+  if (hybridResults && config.graph?.enabled !== false) {
     const graphSearchLimit = Number(config.graph?.searchLimit || 30);
     const graphContextLimit = graphContextLimitForQuestion({ config, listIntent });
     const payload = buildGraphSearchPayload({ query: message, records: normalizeRows(hybridResults), maxRows: graphSearchLimit });
@@ -629,12 +615,14 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
         keyParts: {
           node_ids: payload.source_refs.map((ref) => ref.node_id || `${ref.source_table}:${ref.source_id}`).sort(),
           graph_depth: graphSearchLimit,
-          query: payload.query_text
+          query: payload.query_text,
+          ...(requestProjectId(config) ? { projectId: requestProjectId(config) } : {})
         },
         ttl: CACHE_TTL.graphSearch,
         savedCall: "search",
         estimatedCost: 0.0001,
-        operation: () => graphSearch({ config, payload, limit: graphSearchLimit })
+        // Project-scoped chat reads the Company DB graph of its Project only.
+        operation: () => graphSearch({ config, payload, limit: graphSearchLimit, projectId: requestProjectId(config) })
       });
       graphContext = summarizeGraphContext(graph, graphContextLimit);
       toolCalls.push(annotateToolCall({
@@ -1552,6 +1540,18 @@ async function callProjectTool({
       cacheContext,
       telemetry: telemetryFor(toolName)
     });
+  }
+  // Project-scoped chat never calls n8n: its webhooks read a fixed DB with no
+  // Project scope. Tools without an internal replacement are reported skipped.
+  if (requestProjectId(config)) {
+    return {
+      toolName,
+      ok: false,
+      skipped: true,
+      error: "n8n_disabled_for_project_scope",
+      data: null,
+      sources: []
+    };
   }
   if (config.qa?.externalToolsAllowed === false || config.qa?.sideEffectsAllowed === false) {
     return {
