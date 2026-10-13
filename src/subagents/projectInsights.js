@@ -2,7 +2,7 @@ import { TOOL_NAMES } from "../config.js";
 import { chatCompletion, extractJsonObject } from "../openrouter.js";
 import { buildGraphSearchPayload, summarizeGraphContext } from "../projectGraph.js";
 import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "../sourceQuality.js";
-import { fetchAlertsTimelineEvents, fetchTimelineEventPage, graphSearch, hybridSearch, listEntityMentionEdges } from "../supabase.js";
+import { fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, graphSearch, hybridSearch, listEntityMentionEdges } from "../supabase.js";
 import { callN8nTool } from "../tools.js";
 import { callInternalContentTool, isInternalContentTool } from "./contentTools.js";
 import { runAlertAgent } from "./alert.js";
@@ -1026,6 +1026,31 @@ async function searchFocusRecords({ config, focusQuery, dateFrom, dateTo, active
     emit?.(runId, "focus_retrieval_warning", "Hybrid focus search failed; using index scan only", { error: error.message, status: "warning" });
     return [];
   }
+}
+
+// Hashtag counts for GET /api/insights/hashtags. Both fetchers filter by
+// config.projectId, so a Project-scoped request counts only its own records.
+export async function collectInsightHashtags({ config, source = "alerts", dateFrom = null, dateTo = null }) {
+  const allEvents = source === "index"
+    ? await fetchTimelineEvents({ config }).catch(() => [])
+    : await fetchAlertsTimelineEvents({ config }).catch(() => []);
+  const events = allEvents.filter((ev) => {
+    if (!ev.date) return true;
+    if (dateFrom && ev.date < dateFrom) return false;
+    if (dateTo && ev.date > dateTo) return false;
+    return true;
+  });
+  const counts = {};
+  for (const ev of events) {
+    for (const tag of (ev.tags || [])) {
+      const t = String(tag || "").trim().replace(/^#+/, "");
+      if (t) counts[t] = (counts[t] || 0) + 1;
+    }
+  }
+  const hashtags = Object.entries(counts)
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count);
+  return { hashtags, total: events.length };
 }
 
 // Aggregates saved insight runs into cross-run quality metrics (phase-2 spec Task 6,

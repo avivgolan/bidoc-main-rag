@@ -8,6 +8,7 @@
 
 import { createEmbedding } from "../openrouter.js";
 import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
+import { projectIdFilterParam, requestProjectId, sameProjectId } from "../projectScope.js";
 
 export const INDEX_DATES_VERSION = "index-dates-v1";
 export const INTERNAL_INDEXING_VERSION = "internal-indexing-v1";
@@ -218,6 +219,12 @@ export async function runIncrementalIndexing({ config, dryRun = true, limit = 50
   const targetTables = (Array.isArray(tables) && tables.length ? tables : Object.keys(SOURCE_TABLE_SPECS))
     .filter((table) => SOURCE_TABLE_SPECS[table]);
 
+  // A Project-scoped run (x-project-id) reads and indexes only that Project's
+  // source rows; a source table without project_id fails closed.
+  const projectId = requestProjectId(config);
+  const projectFilter = projectIdFilterParam(projectId);
+  if (projectId) summary.projectId = projectId;
+
   const planned = [];
   let remaining = limit;
   for (const sourceTable of targetTables) {
@@ -228,25 +235,26 @@ export async function runIncrementalIndexing({ config, dryRun = true, limit = 50
         config,
         table: indexTable,
         select: "id,source_id",
-        filter: `source_table=eq.${encodeURIComponent(sourceTable)}`
+        filter: [`source_table=eq.${encodeURIComponent(sourceTable)}`, projectFilter].filter(Boolean).join("&")
       })).map((row) => String(row.source_id))
     );
     const sourceIds = (await fetchAllPages({
       config,
       table: sourceTable,
       select: "id",
-      filter: spec.relevanceFilter || null
+      filter: [spec.relevanceFilter, projectFilter].filter(Boolean).join("&") || null
     })).map((row) => String(row.id));
     const missing = sourceIds.filter((id) => !existing.has(id)).slice(0, remaining);
     summary.byTable[sourceTable] = { existing: existing.size, sources: sourceIds.length, missing: missing.length };
     if (!missing.length) continue;
     remaining -= missing.length;
 
-    const sourceRows = await fetchSourceRowsById({ config, table: sourceTable, ids: missing, select: "*" });
+    const sourceRows = await fetchSourceRowsById({ config, table: sourceTable, ids: missing, select: "*", filter: projectFilter });
     const joinedDates = await fetchJoinedDates({ config, spec, sourceRows });
     for (const id of missing) {
       const sourceRow = sourceRows.get(id);
       if (!sourceRow) continue;
+      if (projectId && !sameProjectId(sourceRow.project_id, projectId)) continue;
       planned.push(buildIndexRow({ sourceTable, sourceRow, joinedDate: joinedDates.get(id) ?? null }));
     }
   }
@@ -591,13 +599,13 @@ async function fetchJoinedDates({ config, spec, sourceRows }) {
   return joined;
 }
 
-async function fetchSourceRowsById({ config, table, ids = [], select = "*" }) {
+async function fetchSourceRowsById({ config, table, ids = [], select = "*", filter = null }) {
   const map = new Map();
   const uniqueIds = [...new Set(ids.map((id) => String(id)).filter((id) => /^\d+$/.test(id)))];
   for (const group of chunk(uniqueIds, SOURCE_FETCH_CHUNK)) {
     const rows = await contentSupabaseRequest({
       config,
-      path: `/rest/v1/${table}?select=${encodeURIComponent(select)}&id=in.(${group.join(",")})`
+      path: `/rest/v1/${table}?select=${encodeURIComponent(select)}&id=in.(${group.join(",")})${filter ? `&${filter}` : ""}`
     });
     for (const row of Array.isArray(rows) ? rows : []) map.set(String(row.id), row);
   }
