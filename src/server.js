@@ -29,11 +29,12 @@ import { resolveContractDocumentSource } from "./contracts/documentSource.js";
 import { listScheduleProjects, loadScheduleSource, saveScheduleProjectEndDate, scheduleSettings } from "./scheduleIngestion.js";
 import { buildDataQueryWorkflowLog, runDataQueryAgent } from "./subagents/dataQuery.js";
 import { runDelayClaimAnalysis, runDelayClaimPackageAnalysis, runDelayEventDeepAnalysis } from "./subagents/delayClaim.js";
-import { aggregateInsightQualityMetrics, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
+import { aggregateInsightQualityMetrics, collectInsightHashtags, runProjectInsightsAnalysis } from "./subagents/projectInsights.js";
 import { consolidateGraphEntities, runGraphEnrichment } from "./subagents/graphEnrichment.js";
 import { runEmbeddingBackfill, runIncrementalIndexing, runIndexDatesBackfill } from "./subagents/indexing.js";
 import { callInternalContentTool, CONTENT_TOOL_SPECS, isInternalContentTool } from "./subagents/contentTools.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, subscribeRun } from "./runLog.js";
+import { requestProjectId, resolveRequestProjectId, sameProjectId } from "./projectScope.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession } from "./auth.js";
@@ -109,7 +110,13 @@ function buildRequestConfig(req, body = {}) {
   const rpc  = req.headers["x-hybrid-rpc-name"]       || body.hybridRpcName        || null;
   const idx  = req.headers["x-index-table"]            || body.indexTable           || null;
   const alt  = req.headers["x-alerts-table"]           || body.alertsTable          || null;
-  const pid  = req.headers["x-project-id"]             || body.projectId || body.project_id || null;
+  // x-project-id wins; ?project_id= is the fallback for GET callers; a header
+  // and query that disagree throw project_mismatch (handleApi answers 400).
+  const pid  = resolveRequestProjectId({
+    header: req.headers["x-project-id"],
+    query: requestQueryProjectId(req),
+    body: body.projectId || body.project_id
+  });
   const merged = (!url && !key) ? base : {
     ...base,
     contentSource: {
@@ -122,6 +129,14 @@ function buildRequestConfig(req, body = {}) {
     },
   };
   return pid ? { ...merged, projectId: pid } : merged;
+}
+
+function requestQueryProjectId(req) {
+  try {
+    return new URL(req.url || "/", "http://localhost").searchParams.get("project_id");
+  } catch {
+    return null;
+  }
 }
 
 // Load persisted settings from Supabase before handling any requests.
@@ -138,6 +153,10 @@ async function handler(req, res) {
     }
     serveStatic(req, res, url.pathname);
   } catch (error) {
+    if (error?.code === "project_mismatch") {
+      sendJson(res, 400, { error: "project_mismatch", message: error.message });
+      return;
+    }
     sendJson(res, 500, { error: error.message });
   }
 }
@@ -272,6 +291,15 @@ async function handleApi(req, res, url) {
         return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
       }
     }
+  }
+
+  // One request, one Project: an x-project-id header and a project_id query
+  // parameter that disagree are rejected before any route reads data.
+  try {
+    resolveRequestProjectId({ header: req.headers["x-project-id"], query: url.searchParams.get("project_id") });
+  } catch (error) {
+    if (error?.code === "project_mismatch") return sendJson(res, 400, { error: "project_mismatch", message: error.message });
+    throw error;
   }
 
   if (url.pathname.startsWith("/api/qa/")) {
@@ -484,28 +512,10 @@ async function handleApi(req, res, url) {
       const dateFrom = url.searchParams.get("date_from") || null;
       const dateTo = url.searchParams.get("date_to") || null;
       const source = url.searchParams.get("source") || "alerts";
+      // Project-scoped (x-project-id or ?project_id): counts only that Project's tags.
       const cfg = buildRequestConfig(req, {});
-      const fetcher = source === "index"
-        ? fetchTimelineEvents({ config: cfg }).catch(() => [])
-        : fetchAlertsTimelineEvents({ config: cfg }).catch(() => []);
-      const allEvents = await fetcher;
-      const events = allEvents.filter((ev) => {
-        if (!ev.date) return true;
-        if (dateFrom && ev.date < dateFrom) return false;
-        if (dateTo && ev.date > dateTo) return false;
-        return true;
-      });
-      const counts = {};
-      for (const ev of events) {
-        for (const tag of (ev.tags || [])) {
-          const t = String(tag || "").trim().replace(/^#+/, "");
-          if (t) counts[t] = (counts[t] || 0) + 1;
-        }
-      }
-      const hashtags = Object.entries(counts)
-        .map(([tag, count]) => ({ tag, count }))
-        .sort((a, b) => b.count - a.count);
-      return sendJson(res, 200, { hashtags, total: events.length });
+      const result = await collectInsightHashtags({ config: cfg, source, dateFrom, dateTo });
+      return sendJson(res, 200, result);
     } catch (error) {
       return sendJson(res, 500, { ok: false, error: error.message });
     }
@@ -515,6 +525,13 @@ async function handleApi(req, res, url) {
     if (!checkBidocSecretForRead(req)) return sendJson(res, 401, { error: "Unauthorized" });
     const body = await readJson(req).catch(() => ({}));
     const cfg = buildRequestConfig(req, body);
+    // The run belongs to the requesting Project (x-project-id, else ?project_id,
+    // else body.project_id). A body that names another Project is rejected.
+    const runProjectId = requestProjectId(cfg);
+    const bodyProjectId = String(body.projectId || body.project_id || "").trim();
+    if (runProjectId && bodyProjectId && !sameProjectId(runProjectId, bodyProjectId)) {
+      return sendJson(res, 400, { error: "project_mismatch", message: "body project_id names a different Project than the request" });
+    }
     // Per-request calibration flags: body.insights toggles the phase-2 engines for
     // this run only, on top of the persisted config.insights defaults.
     const requestInsights = body.insights && typeof body.insights === "object" ? body.insights : null;
@@ -527,12 +544,12 @@ async function handleApi(req, res, url) {
     const parentRunId = body.parentRunId || body.parent_run_id || null;
     // Persist a "running" row immediately so clients that leave/return can show
     // the run in history as in-progress while analysis continues.
-    await saveProjectInsightRun({
+    const startRefusal = await saveProjectInsightRun({
       config: cfg,
       run: {
         runId,
         parentRunId,
-        projectId: body.projectId || body.project_id || null,
+        projectId: runProjectId,
         focusQuery: body.focusQuery || body.query || "",
         dateFrom: body.dateFrom || body.date_from || null,
         dateTo: body.dateTo || body.date_to || null,
@@ -552,9 +569,16 @@ async function handleApi(req, res, url) {
         status: "running",
         metadata: { hasMore: false, findings: [] }
       }
-    }).catch((error) => {
+    }).then(() => null, (error) => {
+      // A runId already saved under another Project is refused, never reused.
+      if (error?.code === "project_mismatch") return error;
       emitRunEvent(runId, "persistence_warning", "Insight run start persistence failed", { error: error.message, status: "warning" });
+      return null;
     });
+    if (startRefusal) {
+      failRun(runId, startRefusal);
+      return sendJson(res, 409, { ok: false, error: "project_mismatch", message: startRefusal.message, runId });
+    }
     try {
       const result = await runProjectInsightsAnalysis({
         config: effectiveCfg,
@@ -589,7 +613,7 @@ async function handleApi(req, res, url) {
         run: {
           runId,
           parentRunId,
-          projectId: body.projectId || body.project_id || null,
+          projectId: runProjectId,
           focusQuery: persistedResult.summary.focusQuery || body.focusQuery || body.query || "",
           dateFrom: persistedResult.summary.dateFrom || body.dateFrom || body.date_from || null,
           dateTo: persistedResult.summary.dateTo || body.dateTo || body.date_to || null,
@@ -625,7 +649,7 @@ async function handleApi(req, res, url) {
         run: {
           runId,
           parentRunId: body.parentRunId || body.parent_run_id || null,
-          projectId: body.projectId || body.project_id || null,
+          projectId: runProjectId,
           focusQuery: body.focusQuery || body.query || "",
           dateFrom: body.dateFrom || body.date_from || null,
           dateTo: body.dateTo || body.date_to || null,

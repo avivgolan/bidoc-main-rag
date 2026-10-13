@@ -3,7 +3,7 @@ import { supabaseHeaders } from "./config.js";
 import { addDurationToLink, TIMELINE_RELATION_TYPES } from "./timelineLinks.js";
 import { CACHE_TTL, cachedOperation } from "./cache.js";
 import { hydrateRetrievedSourceLinks, indexedSourceLinkReadPath, INDEXED_SOURCE_LINK_CONTRACT } from "./sourceLinks.js";
-import { projectIdFilterParam, requestProjectId, sameProjectId } from "./projectScope.js";
+import { projectIdFilterParam, projectMismatchError, requestProjectId, sameProjectId } from "./projectScope.js";
 
 const MESSAGES_TABLE = "chat_messages_gf";
 const SESSION_MEMORY_TABLE = "chat_session_memory";
@@ -569,12 +569,49 @@ export async function saveProjectInsightRun({ config, run }) {
   const contentConfig = contentSupabaseConfig(config);
   if (!isConfigured(contentConfig)) return null;
   const payload = sanitizeProjectInsightRunPayload(run);
+  const projectId = requestProjectId(config);
+  if (projectId) return saveScopedProjectInsightRun({ contentConfig, projectId, payload });
   const rows = await supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?on_conflict=run_id`, {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates,return=representation" },
     body: JSON.stringify(payload)
   });
   return rows?.[0] || payload;
+}
+
+// A Project-scoped save may only touch its own Project's run. It updates the
+// run filtered by run_id AND project_id; when nothing matched it inserts (no
+// merge), so a run_id already saved under another Project (or unscoped) hits
+// the run_id unique key and is refused instead of overwritten.
+async function saveScopedProjectInsightRun({ contentConfig, projectId, payload }) {
+  if (payload.project_id && !sameProjectId(payload.project_id, projectId)) {
+    throw projectMismatchError("Insight run project_id names a different Project than the request");
+  }
+  const scopedPayload = { ...payload, project_id: projectId };
+  const { run_id: runId, ...patch } = scopedPayload;
+  const updated = await supabaseFetch(contentConfig,
+    `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?run_id=eq.${encodeURIComponent(runId)}&${projectIdFilterParam(projectId)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+  if (Array.isArray(updated) && updated.length) return updated[0];
+  try {
+    const rows = await supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}`, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(scopedPayload)
+    });
+    return rows?.[0] || scopedPayload;
+  } catch (error) {
+    if (/duplicate key|unique constraint|23505|conflict/i.test(String(error?.message || ""))) {
+      const refusal = projectMismatchError("Insight run id belongs to another Project; refusing to overwrite it");
+      refusal.status = 409;
+      refusal.cause = error;
+      throw refusal;
+    }
+    throw error;
+  }
 }
 
 export async function listProjectInsightRuns({ config, limit = 30 }) {
