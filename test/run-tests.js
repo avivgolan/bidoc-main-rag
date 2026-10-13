@@ -8152,8 +8152,8 @@ test("indexing agent date derivation is deterministic", () => {
 });
 
 test("indexing agent keeps the n8n email relevance rule", () => {
-  assert.match(SOURCE_TABLE_SPECS.emails.relevanceFilter, /project_related/);
-  assert.match(SOURCE_TABLE_SPECS.emails.relevanceFilter, /multi_project/);
+  // n8n's Data Index (live via "Is 100% Project Related?", and its backfill) indexes project_related Emails only.
+  assert.equal(SOURCE_TABLE_SPECS.emails.relevanceFilter, "relevance_status=eq.project_related");
   for (const table of ["meetings", "safety_reports", "consultants_reports", "financial_transactions", "whatsapp_analysis", "other_documents"]) {
     assert.equal(SOURCE_TABLE_SPECS[table].relevanceFilter, undefined);
   }
