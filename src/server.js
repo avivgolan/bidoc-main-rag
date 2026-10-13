@@ -8,7 +8,7 @@ import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSe
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels, summarizeOpenRouterUsage } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { addDelayEventChangeLog, addDelayEventEvidence, addDelayEventGap, annotateMessage, contentSupabaseConfig, createDelayClaim, createDelayEvent, createTimelineEventLink, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, getMessage, getLatestQaReport, getProjectInsightRun, graphSearch, hybridSearch, listDelayClaims, listDelayEvents, listDislikedMessages, listMessages, listProjectGraph, listProjectInsightRuns, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, parseTimelineEventsQuery, saveProjectInsightRun, saveQaReport, TimelineRequestError, updateDelayEvent, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
+import { addDelayEventChangeLog, addDelayEventEvidence, addDelayEventGap, annotateMessage, contentSupabaseConfig, createDelayClaim, createDelayEvent, createTimelineEventLink, delayClaimCaseInProject, delayEventInProject, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, getMessage, getLatestQaReport, getProjectInsightRun, graphSearch, hybridSearch, listDelayClaims, listDelayEvents, listDislikedMessages, listMessages, listProjectGraph, listProjectInsightRuns, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, parseTimelineEventsQuery, saveProjectInsightRun, saveQaReport, TimelineRequestError, updateDelayEvent, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
@@ -178,19 +178,6 @@ if (!process.env.VERCEL) {
 }
 
 async function handleApi(req, res, url) {
-  if (req.method === "GET" && url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/events")) {
-    const runId = decodeURIComponent(url.pathname.split("/")[3] || "");
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive"
-    });
-    res.write(`retry: 1000\n\n`);
-    const unsubscribe = subscribeRun(runId, res);
-    req.on("close", unsubscribe);
-    return;
-  }
-
   // ─── Login wall (same-origin UI only; cross-tenant bidoc calls are unaffected) ──
   if (req.method === "POST" && url.pathname === "/api/auth/login") {
     const body = await readJson(req);
@@ -291,6 +278,22 @@ async function handleApi(req, res, url) {
         return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
       }
     }
+  }
+
+  // Run event stream (SSE). Behind the auth wall above: the standalone UI's
+  // same-origin EventSource carries the bidoc_session cookie; a cross-tenant
+  // caller needs the shared secret. A runId alone no longer opens the stream.
+  if (req.method === "GET" && url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/events")) {
+    const runId = decodeURIComponent(url.pathname.split("/")[3] || "");
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive"
+    });
+    res.write(`retry: 1000\n\n`);
+    const unsubscribe = subscribeRun(runId, res);
+    req.on("close", unsubscribe);
+    return;
   }
 
   // One request, one Project: an x-project-id header and a project_id query
@@ -424,6 +427,9 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
     const cases = Array.isArray(body.cases) ? body.cases.slice(0, 25) : [];
     if (!cases.length) return sendJson(res, 400, { error: "cases array is required" });
+    // Request config: a BiDoc-context call (x-content-supabase-* / x-project-id)
+    // evaluates against that Project only.
+    const evalConfig = buildRequestConfig(req, body);
     const results = [];
     for (const [index, testCase] of cases.entries()) {
       const message = String(testCase.message || "").trim();
@@ -437,7 +443,7 @@ async function handleApi(req, res, url) {
         const output = await runChatPipeline({
           message,
           sessionId: body.sessionId || `eval_${Date.now()}`,
-          config: config(),
+          config: evalConfig,
           runId
         });
         results.push(summarizeEvaluationCase({ index, testCase, output, runId }));
@@ -468,8 +474,9 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/graph") {
+    // A Project-scoped request reads that Project's Company DB graph.
     const graph = await listProjectGraph({
-      config: config(),
+      config: buildRequestConfig(req),
       limit: Number(url.searchParams.get("limit") || 300),
       nodeType: url.searchParams.get("nodeType") || "",
       edgeType: url.searchParams.get("edgeType") || "",
@@ -670,9 +677,13 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // Delay claims: delay_claim_cases (App DB) carries project_id. Only the
+  // request headers / ?project_id make these routes Project-scoped (the
+  // internal UI's body project_id keeps its old meaning); a scoped request
+  // sees and touches only cases of its Project.
   if (req.method === "GET" && url.pathname === "/api/delay-claims") {
     const claims = await listDelayClaims({
-      config: config(),
+      config: buildRequestConfig(req),
       limit: Number(url.searchParams.get("limit") || 50)
     });
     return sendJson(res, 200, { claims });
@@ -680,16 +691,25 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/delay-claims") {
     const body = await readJson(req);
-    const claim = await createDelayClaim({ config: config(), claim: body });
-    return sendJson(res, 200, { claim });
+    try {
+      const claim = await createDelayClaim({ config: buildRequestConfig(req), claim: body });
+      return sendJson(res, 200, { claim });
+    } catch (error) {
+      if (error?.code === "project_mismatch") return sendJson(res, 400, { error: "project_mismatch", message: error.message });
+      throw error;
+    }
   }
 
   const delayClaimEventsMatch = url.pathname.match(/^\/api\/delay-claims\/([^/]+)\/events$/);
   if (delayClaimEventsMatch) {
     const caseId = decodeURIComponent(delayClaimEventsMatch[1]);
+    const cfg = buildRequestConfig(req);
+    if ((req.method === "GET" || req.method === "POST") && !(await delayClaimCaseInProject({ config: cfg, caseId }))) {
+      return sendJson(res, 404, { error: "delay_claim_not_found" });
+    }
     if (req.method === "GET") {
       const events = await listDelayEvents({
-        config: config(),
+        config: cfg,
         caseId,
         limit: Number(url.searchParams.get("limit") || 200)
       });
@@ -697,7 +717,7 @@ async function handleApi(req, res, url) {
     }
     if (req.method === "POST") {
       const body = await readJson(req);
-      const event = await createDelayEvent({ config: config(), caseId, event: body });
+      const event = await createDelayEvent({ config: cfg, caseId, event: body });
       return sendJson(res, 200, { event });
     }
   }
@@ -705,14 +725,16 @@ async function handleApi(req, res, url) {
   const delayClaimAnalyzeMatch = url.pathname.match(/^\/api\/delay-claims\/([^/]+)\/analyze$/);
   if (req.method === "POST" && delayClaimAnalyzeMatch) {
     const caseId = decodeURIComponent(delayClaimAnalyzeMatch[1]);
+    const cfg = buildRequestConfig(req);
+    if (!(await delayClaimCaseInProject({ config: cfg, caseId }))) return sendJson(res, 404, { error: "delay_claim_not_found" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `delay_claim_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     createRun(runId);
     try {
       const result = await runDelayClaimAnalysis({
-        config: config(),
+        config: cfg,
         caseId,
-        projectId: body.projectId || body.project_id || null,
+        projectId: requestProjectId(cfg) || body.projectId || body.project_id || null,
         dateFrom: body.dateFrom || body.date_from || null,
         dateTo: body.dateTo || body.date_to || null,
         focusQuery: body.focusQuery || body.query || "",
@@ -738,12 +760,14 @@ async function handleApi(req, res, url) {
   const delayClaimPackageMatch = url.pathname.match(/^\/api\/delay-claims\/([^/]+)\/package$/);
   if (req.method === "POST" && delayClaimPackageMatch) {
     const caseId = decodeURIComponent(delayClaimPackageMatch[1]);
+    const cfg = buildRequestConfig(req);
+    if (!(await delayClaimCaseInProject({ config: cfg, caseId }))) return sendJson(res, 404, { error: "delay_claim_not_found" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `delay_package_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     createRun(runId);
     try {
       const result = await runDelayClaimPackageAnalysis({
-        config: config(),
+        config: cfg,
         caseId,
         contractualCompletionDate: body.contractualCompletionDate || body.contractual_completion_date || null,
         actualCompletionDate: body.actualCompletionDate || body.actual_completion_date || null,
@@ -769,9 +793,11 @@ async function handleApi(req, res, url) {
   const delayEventMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)$/);
   if (req.method === "PATCH" && delayEventMatch) {
     const eventId = decodeURIComponent(delayEventMatch[1]);
+    const cfg = buildRequestConfig(req);
+    if (!(await delayEventInProject({ config: cfg, eventId }))) return sendJson(res, 404, { error: "delay_event_not_found" });
     const body = await readJson(req);
     const event = await updateDelayEvent({
-      config: config(),
+      config: cfg,
       eventId,
       patch: body,
       changedBy: body.changed_by || "ui"
@@ -782,12 +808,14 @@ async function handleApi(req, res, url) {
   const delayEventAnalyzeMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)\/analyze$/);
   if (req.method === "POST" && delayEventAnalyzeMatch) {
     const eventId = decodeURIComponent(delayEventAnalyzeMatch[1]);
+    const cfg = buildRequestConfig(req);
+    if (!(await delayEventInProject({ config: cfg, eventId }))) return sendJson(res, 404, { error: "delay_event_not_found" });
     const body = await readJson(req).catch(() => ({}));
     const runId = body.runId || `delay_event_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     createRun(runId);
     try {
       const result = await runDelayEventDeepAnalysis({
-        config: config(),
+        config: cfg,
         eventId,
         runId,
         emit: emitRunEvent
@@ -810,24 +838,30 @@ async function handleApi(req, res, url) {
   const delayEventEvidenceMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)\/evidence$/);
   if (req.method === "POST" && delayEventEvidenceMatch) {
     const eventId = decodeURIComponent(delayEventEvidenceMatch[1]);
+    const cfg = buildRequestConfig(req);
+    if (!(await delayEventInProject({ config: cfg, eventId }))) return sendJson(res, 404, { error: "delay_event_not_found" });
     const body = await readJson(req);
-    const evidence = await addDelayEventEvidence({ config: config(), eventId, evidence: body });
+    const evidence = await addDelayEventEvidence({ config: cfg, eventId, evidence: body });
     return sendJson(res, 200, { evidence });
   }
 
   const delayEventGapsMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)\/gaps$/);
   if (req.method === "POST" && delayEventGapsMatch) {
     const eventId = decodeURIComponent(delayEventGapsMatch[1]);
+    const cfg = buildRequestConfig(req);
+    if (!(await delayEventInProject({ config: cfg, eventId }))) return sendJson(res, 404, { error: "delay_event_not_found" });
     const body = await readJson(req);
-    const gap = await addDelayEventGap({ config: config(), eventId, gap: body });
+    const gap = await addDelayEventGap({ config: cfg, eventId, gap: body });
     return sendJson(res, 200, { gap });
   }
 
   const delayEventChangeLogMatch = url.pathname.match(/^\/api\/delay-events\/([^/]+)\/change-log$/);
   if (req.method === "POST" && delayEventChangeLogMatch) {
     const eventId = decodeURIComponent(delayEventChangeLogMatch[1]);
+    const cfg = buildRequestConfig(req);
+    if (!(await delayEventInProject({ config: cfg, eventId }))) return sendJson(res, 404, { error: "delay_event_not_found" });
     const body = await readJson(req);
-    const change = await addDelayEventChangeLog({ config: config(), eventId, change: body });
+    const change = await addDelayEventChangeLog({ config: cfg, eventId, change: body });
     return sendJson(res, 200, { change });
   }
 
@@ -986,15 +1020,16 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && toolMatch) {
     const toolName = decodeURIComponent(toolMatch[1]);
     const body = await readJson(req);
+    const toolConfig = buildRequestConfig(req, body);
     if (toolName === "hybrid_search" || toolName === "rag_vector_store") {
       try {
         const data = await hybridSearch({
-          config: config(),
+          config: toolConfig,
           query: body.query || "",
           dateFrom: body.date_from || null,
           dateTo: body.date_to || null,
           hashtags: parseHashtags(body.hashtags),
-          topK: Number(body.topK || config().retrieval.candidates)
+          topK: Number(body.topK || toolConfig.retrieval.candidates)
         });
         return sendJson(res, 200, { toolName: "hybrid_search", ok: true, data });
       } catch (error) {
@@ -1004,9 +1039,9 @@ async function handleApi(req, res, url) {
     if (!TOOL_NAMES.includes(toolName)) return sendJson(res, 404, { error: "Unknown tool" });
     // body.internal === true forces the internal path for calibration even
     // while the toolsRuntime.internalTools flag is still off.
-    if (CONTENT_TOOL_SPECS[toolName] && (body.internal === true || isInternalContentTool(toolName, config()))) {
+    if (CONTENT_TOOL_SPECS[toolName] && (body.internal === true || isInternalContentTool(toolName, toolConfig))) {
       const result = await callInternalContentTool({
-        config: config(),
+        config: toolConfig,
         toolName,
         query: body.query || "",
         dateFrom: body.date_from || null,
@@ -1023,7 +1058,7 @@ async function handleApi(req, res, url) {
       dateFrom: body.date_from || null,
       dateTo: body.date_to || null,
       sessionId: body.sessionId || "tool_test",
-      config: config()
+      config: toolConfig
     });
     return sendJson(res, 200, result);
   }
@@ -2839,6 +2874,8 @@ async function handleApi(req, res, url) {
     const body = await readJson(req);
     try {
       const result = await runAlertAgent({
+        // A BiDoc-context call searches only that Project's alerts.
+        config: buildRequestConfig(req, body),
         query: body.query || "",
         dateFilter: body.date_filter || "",
         dateFrom: body.date_from || null,
@@ -2943,20 +2980,22 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // Timeline reads go through the request config: a BiDoc-context call
+  // (x-content-supabase-* / x-project-id) reads only that Project's rows.
   if (req.method === "GET" && url.pathname === "/api/timeline") {
-    const events = await fetchTimelineEvents({ config: config() }).catch(() => []);
+    const events = await fetchTimelineEvents({ config: buildRequestConfig(req) }).catch(() => []);
     return sendJson(res, 200, { events });
   }
 
   if (req.method === "GET" && url.pathname === "/api/timeline/alerts") {
-    const events = await fetchAlertsTimelineEvents({ config: config() }).catch(() => []);
+    const events = await fetchAlertsTimelineEvents({ config: buildRequestConfig(req) }).catch(() => []);
     return sendJson(res, 200, { events });
   }
 
   if (req.method === "GET" && url.pathname === "/api/timeline/events") {
     try {
       const query = parseTimelineEventsQuery(url.searchParams);
-      const result = await fetchTimelineEventPage({ config: config(), ...query });
+      const result = await fetchTimelineEventPage({ config: buildRequestConfig(req), ...query });
       return sendJson(res, 200, result);
     } catch (error) {
       if (error instanceof TimelineRequestError || error?.statusCode === 400) {
@@ -2968,7 +3007,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/timeline/links") {
     const source = normalizeTimelineSource(url.searchParams.get("source") || "index");
-    const links = await listTimelineEventLinks({ config: config(), source });
+    const links = await listTimelineEventLinks({ config: buildRequestConfig(req), source });
     return sendJson(res, 200, { links });
   }
 
@@ -2978,7 +3017,8 @@ async function handleApi(req, res, url) {
     const focusEventId = String(url.searchParams.get("eventId") || "").trim();
     const runId = String(url.searchParams.get("runId") || "").trim();
     if (runId) createRun(runId);
-    const linkAgent = config().timelineLinks || {};
+    const cfg = buildRequestConfig(req);
+    const linkAgent = cfg.timelineLinks || {};
     const requestedLimit = Math.min(Math.max(Number(url.searchParams.get("limit") || 0) || (focusEventId ? linkAgent.suggestionLimit || 12 : 40), 1), 200);
     const trace = [];
     trace.push(timelineLinkTrace("link_agent_start", "סוכן הקשרים הופעל", {
@@ -2989,14 +3029,14 @@ async function handleApi(req, res, url) {
     }));
     emitTimelineLinkRun(runId, trace.at(-1));
     const events = source === "alerts"
-      ? await fetchAlertsTimelineEvents({ config: config() }).catch(() => [])
-      : await fetchTimelineEvents({ config: config() }).catch(() => []);
+      ? await fetchAlertsTimelineEvents({ config: cfg }).catch(() => [])
+      : await fetchTimelineEvents({ config: cfg }).catch(() => []);
     trace.push(timelineLinkTrace("timeline_events", "נטענו אירועי ציר זמן", { count: events.length, source }));
     emitTimelineLinkRun(runId, trace.at(-1));
-    const links = await listTimelineEventLinks({ config: config(), source }).catch(() => []);
+    const links = await listTimelineEventLinks({ config: cfg, source }).catch(() => []);
     trace.push(timelineLinkTrace("saved_links", "נטענו קשרים קיימים", { count: links.length }));
     emitTimelineLinkRun(runId, trace.at(-1));
-    const graphData = await listTimelineGraphData({ config: config(), source }).catch(() => ({ eventEntities: [], graphEdges: [] }));
+    const graphData = await listTimelineGraphData({ config: cfg, source }).catch(() => ({ eventEntities: [], graphEdges: [] }));
     trace.push(timelineLinkTrace("timeline_graph_data", "נטענו נתוני Knowledge Graph", {
       eventEntities: graphData.eventEntities?.length || 0,
       graphEdges: graphData.graphEdges?.length || 0
@@ -3011,7 +3051,7 @@ async function handleApi(req, res, url) {
       records: focusEventId ? events.filter((event) => String(event.id) === focusEventId) : events.slice(0, 50),
       maxRows: 30
     });
-    const projectGraph = await graphSearch({ config: config(), payload: projectGraphPayload, limit: 30 })
+    const projectGraph = await graphSearch({ config: cfg, payload: projectGraphPayload, limit: 30 })
       .catch((error) => ({ skipped: true, error: error.message, results: [] }));
     const projectGraphContext = summarizeGraphContext(projectGraph, 12);
     trace.push(timelineLinkTrace("project_graph_search", "Project Graph Search checked", {
@@ -3053,7 +3093,7 @@ async function handleApi(req, res, url) {
     emitTimelineLinkRun(runId, trace.at(-1));
     const suggestions = smart
       ? await enrichTimelineSuggestionsWithModel({
-        cfg: config(),
+        cfg,
         events,
         links,
         source,
@@ -3242,14 +3282,26 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/timeline/links") {
     const body = await readJson(req);
-    const link = await createTimelineEventLink({ config: config(), link: body });
+    let link;
+    try {
+      link = await createTimelineEventLink({ config: buildRequestConfig(req), link: body });
+    } catch (error) {
+      if (error?.code === "timeline_links_not_project_scoped") return sendJson(res, error.status, { error: error.code, message: error.message });
+      throw error;
+    }
     return sendJson(res, 200, { link });
   }
 
   const timelineLinkDeleteMatch = url.pathname.match(/^\/api\/timeline\/links\/([^/]+)$/);
   if (req.method === "DELETE" && timelineLinkDeleteMatch) {
     const id = decodeURIComponent(timelineLinkDeleteMatch[1]);
-    const result = await deleteTimelineEventLink({ config: config(), id });
+    let result;
+    try {
+      result = await deleteTimelineEventLink({ config: buildRequestConfig(req), id });
+    } catch (error) {
+      if (error?.code === "timeline_links_not_project_scoped") return sendJson(res, error.status, { error: error.code, message: error.message });
+      throw error;
+    }
     return sendJson(res, 200, result);
   }
 
