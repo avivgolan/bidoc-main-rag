@@ -172,23 +172,20 @@ export function registerInternalScopeTests(test) {
     });
   });
 
-  test("internal scope: graph without a Project keeps reading the App DB graph", async () => {
+  test("internal scope: graph without a Project is refused and never reads the App DB graph", async () => {
     await withFetch(() => jsonResponse([]), async (calls) => {
-      await listProjectGraph({ config: baseConfig(), limit: 50 });
-      assert.equal(calls.length, 1);
-      assert.ok(calls[0].url.startsWith(`${APP_URL}/rest/v1/graph_edges`));
-      assert.doesNotMatch(calls[0].url, /project_id=eq/);
+      await assert.rejects(listProjectGraph({ config: baseConfig(), limit: 50 }), (error) => error.code === "company_db_required");
+      assert.equal(calls.length, 0);
     });
   });
 
-  test("internal scope: App DB timeline links and entity graph carry no project_id, so a Project-scoped read is empty", async () => {
+  test("internal scope: App DB timeline links and entity graph carry no project_id, so they are never read", async () => {
     await withFetch(() => jsonResponse([{ id: "leak" }]), async (calls) => {
       assert.deepEqual(await listTimelineEventLinks({ config: scoped(), source: "index" }), []);
       assert.deepEqual(await listTimelineGraphData({ config: scoped(), source: "index" }), { entities: [], eventEntities: [], graphEdges: [] });
+      assert.deepEqual(await listTimelineEventLinks({ config: baseConfig(), source: "index" }), []);
+      assert.deepEqual(await listTimelineGraphData({ config: baseConfig(), source: "index" }), { entities: [], eventEntities: [], graphEdges: [] });
       assert.equal(calls.length, 0);
-      await listTimelineEventLinks({ config: baseConfig(), source: "index" });
-      assert.equal(calls.length, 1);
-      assert.ok(calls[0].url.startsWith(`${APP_URL}/rest/v1/timeline_event_links`));
     });
   });
 
@@ -205,21 +202,24 @@ export function registerInternalScopeTests(test) {
     await withFetch((call) => jsonResponse(call.method === "POST" ? [call.body] : []), async (calls) => {
       await listDelayClaims({ config: scoped() });
       assert.match(calls[0].url, new RegExp(`^${APP_URL}/rest/v1/delay_claim_cases\\?.*project_id=eq\\.${PROJECT_A}`));
-      await listDelayClaims({ config: baseConfig() });
-      assert.doesNotMatch(calls[1].url, /project_id=eq/);
+      await assert.rejects(listDelayClaims({ config: baseConfig() }), (error) => error.code === "company_db_required");
+      assert.equal(calls.length, 1);
 
       const claim = await createDelayClaim({ config: scoped(), claim: { title: "עיכוב בטון" } });
-      assert.equal(calls[2].body.project_id, PROJECT_A);
+      assert.equal(calls[1].body.project_id, PROJECT_A);
       assert.equal(claim.project_id, PROJECT_A);
       await assert.rejects(
         createDelayClaim({ config: scoped(), claim: { title: "עיכוב", project_id: PROJECT_B } }),
         (error) => error.code === "project_mismatch" && error.status === 400
       );
-      assert.equal(calls.length, 3);
+      assert.equal(calls.length, 2);
 
-      // Without a Project the body's project_id is kept as before.
-      await createDelayClaim({ config: baseConfig(), claim: { title: "עיכוב", project_id: PROJECT_B } });
-      assert.equal(calls[3].body.project_id, PROJECT_B);
+      // Without a Project the write is refused (no body-chosen Project).
+      await assert.rejects(
+        createDelayClaim({ config: baseConfig(), claim: { title: "עיכוב", project_id: PROJECT_B } }),
+        (error) => error.code === "company_db_required"
+      );
+      assert.equal(calls.length, 2);
     });
   });
 
@@ -246,9 +246,9 @@ export function registerInternalScopeTests(test) {
       assert.equal(await delayEventInProject({ config: scoped(), eventId: "missing" }), false);
       assert.ok(calls.every((call) => call.url.startsWith(APP_URL)));
       const callCount = calls.length;
-      assert.equal(await delayClaimCaseInProject({ config: baseConfig(), caseId: "case-b" }), true);
-      assert.equal(await delayEventInProject({ config: baseConfig(), eventId: "event-b" }), true);
-      assert.equal(calls.length, callCount, "unscoped checks make no request");
+      await assert.rejects(delayClaimCaseInProject({ config: baseConfig(), caseId: "case-b" }), (error) => error.code === "company_db_required");
+      await assert.rejects(delayEventInProject({ config: baseConfig(), eventId: "event-b" }), (error) => error.code === "company_db_required");
+      assert.equal(calls.length, callCount, "unscoped checks are refused without a request");
     });
   });
 }

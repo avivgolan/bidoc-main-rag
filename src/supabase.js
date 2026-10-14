@@ -1,17 +1,21 @@
 import { createEmbedding } from "./openrouter.js";
 import { supabaseHeaders } from "./config.js";
-import { addDurationToLink, TIMELINE_RELATION_TYPES } from "./timelineLinks.js";
 import { CACHE_TTL, cachedOperation } from "./cache.js";
 import { hydrateRetrievedSourceLinks, indexedSourceLinkReadPath, INDEXED_SOURCE_LINK_CONTRACT } from "./sourceLinks.js";
 import { projectIdFilterParam, projectMismatchError, requestProjectId, sameProjectId } from "./projectScope.js";
+import { companyDbConnection, companyDbRequiredError, searchFunctionOutdatedError } from "./companyDb.js";
+
+// Every Company DB read/write and every Project-owned App DB row needs the
+// request Project; unscoped calls are refused rather than run across Projects.
+function requireRequestProject(config) {
+  const projectId = requestProjectId(config);
+  if (!projectId) throw companyDbRequiredError("This request must name its Project (x-project-id)");
+  return projectId;
+}
 
 const MESSAGES_TABLE = "chat_messages_gf";
 const SESSION_MEMORY_TABLE = "chat_session_memory";
 const MEMORY_ITEMS_TABLE = "chat_memory_items";
-const TIMELINE_LINKS_TABLE = "timeline_event_links";
-const TIMELINE_ENTITIES_TABLE = "timeline_entities";
-const TIMELINE_EVENT_ENTITIES_TABLE = "timeline_event_entities";
-const TIMELINE_GRAPH_EDGES_TABLE = "timeline_graph_edges";
 const GRAPH_NODES_TABLE = "graph_nodes";
 const GRAPH_EDGES_TABLE = "graph_edges";
 const DELAY_CLAIM_CASES_TABLE = "delay_claim_cases";
@@ -33,7 +37,6 @@ const DELAY_GAP_URGENCIES = ["low", "medium", "high"];
 const DELAY_SCHEDULE_LINK_TYPES = ["possibly_related", "claimed_impact", "weakening_context", "review_required"];
 const DELAY_COST_TYPES = ["direct", "indirect", "estimate", "review_required"];
 const DELAY_EXPORT_TYPES = ["markdown", "json"];
-const GRAPH_NODE_TYPES = new Set(["event", "alert", "supplier", "person", "company", "document", "topic", "risk", "invoice", "quote", "source"]);
 const GRAPH_EDGE_TYPES = new Set(["mentions", "caused_by", "blocks", "approved_by", "related_to", "same_topic", "from_document", "has_status", "has_risk"]);
 const TIMELINE_PAGE_DEFAULT_LIMIT = 200;
 const TIMELINE_PAGE_MAX_LIMIT = 2000;
@@ -345,22 +348,20 @@ export function sanitizeDelayClaimExportPayload(input = {}, defaults = {}) {
 // delay_claim_cases (App DB) carries project_id; a Project-scoped request
 // lists only its Project's cases and stamps new ones with it.
 export async function listDelayClaims({ config, limit = 50 } = {}) {
+  const projectId = requireRequestProject(config);
   if (!isConfigured(config)) return [];
   const max = Math.min(Math.max(Number(limit || 50), 1), 200);
-  const projectFilter = projectIdFilterParam(requestProjectId(config));
-  return supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=*${projectFilter ? `&${projectFilter}` : ""}&order=updated_at.desc&limit=${max}`);
+  return supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=*&${projectIdFilterParam(projectId)}&order=updated_at.desc&limit=${max}`);
 }
 
 export async function createDelayClaim({ config, claim }) {
+  const projectId = requireRequestProject(config);
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
   const payload = sanitizeDelayClaimCasePayload(claim);
-  const projectId = requestProjectId(config);
-  if (projectId) {
-    if (payload.project_id && !sameProjectId(payload.project_id, projectId)) {
-      throw projectMismatchError("The delay claim names a different Project than the request");
-    }
-    payload.project_id = projectId;
+  if (payload.project_id && !sameProjectId(payload.project_id, projectId)) {
+    throw projectMismatchError("The delay claim names a different Project than the request");
   }
+  payload.project_id = projectId;
   const rows = await supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}`, {
     method: "POST",
     headers: { Prefer: "return=representation" },
@@ -475,12 +476,11 @@ export async function addDelayEventFinding({ config, eventId, finding }) {
   return rows?.[0] || payload;
 }
 
-// Delay events and their evidence/gaps/change-log hang off a case; a
-// Project-scoped request may only touch cases of its own Project. Calls
-// without a projectId keep their existing (unscoped) behaviour.
+// Delay events and their evidence/gaps/change-log hang off a case; a request
+// may only touch cases of its own Project. A request without a Project is
+// refused.
 export async function delayClaimCaseInProject({ config, caseId }) {
-  const projectId = requestProjectId(config);
-  if (!projectId) return true;
+  const projectId = requireRequestProject(config);
   if (!caseId || !isConfigured(config)) return false;
   const rows = await supabaseFetch(
     config,
@@ -490,7 +490,7 @@ export async function delayClaimCaseInProject({ config, caseId }) {
 }
 
 export async function delayEventInProject({ config, eventId }) {
-  if (!requestProjectId(config)) return true;
+  requireRequestProject(config);
   if (!eventId || !isConfigured(config)) return false;
   const rows = await supabaseFetch(
     config,
@@ -613,17 +613,10 @@ export async function listRunHistory({ config, limit = 30, sessionPrefix = null 
 }
 
 export async function saveProjectInsightRun({ config, run }) {
+  const projectId = requireRequestProject(config);
   const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig)) return null;
   const payload = sanitizeProjectInsightRunPayload(run);
-  const projectId = requestProjectId(config);
-  if (projectId) return saveScopedProjectInsightRun({ contentConfig, projectId, payload });
-  const rows = await supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?on_conflict=run_id`, {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
-    body: JSON.stringify(payload)
-  });
-  return rows?.[0] || payload;
+  return saveScopedProjectInsightRun({ contentConfig, projectId, payload });
 }
 
 // A Project-scoped save may only touch its own Project's run. It updates the
@@ -662,8 +655,8 @@ async function saveScopedProjectInsightRun({ contentConfig, projectId, payload }
 }
 
 export async function listProjectInsightRuns({ config, limit = 30 }) {
+  const projectId = requireRequestProject(config);
   const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig)) return [];
   const max = Math.min(Math.max(Number(limit || 30), 1), 100);
   const select = [
     "id", "run_id", "parent_run_id", "project_id", "focus_query", "date_from", "date_to",
@@ -671,15 +664,15 @@ export async function listProjectInsightRuns({ config, limit = 30 }) {
     "insights", "tool_context", "workflow_log", "run_events", "status", "error", "metadata",
     "created_at", "updated_at"
   ].join(",");
-  const projectFilter = projectIdFilterParam(requestProjectId(config));
-  return supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?select=${select}${projectFilter ? `&${projectFilter}` : ""}&order=created_at.desc&limit=${max}`);
+  return supabaseFetch(contentConfig, `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?select=${select}&${projectIdFilterParam(projectId)}&order=created_at.desc&limit=${max}`);
 }
 
 export async function getProjectInsightRun({ config, runId }) {
+  const projectId = requireRequestProject(config);
   const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig) || !runId) return null;
+  if (!runId) return null;
   const rows = await supabaseFetch(contentConfig,
-    `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?run_id=eq.${encodeURIComponent(runId)}${projectIdFilterParam(requestProjectId(config)) ? `&${projectIdFilterParam(requestProjectId(config))}` : ""}&select=*&limit=1`
+    `/rest/v1/${PROJECT_INSIGHT_RUNS_TABLE}?run_id=eq.${encodeURIComponent(runId)}&${projectIdFilterParam(projectId)}&select=*&limit=1`
   );
   return rows?.[0] || null;
 }
@@ -926,9 +919,9 @@ export async function deleteAllChatMemoryForUser({ config, userId }) {
 }
 
 export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags = [], topK = config.retrieval.candidates, cacheContext = null, telemetry = null }) {
-  if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
+  const projectId = requireRequestProject(config);
   const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig)) throw new Error("Content Supabase is not configured");
+  if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
 
   const embedding = await createEmbedding({
     apiKey: config.openRouterApiKey,
@@ -947,7 +940,7 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
     hashtags: normalizeHashtags(hashtags),
     vector_weight: config.retrieval.vectorWeight,
     keyword_weight: config.retrieval.keywordWeight,
-    ...(config.projectId ? { project_id_filter: config.projectId } : {})
+    project_id_filter: projectId
   };
 
   return cachedOperation({
@@ -963,7 +956,7 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
       source_link_contract: config.rag?.mainCompactEvidence === true ? INDEXED_SOURCE_LINK_CONTRACT : "legacy",
       vectorWeight: payload.vector_weight,
       keywordWeight: payload.keyword_weight,
-      ...(config.projectId ? { projectId: config.projectId } : {})
+      projectId
     },
     ttl: CACHE_TTL.hybridSearch,
     savedCall: "search",
@@ -977,43 +970,33 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
         });
       } catch (error) {
         if (!looksLikeRpcSignatureError(error.message)) throw error;
-        if (payload.project_id_filter) {
-          // A project-scoped call must never widen to the whole Company DB
-          // (one Company DB holds several Projects). Only hashtags (GIN index
-          // from 026) may be dropped; project_id_filter (027) always stays.
-          if (!payload.hashtags.length) throw projectScopeUnsupportedError(error);
-          const { hashtags: _hashtags, ...scopedPayload } = payload;
-          try {
-            results = await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
-              method: "POST",
-              body: JSON.stringify(scopedPayload)
-            });
-          } catch (retryError) {
-            if (looksLikeRpcSignatureError(retryError.message)) throw projectScopeUnsupportedError(retryError);
-            throw retryError;
-          }
-        } else {
-          // Unscoped callers: strip the optional params that older company DBs
-          // may not recognise and retry with the minimal required params.
-          if (!payload.hashtags.length) throw error;
-          const { hashtags: _hashtags, ...payloadBase } = payload;
+        // The search never widens past the Project (one Company DB holds
+        // several Projects). Only hashtags (GIN index from 026) may be
+        // dropped; project_id_filter (027) always stays, and an RPC without
+        // it is refused.
+        if (!payload.hashtags.length) throw searchFunctionOutdatedError(contentConfig.hybridRpcName, error);
+        const { hashtags: _hashtags, ...scopedPayload } = payload;
+        try {
           results = await supabaseFetch(contentConfig, `/rest/v1/rpc/${contentConfig.hybridRpcName}`, {
             method: "POST",
-            body: JSON.stringify(payloadBase)
+            body: JSON.stringify(scopedPayload)
           });
+        } catch (retryError) {
+          if (looksLikeRpcSignatureError(retryError.message)) throw searchFunctionOutdatedError(contentConfig.hybridRpcName, retryError);
+          throw retryError;
         }
       }
-      if (payload.project_id_filter && Array.isArray(results)) {
-        results = results.filter((row) => rowMatchesProject(row, payload.project_id_filter));
+      if (Array.isArray(results)) {
+        results = results.filter((row) => rowMatchesProject(row, projectId));
       }
       if (config.rag?.mainCompactEvidence !== true) return results;
       return hydrateRetrievedSourceLinks({
         results,
-        projectId: config.projectId || null,
+        projectId,
         readIndexRows: (ids) => supabaseFetch(contentConfig, indexedSourceLinkReadPath({
           table: contentConfig.indexTable,
           ids,
-          projectId: config.projectId || null
+          projectId
         }), { timeoutMs: 3000 })
       });
     }
@@ -1044,22 +1027,15 @@ function isConfigured(config) {
   return Boolean(config.supabaseUrl && config.supabaseServiceRoleKey);
 }
 
-// Raw REST access to the Content Supabase for internal agents (indexing agent).
+// Raw REST access to the request's Company DB for internal agents (indexing agent).
 export async function contentSupabaseRequest({ config, path, options = {} }) {
-  const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig)) throw new Error("Content Supabase is not configured");
-  return supabaseFetch(contentConfig, path, options);
+  return supabaseFetch(contentSupabaseConfig(config), path, options);
 }
 
+// The request's Company DB connection. Throws company_db_required when the
+// config carries none: no fallback to the App DB or a global content DB.
 export function contentSupabaseConfig(config) {
-  return {
-    supabaseUrl: config.contentSource?.supabaseUrl || config.supabaseUrl || "",
-    supabaseServiceRoleKey: config.contentSource?.supabaseServiceRoleKey || config.supabaseServiceRoleKey || "",
-    hybridRpcName: config.contentSource?.hybridRpcName || config.retrieval?.rpcName || "hybrid_match_data_index_embeddings_gf_dor_agent",
-    indexTable: config.contentSource?.indexTable || "data_index_embeddings_gf_dor_agent",
-    alertsTable: config.contentSource?.alertsTable || "alerts_embeddings_gf",
-    alertsRpcName: config.contentSource?.alertsRpcName || `match_${config.contentSource?.alertsTable || "alerts_embeddings_gf"}`
-  };
+  return companyDbConnection(config);
 }
 
 function normalizeHashtags(hashtags) {
@@ -1070,10 +1046,12 @@ function normalizeHashtags(hashtags) {
 // ── Project-scoped graph ─────────────────────────────────────────────────────
 // The Project-scoped graph lives in the Company DB (graph_nodes/graph_edges
 // with project_id, ids prefixed p:<project>:, graph_search(filter_project_id)),
-// the same convention bidoc's timeline-relationships pipeline writes. Calls
-// without a projectId keep using the legacy App DB graph.
+// the same convention bidoc's timeline-relationships pipeline writes. The
+// legacy unscoped App DB graph is no longer read or written: a call without
+// a Project is refused.
 function graphStoreConfig(config) {
-  return requestProjectId(config) ? contentSupabaseConfig(config) : config;
+  requireRequestProject(config);
+  return contentSupabaseConfig(config);
 }
 
 export function projectGraphNodeId(projectId, id) {
@@ -1094,7 +1072,6 @@ function graphRowInProject(row, projectId) {
 
 async function scopedGraphSearch({ config, payload = {}, limit = 30, projectId }) {
   const store = contentSupabaseConfig(config);
-  if (!isConfigured(store)) return { results: [], skipped: true, reason: "Content Supabase is not configured" };
   const body = {
     query_text: payload.query_text || "",
     // Project-local node lookup by source identity; legacy node ids would
@@ -1106,28 +1083,20 @@ async function scopedGraphSearch({ config, payload = {}, limit = 30, projectId }
     filter_project_id: projectId
   };
   let results;
-  let mode = "rpc_project";
   try {
     results = await supabaseFetch(store, "/rest/v1/rpc/graph_search", { method: "POST", body: JSON.stringify(body) });
   } catch (error) {
     if (!looksLikeRpcSignatureError(error.message) && !/graph_search/i.test(error.message)) throw error;
-    // Older Company DB without filter_project_id: run unfiltered and keep only
-    // edges whose both nodes are labelled with this Project. Never widens.
-    const { filter_project_id: _projectId, ...legacyBody } = body;
-    try {
-      results = await supabaseFetch(store, "/rest/v1/rpc/graph_search", { method: "POST", body: JSON.stringify(legacyBody) });
-      mode = "rpc_post_filtered";
-    } catch (legacyError) {
-      return { results: [], skipped: true, mode: "unavailable", reason: "Project graph is not available", error: legacyError.message };
-    }
+    // A Company DB whose graph_search lacks filter_project_id is refused; the
+    // RPC is never called without the Project filter.
+    throw searchFunctionOutdatedError("graph_search", error);
   }
   const scoped = (Array.isArray(results) ? results : []).filter((row) => graphRowInProject(row, projectId));
-  return { results: scoped, skipped: false, mode };
+  return { results: scoped, skipped: false, mode: "rpc_project" };
 }
 
 async function upsertScopedProjectGraphData({ config, projectId, nodes = [], edges = [] }) {
   const store = contentSupabaseConfig(config);
-  if (!isConfigured(store)) throw new Error("Content Supabase is not configured");
   const scopedNodes = uniqueByKey(nodes, (node) => node.id).map((node) => ({
     ...sanitizeGraphNode(node),
     id: projectGraphNodeId(projectId, requiredString(node.id, "node.id")),
@@ -1193,7 +1162,6 @@ async function saveScopedGraphEdge(store, edge) {
 
 async function mergeScopedGraphEntityNodes({ config, projectId, moves = [] }) {
   const store = contentSupabaseConfig(config);
-  if (!isConfigured(store)) throw new Error("Content Supabase is not configured");
   const scope = projectIdFilterParam(projectId);
   let edgesRepointed = 0;
   let nodesRemoved = 0;
@@ -1219,13 +1187,6 @@ async function mergeScopedGraphEntityNodes({ config, projectId, moves = [] }) {
     nodesRemoved += 1;
   }
   return { edgesRepointed, nodesRemoved };
-}
-
-function projectScopeUnsupportedError(cause) {
-  const error = new Error("Hybrid search RPC does not support project_id_filter; refusing to search outside the requested Project");
-  error.code = "project_scope_unsupported";
-  error.cause = cause;
-  return error;
 }
 
 // Rows the RPC labels with another Project are dropped; unlabelled rows were
@@ -1275,13 +1236,8 @@ export function parseTimelineEventsQuery(searchParams = new URLSearchParams()) {
 }
 
 export async function fetchTimelineEventPage({ config, source = "index", sort = "desc", limit = TIMELINE_PAGE_DEFAULT_LIMIT, from = null, to = null, origins = [], cursor = null }) {
+  const projectId = requireRequestProject(config);
   const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig)) {
-    return {
-      events: [],
-      page: { nextCursor: null, hasMore: false, from, to, sort, limit, origins }
-    };
-  }
 
   const primaryDateField = source === "alerts" ? "data_date" : "primary_date";
   const table = source === "alerts" ? contentConfig.alertsTable : contentConfig.indexTable;
@@ -1296,8 +1252,7 @@ export async function fetchTimelineEventPage({ config, source = "index", sort = 
   });
   const filters = buildTimelinePageFilters({ primaryDateField, from, to, cursor: decodedCursor, sort, origins });
   if (filters.length) params.set("and", `(${filters.join(",")})`);
-  const projectId = requestProjectId(config);
-  if (projectId) params.set("project_id", `eq.${projectId}`);
+  params.set("project_id", `eq.${projectId}`);
 
   const rows = await supabaseFetch(contentConfig, `/rest/v1/${table}?${params.toString()}`);
   const hasMore = rows.length > limit;
@@ -1495,14 +1450,13 @@ function alertTimelineEvent(row) {
 }
 
 export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {
+  const projectFilter = projectIdFilterParam(requireRequestProject(config));
   const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig)) return [];
   const rows = [];
   const pageSize = 500;
   for (let offset = 0; offset < limit; offset += pageSize) {
     const batchLimit = Math.min(pageSize, limit - offset);
-    const projectFilter = projectIdFilterParam(requestProjectId(config));
-    const query = `/rest/v1/${contentConfig.alertsTable}?select=${ALERT_TIMELINE_SELECT}${projectFilter ? `&${projectFilter}` : ""}&order=data_date.asc.nullslast,created_at.asc,id.asc&limit=${batchLimit}&offset=${offset}`;
+    const query = `/rest/v1/${contentConfig.alertsTable}?select=${ALERT_TIMELINE_SELECT}&${projectFilter}&order=data_date.asc.nullslast,created_at.asc,id.asc&limit=${batchLimit}&offset=${offset}`;
     const batch = await supabaseFetch(contentConfig, query);
     rows.push(...(batch || []));
     if (!Array.isArray(batch) || batch.length < batchLimit) break;
@@ -1514,8 +1468,8 @@ export async function fetchAlertsTimelineEvents({ config, limit = 2000 }) {
 // rebuilt. The backup is never copied back into `alerts`; only the exact linked
 // rows are returned so reviewed CTO assignments remain visible.
 export async function fetchLegacyAlertsTimelineEvents({ config, ids = [] }) {
+  const projectFilter = projectIdFilterParam(requireRequestProject(config));
   const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig)) return [];
   const normalizedIds = [...new Set(ids
     .map((id) => String(id || "").trim().replace(/^alert_/u, ""))
     .filter((id) => /^\d+$/u.test(id)))];
@@ -1525,8 +1479,7 @@ export async function fetchLegacyAlertsTimelineEvents({ config, ids = [] }) {
   const chunkSize = 100;
   for (let offset = 0; offset < normalizedIds.length; offset += chunkSize) {
     const chunk = normalizedIds.slice(offset, offset + chunkSize);
-    const projectFilter = projectIdFilterParam(requestProjectId(config));
-    const query = `/rest/v1/${LEGACY_ALERTS_BACKUP_TABLE}?select=${ALERT_TIMELINE_SELECT}&id=in.(${chunk.join(",")})${projectFilter ? `&${projectFilter}` : ""}&order=data_date.asc.nullslast,created_at.asc,id.asc`;
+    const query = `/rest/v1/${LEGACY_ALERTS_BACKUP_TABLE}?select=${ALERT_TIMELINE_SELECT}&id=in.(${chunk.join(",")})&${projectFilter}&order=data_date.asc.nullslast,created_at.asc,id.asc`;
     const batch = await supabaseFetch(contentConfig, query);
     rows.push(...(batch || []));
   }
@@ -1569,10 +1522,9 @@ function alertRowMetadata(row = {}) {
 }
 
 export async function fetchTimelineEvents({ config, limit = 1000 }) {
+  const projectFilter = projectIdFilterParam(requireRequestProject(config));
   const contentConfig = contentSupabaseConfig(config);
-  if (!isConfigured(contentConfig)) return [];
-  const projectFilter = projectIdFilterParam(requestProjectId(config));
-  const query = `/rest/v1/${contentConfig.indexTable}?select=id,created_at,project_id,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,mail_id,attachment_id,source_url,mentioned_dates${projectFilter ? `&${projectFilter}` : ""}&order=primary_date.asc.nullslast,created_at.asc&limit=${limit}`;
+  const query = `/rest/v1/${contentConfig.indexTable}?select=id,created_at,project_id,source_table,source_id,summary,hashtags,index_text,metadata,primary_date,title,item_status,severity_or_risk,mail_id,attachment_id,source_url,mentioned_dates&${projectFilter}&order=primary_date.asc.nullslast,created_at.asc&limit=${limit}`;
   const rows = await supabaseFetch(contentConfig, query);
   return (rows || []).map((row) => ({
     id: row.id,
@@ -1637,8 +1589,9 @@ function timelineRowMetadata(row = {}) {
 }
 
 // timeline_event_links / timeline_event_entities / timeline_graph_edges live
-// in the App DB and carry no project_id (nor a Company DB identity), so a
-// Project-scoped request reads none of them and may not write them.
+// in the App DB and carry no project_id (nor a Company DB identity). No
+// request can be confined to one Project there, so they are no longer read
+// or written: reads return nothing, writes are refused.
 function timelineLinksNotProjectScopedError() {
   const error = new Error("Timeline links are not Project-scoped; they cannot be changed from a Project request");
   error.code = "timeline_links_not_project_scoped";
@@ -1646,112 +1599,29 @@ function timelineLinksNotProjectScopedError() {
   return error;
 }
 
-export async function listTimelineEventLinks({ config, source = "", limit = 1000 } = {}) {
-  if (requestProjectId(config)) return [];
-  if (!isConfigured(config)) return [];
-  const params = new URLSearchParams({
-    select: "*",
-    order: "created_at.desc",
-    limit: String(limit)
-  });
-  if (source === "index" || source === "alerts") {
-    params.set("or", `(source_event_source.eq.${source},target_event_source.eq.${source})`);
-  }
-  const rows = await supabaseFetch(config, `/rest/v1/${TIMELINE_LINKS_TABLE}?${params.toString()}`);
-  return (rows || []).map(addDurationToLink);
+export async function listTimelineEventLinks() {
+  return [];
 }
 
-export async function createTimelineEventLink({ config, link }) {
-  if (requestProjectId(config)) throw timelineLinksNotProjectScopedError();
-  if (!isConfigured(config)) throw new Error("Supabase is not configured");
-  const payload = sanitizeTimelineEventLink(link);
-  const rows = await supabaseFetch(config, `/rest/v1/${TIMELINE_LINKS_TABLE}?select=*`, {
-    method: "POST",
-    headers: { Prefer: "return=representation" },
-    body: JSON.stringify(payload)
-  });
-  return addDurationToLink(rows?.[0] || payload);
+export async function createTimelineEventLink() {
+  throw timelineLinksNotProjectScopedError();
 }
 
-export async function deleteTimelineEventLink({ config, id }) {
-  if (requestProjectId(config)) throw timelineLinksNotProjectScopedError();
-  if (!isConfigured(config)) throw new Error("Supabase is not configured");
-  if (!id) throw new Error("Timeline link id is required");
-  await supabaseFetch(config, `/rest/v1/${TIMELINE_LINKS_TABLE}?id=eq.${encodeURIComponent(id)}`, {
-    method: "DELETE"
-  });
-  return { ok: true };
+export async function deleteTimelineEventLink() {
+  throw timelineLinksNotProjectScopedError();
 }
 
-export async function listTimelineGraphData({ config, source = "index", limit = 5000 } = {}) {
-  if (requestProjectId(config)) return { entities: [], eventEntities: [], graphEdges: [] };
-  if (!isConfigured(config)) return { entities: [], eventEntities: [], graphEdges: [] };
-  const eventParams = new URLSearchParams({
-    select: "*,entity:timeline_entities(*)",
-    event_source: `eq.${source}`,
-    limit: String(limit)
-  });
-  const edgeParams = new URLSearchParams({
-    select: "*",
-    limit: String(limit)
-  });
-  const eventEntities = await supabaseFetch(config, `/rest/v1/${TIMELINE_EVENT_ENTITIES_TABLE}?${eventParams.toString()}`).catch(() => []);
-  const graphEdges = await supabaseFetch(config, `/rest/v1/${TIMELINE_GRAPH_EDGES_TABLE}?${edgeParams.toString()}`).catch(() => []);
-  const entities = [...new Map((eventEntities || []).map((item) => [item.entity_id, item.entity]).filter(([, entity]) => entity)).values()];
-  return { entities, eventEntities: eventEntities || [], graphEdges: graphEdges || [] };
+export async function listTimelineGraphData() {
+  return { entities: [], eventEntities: [], graphEdges: [] };
 }
 
-export async function upsertTimelineGraphData({ config, entities = [], eventEntities = [] }) {
-  if (!isConfigured(config)) throw new Error("Supabase is not configured");
-  const uniqueEntities = uniqueByKey(entities, (entity) => entity.id);
-  const uniqueEventEntities = uniqueByKey(eventEntities, (item) => [
-    item.event_source === "alerts" ? "alerts" : "index",
-    item.event_id,
-    item.entity_id,
-    item.role || "mentioned"
-  ].join("|"));
-  if (uniqueEntities.length) {
-    await supabaseFetch(config, `/rest/v1/${TIMELINE_ENTITIES_TABLE}`, {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(uniqueEntities.map(sanitizeTimelineEntity))
-    });
-  }
-  if (uniqueEventEntities.length) {
-    await supabaseFetch(config, `/rest/v1/${TIMELINE_EVENT_ENTITIES_TABLE}?on_conflict=event_source,event_id,entity_id,role`, {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(uniqueEventEntities.map(sanitizeTimelineEventEntity))
-    });
-  }
-  return { entities: uniqueEntities.length, eventEntities: uniqueEventEntities.length };
+export async function upsertTimelineGraphData() {
+  throw timelineLinksNotProjectScopedError();
 }
 
 export async function upsertProjectGraphData({ config, nodes = [], edges = [] }) {
-  const projectId = requestProjectId(config);
-  if (projectId) return upsertScopedProjectGraphData({ config, projectId, nodes, edges });
-  if (!isConfigured(config)) throw new Error("Supabase is not configured");
-  const uniqueNodes = uniqueByKey(nodes, (node) => node.id);
-  const uniqueEdges = uniqueByKey(edges, (edge) => [
-    edge.from_node_id,
-    edge.to_node_id,
-    edge.edge_type || "related_to"
-  ].join("|"));
-  for (const batch of chunk(uniqueNodes, GRAPH_UPSERT_BATCH_SIZE)) {
-    await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}`, {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(batch.map(sanitizeGraphNode))
-    });
-  }
-  for (const batch of chunk(uniqueEdges, GRAPH_UPSERT_BATCH_SIZE)) {
-    await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?on_conflict=from_node_id,to_node_id,edge_type`, {
-      method: "POST",
-      headers: { Prefer: "resolution=merge-duplicates" },
-      body: JSON.stringify(batch.map(sanitizeGraphEdge))
-    });
-  }
-  return { nodes: uniqueNodes.length, edges: uniqueEdges.length };
+  const projectId = requireRequestProject(config);
+  return upsertScopedProjectGraphData({ config, projectId, nodes, edges });
 }
 
 // Entity mention links created by the Graph Entity Enrichment Agent (tagged
@@ -1791,117 +1661,35 @@ export async function listEntityMentionEdges({ config, limit = 2000 } = {}) {
 // happy), then remove the alias node. Alias rows are all enrichment-created, so
 // they can be regenerated from source records if ever needed.
 export async function mergeGraphEntityNodes({ config, moves = [] } = {}) {
-  const projectId = requestProjectId(config);
-  if (projectId) return mergeScopedGraphEntityNodes({ config, projectId, moves });
-  if (!isConfigured(config)) throw new Error("Supabase is not configured");
-  let edgesRepointed = 0;
-  let nodesRemoved = 0;
-  for (const move of moves) {
-    if (!move?.from_id || !move?.to_id || move.from_id === move.to_id) continue;
-    const params = new URLSearchParams({
-      select: "from_node_id,to_node_id,edge_type,weight,confidence,evidence_text,metadata",
-      limit: "2000"
-    });
-    const edges = await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}&to_node_id=eq.${encodeURIComponent(move.from_id)}`);
-    const repointed = (edges || []).map((edge) => ({ ...edge, to_node_id: move.to_id }));
-    if (repointed.length) {
-      await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?on_conflict=from_node_id,to_node_id,edge_type`, {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates" },
-        body: JSON.stringify(repointed)
-      });
-      await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?to_node_id=eq.${encodeURIComponent(move.from_id)}`, { method: "DELETE" });
-      edgesRepointed += repointed.length;
-    }
-    await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}?id=eq.${encodeURIComponent(move.from_id)}`, { method: "DELETE" });
-    nodesRemoved += 1;
-  }
-  return { edgesRepointed, nodesRemoved };
+  const projectId = requireRequestProject(config);
+  return mergeScopedGraphEntityNodes({ config, projectId, moves });
 }
 
 // Removes junk entity nodes (and their mention edges) outright — used by the
 // consolidation pass for sentence-length extraction artifacts.
 export async function removeGraphEntityNodes({ config, ids = [] } = {}) {
-  const projectId = requestProjectId(config);
-  if (projectId) {
-    const store = graphStoreConfig(config);
-    if (!isConfigured(store)) throw new Error("Content Supabase is not configured");
-    let removed = 0;
-    const scope = projectIdFilterParam(projectId);
-    for (const id of ids) {
-      if (!id) continue;
-      const nodeId = encodeURIComponent(projectGraphNodeId(projectId, id));
-      await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?${scope}&to_node_id=eq.${nodeId}`, { method: "DELETE" });
-      await supabaseFetch(store, `/rest/v1/${GRAPH_NODES_TABLE}?${scope}&id=eq.${nodeId}`, { method: "DELETE" });
-      removed += 1;
-    }
-    return { removed };
-  }
-  if (!isConfigured(config)) throw new Error("Supabase is not configured");
+  const projectId = requireRequestProject(config);
+  const store = graphStoreConfig(config);
   let removed = 0;
+  const scope = projectIdFilterParam(projectId);
   for (const id of ids) {
     if (!id) continue;
-    await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?to_node_id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
-    await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+    const nodeId = encodeURIComponent(projectGraphNodeId(projectId, id));
+    await supabaseFetch(store, `/rest/v1/${GRAPH_EDGES_TABLE}?${scope}&to_node_id=eq.${nodeId}`, { method: "DELETE" });
+    await supabaseFetch(store, `/rest/v1/${GRAPH_NODES_TABLE}?${scope}&id=eq.${nodeId}`, { method: "DELETE" });
     removed += 1;
   }
   return { removed };
 }
 
 export async function graphSearch({ config, payload = {}, limit = 30, projectId = requestProjectId(config) } = {}) {
-  if (projectId) return scopedGraphSearch({ config, payload, limit, projectId });
-  if (!isConfigured(config)) return { results: [], skipped: true, reason: "App Supabase is not configured" };
-  const body = {
-    query_text: payload.query_text || "",
-    source_refs: Array.isArray(payload.source_refs) ? payload.source_refs : [],
-    max_rows: Number(payload.max_rows || limit || 30)
-  };
-  try {
-    const results = await supabaseFetch(config, "/rest/v1/rpc/graph_search", {
-      method: "POST",
-      body: JSON.stringify(body)
-    });
-    return { results: results || [], skipped: false, mode: "rpc" };
-  } catch (error) {
-    if (!looksLikeRpcSignatureError(error.message) && !/graph_search/i.test(error.message)) throw error;
-    const results = await graphSearchFallback({ config, payload: body, limit: body.max_rows }).catch(() => []);
-    return { results, skipped: !results.length, mode: "rest_fallback", error: error.message };
-  }
+  if (!projectId) throw companyDbRequiredError("This request must name its Project (x-project-id)");
+  return scopedGraphSearch({ config, payload, limit, projectId });
 }
 
 export async function listProjectGraph({ config, limit = 300, nodeType = "", edgeType = "", query = "" } = {}) {
-  const projectId = requestProjectId(config);
-  if (projectId) return listScopedProjectGraph({ config, projectId, limit, nodeType, edgeType, query });
-  if (!isConfigured(config)) return emptyProjectGraph("App Supabase is not configured");
-  const max = Math.min(Math.max(Number(limit || 300), 1), 1000);
-  if (nodeType) {
-    const graph = await listProjectGraphByNodeFilter({ config, limit: max, nodeType, edgeType, query }).catch(() => null);
-    if (graph && (graph.nodes.length || graph.edges.length)) return graph;
-  }
-  const needsSemanticFilter = Boolean(
-    query ||
-    (nodeType && !GRAPH_NODE_TYPES.has(nodeType)) ||
-    (edgeType && !GRAPH_EDGE_TYPES.has(edgeType))
-  );
-  const fetchLimit = needsSemanticFilter ? Math.min(Math.max(max * 200, 5000), 10000) : max;
-  const filters = [];
-  if (edgeType && GRAPH_EDGE_TYPES.has(edgeType)) filters.push(`edge_type=eq.${encodeURIComponent(edgeType)}`);
-  if (edgeType && !GRAPH_EDGE_TYPES.has(edgeType)) filters.push(`metadata->>edge_kind=eq.${encodeURIComponent(edgeType)}`);
-  const params = new URLSearchParams({
-    select: "id,edge_type,weight,confidence,evidence_text,metadata,from_node:graph_nodes!graph_edges_from_node_id_fkey(*),to_node:graph_nodes!graph_edges_to_node_id_fkey(*)",
-    order: "confidence.desc",
-    limit: String(fetchLimit)
-  });
-  const edgePath = `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}${filters.length ? `&${filters.join("&")}` : ""}`;
-  try {
-    const rows = await supabaseFetch(config, edgePath);
-    return projectGraphResponse(rows || [], { nodeType, edgeType, query, limit: max });
-  } catch (error) {
-    if (/graph_nodes|graph_edges|schema cache|could not find/i.test(error.message)) {
-      return emptyProjectGraph(error.message);
-    }
-    throw error;
-  }
+  const projectId = requireRequestProject(config);
+  return listScopedProjectGraph({ config, projectId, limit, nodeType, edgeType, query });
 }
 
 // Project-scoped graph view: the Company DB graph (graph_nodes/graph_edges
@@ -1909,7 +1697,6 @@ export async function listProjectGraph({ config, limit = 300, nodeType = "", edg
 // rather than through FK embeds, whose names differ between DB templates.
 async function listScopedProjectGraph({ config, projectId, limit = 300, nodeType = "", edgeType = "", query = "" }) {
   const store = contentSupabaseConfig(config);
-  if (!isConfigured(store)) return emptyProjectGraph("Content Supabase is not configured");
   const max = Math.min(Math.max(Number(limit || 300), 1), 1000);
   const needsSemanticFilter = Boolean(
     query ||
@@ -1948,32 +1735,6 @@ async function listScopedProjectGraph({ config, projectId, limit = 300, nodeType
     }
     throw error;
   }
-}
-
-async function listProjectGraphByNodeFilter({ config, limit = 300, nodeType = "", edgeType = "", query = "" } = {}) {
-  const max = Math.min(Math.max(Number(limit || 300), 1), 1000);
-  const normalizedQuery = String(query || "").trim().toLowerCase();
-  const nodeRows = await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}?select=*&limit=10000`);
-  const selectedNodes = (nodeRows || [])
-    .map(normalizeProjectGraphNode)
-    .filter((node) => node && nodeMatchesType(node, nodeType))
-    .filter((node) => !normalizedQuery || projectGraphNodeMatches({ node, query: normalizedQuery }))
-    .slice(0, max);
-  if (!selectedNodes.length) return projectGraphResponse([], { nodeType, edgeType, query, limit: max });
-  const edgeRows = [];
-  for (const batch of chunk(selectedNodes.map((node) => node.id), 50)) {
-    const encoded = batch.map((id) => `"${String(id).replace(/"/g, '\\"')}"`).join(",");
-    const params = new URLSearchParams({
-      select: "id,edge_type,weight,confidence,evidence_text,metadata,from_node:graph_nodes!graph_edges_from_node_id_fkey(*),to_node:graph_nodes!graph_edges_to_node_id_fkey(*)",
-      or: `(from_node_id.in.(${encoded}),to_node_id.in.(${encoded}))`,
-      order: "confidence.desc",
-      limit: String(Math.min(max * 10, 1000))
-    });
-    if (edgeType && GRAPH_EDGE_TYPES.has(edgeType)) params.set("edge_type", `eq.${edgeType}`);
-    const rows = await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}`).catch(() => []);
-    edgeRows.push(...(rows || []));
-  }
-  return projectGraphResponse(edgeRows, { nodeType, edgeType, query, limit: max, extraNodes: selectedNodes });
 }
 
 export function projectGraphResponse(rows = [], { nodeType = "", edgeType = "", query = "", limit = 300, extraNodes = [] } = {}) {
@@ -2052,13 +1813,6 @@ function projectGraphRowMatches({ row, source, target, query }) {
   return haystack.includes(query);
 }
 
-function projectGraphNodeMatches({ node, query }) {
-  const haystack = [
-    node.id, node.label, node.node_type, node.entity_kind, node.source_table, node.source_id
-  ].filter(Boolean).join(" ").toLowerCase();
-  return haystack.includes(query);
-}
-
 function projectGraphStats(nodes = [], edges = []) {
   return {
     nodeCount: nodes.length,
@@ -2090,60 +1844,6 @@ function countBy(items, keyFn) {
   return [...counts.entries()]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-}
-
-async function graphSearchFallback({ config, payload = {}, limit = 30 }) {
-  const refs = Array.isArray(payload.source_refs) ? payload.source_refs : [];
-  const nodeIds = refs.map((ref) => ref.node_id).filter(Boolean);
-  const sourcePairs = refs.filter((ref) => ref.source_table && ref.source_id);
-  let sourceNodes = [];
-  if (sourcePairs.length) {
-    const or = sourcePairs
-      .slice(0, 20)
-      .map((ref) => `and(source_table.eq.${encodeURIComponent(ref.source_table)},source_id.eq.${encodeURIComponent(ref.source_id)})`)
-      .join(",");
-    sourceNodes = await supabaseFetch(config, `/rest/v1/${GRAPH_NODES_TABLE}?select=id&or=(${or})&limit=50`).catch(() => []);
-  }
-  const ids = [...new Set([...nodeIds, ...(sourceNodes || []).map((node) => node.id)].filter(Boolean))];
-  if (!ids.length) return [];
-  const encoded = ids.map((id) => `"${String(id).replace(/"/g, '\\"')}"`).join(",");
-  const params = new URLSearchParams({
-    select: "id,edge_type,weight,confidence,evidence_text,from_node:graph_nodes!graph_edges_from_node_id_fkey(*),to_node:graph_nodes!graph_edges_to_node_id_fkey(*)",
-    or: `(from_node_id.in.(${encoded}),to_node_id.in.(${encoded}))`,
-    order: "confidence.desc",
-    limit: String(Math.min(Number(limit || 30), 200))
-  });
-  const rows = await supabaseFetch(config, `/rest/v1/${GRAPH_EDGES_TABLE}?${params.toString()}`).catch(() => []);
-  return (rows || []).map((row) => ({
-    edge_id: row.id,
-    edge_type: row.edge_type,
-    weight: row.weight,
-    confidence: row.confidence,
-    evidence_text: row.evidence_text,
-    source_node: row.from_node,
-    target_node: row.to_node
-  }));
-}
-
-function sanitizeTimelineEventLink(link = {}) {
-  const payload = {
-    source_event_source: link.source_event_source === "alerts" ? "alerts" : "index",
-    source_event_id: requiredString(link.source_event_id, "source_event_id"),
-    target_event_source: link.target_event_source === "alerts" ? "alerts" : "index",
-    target_event_id: requiredString(link.target_event_id, "target_event_id"),
-    relation_type: TIMELINE_RELATION_TYPES.includes(link.relation_type) ? link.relation_type : "related",
-    source_date: nullableString(link.source_date),
-    target_date: nullableString(link.target_date),
-    source_title: nullableString(link.source_title),
-    target_title: nullableString(link.target_title),
-    approver: nullableString(link.approver),
-    note: nullableString(link.note),
-    created_by: nullableString(link.created_by)
-  };
-  if (payload.source_event_source === payload.target_event_source && payload.source_event_id === payload.target_event_id) {
-    throw new Error("Cannot link an event to itself");
-  }
-  return payload;
 }
 
 function requiredString(value, label) {
@@ -2198,27 +1898,6 @@ function stableKey(prefix, value) {
     .replace(/^_+|_+$/g, "")
     .slice(0, 80);
   return `${prefix}_${normalized || Date.now()}`;
-}
-
-function sanitizeTimelineEntity(entity = {}) {
-  return {
-    id: requiredString(entity.id, "entity.id"),
-    entity_type: nullableString(entity.entity_type) || "topic",
-    name: requiredString(entity.name, "entity.name"),
-    normalized_name: requiredString(entity.normalized_name || entity.name, "entity.normalized_name"),
-    metadata: entity.metadata && typeof entity.metadata === "object" ? entity.metadata : {}
-  };
-}
-
-function sanitizeTimelineEventEntity(item = {}) {
-  return {
-    event_source: item.event_source === "alerts" ? "alerts" : "index",
-    event_id: requiredString(item.event_id, "event_id"),
-    entity_id: requiredString(item.entity_id, "entity_id"),
-    role: nullableString(item.role) || "mentioned",
-    confidence: Number(item.confidence || 0.5),
-    evidence_text: nullableString(item.evidence_text)
-  };
 }
 
 function sanitizeGraphNode(node = {}) {

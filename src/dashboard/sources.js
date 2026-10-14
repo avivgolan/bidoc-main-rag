@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { contentSupabaseConfig } from '../supabase.js';
+import { hasCompanyDbConnection } from '../companyDb.js';
 import { LABELS } from './model.js';
 import { pickCurrentVersion } from '../scheduleIngestion.js';
 
@@ -25,9 +26,11 @@ export const EVIDENCE_TABLES = {
 export class DashboardError extends Error {
   constructor(message, status=500, code='dashboard_error') { super(message); this.status=status; this.code=code; }
 }
+// The local superadmin dashboard used the global content DB, which no longer
+// exists: without a request Company DB it is refused (disabled).
 export function dashboardConnection(config) {
+  if (!hasCompanyDbConnection(config)) throw new DashboardError('הדשבורד המקומי כבוי: אין חיבור למסד הנתונים של החברה בבקשה',503,'company_db_required');
   const c=contentSupabaseConfig(config);
-  if (!c.supabaseUrl || !c.supabaseServiceRoleKey) throw new DashboardError('חיבור נתוני הפרויקט אינו מוגדר',503,'not_configured');
   const url=new URL(c.supabaseUrl);
   if(url.protocol!=='https:') throw new DashboardError('חיבור לא תקף',503,'invalid_connection');
   return { url:url.origin, key:c.supabaseServiceRoleKey, tenantKey:url.hostname, indexTable:c.indexTable, alertsTable:c.alertsTable,

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, settingsOpenRouterApiKey, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
+import { contractsServerConfig, exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, settingsOpenRouterApiKey, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels, summarizeOpenRouterUsage } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
@@ -16,7 +16,7 @@ import { callN8nTool } from "./tools.js";
 import { authorizeBidocRead, authorizeContractsExtractionRequest, authorizeDataQueryRequest, checkBidocSecretHeader, isBidocContextRequest, isContractsMachineIngestPath, resolveContractsReviewerId } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
-import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, listScheduleActivityAssignmentWorkflowRuns, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
+import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
 import { getPendingSharedScheduleAssignmentReview, listSharedScheduleAssignmentEvaluationLabels, listSharedScheduleAssignmentReviews, listSharedScheduleAssignmentShadowValidation, persistSharedScheduleAssignmentReview, resolveSharedScheduleAssignmentReviews, scheduleAssignmentNeedsSharedReview } from "./subagents/scheduleActivityAssignmentReviewQueue.js";
 import { SCHEDULE_ASSIGNMENT_LABEL_TYPES, SCHEDULE_ASSIGNMENT_NEGATIVE_LABEL_TYPES } from "./scheduleActivityAssignmentLabels.js";
 import { scheduleAssignmentConfigurationSnapshot, validateScheduleAssignmentAgentSettings } from "./scheduleActivityAssignmentEngine.js";
@@ -42,12 +42,15 @@ import { injectBuildVersion } from "./buildInfo.js";
 import { QaHarnessService } from "./qa/qaHarnessService.js";
 import { handleQaHttpRequest } from "./qa/httpApi.js";
 import { createHttpQaContext } from "./mcp/context.js";
+import { companyDbRequiredError, hasCompanyDbConnection, isCompanyDbError, readCompanyDbHeaders, verifyCompanyDbAgainstMeta } from "./companyDb.js";
 
 loadEnv();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const config = () => getConfig();
+// Superadmin Contracts tooling only: its server-owned KAPAIM/MAIN connection.
+const contractsConfig = () => contractsServerConfig();
 const qaHarnessService = new QaHarnessService();
 
 function logContractsRouteFailure(scope, error) {
@@ -69,7 +72,7 @@ async function reconcileIndicatorAfterContractMutation({ workspaceId }) {
   } = await import("./indicator/contractConditions.js");
   return bestEffortReconcileContractConditions({
     workspaceId,
-    config: config()
+    config: contractsConfig()
   });
 }
 
@@ -122,36 +125,92 @@ function scheduleRouteProjectId(req, routeProjectId) {
 }
 
 /**
- * Builds a config with contentSource overridden by per-request credentials.
- * Credentials are read from request headers first, then from body fields.
- * Falls back to the global config values when not provided.
+ * The request config: the global settings plus this request's Company DB
+ * connection, read ONLY from the authenticated caller's headers
+ * (x-content-supabase-url / -key) and its Project (x-project-id, else
+ * ?project_id, else the body). There is no fallback to a global content DB or
+ * the App DB: without a Company DB and a Project it throws
+ * company_db_required (handleApi answers 400) before any read.
  */
 function buildRequestConfig(req, body = {}) {
   const base = getConfig();
-  const url  = req.headers["x-content-supabase-url"]  || body.contentSupabaseUrl  || null;
-  const key  = req.headers["x-content-supabase-key"]  || body.contentSupabaseKey  || null;
-  const rpc  = req.headers["x-hybrid-rpc-name"]       || body.hybridRpcName        || null;
-  const idx  = req.headers["x-index-table"]            || body.indexTable           || null;
-  const alt  = req.headers["x-alerts-table"]           || body.alertsTable          || null;
+  const connection = readCompanyDbHeaders(req);
+  const header = (name) => {
+    const value = req.headers[name];
+    return String((Array.isArray(value) ? value[0] : value) ?? "").trim() || null;
+  };
   // x-project-id wins; ?project_id= is the fallback for GET callers; a header
   // and query that disagree throw project_mismatch (handleApi answers 400).
-  const pid  = resolveRequestProjectId({
+  const pid = resolveRequestProjectId({
     header: req.headers["x-project-id"],
     query: requestQueryProjectId(req),
-    body: body.projectId || body.project_id
+    body: body?.projectId || body?.project_id
   });
-  const merged = (!url && !key) ? base : {
+  if (!connection || !pid) throw companyDbRequiredError();
+  return {
     ...base,
+    projectId: pid,
     contentSource: {
       ...base.contentSource,
-      ...(url ? { supabaseUrl: url }                     : {}),
-      ...(key ? { supabaseServiceRoleKey: key }          : {}),
-      ...(rpc ? { hybridRpcName: rpc }                   : {}),
-      ...(idx ? { indexTable: idx }                      : {}),
-      ...(alt ? { alertsTable: alt }                     : {}),
-    },
+      supabaseUrl: connection.supabaseUrl,
+      supabaseServiceRoleKey: connection.supabaseServiceRoleKey,
+      ...(header("x-hybrid-rpc-name") ? { hybridRpcName: header("x-hybrid-rpc-name") } : {}),
+      ...(header("x-index-table") ? { indexTable: header("x-index-table") } : {}),
+      ...(header("x-alerts-table") ? { alertsTable: header("x-alerts-table") } : {}),
+      useAppSupabase: false,
+      usesAppSupabase: false
+    }
   };
-  return pid ? { ...merged, projectId: pid } : merged;
+}
+
+// Routes that never read or write Project data (auth, settings, knowledge,
+// model lists, App DB chat history, the in-memory run stream, QA harness) or
+// that use the superadmin Contracts server-owned connection. Every other
+// /api route needs the request's Company DB and Project; new routes default
+// to needing them.
+const COMPANY_DB_EXEMPT_ROUTES = [
+  /^\/api\/auth\//,
+  /^\/api\/runs\/[^/]+\/events$/,
+  /^\/api\/qa\//,
+  /^\/api\/sessions(?:\/[^/]+\/messages)?$/,
+  /^\/api\/run-history$/,
+  /^\/api\/messages\/[^/]+\/(?:annotate)$/,
+  /^\/api\/ai-report\//,
+  /^\/api\/settings(?:\/(?:reload|export|import|schedule-assignment-agent(?:\/validate)?))?$/,
+  /^\/api\/system\/restart$/,
+  /^\/api\/agents$/,
+  /^\/api\/knowledge\//,
+  /^\/api\/openrouter\/models$/,
+  /^\/api\/subagents\/[^/]+\/config$/,
+  /^\/api\/diagnostics\/connections$/,
+  /^\/api\/contracts\//,
+  /^\/api\/indicator\/contracts\//,
+  /^\/api\/dashboard\/v1\//
+];
+
+export function routeNeedsCompanyDb(pathname) {
+  return String(pathname || "").startsWith("/api/") && !COMPANY_DB_EXEMPT_ROUTES.some((pattern) => pattern.test(pathname));
+}
+
+// One gate for every Project route: the request must name its Company DB and
+// Project, and (when the Meta DB cross-check is configured) that Company DB
+// must be the Project's own. Returns null to continue, or the refusal.
+async function companyDbGate(req, url) {
+  if (!routeNeedsCompanyDb(url.pathname)) return null;
+  const connection = readCompanyDbHeaders(req);
+  const projectId = resolveRequestProjectId({ header: req.headers["x-project-id"], query: url.searchParams.get("project_id") });
+  if (!connection || !projectId) return companyDbRequiredError();
+  try {
+    await verifyCompanyDbAgainstMeta({ projectId, connection });
+  } catch (error) {
+    if (isCompanyDbError(error)) return error;
+    throw error;
+  }
+  return null;
+}
+
+function sendCompanyDbError(res, error) {
+  return sendJson(res, error.status || 400, { error: error.code, message: error.message });
 }
 
 function requestQueryProjectId(req) {
@@ -180,6 +239,10 @@ async function handler(req, res) {
       sendJson(res, 400, { error: "project_mismatch", message: error.message });
       return;
     }
+    if (isCompanyDbError(error)) {
+      sendCompanyDbError(res, error);
+      return;
+    }
     sendJson(res, 500, { error: error.message });
   }
 }
@@ -195,7 +258,7 @@ if (!process.env.VERCEL) {
     console.log(`bidoc agent running at http://localhost:${cfg.port}`);
     console.log(`[startup] OpenRouter : ${cfg.openRouterApiKey ? "✓ configured" : "✗ MISSING — RAG agent will use fallback"}`);
     console.log(`[startup] App DB     : ${cfg.supabaseUrl ? "✓ configured" : "✗ MISSING"}`);
-    console.log(`[startup] APP DATA   : ${cfg.contentSource?.supabaseUrl && cfg.contentSource?.supabaseServiceRoleKey ? "✓ configured" : "✗ MISSING"}`);
+    console.log("[startup] Company DB : per request (x-content-supabase-* headers); no global content DB");
     console.log(`[startup] Timezone   : ${cfg.timezone}`);
   });
 }
@@ -332,6 +395,13 @@ async function handleApi(req, res, url) {
     throw error;
   }
 
+  // Every Project route reads only the request's own Company DB: without a
+  // Company DB + Project (or with a Company DB that is not the Project's own,
+  // when the Meta DB cross-check is configured) it is refused here, before
+  // any database call.
+  const companyDbRefusal = await companyDbGate(req, url);
+  if (companyDbRefusal) return sendCompanyDbError(res, companyDbRefusal);
+
   if (url.pathname.startsWith("/api/qa/")) {
     // A BiDoc-context caller must name its Project and is confined to it.
     const qaScope = bidocChatScope(req);
@@ -456,7 +526,8 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/run-history") {
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
     // A BiDoc-context caller sees its Project's chat runs and in-memory runs
-    // only; schedule-assignment runs are a superadmin reviewer tool.
+    // only. Schedule-assignment runs live in a Company DB, which this
+    // Project-less listing cannot name, so they are not listed here.
     const chatScope = bidocChatScope(req);
     if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
     const [dbRuns, scheduleAssignmentRuns] = await Promise.all([
@@ -465,9 +536,7 @@ async function handleApi(req, res, url) {
         limit,
         sessionPrefix: chatScope.bidoc ? bidocChatSessionPrefix(chatScope.projectId) : null
       }).catch(() => []),
-      chatScope.bidoc
-        ? Promise.resolve([])
-        : listScheduleActivityAssignmentWorkflowRuns({ config: config(), limit }).catch(() => [])
+      Promise.resolve([])
     ]);
     const localRuns = chatScope.bidoc
       ? listLocalRunHistory({ limit, projectId: chatScope.projectId })
@@ -523,7 +592,9 @@ async function handleApi(req, res, url) {
     // Diagnostics must report the persisted MAIN settings, not a process-local
     // Content DB snapshot that may predate the last Settings save.
     await reloadSettingsFromDb();
-    const results = await runConnectionDiagnostics(config(), { ids });
+    // Company DB probes use the request's own Company DB when it names one.
+    const diagnosticsConfig = readCompanyDbHeaders(req) && requestScopeProjectId(req) ? buildRequestConfig(req) : config();
+    const results = await runConnectionDiagnostics(diagnosticsConfig, { ids });
     return sendJson(res, 200, {
       ok: results.every((item) => item.ok),
       results
@@ -984,12 +1055,13 @@ async function handleApi(req, res, url) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     const body = await readJson(req).catch(() => ({}));
-    if (!body.projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
+    if (!projectId || !body.sourceId) return sendJson(res, 400, { error: "projectId and sourceId are required" });
     try {
       await reloadSettingsFromDb();
-      const requestConfig = getConfig();
+      const requestConfig = buildRequestConfig(req, body);
       const result = await runScheduleActivityAssignmentAgent({
-        projectId: body.projectId,
+        projectId,
         sourceId: body.sourceId,
         requestedBy: reviewer.sub,
         commit: false,
@@ -1140,7 +1212,7 @@ async function handleApi(req, res, url) {
       const { runContractsAutomaticStep } = await import("./contracts/automaticPipeline.js");
       const result = await runContractsAutomaticStep({
         workspaceId: contractsAutomaticMatch[1], step: contractsAutomaticMatch[2],
-        reviewerId, config: config(), body
+        reviewerId, config: contractsConfig(), body
       });
       const { sendContractsJson } = await import("./contracts/response.js");
       return sendContractsJson(res, 200, result);
@@ -1161,7 +1233,7 @@ async function handleApi(req, res, url) {
       const { sendContractsJson } = await import("./contracts/response.js");
       const result = await runContractsExtractionRequest({
         body,
-        config: config(),
+        config: contractsConfig(),
         emit: (payload) => {
           const safe = safeContractTelemetry(payload.event, payload);
           if (safe) console.info("[contracts]", JSON.stringify(safe));
@@ -1189,7 +1261,7 @@ async function handleApi(req, res, url) {
       const body = await resolveContractDocumentSource(await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES));
       const { runContractsClausePreview } = await import("./contracts/clausePreview.js");
       const { sendContractsJson } = await import("./contracts/response.js");
-      const result = await runContractsClausePreview({ body, config: config() });
+      const result = await runContractsClausePreview({ body, config: contractsConfig() });
       return sendContractsJson(res, 200, result);
     } catch (error) {
       const response = contractsErrorResponse(error);
@@ -1205,7 +1277,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsClausePersistenceStatus } = await import("./contracts/clausePersistence.js");
-      return sendJson(res, 200, await loadContractsClausePersistenceStatus({ config: config() }));
+      return sendJson(res, 200, await loadContractsClausePersistenceStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -1221,7 +1293,7 @@ async function handleApi(req, res, url) {
       } = await import("./contracts/clausePersistence.js");
       const request = parseContractsClauseWorkspaceListRequest(url.searchParams);
       const { listPublicContractWorkspaces } = await import("./contracts/publicWorkspaceRead.js");
-      const publicList = await listPublicContractWorkspaces({ config: config(), ...request });
+      const publicList = await listPublicContractWorkspaces({ config: contractsConfig(), ...request });
       return sendJson(res, 200, { ok: true, items: publicList.items, source: "public.contract_workspaces" });
     } catch (error) {
       const response = contractsErrorResponse(error);
@@ -1240,7 +1312,7 @@ async function handleApi(req, res, url) {
       } = await import("./contracts/clausePersistence.js");
       const { getPublicContractWorkspace } = await import("./contracts/publicWorkspaceRead.js");
       const publicWorkspace = await getPublicContractWorkspace({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsClauseWorkspaceMatch[1]
       });
       if (publicWorkspace) {
@@ -1254,7 +1326,7 @@ async function handleApi(req, res, url) {
         });
       }
       const result = await getSavedContractsClauseWorkspace({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsClauseWorkspaceMatch[1]
       });
       const { sendContractsJson } = await import("./contracts/response.js");
@@ -1293,7 +1365,7 @@ async function handleApi(req, res, url) {
       }
       const result = await runContractsClausePersistence({
         body: boundBody,
-        config: config(),
+        config: contractsConfig(),
         reviewerId,
         emit: (event) => console.info("[contracts-r3.2]", JSON.stringify(event))
       });
@@ -1314,7 +1386,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsRelationshipsStatus } = await import("./contracts/relationshipPersistence.js");
-      return sendJson(res, 200, await loadContractsRelationshipsStatus({ config: config() }));
+      return sendJson(res, 200, await loadContractsRelationshipsStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -1329,7 +1401,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsSemanticRelationshipsStatus } = await import("./contracts/semanticRelationshipService.js");
-      return sendJson(res, 200, loadContractsSemanticRelationshipsStatus({ config: config() }));
+      return sendJson(res, 200, loadContractsSemanticRelationshipsStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -1344,7 +1416,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsRelationshipReviewStatus } = await import("./contracts/semanticRelationshipReview.js");
-      return sendJson(res, 200, await loadContractsRelationshipReviewStatus({ config: config() }));
+      return sendJson(res, 200, await loadContractsRelationshipReviewStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -1359,7 +1431,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsRelationshipAutoReviewStatus } = await import("./contracts/semanticRelationshipAutoReview.js");
-      return sendJson(res, 200, await loadContractsRelationshipAutoReviewStatus({ config: config() }));
+      return sendJson(res, 200, await loadContractsRelationshipAutoReviewStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -1384,7 +1456,7 @@ async function handleApi(req, res, url) {
         });
       }
       return sendJson(res, 200, await loadContractsRelationships({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsRelationshipsWorkspaceMatch[1]
       }));
     } catch (error) {
@@ -1411,7 +1483,7 @@ async function handleApi(req, res, url) {
         });
       }
       const result = await persistContractsExplicitRelationships({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsRelationshipsPersistMatch[1],
         timeoutMs: 60_000
       });
@@ -1449,7 +1521,7 @@ async function handleApi(req, res, url) {
         });
       }
       const result = await previewContractsSemanticRelationships({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsSemanticRelationshipsPreviewMatch[1],
         body,
         deadlineAt: Date.now() + 180_000
@@ -1498,13 +1570,13 @@ async function handleApi(req, res, url) {
         });
       }
       const analysis = await previewContractsSemanticRelationships({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsSemanticRelationshipsPersistMatch[1],
         body,
         deadlineAt: Date.now() + 180_000
       });
       const review = await persistContractsSemanticRelationshipProposals({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsSemanticRelationshipsPersistMatch[1],
         semanticResult: analysis,
         timeoutMs: 60_000
@@ -1545,7 +1617,7 @@ async function handleApi(req, res, url) {
         });
       }
       return sendJson(res, 200, await loadContractsRelationshipReview({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsSemanticRelationshipReviewWorkspaceMatch[1],
         timeoutMs: 60_000
       }));
@@ -1566,7 +1638,7 @@ async function handleApi(req, res, url) {
       const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
       const { autoReviewContractsSemanticRelationships } = await import("./contracts/semanticRelationshipAutoReview.js");
       const result = await autoReviewContractsSemanticRelationships({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsSemanticRelationshipAutoReviewMatch[1],
         reviewerId: reviewer.sub,
         body,
@@ -1607,7 +1679,7 @@ async function handleApi(req, res, url) {
         });
       }
       const result = await reviewContractsSemanticRelationship({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsSemanticRelationshipReviewItemMatch[1],
         relationshipId: contractsSemanticRelationshipReviewItemMatch[2],
         reviewerId: reviewer.sub,
@@ -1640,7 +1712,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsDecisionReviewStatus } = await import("./contracts/decisionReview.js");
-      return sendJson(res, 200, await loadContractsDecisionReviewStatus({ config: config() }));
+      return sendJson(res, 200, await loadContractsDecisionReviewStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -1656,7 +1728,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsDecisionAutoReviewStatus } = await import("./contracts/decisionAutoReview.js");
-      return sendJson(res, 200, await loadContractsDecisionAutoReviewStatus({ config: config() }));
+      return sendJson(res, 200, await loadContractsDecisionAutoReviewStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -1671,7 +1743,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsDecisionLineageStatus } = await import("./contracts/decisionLineage.js");
-      return sendJson(res, 200, await loadContractsDecisionLineageStatus({ config: config() }));
+      return sendJson(res, 200, await loadContractsDecisionLineageStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -1703,7 +1775,7 @@ async function handleApi(req, res, url) {
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsIndicatorHandoff } = await import("./contracts/indicatorHandoff.js");
       const result = await loadContractsIndicatorHandoff({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsIndicatorHandoffWorkspaceMatch[1],
         timeoutMs: 60_000
       });
@@ -1731,7 +1803,7 @@ async function handleApi(req, res, url) {
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsDecisionLineageReview } = await import("./contracts/decisionLineage.js");
       return sendJson(res, 200, await loadContractsDecisionLineageReview({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsDecisionLineageWorkspaceMatch[1],
         timeoutMs: 60_000
       }));
@@ -1752,7 +1824,7 @@ async function handleApi(req, res, url) {
       const body = await readJsonBounded(req, 262_144);
       const { splitContractsDecision } = await import("./contracts/decisionLineage.js");
       const result = await splitContractsDecision({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsDecisionSplitMatch[1],
         decisionId: contractsDecisionSplitMatch[2],
         reviewerId: reviewer.sub,
@@ -1787,7 +1859,7 @@ async function handleApi(req, res, url) {
       const body = await readJsonBounded(req, 262_144);
       const { mergeContractsDecisions } = await import("./contracts/decisionLineage.js");
       const result = await mergeContractsDecisions({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsDecisionMergeMatch[1],
         reviewerId: reviewer.sub,
         body,
@@ -1829,7 +1901,7 @@ async function handleApi(req, res, url) {
         });
       }
       return sendJson(res, 200, await loadContractsDecisionReview({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsDecisionReviewWorkspaceMatch[1],
         timeoutMs: 60_000
       }));
@@ -1859,7 +1931,7 @@ async function handleApi(req, res, url) {
         });
       }
       const result = await generateAndPersistContractsDecisions({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsDecisionProposalMatch[1],
         body,
         deadlineAt: Date.now() + 300_000
@@ -1891,7 +1963,7 @@ async function handleApi(req, res, url) {
       const body = await readJsonBounded(req, CONTRACTS_MAX_JSON_BYTES);
       const { autoReviewContractsDecisions } = await import("./contracts/decisionAutoReview.js");
       const result = await autoReviewContractsDecisions({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsDecisionAutoReviewMatch[1],
         reviewerId: reviewer.sub,
         body,
@@ -1936,7 +2008,7 @@ async function handleApi(req, res, url) {
         });
       }
       const result = await reviewContractsDecision({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractsDecisionReviewItemMatch[1],
         decisionId: contractsDecisionReviewItemMatch[2],
         reviewerId: reviewer.sub,
@@ -1974,7 +2046,7 @@ async function handleApi(req, res, url) {
       const result = await reconcileContractConditions({
         workspaceId: indicatorContractWorkspaceMatch[1],
         commit: req.method === "POST" ? body.commit !== false : false,
-        config: config()
+        config: contractsConfig()
       });
       return sendJson(res, 200, result);
     } catch (error) {
@@ -1999,7 +2071,7 @@ async function handleApi(req, res, url) {
         workspaceId: contractSourceLinkMatch[1],
         decisionId,
         expiresIn: 60,
-        config: config()
+        config: contractsConfig()
       });
       const location = `${source.signedUrl}${Number.isInteger(page) && page > 0 ? `#page=${page}` : ""}`;
       res.writeHead(302, {
@@ -2029,7 +2101,7 @@ async function handleApi(req, res, url) {
       const reviewer = getSuperadminSession(req);
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { loadContractsWorkspaceStatus } = await import("./contracts/workspacePersistence.js");
-      return sendJson(res, 200, await loadContractsWorkspaceStatus({ config: config() }));
+      return sendJson(res, 200, await loadContractsWorkspaceStatus({ config: contractsConfig() }));
     } catch (error) {
       const response = contractsErrorResponse(error);
       return sendJson(res, response.status, response.body);
@@ -2052,7 +2124,7 @@ async function handleApi(req, res, url) {
         });
       }
       const request = parseWorkspaceListRequest(url.searchParams);
-      const result = await listSavedContractWorkspaces({ config: config(), reviewerId: reviewer.sub, ...request });
+      const result = await listSavedContractWorkspaces({ config: contractsConfig(), reviewerId: reviewer.sub, ...request });
       return sendJson(res, 200, { ok: true, ...result });
     } catch (error) {
       const response = contractsErrorResponse(error);
@@ -2073,7 +2145,7 @@ async function handleApi(req, res, url) {
         });
       }
       const workspace = await getSavedContractWorkspace({
-        config: config(),
+        config: contractsConfig(),
         workspaceId: contractWorkspaceMatch[1],
         reviewerId: reviewer.sub
       });
@@ -2102,9 +2174,9 @@ async function handleApi(req, res, url) {
         });
       }
       const workspaceId = contractWorkspaceDraftMatch[1];
-      const workspace = await getSavedContractWorkspace({ config: config(), workspaceId, reviewerId: reviewer.sub });
+      const workspace = await getSavedContractWorkspace({ config: contractsConfig(), workspaceId, reviewerId: reviewer.sub });
       const saved = await saveContractWorkspaceDraft({
-        config: config(),
+        config: contractsConfig(),
         workspaceId,
         reviewerId: reviewer.sub,
         draft: body,
@@ -2142,7 +2214,7 @@ async function handleApi(req, res, url) {
       }
       const request = parseWorkspaceExtractionRequest(body);
       const existing = await findSavedContractWorkspace({
-        config: config(),
+        config: contractsConfig(),
         sourceProjectId: request.parsedExtraction.projectSelection.projectId,
         scheduleProjectId: request.scheduleProjectId,
         documentSha256: contractPdfSha256(request.parsedExtraction.pdfBytes),
@@ -2156,14 +2228,14 @@ async function handleApi(req, res, url) {
       const { runContractsExtractionRequest, safeContractTelemetry } = await import("./subagents/contracts.js");
       const extraction = await runContractsExtractionRequest({
         body: request.extractionRequest,
-        config: config(),
+        config: contractsConfig(),
         emit: (payload) => {
           const safe = safeContractTelemetry(payload.event, payload);
           if (safe) console.info("[contracts]", JSON.stringify(safe));
         }
       });
       const workspace = await persistExtractedContractWorkspace({
-        config: config(),
+        config: contractsConfig(),
         parsedExtraction: request.parsedExtraction,
         extraction,
         scheduleProjectId: request.scheduleProjectId,
@@ -2232,7 +2304,7 @@ async function handleApi(req, res, url) {
       const { submitContractPromotion } = await import("./contracts/promotionWriter.js");
       const result = await submitContractPromotion({
         ...prepared,
-        config: config(),
+        config: contractsConfig(),
         commit: true,
         migrationApplyApproved: true
       });
@@ -2269,7 +2341,7 @@ async function handleApi(req, res, url) {
       const { submitContractPromotion } = await import("./contracts/promotionWriter.js");
       const result = await submitContractPromotion({
         ...prepared,
-        config: config(),
+        config: contractsConfig(),
         commit: true,
         migrationApplyApproved: true
       });
@@ -2335,12 +2407,12 @@ async function handleApi(req, res, url) {
       const applying = url.pathname.endsWith("/apply");
       const result = applying
         ? await applyActivityMappingUploadReconciliation({
-            config: config(),
+            config: contractsConfig(),
             sourceProjectId: request.sourceProjectId,
             reconciliationApplyApproved: contractsActivityMappingUploadReconciliationApproved()
           })
         : await previewActivityMappingUploadReconciliation({
-            config: config(),
+            config: contractsConfig(),
             sourceProjectId: request.sourceProjectId
           });
       return sendJson(res, 200, { ok: true, ...result });
@@ -2357,7 +2429,7 @@ async function handleApi(req, res, url) {
       const { loadContractActivityMappingState, parseActivityMappingListRequest } = await import("./contracts/activityMappingService.js");
       const request = parseActivityMappingListRequest({ headers: req.headers, query: url.searchParams });
       const result = await loadContractActivityMappingState({
-        config: config(),
+        config: contractsConfig(),
         sourceProjectId: request.sourceProjectId
       });
       return sendJson(res, 200, { ok: true, ...result });
@@ -2375,7 +2447,7 @@ async function handleApi(req, res, url) {
       const { buildContractActivityMappingCandidatesFromSources, parseActivityMappingCandidateRequest } = await import("./contracts/activityMappingService.js");
       const request = parseActivityMappingCandidateRequest({ headers: req.headers, query: url.searchParams, body });
       const result = await buildContractActivityMappingCandidatesFromSources({
-        config: config(),
+        config: contractsConfig(),
         sourceProjectId: request.sourceProjectId,
         obligation: request.obligation
       });
@@ -2395,7 +2467,7 @@ async function handleApi(req, res, url) {
       if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
       const { listActivityMappingReviewHistory, parseActivityMappingHistoryRequest } = await import("./contracts/activityMappingReview.js");
       const request = parseActivityMappingHistoryRequest({ headers: req.headers, query: url.searchParams });
-      const result = await listActivityMappingReviewHistory({ config: config(), ...request });
+      const result = await listActivityMappingReviewHistory({ config: contractsConfig(), ...request });
       return sendJson(res, 200, { ok: true, ...result });
     } catch (error) {
       const response = contractsErrorResponse(error);
@@ -2415,7 +2487,7 @@ async function handleApi(req, res, url) {
       } = await import("./contracts/activityMappingReview.js");
       const request = parseActivityMappingReviewRequest({ headers: req.headers, query: url.searchParams, body });
       const result = await submitActivityMappingReview({
-        config: config(),
+        config: contractsConfig(),
         request,
         reviewerId: reviewer.sub,
         reviewApplyApproved: contractsActivityMappingReviewApproved()
@@ -2670,7 +2742,7 @@ async function handleApi(req, res, url) {
         requestedBy: reviewer.sub,
         commit: false,
         timeFilter: body.timeFilter === true,
-        config: getConfig(),
+        config: buildRequestConfig(req, body),
         apiKey: settingsOpenRouterApiKey(),
         retrieval: SCHEDULE_ASSIGNMENT_SHADOW_RETRIEVAL,
         runId,
@@ -2696,7 +2768,7 @@ async function handleApi(req, res, url) {
           runId,
           workflowLog: result.workflowLog,
           runEvents,
-          config: getConfig()
+          config: buildRequestConfig(req, body)
         }).catch((error) => {
           emitRunEvent(runId, "workflow_persistence_warning", "Workflow persistence failed", { status: "warning", error: error.message });
         });
@@ -2756,18 +2828,19 @@ async function handleApi(req, res, url) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     const body = await readJson(req).catch(() => ({}));
-    if (!body.projectId || !body.runId || !body.activityKey) return sendJson(res, 400, { error: "projectId, runId and activityKey are required" });
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
+    if (!projectId || !body.runId || !body.activityKey) return sendJson(res, 400, { error: "projectId, runId and activityKey are required" });
     try {
       const result = await confirmScheduleActivityAssignment({
-        projectId: body.projectId,
+        projectId,
         runId: body.runId,
         activityKey: body.activityKey,
         requestedBy: reviewer.sub,
-        config: getConfig()
+        config: buildRequestConfig(req, body)
       });
       let reviewQueueWarning = null;
       await resolveSharedScheduleAssignmentReviews({
-        projectId: body.projectId,
+        projectId,
         sourceId: result.item.id,
         status: "selected",
         activityKey: result.activityKey,
@@ -2786,16 +2859,17 @@ async function handleApi(req, res, url) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     const body = await readJson(req).catch(() => ({}));
-    if (!body.projectId || !body.runId) return sendJson(res, 400, { error: "projectId and runId are required" });
+    const projectId = scheduleRouteProjectId(req, body.projectId || body.project_id);
+    if (!projectId || !body.runId) return sendJson(res, 400, { error: "projectId and runId are required" });
     try {
       const requestedLabelType = SCHEDULE_ASSIGNMENT_NEGATIVE_LABEL_TYPES.includes(body.labelType)
         && body.labelType !== SCHEDULE_ASSIGNMENT_LABEL_TYPES.STALE_ACTIVITY
         ? body.labelType
         : SCHEDULE_ASSIGNMENT_LABEL_TYPES.REJECTED_MATCH;
-      const result = await rejectScheduleActivityAssignment({ projectId: body.projectId, runId: body.runId, reason: body.reason, requestedBy: reviewer.sub, config: getConfig() });
+      const result = await rejectScheduleActivityAssignment({ projectId, runId: body.runId, reason: body.reason, requestedBy: reviewer.sub, config: buildRequestConfig(req, body) });
       let reviewQueueWarning = null;
       await resolveSharedScheduleAssignmentReviews({
-        projectId: body.projectId,
+        projectId,
         sourceId: result.sourceId,
         status: "rejected",
         resolvedBy: reviewer.sub,
@@ -2860,7 +2934,7 @@ async function handleApi(req, res, url) {
     const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
-      const result = await getScheduleActivityAssignmentRun({ projectId, runId: decodeURIComponent(assignmentRunMatch[1]), config: getConfig() });
+      const result = await getScheduleActivityAssignmentRun({ projectId, runId: decodeURIComponent(assignmentRunMatch[1]), config: buildRequestConfig(req) });
       return sendJson(res, 200, { ok: true, ...result });
     } catch (error) {
       return sendJson(res, /required|not found/.test(error.message) ? 400 : 500, { ok: false, error: error.message });
@@ -4217,7 +4291,11 @@ function sendText(res, status, value) {
 }
 
 async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
-  const contentCfg = contentSupabaseConfig(cfg);
+  // Company DB probes run only against the request's own Company DB; without
+  // one (e.g. the standalone UI) they report the connection as missing.
+  const contentCfg = hasCompanyDbConnection(cfg)
+    ? contentSupabaseConfig(cfg)
+    : { ...cfg.contentSource, supabaseUrl: "", supabaseServiceRoleKey: "" };
   const savedSettings = readLocalSettings();
   const checks = [];
   const add = (id, label, group, fn) => checks.push({ id, label, group, fn });
@@ -4299,7 +4377,8 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
         date_to: null,
         hashtags: [],
         vector_weight: cfg.retrieval.vectorWeight,
-        keyword_weight: cfg.retrieval.keywordWeight
+        keyword_weight: cfg.retrieval.keywordWeight,
+        project_id_filter: cfg.projectId
       })
     });
     return { rpc: contentCfg.hybridRpcName, rows: Array.isArray(rows) ? rows.length : 0 };
@@ -4311,25 +4390,30 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
     const embedding = await createEmbedding({ apiKey: cfg.openRouterApiKey, model: cfg.models.embedding, input: "connection test" });
     const rows = await rawSupabaseFetch(contentCfg, `/rest/v1/rpc/${contentCfg.alertsRpcName}`, {
       method: "POST",
-      body: JSON.stringify({ query_embedding: embedding, match_count: 1 })
+      body: JSON.stringify({ query_embedding: embedding, match_count: 1, project_id_filter: cfg.projectId })
     });
     return { rpc: contentCfg.alertsRpcName, rows: Array.isArray(rows) ? rows.length : 0 };
   });
 
+  // The Project graph lives in the Company DB (project_id-scoped); the legacy
+  // App DB graph is no longer used.
   add("app_graph_tables", "Project Graph Tables", "data", async () => {
-    if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
+    requireConnection(contentCfg, "Company DB");
+    if (!cfg.projectId) inactive("Project Graph probe needs the request Project");
+    const scope = `project_id=eq.${encodeURIComponent(cfg.projectId)}`;
     const [nodes, edges] = await Promise.all([
-      rawSupabaseFetch(cfg, "/rest/v1/graph_nodes?select=id&limit=1"),
-      rawSupabaseFetch(cfg, "/rest/v1/graph_edges?select=id&limit=1")
+      rawSupabaseFetch(contentCfg, `/rest/v1/graph_nodes?select=id&${scope}&limit=1`),
+      rawSupabaseFetch(contentCfg, `/rest/v1/graph_edges?select=id&${scope}&limit=1`)
     ]);
     return { graph_nodes: Array.isArray(nodes) ? nodes.length : 0, graph_edges: Array.isArray(edges) ? edges.length : 0 };
   });
 
   add("app_graph_search_rpc", "Project Graph Search RPC", "data", async () => {
-    if (!cfg.supabaseUrl || !cfg.supabaseServiceRoleKey) throw new Error("Supabase URL or Service Role Key is missing");
-    const rows = await rawSupabaseFetch(cfg, "/rest/v1/rpc/graph_search", {
+    requireConnection(contentCfg, "Company DB");
+    if (!cfg.projectId) inactive("Project Graph probe needs the request Project");
+    const rows = await rawSupabaseFetch(contentCfg, "/rest/v1/rpc/graph_search", {
       method: "POST",
-      body: JSON.stringify({ query_text: "connection test", source_refs: [], max_rows: 1 })
+      body: JSON.stringify({ query_text: "connection test", source_refs: [], max_rows: 1, filter_project_id: cfg.projectId })
     });
     return { rpc: "graph_search", rows: Array.isArray(rows) ? rows.length : 0 };
   });
@@ -4451,7 +4535,7 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
 
   add("subagent_graph_enrichment", "Graph Enrichment Agent", "subagents", async () => {
     if (cfg.graph?.enabled === false) inactive("Project Graph is disabled in Settings");
-    await probeTable(cfg, "graph_nodes", "App DB");
+    await probeTable(contentCfg, "graph_nodes", "Company DB");
     return { active: true, automatic: cfg.insights?.graphEnrichment === true, mode: cfg.insights?.graphEnrichment ? "automatic" : "manual" };
   });
 

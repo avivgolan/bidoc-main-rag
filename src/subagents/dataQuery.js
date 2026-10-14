@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { chatCompletion, extractJsonObject, summarizeOpenRouterUsage } from "../openrouter.js";
 import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig } from "../supabase.js";
-import { getDataQueryAccessToken } from "./dataQueryAuth.js";
+import { hasCompanyDbConnection } from "../companyDb.js";
 import {
   DATA_QUERY_EXACT_OPERATIONS,
   DATA_QUERY_ALERT_INPUT_TYPE_VALUES,
@@ -235,17 +235,10 @@ function dataQueryExactAvailable(table) {
     table?.exactTransport === DATA_QUERY_MANAGED_READ_TRANSPORT;
 }
 
+// Managed read transports are active only for a request that carries its
+// Company DB connection; without one they stay dormant.
 function dataQueryReadCredentialsConfigured(config = {}) {
-  const safeConfig = config || {};
-  const appReadConnection = safeConfig.contentSource?.usesAppSupabase === true && Boolean(
-    String(safeConfig.contentSource?.supabaseUrl || safeConfig.supabaseUrl || "").trim() &&
-    String(safeConfig.contentSource?.supabaseServiceRoleKey || safeConfig.supabaseServiceRoleKey || "").trim()
-  );
-  const managedIdentity = Boolean(
-    String(safeConfig.dataQueryServiceEmail || "").trim() &&
-    String(safeConfig.dataQueryServicePassword || "")
-  );
-  return appReadConnection || managedIdentity || Boolean(String(safeConfig.dataQueryReadAccessToken || "").trim());
+  return hasCompanyDbConnection(config);
 }
 
 function activateDataQueryPolicy(policy, config) {
@@ -4152,39 +4145,19 @@ function validatePlanFields(plan, table) {
   return errors;
 }
 
+// Data Query authenticates with the request's own Company DB service
+// connection. The global service account (DATA_QUERY_SUPABASE_*) existed in a
+// single content database and is never used: it could not log in to another
+// Company DB, and its token must not be sent there. Reads stay behind the
+// fixed read-only transport (approved tables/fields/filters, GET/HEAD only,
+// approved exact RPCs) and the caller's Project scope.
 export function dataQuerySupabaseHeaders(config, extra = {}) {
   const connection = contentSupabaseConfig(config);
-  if (config?.contentSource?.usesAppSupabase === true) {
-    if (!connection.supabaseServiceRoleKey) throw new Error("MAIN Supabase service role key is missing");
-    return { ...supabaseHeaders(connection.supabaseServiceRoleKey), ...extra };
-  }
-  const accessToken = String(config?.dataQueryReadAccessToken || "").trim();
-  if (!accessToken) {
-    throw new Error("DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN is missing");
-  }
-  return {
-    ...supabaseHeaders(connection.supabaseServiceRoleKey),
-    Authorization: `Bearer ${accessToken}`,
-    ...extra
-  };
+  return { ...supabaseHeaders(connection.supabaseServiceRoleKey), ...extra };
 }
 
-export async function resolveDataQuerySupabaseHeaders(
-  config,
-  extra = {},
-  { fetchImpl = fetch, now = Date.now } = {}
-) {
-  const connection = contentSupabaseConfig(config);
-  if (config?.contentSource?.usesAppSupabase === true) {
-    if (!connection.supabaseServiceRoleKey) throw new Error("MAIN Supabase service role key is missing");
-    return { ...supabaseHeaders(connection.supabaseServiceRoleKey), ...extra };
-  }
-  const accessToken = await getDataQueryAccessToken(config, { fetchImpl, now });
-  return {
-    ...supabaseHeaders(connection.supabaseServiceRoleKey),
-    Authorization: `Bearer ${accessToken}`,
-    ...extra
-  };
+export async function resolveDataQuerySupabaseHeaders(config, extra = {}) {
+  return dataQuerySupabaseHeaders(config, extra);
 }
 
 export async function fetchExactPlan({ config, settings, plan, timeoutMs = settings.timeoutMsPerPlan, fetchImpl = fetch, now = Date.now }) {

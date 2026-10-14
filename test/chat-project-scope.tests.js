@@ -113,17 +113,30 @@ export function registerChatProjectScopeTests(test) {
     );
   });
 
-  test("chat project scope: hybrid search without a project keeps the legacy widen-on-signature fallback", async () => {
+  test("chat project scope: hybrid search without a project is refused before any call", async () => {
     await withFetch(
-      (call) => {
-        if (!call.url.includes("/rest/v1/rpc/content_hybrid")) return jsonResponse([], 404);
-        if (call.body.hashtags) return jsonResponse(SIGNATURE_ERROR, 404);
-        return jsonResponse([{ id: 9 }]);
-      },
+      () => jsonResponse([{ id: 9 }]),
       async (calls) => {
-        const results = await hybridSearch({ config: scopedConfig(), query: "q", dateFrom: null, dateTo: null, hashtags: ["x"] });
-        assert.deepEqual(results, [{ id: 9 }]);
-        assert.equal(calls.filter((call) => call.url.includes("/rest/v1/rpc/content_hybrid")).length, 2);
+        await assert.rejects(
+          hybridSearch({ config: scopedConfig(), query: "q", dateFrom: null, dateTo: null, hashtags: ["x"] }),
+          (error) => error.code === "company_db_required"
+        );
+        assert.equal(calls.length, 0, "no embedding or Company DB call without a Project");
+      }
+    );
+  });
+
+  test("chat project scope: hybrid search refuses an RPC without project_id_filter instead of running unfiltered", async () => {
+    await withFetch(
+      (call) => call.url.includes("/rest/v1/rpc/content_hybrid") ? jsonResponse(SIGNATURE_ERROR, 404) : jsonResponse([], 404),
+      async (calls) => {
+        await assert.rejects(
+          hybridSearch({ config: scopedConfig({ projectId: PROJECT_A }), query: "q", dateFrom: null, dateTo: null, hashtags: [] }),
+          (error) => error.code === "search_function_outdated" && /out of date for this Company DB/.test(error.message)
+        );
+        const rpcCalls = calls.filter((call) => call.url.includes("/rest/v1/rpc/content_hybrid"));
+        assert.equal(rpcCalls.length, 1);
+        assert.ok(rpcCalls.every((call) => call.body.project_id_filter === PROJECT_A), "never called without the Project filter");
       }
     );
   });
@@ -196,19 +209,13 @@ export function registerChatProjectScopeTests(test) {
     );
   });
 
-  test("chat project scope: content tool legs stay unscoped when the caller has no project", async () => {
+  test("chat project scope: content tools without a project are refused before any call", async () => {
     await withFetch(
-      (call) => {
-        if (call.url.includes("/rest/v1/rpc/match_meetings")) return jsonResponse([{ id: 5, similarity: 0.5 }]);
-        if (call.url.includes("/rest/v1/meetings?")) return jsonResponse([{ id: 5, meeting_date: "2026-10-01" }]);
-        return jsonResponse([], 404);
-      },
+      () => jsonResponse([{ id: 5 }]),
       async (calls) => {
         const config = scopedConfig({ contentTools: { perTool: { meetings: { enabled: true, answerSynthesis: false } } } });
-        await runContentToolAgent({ config, toolName: "meetings", query: "pour schedule" });
-        for (const call of calls.filter((item) => item.url.includes("/rest/v1/meetings?"))) {
-          assert.doesNotMatch(call.url, /project_id=/);
-        }
+        await assert.rejects(runContentToolAgent({ config, toolName: "meetings", query: "pour schedule" }), (error) => error.code === "company_db_required");
+        assert.equal(calls.length, 0);
       }
     );
   });
@@ -292,38 +299,40 @@ export function registerChatProjectScopeTests(test) {
     );
   });
 
-  test("project graph: older graph_search without filter_project_id is post-filtered, never widened", async () => {
+  test("project graph: older graph_search without filter_project_id is refused, never run unfiltered", async () => {
     await withFetch(
       (call) => {
         if (!call.url.includes("/rest/v1/rpc/graph_search")) return jsonResponse([{ id: "leak" }]);
         if ("filter_project_id" in call.body) {
           return jsonResponse({ code: "PGRST202", message: "Could not find the function public.graph_search(filter_project_id, max_rows, query_text, source_refs) in the schema cache" }, 404);
         }
-        return jsonResponse([
-          { edge_id: "ours", source_node: { project_id: PROJECT_A }, target_node: { project_id: PROJECT_A } },
-          { edge_id: "theirs", source_node: { project_id: PROJECT_B }, target_node: { project_id: PROJECT_B } },
-          { edge_id: "mixed", source_node: { project_id: PROJECT_A }, target_node: { project_id: PROJECT_B } },
-          { edge_id: "unlabelled", source_node: {}, target_node: {} }
-        ]);
+        return jsonResponse([{ edge_id: "theirs", source_node: { project_id: PROJECT_B }, target_node: { project_id: PROJECT_B } }]);
       },
       async (calls) => {
-        const graph = await graphSearch({ config: scopedConfig({ projectId: PROJECT_A }), payload: { query_text: "x", source_refs: [] } });
-        assert.deepEqual(graph.results.map((row) => row.edge_id), ["ours"]);
+        await assert.rejects(
+          graphSearch({ config: scopedConfig({ projectId: PROJECT_A }), payload: { query_text: "x", source_refs: [] } }),
+          (error) => error.code === "search_function_outdated"
+        );
+        const rpcCalls = calls.filter((call) => call.url.includes("/rest/v1/rpc/graph_search"));
+        assert.equal(rpcCalls.length, 1);
+        assert.equal(rpcCalls[0].body.filter_project_id, PROJECT_A);
         assert.equal(calls.some((call) => /\/rest\/v1\/graph_(edges|nodes)/.test(call.url)), false, "no unscoped REST fallback");
       }
     );
   });
 
-  test("project graph: scoped graph search returns nothing when the Company DB has no graph", async () => {
+  test("project graph: a Company DB without graph_search is refused and reads nothing else", async () => {
     await withFetch(
       (call) => call.url.includes("/rest/v1/rpc/graph_search")
         ? jsonResponse({ code: "PGRST202", message: "Could not find the function public.graph_search in the schema cache" }, 404)
         : jsonResponse([{ id: "leak" }]),
       async (calls) => {
-        const graph = await graphSearch({ config: scopedConfig({ projectId: PROJECT_A }), payload: { query_text: "x" } });
-        assert.equal(graph.skipped, true);
-        assert.deepEqual(graph.results, []);
+        await assert.rejects(
+          graphSearch({ config: scopedConfig({ projectId: PROJECT_A }), payload: { query_text: "x" } }),
+          (error) => error.code === "search_function_outdated"
+        );
         assert.equal(calls.some((call) => /\/rest\/v1\/graph_(edges|nodes)/.test(call.url)), false);
+        await assert.rejects(graphSearch({ config: scopedConfig(), payload: { query_text: "x" } }), (error) => error.code === "company_db_required");
       }
     );
   });
@@ -373,13 +382,13 @@ export function registerChatProjectScopeTests(test) {
       async (calls) => {
         await fetchTimelineEvents({ config: scopedConfig({ projectId: PROJECT_A }) });
         assert.match(calls[0].url, new RegExp(`[?&]project_id=eq\\.${PROJECT_A}(&|$)`));
-        await fetchTimelineEvents({ config: scopedConfig() });
-        assert.doesNotMatch(calls[1].url, /project_id=eq/);
+        await assert.rejects(fetchTimelineEvents({ config: scopedConfig() }), (error) => error.code === "company_db_required");
+        assert.equal(calls.length, 1, "an unscoped timeline read makes no call");
       }
     );
   });
 
-  test("match RPCs: scoped alert search passes project_id_filter and falls back to post-filtering on older DBs", async () => {
+  test("match RPCs: scoped alert search passes project_id_filter and refuses an older RPC without it", async () => {
     await withFetch(
       (call) => {
         if (call.url.includes("/rest/v1/rpc/match_alerts")) {
@@ -390,14 +399,15 @@ export function registerChatProjectScopeTests(test) {
         return jsonResponse([], 404);
       },
       async (calls) => {
-        const result = await runAlertAgent({ config: scopedConfig({ projectId: PROJECT_A }), query: "alerts" });
+        await assert.rejects(
+          runAlertAgent({ config: scopedConfig({ projectId: PROJECT_A }), query: "alerts" }),
+          (error) => error.code === "search_function_outdated"
+        );
         const rpcCalls = calls.filter((call) => call.url.includes("/rest/v1/rpc/match_alerts"));
-        assert.equal(rpcCalls.length, 2);
+        assert.equal(rpcCalls.length, 1);
         assert.equal(rpcCalls[0].body.project_id_filter, PROJECT_A);
         assert.equal(rpcCalls[0].body.match_count, 4, "no over-fetch when the RPC filters by project");
-        assert.equal("project_id_filter" in rpcCalls[1].body, false);
-        assert.equal(rpcCalls[1].body.match_count, 12, "fallback over-fetches before the project post-filter");
-        assert.equal(result.resultsCount, 1);
+        assert.equal(calls.some((call) => call.url.includes("/rest/v1/alerts?")), false);
       }
     );
   });
@@ -467,8 +477,9 @@ export function registerChatProjectScopeTests(test) {
         await listProjectInsightRuns({ config: scopedConfig({ projectId: PROJECT_A }) });
         await getProjectInsightRun({ config: scopedConfig({ projectId: PROJECT_A }), runId: "run-1" });
         for (const call of calls) assert.match(call.url, new RegExp(`[?&]project_id=eq\\.${PROJECT_A}(&|$)`));
-        await listProjectInsightRuns({ config: scopedConfig() });
-        assert.doesNotMatch(calls.at(-1).url, /project_id=eq/);
+        const before = calls.length;
+        await assert.rejects(listProjectInsightRuns({ config: scopedConfig() }), (error) => error.code === "company_db_required");
+        assert.equal(calls.length, before);
       }
     );
   });

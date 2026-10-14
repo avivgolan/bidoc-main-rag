@@ -1916,7 +1916,9 @@ test("schedule assignment agent: runtime route owns settings and forces Phase 6 
   assert.ok(start >= 0 && end > start);
   assert.match(route, /reloadSettingsFromDb\(\)/u);
   assert.match(route, /settingsOpenRouterApiKey\(\)/u);
-  assert.match(route, /config: getConfig\(\)/u);
+  // Settings stay server-owned; the request supplies only its Company DB + Project.
+  assert.match(route, /config: buildRequestConfig\(req, body\)/u);
+  assert.doesNotMatch(server, /body\.contentSupabaseUrl|body\.contentSupabaseKey/u);
   assert.match(route, /timeFilter: body\.timeFilter === true/u);
   assert.doesNotMatch(route, /const reviewOnly = body\.reviewOnly/u);
   assert.match(route, /commit: false/u);
@@ -1929,7 +1931,6 @@ test("schedule assignment agent: runtime route owns settings and forces Phase 6 
   assert.match(route, /workflowLog: result\.workflowLog/u);
   assert.match(route, /persistScheduleActivityAssignmentWorkflow\(/u);
   assert.doesNotMatch(route, /body\.(?:prompt|model|threshold|apiKey|commit)/u);
-  assert.doesNotMatch(route, /buildRequestConfig/u);
   assert.match(server, /assignment-agent\/shadow-report/u);
   assert.match(server, /scheduleAssignmentShadowRuntimeStatus\(\)/u);
   assert.match(server, /delete reviewerResult\.shadow/u);
@@ -2397,7 +2398,7 @@ test("schedule ingestion: source profiles are a settings switch, not a code chan
   assert.deepEqual(Object.keys(SCHEDULE_SOURCE_PROFILES).sort(), ["app_data", "content", "dev", "kapaim"]);
 });
 
-test("schedule ingestion: source uploads use MAIN while engine tables use APP DATA / KAPAIM", () => {
+test("schedule ingestion: schedule sources and engine tables use only the request Company DB", () => {
   const target = scheduleSupabaseConfig({
     supabaseUrl: "https://app.example",
     supabaseServiceRoleKey: "app-key",
@@ -2415,14 +2416,16 @@ test("schedule ingestion: source uploads use MAIN while engine tables use APP DA
     filesTable: "gantt_files_test",
     tasksTable: "gantt_tasks_test"
   });
-  assert.deepEqual(scheduleSupabaseConfig({
+  // The App DB ("main") is never a schedule source, and there is no fallback
+  // to it when the request carries no Company DB.
+  assert.throws(() => scheduleSupabaseConfig({
     supabaseUrl: "https://main.example",
     supabaseServiceRoleKey: "main-key"
-  }, "main", {}), {
-    label: "App / MAIN",
+  }, "main"), (error) => error.code === "company_db_required");
+  assert.throws(() => scheduleSupabaseConfig({
     supabaseUrl: "https://main.example",
     supabaseServiceRoleKey: "main-key"
-  });
+  }), (error) => error.code === "company_db_required");
 });
 
 test("schedule ingestion: Gantt source follows the active project's database settings", () => {

@@ -80,7 +80,13 @@ All configuration is read from environment variables. For local development, pla
 | `N8N_BASE_URL` | Base URL for n8n webhooks |
 | `N8N_TOOL_<NAME>_URL` | Override URL for a specific tool webhook |
 | `CONTRACTS_INGESTION_SECRET` | Dedicated secret accepted in `X-Contracts-Ingestion-Secret` when n8n calls the dry-run Contracts extraction API |
+| `META_SUPABASE_URL` / `META_SUPABASE_SERVICE_ROLE_KEY` | Optional. When both are set, every Project request's Company DB headers are cross-checked (read-only) against BiDoc's Meta DB (`projects.company_id` → `companies.supabase_url`, `company_credentials`); a mismatch is refused (403) |
+| `CONTENT_SUPABASE_URL` / `CONTENT_SUPABASE_SERVICE_ROLE_KEY` | Superadmin Contracts tooling only (server-owned KAPAIM connection). Never used for a Project request |
 | `PORT` | Server port (default: 4000) |
+
+### Company DB rule
+
+Everything main-agent does for a Project (chat, insights, search, data query, memory, alerts, indexing, schedule, graph, timeline) reads and writes only that Project's own Company DB, named by the authenticated caller in `x-content-supabase-url` / `x-content-supabase-key` plus `x-project-id` (see `src/companyDb.js`). There is no global content DB and no App DB fallback: a Project route without them is refused (400 `company_db_required`) before any database call. The App DB holds only main-agent's own tables (settings, chat history keyed by `bidoc:<projectId>:` sessions, QA reports, delay claims with `project_id`).
 
 > **Never commit `.env.local` or `data/settings.json`** — both are in `.gitignore`.
 

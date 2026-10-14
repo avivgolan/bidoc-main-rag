@@ -45,7 +45,7 @@ import { completeRun, emitRunEvent, getRunEvents } from "./runLog.js";
 import { renderPrompt, defaultPrompts } from "./prompts.js";
 import { getProjectDateTime } from "./clock.js";
 import { routeKnowledgeAgents, searchKnowledgeBase } from "./knowledge.js";
-import { getConfig, TOOL_NAMES } from "./config.js";
+import { TOOL_NAMES } from "./config.js";
 import { annotateToolCall, buildSourceQualitySummary, detectConflicts } from "./sourceQuality.js";
 import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, hashValue } from "./cache.js";
@@ -1455,7 +1455,7 @@ async function callProjectTool({
           source: "main_agent",
           runId,
           callerNodeId: "main_agent",
-          projectId: config.projectId || config.contentSource?.projectId || null
+          projectId: config.projectId || null
         },
         telemetry: telemetryFor("data_query")
       });
@@ -1998,7 +1998,11 @@ export function isDeterministicConsultantReportNotComputableCapability(capabilit
   ].includes(capability?.warning);
 }
 
-export function enforceAlertDataQueryTrustedOrigin(routing = null, requestConfig = {}, trustedConfig = getConfig()) {
+// Exact content reads run against the request's own Company DB (Data Query
+// authenticates with that connection). They need a valid request Company DB
+// origin; there is no global "trusted" content origin any more. A caller that
+// passes an explicit trustedConfig still requires the two origins to match.
+export function enforceAlertDataQueryTrustedOrigin(routing = null, requestConfig = {}, trustedConfig = null) {
   const alertTarget = routing?.lookup?.targetTable === "alerts" ||
     routing?.metricScope?.targetTable === "alerts";
   const meetingTarget = routing?.lookup?.targetTable === "meetings" ||
@@ -2012,9 +2016,9 @@ export function enforceAlertDataQueryTrustedOrigin(routing = null, requestConfig
   const requestUrl = normalizeDataQueryContentOrigin(
     requestConfig?.contentSource?.supabaseUrl || requestConfig?.contentSupabaseUrl
   );
-  const trustedUrl = normalizeDataQueryContentOrigin(
-    trustedConfig?.contentSource?.supabaseUrl || trustedConfig?.contentSupabaseUrl
-  );
+  const trustedUrl = trustedConfig
+    ? normalizeDataQueryContentOrigin(trustedConfig?.contentSource?.supabaseUrl || trustedConfig?.contentSupabaseUrl)
+    : requestUrl;
   if (requestUrl && trustedUrl && requestUrl === trustedUrl) return routing;
   const targetTable = meetingTarget ? "meetings" : emailTarget ? "emails" : exceptionTarget ? "exceptions_report" : consultantTarget ? "consultants_reports" : "alerts";
   const recordKind = meetingTarget ? "meeting" : emailTarget ? "email" : exceptionTarget ? "exception" : consultantTarget ? "consultant report" : "alert";

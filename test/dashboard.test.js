@@ -5,7 +5,7 @@ import {classifyDataQueryCapability} from '../src/subagents/dataQuery.js';
 import {buildInsightBrief} from '../src/dashboard/insightBrief.js';
 import assert from 'node:assert/strict';
 import {buildDashboard,normalizeItem,selectCohort,validRow,safeSourceUrl} from '../src/dashboard/model.js';
-import {createSourceReader,SOURCES} from '../src/dashboard/sources.js';
+import {createSourceReader,dashboardConnection,SOURCES} from '../src/dashboard/sources.js';
 import {createDashboardService} from '../src/dashboard/service.js';
 import {authorizeDashboard} from '../src/dashboard/http.js';
 import {buildSessionSetCookieHeader} from '../src/auth.js';
@@ -14,7 +14,12 @@ import {runChatPipeline} from '../src/agent.js';
 import {createRun} from '../src/runLog.js';
 
 const id='11111111-1111-4111-8111-111111111111';
-const config={supabaseUrl:'https://example.supabase.co',supabaseServiceRoleKey:'test-key',contentSource:{indexTable:'data_index'}};
+// The dashboard reads only an explicit Company DB connection (no App DB fallback).
+const config={supabaseUrl:'https://app.supabase.co',supabaseServiceRoleKey:'app-key',contentSource:{supabaseUrl:'https://example.supabase.co',supabaseServiceRoleKey:'test-key',indexTable:'data_index'}};
+test('dashboard without a Company DB connection is refused and never falls back to the App DB',()=>{
+  assert.throws(()=>dashboardConnection({supabaseUrl:'https://app.supabase.co',supabaseServiceRoleKey:'app-key',contentSource:{indexTable:'data_index'}}),(error)=>error.code==='company_db_required'&&error.status===503);
+  assert.equal(dashboardConnection(config).url,'https://example.supabase.co');
+});
 export function fixture() {
   const datasets=Object.fromEntries(Object.entries(SOURCES).map(([k,[table]])=>[k,{table,rows:[],complete:true,status:'ready'}]));
   for(const k of ['files','tasks','documents'])datasets[k]={table:k,rows:[],complete:true,status:'ready'};
@@ -47,7 +52,7 @@ test('reader follows server page caps and exposes GET only',async()=>{
 });
 test('context is bound to actor and connection; snapshot writes target only new RPC',async()=>{
   const calls=[];const fetchImpl=async(url,opts)=>{const u=new URL(url);calls.push({path:u.pathname,method:opts.method});if(opts.method==='POST')return Response.json({snapshotId:'new'});const rows=u.pathname.endsWith('/projects')?[{id,name:'test',is_active:true,settings:{}}]:[];return new Response(JSON.stringify(rows),{headers:{'content-range':`0-0/${rows.length}`}});};
-  const s=createDashboardService({fetchImpl});const v=await s.overview(config,id,{projectId:id});assert.throws(()=>s.items(config,'other',v.queryToken,'approvals'),/פגה/);assert.throws(()=>s.items({...config,supabaseServiceRoleKey:'other'},id,v.queryToken,'approvals'),/פגה/);await s.saveSnapshot(config,id,v.queryToken);assert.deepEqual(calls.filter(c=>c.method!=='GET'),[{path:'/rest/v1/rpc/dashboard_publish_snapshot_v1',method:'POST'}]);
+  const s=createDashboardService({fetchImpl});const v=await s.overview(config,id,{projectId:id});assert.throws(()=>s.items(config,'other',v.queryToken,'approvals'),/פגה/);assert.throws(()=>s.items({...config,contentSource:{...config.contentSource,supabaseServiceRoleKey:'other'}},id,v.queryToken,'approvals'),/פגה/);await s.saveSnapshot(config,id,v.queryToken);assert.deepEqual(calls.filter(c=>c.method!=='GET'),[{path:'/rest/v1/rpc/dashboard_publish_snapshot_v1',method:'POST'}]);
 });
 test('dashboard rejects anonymous, connection overrides and cross-site writes',()=>{
   process.env.MAIN_AGENT_SESSION_SECRET='dashboard-unit-test';
