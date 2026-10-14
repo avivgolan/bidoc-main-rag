@@ -9,6 +9,7 @@
 import { createEmbedding } from "../openrouter.js";
 import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
 import { projectIdFilterParam, requestProjectId, sameProjectId } from "../projectScope.js";
+import { companyDbRequiredError } from "../companyDb.js";
 
 export const INDEX_DATES_VERSION = "index-dates-v1";
 export const INTERNAL_INDEXING_VERSION = "internal-indexing-v1";
@@ -93,10 +94,19 @@ export function computeIndexDates({ sourceTable, sourceRow = null, primaryDate =
 
 // ── Backfill: fill event_date/document_date on existing index rows ───────────
 
-export async function runIndexDatesBackfill({ config, dryRun = true, limit = 3000, runId = null, emit = null } = {}) {
-  const indexTable = contentSupabaseConfig(config).indexTable;
-  // A Project-scoped run reads and patches only that Project's index rows.
+// Indexing always runs for one Project in its own Company DB; a run without
+// both is refused before any read.
+function requireIndexingScope(config) {
+  contentSupabaseConfig(config);
   const projectId = requestProjectId(config);
+  if (!projectId) throw companyDbRequiredError("Indexing must name its Project (x-project-id)");
+  return projectId;
+}
+
+export async function runIndexDatesBackfill({ config, dryRun = true, limit = 3000, runId = null, emit = null } = {}) {
+  // The run reads and patches only the request Project's index rows.
+  const projectId = requireIndexingScope(config);
+  const indexTable = contentSupabaseConfig(config).indexTable;
   const projectFilter = projectIdFilterParam(projectId);
   const summary = {
     dates_version: INDEX_DATES_VERSION,
@@ -210,6 +220,7 @@ export async function runIndexDatesBackfill({ config, dryRun = true, limit = 300
 // ── Incremental indexing: index source rows missing from data_index ──────────
 
 export async function runIncrementalIndexing({ config, dryRun = true, limit = 50, tables = null, runId = null, emit = null } = {}) {
+  requireIndexingScope(config);
   const indexTable = contentSupabaseConfig(config).indexTable;
   const summary = {
     indexing_version: INTERNAL_INDEXING_VERSION,
@@ -327,6 +338,7 @@ export function pickEmbeddingText(row = {}, textColumns = []) {
 }
 
 export async function runEmbeddingBackfill({ config, tables = null, dryRun = true, limit = 150, runId = null, emit = null } = {}) {
+  requireIndexingScope(config);
   if (!config?.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
   const targetTables = (Array.isArray(tables) && tables.length ? tables : Object.keys(EMBEDDING_BACKFILL_TABLES))
     .filter((table) => EMBEDDING_BACKFILL_TABLES[table]);

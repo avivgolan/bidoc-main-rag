@@ -579,9 +579,10 @@ export function getConfig(settingsOverride = null) {
   const secrets = settings.secrets || {};
   const appSupabaseUrl = trimSlash(secrets.supabaseUrl || process.env.SUPABASE_URL || "");
   const appSupabaseServiceRoleKey = resolveSecret(secrets.supabaseServiceRoleKey, process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const contentSource = normalizeContentSourceSettings(settings.contentSource, {
-    fallbackSupabaseUrl: appSupabaseUrl,
-    fallbackSupabaseServiceRoleKey: appSupabaseServiceRoleKey,
+  // contentSource carries only table and RPC names. The Company DB URL and key
+  // come from each request (x-content-supabase-*); there is no global content
+  // database and the App DB is never used as one (see companyDb.js).
+  const contentSource = contentTableSettings(settings.contentSource, {
     fallbackHybridRpcName: settings.retrieval?.rpcName || process.env.HYBRID_RPC_NAME || DEFAULT_HYBRID_RPC_NAME
   });
   const compactEvidenceEnv = process.env.MAIN_COMPACT_EVIDENCE_ENABLED;
@@ -601,14 +602,10 @@ export function getConfig(settingsOverride = null) {
     supabaseUrl: appSupabaseUrl,
     supabaseServiceRoleKey: appSupabaseServiceRoleKey,
     contentSource,
-    // Managed Supabase Auth service-account credentials. They are kept out of
-    // persisted/public settings and exchange only for short-lived server-side
-    // access tokens carrying app_metadata.data_query_role=bidoc_data_query.
-    dataQueryServiceEmail: String(process.env.DATA_QUERY_SUPABASE_SERVICE_EMAIL || "").trim(),
-    dataQueryServicePassword: String(process.env.DATA_QUERY_SUPABASE_SERVICE_PASSWORD || ""),
-    // Temporary compatibility path for the former manually minted custom-role
-    // JWT. Managed service-account credentials take precedence when configured.
-    dataQueryReadAccessToken: String(process.env.DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN || "").trim(),
+    // Data Query reads the request's own Company DB through its service
+    // connection behind the fixed read-only transport. The former global
+    // service account (DATA_QUERY_SUPABASE_*) lived in one content database
+    // and is no longer read.
     postgresUrl: process.env.POSTGRES_URL || "",
     // Base origin of the bidoc web app. Used to build a clickable "view in bidoc"
     // link for source records whose underlying table has no external URL of its
@@ -676,6 +673,13 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
   const settings = settingsOverride && typeof settingsOverride === "object"
     ? settingsOverride
     : readLocalSettings();
+  // The saved contentSource connection now serves only the superadmin
+  // Contracts tooling; Project requests use their own Company DB headers.
+  const contractsSource = normalizeContentSourceSettings(settings.contentSource, {
+    fallbackSupabaseUrl: config.supabaseUrl,
+    fallbackSupabaseServiceRoleKey: config.supabaseServiceRoleKey,
+    fallbackHybridRpcName: config.retrieval?.rpcName
+  });
   return {
     models: config.models,
     prompts: config.prompts,
@@ -693,14 +697,16 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
     scheduleAssignmentAgent: scheduleAssignmentConfigurationSnapshot(config.scheduleAssignmentAgent),
     contractsAgent: config.contractsAgent,
     contentSource: {
-      ...config.contentSource,
-      supabaseServiceRoleKey: maskSecret(config.contentSource.supabaseServiceRoleKey),
-      keyRole: supabaseKeyRole(config.contentSource.supabaseServiceRoleKey)
+      ...contractsSource,
+      supabaseServiceRoleKey: maskSecret(contractsSource.supabaseServiceRoleKey),
+      keyRole: supabaseKeyRole(contractsSource.supabaseServiceRoleKey),
+      scope: "contracts_only",
+      projectRequests: "request_company_db_headers"
     },
     memory: config.memory,
     timezone: config.timezone,
     supabaseConfigured: Boolean(config.supabaseUrl && config.supabaseServiceRoleKey),
-    contentSupabaseConfigured: Boolean(config.contentSource.supabaseUrl && config.contentSource.supabaseServiceRoleKey),
+    contentSupabaseConfigured: Boolean(contractsSource.supabaseUrl && contractsSource.supabaseServiceRoleKey),
     openRouterConfigured: Boolean(config.openRouterApiKey),
     n8nBaseUrl: config.n8n.baseUrl,
     toolsRuntime: config.n8n.runtime,
@@ -718,8 +724,8 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
         openRouterApiKey: secretSource(settings.secrets?.openRouterApiKey, process.env.OPENROUTER_API_KEY),
         supabaseUrl: secretSource(settings.secrets?.supabaseUrl, process.env.SUPABASE_URL),
         supabaseServiceRoleKey: secretSource(settings.secrets?.supabaseServiceRoleKey, process.env.SUPABASE_SERVICE_ROLE_KEY),
-        contentSupabaseUrl: contentSecretSource(settings.contentSource?.supabaseUrl, process.env.CONTENT_SUPABASE_URL, config.contentSource.usesAppSupabase),
-        contentSupabaseServiceRoleKey: contentSecretSource(settings.contentSource?.supabaseServiceRoleKey, process.env.CONTENT_SUPABASE_SERVICE_ROLE_KEY, config.contentSource.usesAppSupabase)
+        contentSupabaseUrl: contentSecretSource(settings.contentSource?.supabaseUrl, process.env.CONTENT_SUPABASE_URL, contractsSource.usesAppSupabase),
+        contentSupabaseServiceRoleKey: contentSecretSource(settings.contentSource?.supabaseServiceRoleKey, process.env.CONTENT_SUPABASE_SERVICE_ROLE_KEY, contractsSource.usesAppSupabase)
       }
     },
     tools: Object.fromEntries(
@@ -909,9 +915,10 @@ export function exportFullSettings(config = getConfig()) {
       timelineLinks: config.timelineLinks,
       scheduleAssignmentAgent: config.scheduleAssignmentAgent,
       contractsAgent: config.contractsAgent,
+      // The saved (Contracts-only) connection; Project requests never use it.
       contentSource: {
-        supabaseUrl: config.contentSource.supabaseUrl,
-        supabaseServiceRoleKey: config.contentSource.supabaseServiceRoleKey,
+        supabaseUrl: config.contentSource?.supabaseUrl || settings.contentSource?.supabaseUrl || "",
+        supabaseServiceRoleKey: config.contentSource?.supabaseServiceRoleKey || settings.contentSource?.supabaseServiceRoleKey || "",
         hybridRpcName: config.contentSource.hybridRpcName,
         indexTable: config.contentSource.indexTable,
         alertsTable: config.contentSource.alertsTable,
@@ -971,6 +978,46 @@ export function previewImportedSettingsFile(value = {}) {
   };
 }
 
+// Table and RPC names of the content source, without any connection. The
+// Company DB URL and key are request-scoped (buildRequestConfig in server.js).
+export function contentTableSettings(value = {}, fallback = {}) {
+  const raw = value && typeof value === "object" ? value : {};
+  const indexTable = String(raw.indexTable || process.env.CONTENT_INDEX_TABLE || DEFAULT_INDEX_TABLE).trim();
+  const alertsTable = String(raw.alertsTable || process.env.CONTENT_ALERTS_TABLE || DEFAULT_ALERTS_TABLE).trim();
+  return {
+    supabaseUrl: "",
+    supabaseServiceRoleKey: "",
+    hybridRpcName: String(raw.hybridRpcName || process.env.CONTENT_HYBRID_RPC_NAME || fallback.fallbackHybridRpcName || DEFAULT_HYBRID_RPC_NAME).trim(),
+    indexTable,
+    alertsTable,
+    alertsRpcName: String(raw.alertsRpcName || process.env.CONTENT_ALERTS_RPC_NAME || `match_${alertsTable}`).trim(),
+    useAppSupabase: false,
+    usesAppSupabase: false
+  };
+}
+
+// Config for the superadmin Contracts routes only (server-owned KAPAIM/MAIN
+// connections, client database overrides rejected). It keeps the legacy
+// contentSource resolution below and is marked serverOwned; no Project
+// request path uses it.
+export function contractsServerConfig(settingsOverride = null) {
+  const settings = settingsOverride && typeof settingsOverride === "object" ? settingsOverride : readLocalSettings();
+  const base = getConfig(settings);
+  return {
+    ...base,
+    contentSource: {
+      ...normalizeContentSourceSettings(settings.contentSource, {
+        fallbackSupabaseUrl: base.supabaseUrl,
+        fallbackSupabaseServiceRoleKey: base.supabaseServiceRoleKey,
+        fallbackHybridRpcName: base.retrieval?.rpcName
+      }),
+      serverOwned: true
+    }
+  };
+}
+
+// The legacy contentSource resolution (saved settings, CONTENT_SUPABASE_*,
+// then the App DB). Used only by contractsServerConfig.
 export function normalizeContentSourceSettings(value = {}, fallback = {}) {
   const raw = value && typeof value === "object" ? value : {};
   const fallbackUrl = fallback.fallbackSupabaseUrl || "";

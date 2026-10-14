@@ -225,8 +225,8 @@ export function registerInternalScopeAccessTests(test) {
       await fetchLegacyAlertsTimelineEvents({ config: scoped(), ids: ["alert_1", "2"] });
       assert.equal(calls.length, 1);
       assert.match(calls[0].url, new RegExp(`project_id=eq\\.${PROJECT_A}`));
-      await fetchLegacyAlertsTimelineEvents({ config: baseConfig(), ids: ["3"] });
-      assert.doesNotMatch(calls[1].url, /project_id=eq/);
+      await assert.rejects(fetchLegacyAlertsTimelineEvents({ config: baseConfig(), ids: ["3"] }), (error) => error.code === "company_db_required");
+      assert.equal(calls.length, 1);
     });
   });
 
@@ -238,8 +238,9 @@ export function registerInternalScopeAccessTests(test) {
       for (const call of calls) assert.match(call.url, new RegExp(`project_id=eq\\.${PROJECT_A}`), call.url);
     });
     await withFetch(() => jsonResponse([]), async (calls) => {
-      await runIndexDatesBackfill({ config: baseConfig(), dryRun: true, limit: 10 });
-      for (const call of calls) assert.doesNotMatch(call.url, /project_id=eq/);
+      await assert.rejects(runIndexDatesBackfill({ config: baseConfig(), dryRun: true, limit: 10 }), (error) => error.code === "company_db_required");
+      await assert.rejects(runEmbeddingBackfill({ config: baseConfig(), dryRun: true, limit: 10 }), (error) => error.code === "company_db_required");
+      assert.equal(calls.length, 0);
     });
   });
 

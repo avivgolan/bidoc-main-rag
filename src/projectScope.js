@@ -1,6 +1,7 @@
 // Project scoping for chat and insights. One Company DB can hold several Projects, so
 // a request carrying x-project-id (config.projectId) must only read that
-// Project's rows. Callers without a projectId keep their existing behaviour.
+// Project's rows. Company DB reads without a projectId are refused (see
+// companyDb.js and the Project gate in server.js).
 
 export function requestProjectId(config) {
   const value = String(config?.projectId ?? "").trim();
@@ -17,11 +18,10 @@ export function sameProjectId(left, right) {
   return Boolean(a) && a === String(right ?? "").trim().toLowerCase();
 }
 
-// match_<table> RPCs take an optional project_id_filter (migration
-// 20261013120000_match_rpc_project_filter). Older Company DBs lack it: the
-// project filter is then applied on the follow-up row select, so the fallback
-// call asks the RPC for more candidates to keep recall.
-export const PROJECT_SCOPED_OVERFETCH = 3;
+// match_<table> / hybrid / graph_search RPCs take a Project filter (migration
+// 20261013120000_match_rpc_project_filter). An older Company DB whose RPC
+// lacks it is refused (search_function_outdated in companyDb.js), never
+// called unfiltered.
 
 // PostgREST signature errors: the function or one of its named params is
 // unknown to the DB (PGRST202 / schema cache), i.e. an older schema.

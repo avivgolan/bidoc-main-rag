@@ -5,6 +5,7 @@ import {
   scheduleSupabaseConfig
 } from "../scheduleIngestion.js";
 import { ContractsAgentError } from "../contracts/errors.js";
+import { hasCompanyDbConnection } from "../companyDb.js";
 
 export const INDICATOR_CONTRACT_CONDITIONS_VERSION = "indicator-contract-conditions.v1";
 export const INDICATOR_CONTRACT_SYNC_RPC = "bidoc_indicator_sync_contract_conditions_v1";
@@ -83,8 +84,8 @@ export async function resolveIndicatorProjectContext({
 } = {}) {
   const normalized = uuid(projectId, "projectId");
   const cfg = config || getConfig();
-  const target = scheduleSupabaseConfig(cfg, "app_data");
-  if (!target.supabaseUrl || !target.supabaseServiceRoleKey) {
+  // Without a Company DB there is no mapping to read (nothing is read).
+  if (!hasCompanyDbConnection(cfg)) {
     return { mappingFound: false, sourceProjectId: normalized, scheduleProjectId: normalized };
   }
   const result = await scheduleRpcRequest({

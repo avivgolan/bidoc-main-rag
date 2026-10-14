@@ -10,7 +10,6 @@ import { appendLocalMemory, getMemorySummary, memorySummaryMessages } from "../s
 import { appendConflictWarnings, appendEmailSemanticLatestBoundary, appendExactInvoiceEnrichment, buildAlertAgentRequest, buildDeterministicAlertAnswer, buildDeterministicDateScopedMeetingDecisionAnswer, buildDeterministicEmailAnswer, buildDeterministicExceptionAnswer, buildDeterministicFinancialDataQueryFailureAnswer, buildDeterministicFinancialDocumentAnswer, buildDeterministicInvoiceAnswer, buildDeterministicMeetingAnswer, buildDeterministicMeetingEvidenceUnavailableAnswer, buildDeterministicMeetingFallbackEvidenceAnswer, buildDeterministicSafetyAnswer, buildExactInvoiceDocumentSources, buildExactInvoiceEnrichment, buildExactInvoiceEnrichments, buildExactSafetyDocumentSources, buildExactSafetyEnrichments, buildExceptionApprovalFallbackAnswer, buildMainDataQueryWorkflowProjection, buildMainProjectTools, buildSafetyPrecheckTools, dataQueryClassifierDateScopeForQuestion, enforceAlertDataQueryTrustedOrigin, enforceProfessionalKnowledgeMode, exactAlertLookupRecords, exactEmailLookupRecords, exactExceptionLookupRecords, exactInvoiceAttachmentProjectId, exactInvoiceLookupProjectId, exactInvoiceLookupProjectScope, exactMeetingLookupRecords, fallbackRagAnswer, hasVerifiedMeetingEvidence, isDeterministicAlertCapability, isDeterministicAlertMixedCapability, isDeterministicAlertNotComputableCapability, isDeterministicConsultantReportNotComputableCapability, isDeterministicEmailCapability, isDeterministicEmailMixedCapability, isDeterministicEmailNotComputableCapability, isDeterministicExceptionCapability, isDeterministicExceptionMixedCapability, isDeterministicExceptionNotComputableCapability, isDeterministicFinancialDocumentMetricCapability, isDeterministicFinancialTransactionTypeCapability, isDeterministicInvoiceCapability, isDeterministicMeetingCapability, isDeterministicMeetingMixedCapability, isDeterministicMeetingNotComputableCapability, isDeterministicSafetyCapability, isDeterministicSafetyNotComputableCapability, isExceptionCountApprovalMixedCapability, isMeetingSemanticFallbackCapability, isPureEmailSemanticCapability, isPureMeetingEvidenceCapability, KNOWLEDGE_PLANNER_RESPONSE_FORMAT, mainSynthesisRetryPolicy, normalizeDataQueryClassifierDate, prefixExactExceptionApprovalAnchor, projectChatToolCallsForClient, projectMeetingEvidenceConflicts, resolveExactInvoiceAttachmentLinks, resolveExactSafetyAttachmentLinks, sanitizeCustomerFacingAnswer, shouldBypassGenericRetrieval, shouldRunDataQuery, shouldRunMeetingEvidenceForRequest, summarizeMeetingEvidenceErrorForWorkflow } from "../src/agent.js";
 import { buildAlertDateFilter, filterAlertsByDateRange } from "../src/subagents/alert.js";
 import { applyDataQueryCallerScope, buildHeuristicQueryPlan, buildDataQueryMachineResult, buildDataQueryManifest, buildDataQueryManifestFromSelection, buildDataQueryMetrics, buildDataQueryWorkflowLog, classifyDataQueryCapability, clearDataQueryRunCache, DATA_QUERY_CONTRACT_VERSION, dataQueryPlanSignature, dataQuerySettings, dataQuerySupabaseHeaders, executeQueryPlans, fetchExactPlan, introspectSupabaseTables, normalizeDataQueryCaller, normalizeExactExecution, parseDataQueryLookupIntent, parseDataQueryMetricScope, parseOpenApiTables, planDataQueryWithLlm, runDataQueryAgent, summarizeDataQueryMetricsForWorkflow, validateQueryPlan } from "../src/subagents/dataQuery.js";
-import { clearDataQueryAccessTokenCache, getDataQueryAccessToken, validateDataQueryAccessToken } from "../src/subagents/dataQueryAuth.js";
 import { canonicalizeDataQueryAlertInputType, canonicalizeDataQueryAlertType, canonicalizeDataQuerySafetyRisk, DATA_QUERY_ALERT_INPUT_TYPE_VALUES, DATA_QUERY_ALERT_ITEM_STATUS, DATA_QUERY_ALERT_SEVERITY_LEVEL, DATA_QUERY_ALERT_TYPE_VALUES, DATA_QUERY_EMAIL_ALLOWED_RELEVANCE_VALUES, DATA_QUERY_EMAIL_CATEGORY_VALUES, DATA_QUERY_EMAIL_DIRECTION_VALUES, DATA_QUERY_EMAIL_ITEM_STATUS, DATA_QUERY_EMAIL_NO_CLEAR_RELEVANCE, DATA_QUERY_EMAIL_RELEVANCE_VALUES, DATA_QUERY_EXCEPTION_CURRENCY, DATA_QUERY_EXCEPTION_ITEM_STATUS_VALUES, DATA_QUERY_EXCEPTION_URGENCY_VALUES, DATA_QUERY_EXCEPTION_VAT_RATE, DATA_QUERY_EXACT_OPERATIONS, DATA_QUERY_EXACT_RPC, DATA_QUERY_FINANCIAL_INVOICE_TYPE, DATA_QUERY_MANAGED_READ_TRANSPORT, DATA_QUERY_MEETING_STATUS_VALUES, dataQuerySafetyRiskRawValues, dataQueryTablePolicy } from "../src/subagents/dataQueryMetadata.js";
 import { analyzeHebrewEmailRelevance, analyzeHebrewExceptionIntent, DATA_QUERY_HEBREW_LEXICON, normalizeDataQueryHebrewQuestion, normalizeHebrewEmailMetricQuestion, normalizeHebrewExceptionMetricQuestion } from "../src/subagents/dataQueryHebrewLexicon.js";
 import { analyzeDataQueryFinancialTransactionType, DATA_QUERY_FINANCIAL_ALL_ROWS_LIMIT, DATA_QUERY_FINANCIAL_TRANSACTION_TYPE_VALUES, DATA_QUERY_FINANCIAL_TYPE_LEXICON, dataQueryFinancialTransactionTypeFilter, dataQueryFinancialTypeForStoredValue, isDataQueryFinancialAllListIntent } from "../src/subagents/dataQueryFinancialLexicon.js";
@@ -58,6 +57,7 @@ import { registerChatProjectScopeTests } from "./chat-project-scope.tests.js";
 import { registerInsightsProjectScopeTests } from "./insights-project-scope.tests.js";
 import { registerInternalScopeTests } from "./internal-scope.tests.js";
 import { registerInternalScopeAccessTests } from "./internal-scope-access.tests.js";
+import { registerCompanyDbIsolationTests } from "./company-db-isolation.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
@@ -870,8 +870,7 @@ test("data query Phase 4A.2 registers financial transactions as dormant and fail
 
 test("data query activates the reviewed financial read contract only with dedicated credentials", () => {
   const config = {
-    dataQueryServiceEmail: "data-query@example.invalid",
-    dataQueryServicePassword: "private-password"
+    contentSource: { supabaseUrl: "https://company.supabase.test", supabaseServiceRoleKey: "sb_secret_company" }
   };
   const financial = buildDataQueryManifest(config)
     .find((table) => table.tableName === "financial_transactions");
@@ -914,8 +913,7 @@ test("data query merges the approved financial built-in into legacy data_index-o
       }
     };
     const config = {
-      dataQueryServiceEmail: "data-query@example.invalid",
-      dataQueryServicePassword: "private-password"
+      contentSource: { supabaseUrl: "https://company.supabase.test", supabaseServiceRoleKey: "sb_secret_company" }
     };
     const settings = dataQuerySettings(config);
     assert.equal(settings.usingSelection, true);
@@ -961,8 +959,7 @@ test("data query uses the deterministic planner for recognized financial lookups
     openRouterApiKey: "test-openrouter-key",
     models: { knowledgePlanner: "test-planner", main: "test-main" },
     contentSource: {},
-    dataQueryServiceEmail: "data-query@example.invalid",
-    dataQueryServicePassword: "private-password"
+    contentSource: { supabaseUrl: "https://company.supabase.test", supabaseServiceRoleKey: "sb_secret_company" }
   };
   const financial = buildDataQueryManifest(config)
     .find((table) => table.tableName === "financial_transactions");
@@ -1198,14 +1195,15 @@ test("data query exact invoice enrichment fallback performs one fixed GET by int
           supabaseServiceRoleKey: "content-key"
         }
       },
-      id: 7
+      id: 7,
+      projectId
     });
     assert.equal(row.id, 7);
     assert.equal(calls.length, 1);
     const request = new URL(calls[0].url);
     assert.equal(request.pathname, "/rest/v1/financial_transactions");
     assert.equal(request.searchParams.get("id"), "eq.7");
-    assert.equal(request.searchParams.get("project_id"), null);
+    assert.equal(request.searchParams.get("project_id"), `eq.${projectId}`);
     assert.equal(request.searchParams.get("limit"), "1");
     assert.ok(request.searchParams.get("select").includes("amount_numeric"));
     assert.ok(request.searchParams.get("select").includes("data_link"));
@@ -3170,21 +3168,21 @@ test("data query API requires its configured server secret", () => {
   assert.deepEqual(authorizeDataQueryRequest(request("expected"), { secret: "expected" }), { ok: true, status: 200, error: null });
 });
 
-test("data query reads require a dedicated database-role access token", () => {
+test("data query reads use only the request Company DB service connection", () => {
   const config = {
-    contentSource: { supabaseServiceRoleKey: "server-api-key" },
-    dataQueryReadAccessToken: "dedicated-read-jwt"
+    contentSource: { supabaseUrl: "https://company-a.supabase.co", supabaseServiceRoleKey: "sb_secret_company-a" },
+    dataQueryReadAccessToken: "global-read-jwt"
   };
   const headers = dataQuerySupabaseHeaders(config);
-  assert.equal(headers.apikey, "server-api-key");
-  assert.equal(headers.Authorization, "Bearer dedicated-read-jwt");
-  assert.throws(() => dataQuerySupabaseHeaders({ contentSource: config.contentSource }), /DATA_QUERY_SUPABASE_READ_ACCESS_TOKEN/);
-  const exposed = publicSettings({
-    ...getConfig(),
-    dataQueryReadAccessToken: "dedicated-read-jwt",
-    dataQueryServiceEmail: "private@example.invalid",
-    dataQueryServicePassword: "private-password"
-  });
+  assert.equal(headers.apikey, "sb_secret_company-a");
+  // A leftover global Data Query token is never sent to a Company DB.
+  assert.equal("Authorization" in headers, false);
+  assert.throws(() => dataQuerySupabaseHeaders({ contentSource: { supabaseServiceRoleKey: "sb_secret_company-a" } }), (error) => error.code === "company_db_required");
+  const global = getConfig();
+  assert.equal("dataQueryReadAccessToken" in global, false);
+  assert.equal("dataQueryServiceEmail" in global, false);
+  assert.equal("dataQueryServicePassword" in global, false);
+  const exposed = publicSettings(global);
   assert.equal("dataQueryReadAccessToken" in exposed, false);
   assert.equal("dataQueryServiceEmail" in exposed, false);
   assert.equal("dataQueryServicePassword" in exposed, false);
@@ -3353,101 +3351,6 @@ test("data query uses the explicit MAIN mapping only through the fixed read-only
   const exceptions = buildDataQueryManifest(config).find((table) => table.tableName === "exceptions_report");
   assert.equal(exceptions.exactTransport, DATA_QUERY_MANAGED_READ_TRANSPORT);
   assert.equal(exceptions.executionContract.status, "active");
-});
-
-test("data query managed service account validates, caches, and refreshes short-lived tokens", async () => {
-  clearDataQueryAccessTokenCache();
-  const baseSeconds = 2_000_000_000;
-  let clock = baseSeconds * 1000;
-  let requests = 0;
-  const firstToken = testJwt({
-    role: "authenticated",
-    app_metadata: { data_query_role: "bidoc_data_query" },
-    exp: baseSeconds + 120
-  });
-  const refreshedToken = testJwt({
-    role: "authenticated",
-    app_metadata: { data_query_role: "bidoc_data_query" },
-    exp: baseSeconds + 500
-  });
-  const config = {
-    contentSource: {
-      supabaseUrl: "https://content.example",
-      supabaseServiceRoleKey: "server-api-key"
-    },
-    dataQueryServiceEmail: "data-query@example.invalid",
-    dataQueryServicePassword: "secret-password"
-  };
-  const fetchImpl = async (url, options) => {
-    requests += 1;
-    assert.match(url, /\/auth\/v1\/token\?grant_type=/);
-    if (requests === 1) {
-      assert.match(url, /grant_type=password/);
-      assert.deepEqual(JSON.parse(options.body), {
-        email: "data-query@example.invalid",
-        password: "secret-password"
-      });
-      return {
-        ok: true,
-        text: async () => JSON.stringify({
-          access_token: firstToken,
-          refresh_token: "refresh-one",
-          expires_at: baseSeconds + 120
-        })
-      };
-    }
-    assert.match(url, /grant_type=refresh_token/);
-    assert.deepEqual(JSON.parse(options.body), { refresh_token: "refresh-one" });
-    return {
-      ok: true,
-      text: async () => JSON.stringify({
-        access_token: refreshedToken,
-        refresh_token: "refresh-two",
-        expires_at: baseSeconds + 500
-      })
-    };
-  };
-
-  assert.equal(await getDataQueryAccessToken(config, { fetchImpl, now: () => clock }), firstToken);
-  clock += 30_000;
-  assert.equal(await getDataQueryAccessToken(config, { fetchImpl, now: () => clock }), firstToken);
-  assert.equal(requests, 1);
-  clock += 40_000;
-  assert.equal(await getDataQueryAccessToken(config, { fetchImpl, now: () => clock }), refreshedToken);
-  assert.equal(requests, 2);
-  assert.equal(validateDataQueryAccessToken(refreshedToken).mode, "managed_service_account");
-  assert.throws(
-    () => validateDataQueryAccessToken(testJwt({ role: "authenticated", app_metadata: {}, exp: baseSeconds + 500 })),
-    /missing the bidoc_data_query authorization claim/
-  );
-});
-
-test("data query managed credentials fail closed when only one value is configured", async () => {
-  clearDataQueryAccessTokenCache();
-  await assert.rejects(
-    () => getDataQueryAccessToken({
-      contentSource: { supabaseUrl: "https://content.example", supabaseServiceRoleKey: "server-api-key" },
-      dataQueryServiceEmail: "data-query@example.invalid",
-      dataQueryReadAccessToken: testJwt({ role: "bidoc_data_query" })
-    }),
-    /Both DATA_QUERY_SUPABASE_SERVICE_EMAIL and DATA_QUERY_SUPABASE_SERVICE_PASSWORD are required/
-  );
-});
-
-test("data query managed authentication forbids App Supabase fallback", async () => {
-  clearDataQueryAccessTokenCache();
-  await assert.rejects(
-    () => getDataQueryAccessToken({
-      contentSource: {
-        supabaseUrl: "https://main.example",
-        supabaseServiceRoleKey: "main-server-key",
-        usesAppSupabase: true
-      },
-      dataQueryServiceEmail: "data-query@example.invalid",
-      dataQueryServicePassword: "secret-password"
-    }),
-    /App\/MAIN Supabase fallback is forbidden/
-  );
 });
 
 test("data query executor enforces the total deadline across plans", async () => {
@@ -3775,7 +3678,8 @@ test("data query exact RPC call uses the typed payload and dedicated role token"
   });
   assert.match(request.url, new RegExp(`/rpc/${DATA_QUERY_EXACT_RPC}$`));
   assert.equal(request.options.method, "POST");
-  assert.equal(request.options.headers.Authorization, `Bearer ${legacyRoleToken}`);
+  assert.equal(request.options.headers.apikey, "server-key");
+  assert.notEqual(request.options.headers.Authorization, `Bearer ${legacyRoleToken}`, "a global Data Query token is never sent");
   assert.equal(request.body.p_operation, "count");
   assert.deepEqual(request.body.p_filters, [{ field: "source_table", op: "eq", value: "emails" }]);
   assert.equal(result.cardinality, 1248);
@@ -3904,7 +3808,8 @@ test("data query financial adapter is hardcoded, read-only, exact, and bounded",
   for (const request of requests) {
     assert.match(request.url, /^https:\/\/content\.example\/rest\/v1\/financial_transactions\?/);
     assert.equal(request.options.body, undefined);
-    assert.equal(request.options.headers.Authorization, `Bearer ${legacyRoleToken}`);
+    assert.equal(request.options.headers.apikey, "server-key");
+    assert.notEqual(request.options.headers.Authorization, `Bearer ${legacyRoleToken}`, "a global Data Query token is never sent");
   }
   const lookupUrl = new URL(requests[2].url);
   assert.equal(lookupUrl.searchParams.get("transaction_type"), `eq.${DATA_QUERY_FINANCIAL_INVOICE_TYPE}`);
@@ -6598,7 +6503,7 @@ test("workflow compare runs exposes base compare selection and node diffs", () =
   assert.match(cssSource, /#workflowRegressionNodes\.active/);
 });
 
-test("hybridSearch uses Content Supabase while app persistence uses App Supabase", async () => {
+test("hybridSearch uses the request Company DB while app persistence uses App Supabase", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
@@ -6628,7 +6533,8 @@ test("hybridSearch uses Content Supabase while app persistence uses App Supabase
         alertsRpcName: "content_alerts_match"
       },
       models: { embedding: "openai/text-embedding-3-large" },
-      retrieval: { candidates: 5, vectorWeight: 0.6, keywordWeight: 0.4 }
+      retrieval: { candidates: 5, vectorWeight: 0.6, keywordWeight: 0.4 },
+      projectId: "11111111-1111-4111-8111-111111111111"
     };
     await hybridSearch({ config, query: "test", dateFrom: null, dateTo: null });
     await saveMessage({ config, userMessage: "hello", sanitizedMessage: "hello", sessionId: "s1" });
@@ -6643,7 +6549,7 @@ test("hybridSearch uses Content Supabase while app persistence uses App Supabase
   }
 });
 
-test("timeline links remain on App Supabase", async () => {
+test("timeline links (App DB, no project_id) are never read; the content connection is the request Company DB only", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
@@ -6660,9 +6566,10 @@ test("timeline links remain on App Supabase", async () => {
       }
     };
     assert.deepEqual(contentSupabaseConfig(config).supabaseUrl, "https://content.supabase.co");
-    await listTimelineEventLinks({ config, source: "index" });
-    assert.ok(calls.some((call) => call.url.startsWith("https://app.supabase.co/rest/v1/timeline_event_links")));
-    assert.equal(calls[0].options.headers.apikey, "app-key");
+    // No fallback to the App DB when the request carries no Company DB.
+    assert.throws(() => contentSupabaseConfig({ supabaseUrl: "https://app.supabase.co", supabaseServiceRoleKey: "app-key" }), (error) => error.code === "company_db_required");
+    assert.deepEqual(await listTimelineEventLinks({ config, source: "index" }), []);
+    assert.equal(calls.length, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -6997,6 +6904,7 @@ test("compact index timeline query filters and paginates in Supabase", async () 
   };
   try {
     const config = {
+      projectId: "11111111-1111-4111-8111-111111111111",
       contentSource: {
         supabaseUrl: "https://content.supabase.co",
         supabaseServiceRoleKey: "content-key",
@@ -7060,6 +6968,7 @@ test("compact index timeline filters origins in Supabase and binds them to curso
   };
   try {
     const config = {
+      projectId: "11111111-1111-4111-8111-111111111111",
       contentSource: {
         supabaseUrl: "https://content.supabase.co",
         supabaseServiceRoleKey: "content-key",
@@ -7120,6 +7029,7 @@ test("compact alerts timeline query excludes analyzed data and filters metadata"
   try {
     const result = await fetchTimelineEventPage({
       config: {
+        projectId: "11111111-1111-4111-8111-111111111111",
         contentSource: {
           supabaseUrl: "https://content.supabase.co",
           supabaseServiceRoleKey: "content-key",
@@ -7224,6 +7134,7 @@ test("timeline events can use metadata date when date column is empty", async ()
   try {
     const events = await fetchTimelineEvents({
       config: {
+        projectId: "11111111-1111-4111-8111-111111111111",
         supabaseUrl: "https://app.supabase.co",
         supabaseServiceRoleKey: "app-key",
         contentSource: {
@@ -7272,6 +7183,7 @@ test("timeline events map data_index schema fields", async () => {
   try {
     const events = await fetchTimelineEvents({
       config: {
+        projectId: "11111111-1111-4111-8111-111111111111",
         contentSource: {
           supabaseUrl: "https://content.supabase.co",
           supabaseServiceRoleKey: "content-key",
@@ -7328,6 +7240,7 @@ test("alert timeline events map alerts schema fields", async () => {
   try {
     const events = await fetchAlertsTimelineEvents({
       config: {
+        projectId: "11111111-1111-4111-8111-111111111111",
         contentSource: {
           supabaseUrl: "https://content.supabase.co",
           supabaseServiceRoleKey: "content-key",
@@ -9165,8 +9078,7 @@ test("data query Phase 4B safety metadata is fixed, typed, canonical, and creden
   assert.deepEqual(new Set(dataQuerySafetyRiskRawValues("medium")), new Set(["medium", "בינוני", "בינונית"]));
 
   const active = buildDataQueryManifest({
-    dataQueryServiceEmail: "data-query@example.invalid",
-    dataQueryServicePassword: "private-password"
+    contentSource: { supabaseUrl: "https://company.supabase.test", supabaseServiceRoleKey: "sb_secret_company" }
   }).find((table) => table.tableName === "safety_reports");
   assert.equal(active.executionContract.status, "active");
   assert.equal(active.exactTransport, DATA_QUERY_MANAGED_READ_TRANSPORT);
@@ -9812,7 +9724,8 @@ test("data query Phase 4B safety document enrichment is composite-key exact and 
     assert.equal(reports.length, 1);
     const safetyRequest = requests.find((request) => new URL(request.url).pathname.endsWith("/safety_reports"));
     assert.equal(safetyRequest.options.method, "GET");
-    assert.equal(safetyRequest.options.headers.Authorization, `Bearer ${roleToken}`);
+    assert.equal(safetyRequest.options.headers.apikey, "server-key");
+    assert.notEqual(safetyRequest.options.headers.Authorization, `Bearer ${roleToken}`, "a global Data Query token is never sent");
     await assert.rejects(
       () => fetchSafetyReportsByIds({ config, ids: [7] }),
       /authorized project UUID/
@@ -10019,9 +9932,9 @@ test("data query Phase 4C alert metadata is fixed, typed, credential-gated, and 
   assert.equal(canonicalizeDataQueryAlertInputType("meeting-summary attachment"), "attachment/meeting_summary");
 
   const config = {
-    dataQueryServiceEmail: "data-query@example.invalid",
-    dataQueryServicePassword: "private-password",
     contentSource: {
+      supabaseUrl: "https://company.supabase.test",
+      supabaseServiceRoleKey: "sb_secret_company",
       alertsTable: "alerts_embeddings_gf",
       alertsRpcName: "match_alerts"
     }
@@ -11467,9 +11380,7 @@ test("data query Phase 4D meeting policy is fixed, dormant by default, and expos
   assert.equal(policy.notComputableCapabilities.decisionPresence.includes("semantic"), true);
 
   const active = buildDataQueryManifest({
-    dataQueryServiceEmail: "data-query@example.invalid",
-    dataQueryServicePassword: "private-password",
-    contentSource: { meetingsTable: "redirected_meetings_documents" }
+    contentSource: { supabaseUrl: "https://company.supabase.test", supabaseServiceRoleKey: "sb_secret_company", meetingsTable: "redirected_meetings_documents" }
   }).find((table) => table.tableName === "meetings");
   assert.equal(active.exactTransport, DATA_QUERY_MANAGED_READ_TRANSPORT);
   assert.equal(active.executionContract.status, "active");
@@ -12088,8 +11999,9 @@ test("data query Phase 4D exact-date decision questions read every bounded proje
       };
     }
   });
-  assert.equal(unscoped.status, "found");
-  assert.equal(new URL(unscopedCalls[0].url).searchParams.get("project_id"), null);
+  assert.equal(unscoped.status, "error");
+  assert.equal(unscoped.warning, "meeting_semantic_project_scope_invalid");
+  assert.equal(unscopedCalls.length, 0, "no unscoped meeting read");
 
   const multipleProjects = await runMeetingEvidenceAgent({
     query,
@@ -12109,7 +12021,7 @@ test("data query Phase 4D exact-date decision questions read every bounded proje
     })
   });
   assert.equal(multipleProjects.status, "error");
-  assert.equal(multipleProjects.warning, "meeting_decision_multiple_projects");
+  assert.equal(multipleProjects.warning, "meeting_semantic_project_scope_invalid");
 
   const answer = buildDeterministicDateScopedMeetingDecisionAnswer({
     message: query,
@@ -12144,6 +12056,7 @@ test("data query Phase 4D structural meeting RPC failure uses one bounded compat
   const projectId = "11111111-1111-4111-8111-111111111111";
   const otherProjectId = "22222222-2222-4222-8222-222222222222";
   const baseConfig = {
+    projectId,
     contentSource: {
       supabaseUrl: "https://content.example",
       supabaseServiceRoleKey: "sb_secret_semantic_test"
@@ -12224,7 +12137,7 @@ test("data query Phase 4D structural meeting RPC failure uses one bounded compat
   assert.equal(fallbackUrl.pathname, "/rest/v1/meetings_documents");
   assert.equal(fallbackUrl.searchParams.get("limit"), "501");
   assert.equal(fallbackUrl.searchParams.get("embedding"), "not.is.null");
-  assert.equal(fallbackUrl.searchParams.get("project_id"), null);
+  assert.equal(fallbackUrl.searchParams.get("project_id"), `eq.${projectId}`);
   const selectedFields = fallbackUrl.searchParams.get("select").split(",");
   assert.ok(selectedFields.includes("source_id"));
   assert.ok(selectedFields.includes("embedding"));
@@ -12469,8 +12382,7 @@ test("data query Phase 4E email policy is fixed, project-scoped, dormant by defa
   assert.equal(policy.notComputableCapabilities.personalData.includes("sender"), true);
 
   const active = buildDataQueryManifest({
-    dataQueryServiceEmail: "data-query@example.invalid",
-    dataQueryServicePassword: "private-password"
+    contentSource: { supabaseUrl: "https://company.supabase.test", supabaseServiceRoleKey: "sb_secret_company" }
   }).find((table) => table.tableName === "emails");
   assert.equal(active.exactTransport, DATA_QUERY_MANAGED_READ_TRANSPORT);
   assert.equal(active.executionContract.status, "active");
@@ -13050,8 +12962,7 @@ test("data query Phase 4F exception policy is fixed, project-scoped, dormant by 
   assert.equal(DATA_QUERY_EXCEPTION_VAT_RATE, 0.18);
 
   const active = buildDataQueryManifest({
-    dataQueryServiceEmail: "data-query@example.invalid",
-    dataQueryServicePassword: "private-password"
+    contentSource: { supabaseUrl: "https://company.supabase.test", supabaseServiceRoleKey: "sb_secret_company" }
   }).find((table) => table.tableName === "exceptions_report");
   assert.equal(active.exactTransport, DATA_QUERY_MANAGED_READ_TRANSPORT);
   assert.equal(active.executionContract.status, "active");
@@ -14029,6 +13940,10 @@ test("internal subagent diagnostics are read-only readiness probes", () => {
   assert.match(serverSource, /method:\s*"HEAD"/);
   assert.match(serverSource, /error\?\.diagnosticStatus\s*\|\|\s*classifyDiagnosticError/);
 });
+
+// Registered last: these tests import the HTTP handler under a fake network
+// and temporarily set process env (restored at the end).
+registerCompanyDbIsolationTests(test);
 
 const filterIndex = process.argv.indexOf("--filter");
 const filterPattern = filterIndex >= 0 ? process.argv[filterIndex + 1] : "";

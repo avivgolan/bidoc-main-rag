@@ -266,12 +266,13 @@ export function registerInsightsProjectScopeTests(test) {
       );
       assert.equal(calls.length, 0);
     });
-    // Unscoped callers keep the legacy upsert.
+    // A save without a Project is refused; the legacy unscoped upsert is gone.
     await withFetch((call) => jsonResponse([{ ...call.body }]), async (calls) => {
-      await saveProjectInsightRun({ config: scopedConfig(), run: { runId: "legacy", status: "done" } });
-      assert.equal(calls.length, 1);
-      assert.ok(calls[0].url.includes("on_conflict=run_id"));
-      assert.match(String(calls[0].options.headers?.Prefer || ""), /merge-duplicates/);
+      await assert.rejects(
+        saveProjectInsightRun({ config: scopedConfig(), run: { runId: "legacy", status: "done" } }),
+        (error) => error.code === "company_db_required"
+      );
+      assert.equal(calls.length, 0);
     });
   });
 

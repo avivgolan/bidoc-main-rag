@@ -9,11 +9,11 @@
 import { chatCompletion, createEmbedding } from "../openrouter.js";
 import { DEFAULT_CONTENT_TOOL_SETTINGS, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
-import { getDataQueryAccessToken } from "./dataQueryAuth.js";
 import { analyzeEmails, analyzeFinancial, analyzeGeneric, analyzeMeetings, analyzeSafety, analyzeWhatsapp } from "./contentAnalysis.js";
 import { extractSearchTerms, mergeRetrievalRows, resolveTableRoles } from "./contentRetrieval.js";
 import { toDateOnly } from "./indexing.js";
-import { looksLikeRpcSignatureError, PROJECT_SCOPED_OVERFETCH, projectIdFilterParam, requestProjectId } from "../projectScope.js";
+import { looksLikeRpcSignatureError, projectIdFilterParam, requestProjectId } from "../projectScope.js";
+import { companyDbRequiredError, isCompanyDbError, searchFunctionOutdatedError } from "../companyDb.js";
 
 const DEFAULT_TOP_K = 12;
 const SAFE_TABLE_NAME = /^[A-Za-z0-9_]+$/;
@@ -249,10 +249,9 @@ export async function runContentToolAgent({
 }) {
   const spec = CONTENT_TOOL_SPECS[toolName];
   if (!spec) throw new Error(`No internal content tool is registered for: ${toolName}`);
-  const contentConfig = contentSupabaseConfig(config);
-  if (!contentConfig.supabaseUrl || !contentConfig.supabaseServiceRoleKey) {
-    throw new Error("Content Supabase is not configured");
-  }
+  // The request's Company DB and Project, or refuse (company_db_required).
+  contentSupabaseConfig(config);
+  if (!requestProjectId(config)) throw companyDbRequiredError("Content tools must name their Project (x-project-id)");
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY is missing");
 
   const settings = contentToolSettings(config, toolName, overrides);
@@ -322,10 +321,10 @@ export async function runContentToolAgent({
 
 // Vector leg: embed the query and call the table's own match_<table> RPC.
 // Enriches RPC hits (id/content/metadata/similarity only) with real columns.
-// A project-scoped (chat) call passes project_id_filter to the RPC and also
-// filters the follow-up row select by project_id. On an older Company DB whose
-// RPC lacks the param, it retries unfiltered with over-fetch and relies on the
-// row select. A table without project_id fails that select: no rows.
+// The call passes project_id_filter to the RPC and also filters the
+// follow-up row select by project_id. An RPC that lacks the param is refused
+// (search_function_outdated), never retried unfiltered. A table without
+// project_id fails that select: no rows.
 async function vectorLeg({ config, spec, table, roles, isDefaultTable, searchQuery, effectiveTopK, hasDates, warnings, cacheContext, telemetry }) {
   try {
     const projectId = requestProjectId(config);
@@ -349,16 +348,12 @@ async function vectorLeg({ config, spec, table, roles, isDefaultTable, searchQue
       options: { method: "POST", body: JSON.stringify(body) }
     });
     let matches;
-    if (projectId) {
-      try {
-        matches = await callMatch({ ...rpcBody, project_id_filter: projectId });
-      } catch (error) {
-        if (!looksLikeRpcSignatureError(error.message)) throw error;
-        warnings.push("vector_rpc_project_filter_missing");
-        matches = await callMatch({ ...rpcBody, match_count: rpcBody.match_count * PROJECT_SCOPED_OVERFETCH });
-      }
-    } else {
-      matches = await callMatch(rpcBody);
+    try {
+      matches = await callMatch({ ...rpcBody, project_id_filter: projectId });
+    } catch (error) {
+      // An RPC without project_id_filter is refused, never called unfiltered.
+      if (looksLikeRpcSignatureError(error.message)) throw searchFunctionOutdatedError(`match_${table}`, error);
+      throw error;
     }
     const bySimilarity = new Map((Array.isArray(matches) ? matches : []).map((match) => [String(match.id), match.similarity ?? null]));
     if (!bySimilarity.size) return [];
@@ -372,6 +367,7 @@ async function vectorLeg({ config, spec, table, roles, isDefaultTable, searchQue
     const rows = await contentSupabaseRequest({ config, path: `/rest/v1/${table}?${params}` });
     return (Array.isArray(rows) ? rows : []).map((row) => ({ ...row, similarity: bySimilarity.get(String(row[roles.idColumn || "id"])) ?? null }));
   } catch (error) {
+    if (isCompanyDbError(error)) throw error;
     warnings.push(/function|schema cache|PGRST202|could not find/i.test(error.message) ? "vector_rpc_missing" : `vector_leg_failed: ${error.message.slice(0, 120)}`);
     return [];
   }
@@ -480,11 +476,12 @@ export async function callInternalContentTool({ config, toolName, query, dateFro
 
 export async function fetchFinancialTransactionsByIds({ config, ids = [], projectId }) {
   const normalizedIds = [...new Set((Array.isArray(ids) ? ids : []).map((id) => String(id ?? "").trim()))];
-  const normalizedProjectId = String(projectId ?? "").trim();
+  // Always Project-filtered: the caller's Project, else the request Project.
+  const normalizedProjectId = String(projectId || requestProjectId(config) || "").trim();
   if (!normalizedIds.length || normalizedIds.length > 200 || normalizedIds.some((id) => !/^[1-9]\d*$/.test(id))) {
     throw new Error("Financial transaction IDs must contain 1-200 positive integers");
   }
-  if (normalizedProjectId && !PROJECT_UUID_PATTERN.test(normalizedProjectId)) {
+  if (!PROJECT_UUID_PATTERN.test(normalizedProjectId)) {
     throw new Error("Financial transaction lookup requires a valid project UUID");
   }
   const chunks = [];
@@ -535,8 +532,8 @@ export async function fetchSafetyReportsByIds({ config, ids = [], projectId }) {
   if (!PROJECT_UUID_PATTERN.test(normalizedProjectId)) {
     throw new Error("Safety report lookup requires an authorized project UUID");
   }
-  const connection = contentSupabaseConfig(config);
-  const accessToken = await getDataQueryAccessToken(config);
+  // The request's own Company DB service connection (GET, Project-filtered);
+  // the former global Data Query service-account token is never used.
   const query = new URLSearchParams();
   query.set("select", SAFETY_EXACT_ENRICHMENT_COLUMNS.join(","));
   query.set("id", normalizedIds.length === 1
@@ -547,13 +544,7 @@ export async function fetchSafetyReportsByIds({ config, ids = [], projectId }) {
   const rows = await contentSupabaseRequest({
     config,
     path: `/rest/v1/safety_reports?${query.toString()}`,
-    options: {
-      method: "GET",
-      headers: {
-        ...supabaseHeaders(connection.supabaseServiceRoleKey),
-        Authorization: `Bearer ${accessToken}`
-      }
-    }
+    options: { method: "GET" }
   });
   if (!Array.isArray(rows)) throw new Error("Safety report lookup returned an invalid payload");
   const byId = new Map(rows

@@ -10,12 +10,14 @@
 //   engine-owned tables      → APP DATA/KAPAIM, schedule_*
 //   "content" / "kapaim" are legacy aliases for the APP DATA production tables.
 //
-// All schedule reads and writes use the existing APP DATA connection
-// (contentSource), whose Supabase project is KAPAIM. There is no second
-// Schedule-specific URL or key.
+// All schedule reads and writes use the request's own Company DB connection
+// (x-content-supabase-*, see companyDb.js). There is no global or App DB
+// schedule source and no Schedule-specific URL or key. (The superadmin
+// Contracts tooling passes its server-owned config here explicitly.)
 
 import { getConfig, readLocalSettings, supabaseHeaders } from "./config.js";
 import { contentSupabaseConfig } from "./supabase.js";
+import { companyDbRequiredError } from "./companyDb.js";
 import { requestProjectId, sameProjectId } from "./projectScope.js";
 
 export const SCHEDULE_SOURCE_PROFILES = {
@@ -154,13 +156,11 @@ function trimSlash(value) {
   return String(value || "").replace(/\/+$/, "");
 }
 
-export function scheduleSupabaseConfig(config = getConfig(), database = "app_data", env = process.env) {
-  if (database === "main") {
-    return {
-      supabaseUrl: env.SUPABASE_URL || config.supabaseUrl || "",
-      supabaseServiceRoleKey: env.SUPABASE_SERVICE_ROLE_KEY || config.supabaseServiceRoleKey || "",
-      label: "App / MAIN"
-    };
+// Schedule data lives only in the request's Company DB. The former "main"
+// (App DB) schedule source is gone: the App DB is never read as Project data.
+export function scheduleSupabaseConfig(config = getConfig(), database = "app_data") {
+  if (database !== "app_data") {
+    throw companyDbRequiredError(`Schedule database "${database}" is not a Company DB; schedule data is read only from the request's Company DB`);
   }
   const appData = contentSupabaseConfig(config);
   return {
@@ -215,33 +215,22 @@ async function scheduleFetch({
   return rows;
 }
 
+// The Project row is looked up only in the request's Company DB (never the
+// App DB as a second candidate).
 async function findScheduleProject({ config, projectId, settings, fetchImpl = fetch }) {
-  const failures = [];
-  for (const database of ["app_data", "main"]) {
-    try {
-      const rows = await scheduleFetch({
-        config,
-        settings,
-        database,
-        path: `/rest/v1/projects?select=${PROJECT_COLUMNS}&id=eq.${encodeURIComponent(projectId)}&limit=1`,
-        fetchImpl
-      });
-      if (rows[0]) return { database, project: rows[0] };
-    } catch (error) {
-      failures.push(error);
-    }
-  }
-  if (failures.length === 2) throw failures[0];
-  return null;
+  const rows = await scheduleFetch({
+    config,
+    settings,
+    database: "app_data",
+    path: `/rest/v1/projects?select=${PROJECT_COLUMNS}&id=eq.${encodeURIComponent(projectId)}&limit=1`,
+    fetchImpl
+  });
+  return rows[0] ? { database: "app_data", project: rows[0] } : null;
 }
 
 async function resolveScheduleSource({ config, projectId, settings, fetchImpl = fetch }) {
   const found = await findScheduleProject({ config, projectId, settings, fetchImpl });
-  if (found) {
-    return scheduleSourceFromProject({ database: found.database, project: found.project, settings });
-  }
-  const database = settings.sourceProfile === "dev" ? "main" : "app_data";
-  return scheduleSourceFromProject({ database, project: { id: projectId }, settings });
+  return scheduleSourceFromProject({ database: "app_data", project: found?.project || { id: projectId }, settings });
 }
 
 export async function saveScheduleProjectEndDate({
@@ -454,11 +443,13 @@ export async function loadContractMilestones({ config = null, projectId, setting
 export async function listScheduleProjects({ config = null, settings: settingsInput = null } = {}) {
   const settings = settingsInput || scheduleSettings();
   const cfg = config || getConfig();
-  // A Project-scoped request lists only its own Project.
+  // The request lists only its own Project, from its own Company DB.
   const scopedProjectId = requestProjectId(cfg);
-  const projectFilter = scopedProjectId ? `&id=eq.${encodeURIComponent(scopedProjectId)}` : "";
+  if (!scopedProjectId) throw companyDbRequiredError("Schedule project discovery must name its Project (x-project-id)");
+  contentSupabaseConfig(cfg);
+  const projectFilter = `&id=eq.${encodeURIComponent(scopedProjectId)}`;
   const discovered = [];
-  for (const database of ["app_data", "main"]) {
+  for (const database of ["app_data"]) {
     let projects = [];
     try {
       projects = await scheduleFetch({

@@ -5558,7 +5558,7 @@ export function registerContractsAgentTests(test) {
     assert.match(route, /\/semantic-preview/u);
     assert.match(route, /getSuperadminSession\(req\)/u);
     assert.match(route, /readJsonBounded\(req, CONTRACTS_MAX_JSON_BYTES\)/u);
-    assert.match(route, /config:\s*config\(\)/u);
+    assert.match(route, /config:\s*contractsConfig\(\)/u);
     assert.doesNotMatch(previewRoute, /runSchedule|submitContractPromotion|persistContractsExplicitRelationships/u);
     assert.doesNotMatch(service, /buildRequestConfig|runSchedule|submitContractPromotion/u);
     assert.match(page, /\/api\/contracts\/relationships\/semantic\/status/u);
@@ -7970,7 +7970,7 @@ export function registerContractsAgentTests(test) {
     assert.match(route, /readJsonBounded\(req, CONTRACTS_MAX_JSON_BYTES\)/);
     assert.match(route, /contractsPhase2ApplyApproved\(\)/);
     assert.match(route, /submitContractPromotion/);
-    assert.match(route, /config:\s*config\(\)/);
+    assert.match(route, /config:\s*contractsConfig\(\)/);
     assert.match(route, /url\.pathname === ["']\/api\/contracts\/review\/save["']/);
     assert.match(route, /body\.persistReview !== true/);
     assert.match(route, /contracts_review_only_not_ready/);
@@ -7995,7 +7995,7 @@ export function registerContractsAgentTests(test) {
     assert.match(route, /parseActivityMappingCandidateRequest/u);
     assert.match(route, /loadContractActivityMappingState/u);
     assert.match(route, /buildContractActivityMappingCandidatesFromSources/u);
-    assert.match(route, /config:\s*config\(\)/u);
+    assert.match(route, /config:\s*contractsConfig\(\)/u);
     assert.doesNotMatch(route, /buildRequestConfig|submitContractPromotion|bidoc_contracts_review_activity_mapping_v1|commit|persist|runSchedule/u);
 
     const loginWall = server.slice(
@@ -8021,7 +8021,7 @@ export function registerContractsAgentTests(test) {
     assert.match(route, /parseActivityMappingReviewRequest/u);
     assert.match(route, /contractsActivityMappingReviewApproved\(\)/u);
     assert.match(route, /reviewerId:\s*reviewer\.sub/u);
-    assert.match(route, /config:\s*config\(\)/u);
+    assert.match(route, /config:\s*contractsConfig\(\)/u);
     assert.doesNotMatch(route, /buildRequestConfig|x-content-supabase-key|contentSupabaseKey|auto_continue/u);
   });
 

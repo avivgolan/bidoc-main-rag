@@ -1,7 +1,8 @@
 import { chatCompletion, createEmbedding } from "../openrouter.js";
-import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
+import { readLocalSettings, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
-import { looksLikeRpcSignatureError, PROJECT_SCOPED_OVERFETCH, projectIdFilterParam, requestProjectId } from "../projectScope.js";
+import { looksLikeRpcSignatureError, projectIdFilterParam, requestProjectId } from "../projectScope.js";
+import { companyDbRequiredError, searchFunctionOutdatedError } from "../companyDb.js";
 
 const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 
@@ -25,6 +26,7 @@ const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 אם לא נמצאו נתונים: "לא נמצאו התראות רלוונטיות."`;
 
 async function searchAlertsEmbeddings(config, query, table, topK = 20, cacheContext = null, telemetry = null) {
+  const projectId = requiredProjectId(config);
   const contentConfig = contentSupabaseConfig(config);
   const embedding = await createEmbedding({
     apiKey: config.openRouterApiKey,
@@ -35,26 +37,20 @@ async function searchAlertsEmbeddings(config, query, table, topK = 20, cacheCont
   });
 
   const rpcName = contentConfig.alertsRpcName || `match_${table}`;
-  const projectId = requestProjectId(config);
   // The match_* functions default match_threshold to 0.5 — query-vs-document
   // similarities top out around 0.4-0.6, so the default silently returns
   // nothing. Threshold 0 + match_count bounding, like the specialist agents.
-  const body = { query_embedding: embedding, match_count: topK, filter: {}, match_threshold: 0 };
+  const body = { query_embedding: embedding, match_count: topK, filter: {}, match_threshold: 0, project_id_filter: projectId };
   let data;
-  if (projectId) {
-    try {
-      data = await postAlertsRpc(contentConfig, rpcName, { ...body, project_id_filter: projectId });
-    } catch (error) {
-      if (!looksLikeRpcSignatureError(error.message)) throw error;
-      // Older Company DB without project_id_filter: rank across the DB and let
-      // the project-filtered detail select below narrow it (over-fetching).
-      data = await postAlertsRpc(contentConfig, rpcName, { ...body, match_count: Math.min(topK * PROJECT_SCOPED_OVERFETCH, 100) });
-    }
-  } else {
+  try {
     data = await postAlertsRpc(contentConfig, rpcName, body);
+  } catch (error) {
+    // An RPC without project_id_filter is refused, never called unfiltered.
+    if (looksLikeRpcSignatureError(error.message)) throw searchFunctionOutdatedError(rpcName, error);
+    throw error;
   }
   const rows = await enrichAlertRows(config, table, Array.isArray(data) ? data : []);
-  return projectId ? rows.slice(0, topK) : rows;
+  return rows.slice(0, topK);
 }
 
 async function postAlertsRpc(contentConfig, rpcName, body) {
@@ -71,20 +67,20 @@ async function postAlertsRpc(contentConfig, rpcName, body) {
 
 // The RPC returns only (id, content, metadata-string, similarity) — no date, so
 // date filtering would drop every row. One batched fetch brings the real
-// columns from the alerts table; on legacy tables without them, the raw rows
-// are kept as-is. A project-scoped (chat) call filters the detail select by
-// project_id, keeps only rows it returned, and fails closed to no rows.
+// columns from the alerts table. The detail select is filtered by the
+// request Project's project_id, keeps only rows it returned, and fails closed
+// to no rows.
 async function enrichAlertRows(config, table, rows) {
   const ids = rows.map((row) => row?.id).filter((id) => id != null);
   if (!ids.length) return rows;
-  const projectFilter = projectIdFilterParam(requestProjectId(config));
+  const projectFilter = projectIdFilterParam(requiredProjectId(config));
   try {
     const detail = await contentSupabaseRequest({
       config,
-      path: `/rest/v1/${table}?select=id,data_date,alert_type,severity_level,item_status,data_link,summary,alert_description&id=in.(${ids.join(",")})${projectFilter ? `&${projectFilter}` : ""}`
+      path: `/rest/v1/${table}?select=id,data_date,alert_type,severity_level,item_status,data_link,summary,alert_description&id=in.(${ids.join(",")})&${projectFilter}`
     });
     const byId = new Map((Array.isArray(detail) ? detail : []).map((row) => [String(row.id), row]));
-    const scopedRows = projectFilter ? rows.filter((row) => byId.has(String(row.id))) : rows;
+    const scopedRows = rows.filter((row) => byId.has(String(row.id)));
     return scopedRows.map((row) => {
       const extra = byId.get(String(row.id)) || {};
       return {
@@ -101,21 +97,26 @@ async function enrichAlertRows(config, table, rows) {
       };
     });
   } catch {
-    return projectFilter ? [] : rows;
+    return [];
   }
 }
 
-export async function runAlertAgent({ config: configOverride = null, query, dateFilter = "", dateFrom = null, dateTo = null, cacheContext = null, telemetry = null }) {
-  // Chat passes its per-request config (Company DB + projectId); other callers
-  // fall back to the global settings.
-  const config = configOverride || getConfig();
+function requiredProjectId(config) {
+  const projectId = requestProjectId(config);
+  if (!projectId) throw companyDbRequiredError("The alert search must name its Project (x-project-id)");
+  return projectId;
+}
+
+export async function runAlertAgent({ config, query, dateFilter = "", dateFrom = null, dateTo = null, cacheContext = null, telemetry = null }) {
+  // Only the request config (Company DB + projectId) is accepted; there is no
+  // global content database to fall back to.
   const saved = readLocalSettings().subagents?.alert || {};
+  requiredProjectId(config);
   const contentConfig = contentSupabaseConfig(config);
 
   const table = saved.table || contentConfig.alertsTable || "alerts_embeddings_gf";
   const model = saved.model || config.models.main;
   const systemPrompt = saved.systemPrompt || SYSTEM_PROMPT;
-  if (!contentConfig.supabaseUrl || !contentConfig.supabaseServiceRoleKey) throw new Error("Content Supabase is not configured");
 
   if (!config.openRouterApiKey) throw new Error("OPENROUTER_API_KEY לא מוגדר");
 

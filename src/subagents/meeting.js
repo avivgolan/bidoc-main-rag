@@ -1,7 +1,8 @@
 import { createEmbedding } from "../openrouter.js";
-import { getConfig, readLocalSettings, supabaseHeaders } from "../config.js";
+import { readLocalSettings, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig } from "../supabase.js";
 import { requestProjectId, sameProjectId } from "../projectScope.js";
+import { hasCompanyDbConnection } from "../companyDb.js";
 
 const DEFAULT_MEETINGS_RPC = "hybrid_match_meetings_documents";
 const DEFAULT_MEETINGS_TABLE = "meetings_documents";
@@ -58,16 +59,17 @@ function normalizeEmbeddingVector(value) {
   return Number.isFinite(normSquared) && normSquared > 0 ? vector : null;
 }
 
+// The caller's Project and the request Project must agree, and one of them
+// must be present: there is no global PROJECT_ID fallback and no unscoped
+// meeting search.
 function resolveSemanticProjectScope(config, requestedProjectId) {
   const candidates = [
     requestedProjectId,
-    config?.projectId,
-    config?.contentSource?.projectId,
-    process.env.PROJECT_ID
+    config?.projectId
   ]
     .map((value) => String(value ?? "").trim())
     .filter(Boolean);
-  if (!candidates.length) return { ok: true, projectId: null };
+  if (!candidates.length) return { ok: false, projectId: null };
 
   const normalized = candidates.map(normalizeProjectId);
   if (normalized.some((value) => !value)) return { ok: false, projectId: null };
@@ -162,7 +164,8 @@ async function callMeetingsRpc(
 async function fetchAdjacentChunks(config, chunks, adjacentCount = 1, fetchImpl = globalThis.fetch, scopedProjectId = null) {
   if (!chunks.length || adjacentCount <= 0) return [];
   const contentConfig = contentSupabaseConfig(config);
-  const projectId = scopedProjectId || config.contentSource?.projectId || process.env.PROJECT_ID || null;
+  const projectId = scopedProjectId || requestProjectId(config);
+  if (!projectId) return [];
   const table = DEFAULT_MEETINGS_TABLE;
 
   const adjacentIds = new Set();
@@ -1013,12 +1016,12 @@ export async function runMeetingEvidenceAgent({
   embeddingOverride = null,
   fetchImpl = globalThis.fetch
 }) {
-  const config = configOverride || getConfig();
+  // Only the request config (its Company DB) is read; no global fallback.
+  const config = configOverride || {};
   const saved = config.meetingsEvidence || readLocalSettings().subagents?.meetingsEvidence || {};
-  const contentConfig = contentSupabaseConfig(config);
 
-  if (!contentConfig.supabaseUrl || !contentConfig.supabaseServiceRoleKey) {
-    return { status: "error", summary: null, evidence: [], conflicts: [], insufficient_evidence: true, error: "Content Supabase not configured" };
+  if (!hasCompanyDbConnection(config)) {
+    return { status: "error", summary: null, evidence: [], conflicts: [], insufficient_evidence: true, error: "company_db_required: the request carries no Company DB" };
   }
 
   const subagentCfg = {
