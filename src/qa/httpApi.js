@@ -59,11 +59,9 @@ export async function handleQaHttpRequest({ req, url, service, context, readJson
       return response(200, data);
     }
 
-    return {
-      matched: true,
-      status: 404,
-      body: errorEnvelope(new Error("QA API route not found"))
-    };
+    // Not a harness route: the Lab's message-level QA routes (/api/qa/messages,
+    // /api/qa/:id/run, /api/qa/trends, ...) are handled after this by the server.
+    return { matched: false };
   } catch (error) {
     const normalized = normalizeQaError(error);
     return { matched: true, status: normalized.status || 500, body: errorEnvelope(normalized) };

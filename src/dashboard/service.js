@@ -21,7 +21,8 @@ export function snapshotPayload(view) {
     status:view.metrics.some(m=>m.status==='partial')?'partial':'ready' };
 }
 
-export function createDashboardService({ fetchImpl=fetch, clock=()=>new Date() }={}) {
+// fetch is resolved per call (not captured when this module loads), so the service follows the process' fetch.
+export function createDashboardService({ fetchImpl=(...args)=>globalThis.fetch(...args), clock=()=>new Date() }={}) {
   const cache=new Map(); const inFlight=new Map();
   const reader=c=>createSourceReader(c,fetchImpl);
   function sweep() { for(const [key,v] of cache) if(v.expires<=clock().getTime()) cache.delete(key); while(cache.size>24) cache.delete(cache.keys().next().value); }

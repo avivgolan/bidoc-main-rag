@@ -262,8 +262,7 @@ const WORKFLOW_TEMPLATE_NODES = [
 
   { id: "settings", label: "Settings", kind: "database", x: 70, y: 438, disconnected: true, description: "Configuration screen. Not part of a chat run." },
   { id: "knowledge_manager", label: "Knowledge Manager", kind: "database", x: 286, y: 438, disconnected: true, description: "Uploads and manages KB documents. Not part of a chat run unless the planner reads KB data." },
-  { id: "tool_tester", label: "Tool Tester", kind: "tool", x: 502, y: 438, disconnected: true, description: "Manual test panel for tools and evaluations. Not part of automatic chat routing." },
-  { id: "reset_server", label: "Reset Server", kind: "tool", x: 718, y: 438, disconnected: true, description: "Local restart helper for testing. Isolated from the agent pipeline." }
+  { id: "tool_tester", label: "Tool Tester", kind: "tool", x: 502, y: 438, disconnected: true, description: "Manual test panel for tools and evaluations. Not part of automatic chat routing." }
 ];
 
 const WORKFLOW_TEMPLATE_EDGES = [
@@ -386,7 +385,6 @@ async function init() {
   safeInitStep("knowledge", wireKnowledge);
   safeInitStep("delay claims", wireDelayClaims);
   safeInitStep("evaluation", wireEvaluation);
-  safeInitStep("reset", wireReset);
   safeInitStep("logout", wireLogout);
   safeInitStep("project graph", wireProjectGraph);
   safeInitStep("link agent", wireLinkAgent);
@@ -709,7 +707,7 @@ function renderIndexingCard(list) {
 
 function markSubagentsDirty() {
   const status = $("subagentsSaveStatus");
-  if (status) status.textContent = "יש שינויים שטרם נשמרו ב-Supabase.";
+  if (status) status.textContent = "יש שינויים שטרם נשמרו. שמירה משנה את הייצור.";
 }
 
 // The settings page is a React island with its own save; subagent drafts are
@@ -721,7 +719,7 @@ function wireSubagentsSaveBar() {
   button.addEventListener("click", async () => {
     const status = $("subagentsSaveStatus");
     button.disabled = true;
-    if (status) status.textContent = "שומר ב-Supabase…";
+    if (status) status.textContent = "שומר בייצור (Meta)…";
     try {
       const result = await api("/api/settings", {
         method: "PUT",
@@ -732,7 +730,7 @@ function wireSubagentsSaveBar() {
       });
       if (result?.settings) state.settings = result.settings;
       state.settingsDirty = false;
-      if (status) status.textContent = "✓ נשמר ב-Supabase";
+      if (status) status.textContent = "✓ נשמר בייצור ונרשם ביומן";
       showToast("הגדרות הסוכנים נשמרו");
       setTimeout(() => { if (status) status.textContent = ""; }, 3000);
     } catch (error) {
@@ -1095,6 +1093,25 @@ async function refreshAgentsFromApi() {
   }
 }
 
+// The Lab screens that read a Project's content read the Lab dataset in MAIN
+// (a test copy, loaded by a Superadmin action). Until it is loaded they say so.
+const LAB_DATA_TABS = new Set(["dashboard", "chat", "insights", "schedule", "timeline", "graph", "linkAgent", "qa", "tools"]);
+
+async function refreshLabDatasetNotices() {
+  const notices = document.querySelectorAll("[data-lab-empty]");
+  if (!notices.length) return;
+  try {
+    const status = await api("/api/lab/dataset");
+    const empty = status?.hasData === false;
+    notices.forEach((notice) => {
+      if (empty && status.message) notice.textContent = status.message;
+      notice.hidden = !empty;
+    });
+  } catch {
+    // The status is advisory: a failed read leaves the notice as it was.
+  }
+}
+
 function activateTab(tabId, pushHistory = true, options = {}) {
   const { skipData = false } = options;
   const button = document.querySelector(`.tab[data-tab="${tabId}"]`);
@@ -1109,6 +1126,7 @@ function activateTab(tabId, pushHistory = true, options = {}) {
     history.pushState({ tab: tabId }, "", `#${tabId}`);
   }
   if (!skipData) TAB_LOADERS[tabId]?.();
+  if (LAB_DATA_TABS.has(tabId)) refreshLabDatasetNotices();
   if (tabId === "workflow") {
     requestAnimationFrame(() => renderWorkflow(state.lastWorkflow));
   }
@@ -1892,10 +1910,6 @@ function wireKnowledge() {
   $("runKnowledgeSearch").addEventListener("click", runKnowledgeSearch);
 }
 
-function wireReset() {
-  $("restartServer").addEventListener("click", restartServer);
-}
-
 function wireLogout() {
   const button = $("logoutButton");
   if (!button) return;
@@ -1974,44 +1988,13 @@ async function runEvaluation() {
   }
 }
 
-async function restartServer() {
-  const button = $("restartServer");
-  const status = $("restartStatus");
-  button.disabled = true;
-  status.textContent = "שולח בקשת restart לשרת...";
-  try {
-    await api("/api/system/restart", { method: "POST", body: {} });
-    status.textContent = "השרת נסגר ועולה מחדש. ממתין לחיבור...";
-    await waitForServer();
-    status.textContent = "השרת חזר. מרענן את האפליקציה...";
-    setTimeout(() => window.location.reload(), 500);
-  } catch (error) {
-    status.textContent = `שגיאה בהפעלת restart: ${error.message}`;
-    button.disabled = false;
-  }
-}
-
-async function waitForServer() {
-  await new Promise((resolve) => setTimeout(resolve, 1200));
-  for (let attempt = 1; attempt <= 30; attempt += 1) {
-    try {
-      const response = await fetch("/api/settings", { cache: "no-store" });
-      if (response.ok) return;
-    } catch {
-      // The server is expected to be unavailable while restarting.
-    }
-    $("restartStatus").textContent = `ממתין לחזרת השרת... ניסיון ${attempt}/30`;
-    await new Promise((resolve) => setTimeout(resolve, 700));
-  }
-  throw new Error("השרת לא חזר בזמן הצפוי. הפעל אותו ידנית דרך CMD.");
-}
-
 async function loadKnowledgeDocuments() {
   const list = $("knowledgeList");
   if (!list) return;
   await loadKnowledgeAgents();
   const agentId = state.selectedKnowledgeAgent || "schedule";
   const result = await api(`/api/knowledge/documents?agentId=${encodeURIComponent(agentId)}`);
+  applyKnowledgeWritable(result.writable !== false);
   list.innerHTML = "";
   if (!result.documents?.length) {
     list.textContent = "אין מסמכים עדיין.";
@@ -2029,6 +2012,17 @@ async function loadKnowledgeDocuments() {
     `;
     button.addEventListener("click", () => openKnowledgeDocument(item.filename, item.agentId, item.source));
     list.append(button);
+  }
+}
+
+// The Knowledge Base is files shipped with the code: read-only on Vercel.
+function applyKnowledgeWritable(writable) {
+  state.knowledgeWritable = writable;
+  const note = $("knowledgeReadOnlyNote");
+  if (note) note.hidden = writable;
+  for (const id of ["knowledgeFile", "uploadKnowledge"]) {
+    const control = $(id);
+    if (control) control.disabled = !writable;
   }
 }
 
@@ -2121,12 +2115,12 @@ async function openKnowledgeDocument(filename, agentId = state.selectedKnowledge
   state.selectedKnowledgeAgent = result.document.agentId || agentId || "schedule";
   $("knowledgePreviewTitle").textContent = result.document.filename;
   $("knowledgePreview").textContent = result.document.content || "";
-  $("deleteKnowledge").disabled = Boolean(result.document.readOnly);
+  $("deleteKnowledge").disabled = Boolean(result.document.readOnly) || state.knowledgeWritable === false;
 }
 
 async function deleteSelectedKnowledgeDocument() {
   if (!state.selectedKnowledgeDocument) return;
-  if (state.selectedKnowledgeDocument.readOnly) return;
+  if (state.selectedKnowledgeDocument.readOnly || state.knowledgeWritable === false) return;
   const filename = state.selectedKnowledgeDocument.filename;
   const agentId = state.selectedKnowledgeDocument.agentId || state.selectedKnowledgeAgent || "schedule";
   const source = state.selectedKnowledgeDocument.source || "upload";
@@ -5978,12 +5972,12 @@ function wireSettings() {
   $("saveSettings")?.addEventListener("click", async () => {
     const body = readSettingsForm();
     if ($("saveSettings")) $("saveSettings").disabled = true;
-    setSettingsSaveState("שומר את כל ההגדרות ב-Supabase...", "saving");
+    setSettingsSaveState("שומר את כל ההגדרות בייצור (Meta)...", "saving");
     try {
       const result = await api("/api/settings", { method: "PUT", body });
       applySettingsResponse(result.settings);
       state.settingsDirty = false;
-      setSettingsSaveState("כל ההגדרות נשמרו ב-Supabase.", "saved");
+      setSettingsSaveState("כל ההגדרות נשמרו בייצור ונרשמו ביומן.", "saved");
       showToast("ההגדרות נשמרו בהצלחה");
     } catch (error) {
       setSettingsSaveState("השמירה נכשלה. השינויים עדיין נמצאים בטופס ולא נמחקו.", "error");

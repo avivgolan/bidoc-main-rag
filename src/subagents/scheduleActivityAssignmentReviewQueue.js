@@ -211,6 +211,19 @@ export async function listSharedScheduleAssignmentReviews({ projectId, status = 
   return { count: reviews.length, reviews };
 }
 
+// The Projects that have schedule assignment reviews in MAIN (distinct source_project_id).
+// The Lab lists them next to the Lab dataset's own projects, so reviews made before the
+// Lab dataset existed stay reachable.
+export async function listScheduleAssignmentReviewProjectIds({ limit = 2000, config, fetchImpl = fetch } = {}) {
+  const safeLimit = Math.max(1, Math.min(5000, Number(limit) || 2000));
+  const rows = await mainDataRequest({
+    config,
+    fetchImpl,
+    path: `/rest/v1/${SCHEDULE_ASSIGNMENT_REVIEWS_TABLE}?select=source_project_id&order=created_at.desc&limit=${safeLimit}`
+  });
+  return [...new Set((Array.isArray(rows) ? rows : []).map((row) => String(row?.source_project_id || "").trim()).filter(Boolean))];
+}
+
 export async function listSharedScheduleAssignmentEvaluationLabels({ projectId, limit = 5000, config, fetchImpl = fetch } = {}) {
   if (!projectId) throw new Error("projectId is required");
   const safeLimit = Math.max(1, Math.min(5000, Number(limit) || 5000));

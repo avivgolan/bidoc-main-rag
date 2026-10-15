@@ -3,6 +3,7 @@ import { contentSupabaseConfig } from '../supabase.js';
 import { hasCompanyDbConnection } from '../companyDb.js';
 import { LABELS } from './model.js';
 import { pickCurrentVersion } from '../scheduleIngestion.js';
+import { LAB_EMPTY_CODE, LAB_EMPTY_MESSAGE, isMissingRelationFailure } from '../labDataset.js';
 
 const COMMON = 'id,project_id,title,statement,status,source_date,needs_attention,confidence,withdrawn,superseded,created_at,updated_at';
 export const SOURCES = {
@@ -33,7 +34,7 @@ export function dashboardConnection(config) {
   const c=contentSupabaseConfig(config);
   const url=new URL(c.supabaseUrl);
   if(url.protocol!=='https:') throw new DashboardError('חיבור לא תקף',503,'invalid_connection');
-  return { url:url.origin, key:c.supabaseServiceRoleKey, tenantKey:url.hostname, indexTable:c.indexTable, alertsTable:c.alertsTable,
+  return { url:url.origin, key:c.supabaseServiceRoleKey, tenantKey:url.hostname, indexTable:c.indexTable, alertsTable:c.alertsTable, labDataset:c.labDataset === true,
     identity:createHash('sha256').update(`${url.origin}|${c.supabaseServiceRoleKey}`).digest('hex') };
 }
 export function validTable(name) {
@@ -49,6 +50,7 @@ export function createSourceReader(connection, fetchImpl=fetch) {
       const q=new URLSearchParams(query); q.set('offset',String(rows.length)); q.set('limit',String(Math.min(pageSize,maxRows-rows.length)));
       const res=await fetchImpl(`${connection.url}/rest/v1/${table}?${q}`,{method:'GET',
         headers:{apikey:connection.key,Authorization:`Bearer ${connection.key}`,Prefer:'count=exact'},signal:AbortSignal.timeout(15000)});
+      if(!res.ok && connection.labDataset && isMissingRelationFailure(res.status, await res.clone().json().catch(()=>null))) throw new DashboardError(LAB_EMPTY_MESSAGE,409,LAB_EMPTY_CODE);
       if(!res.ok) throw new DashboardError(res.status===404?'מקור הנתונים אינו זמין':'לא ניתן לקרוא את המקור',502,`source_${res.status}`);
       const page=await res.json(); if(!Array.isArray(page)) throw new DashboardError('תשובת מקור לא תקפה');
       const count=res.headers.get('content-range')?.split('/')[1];

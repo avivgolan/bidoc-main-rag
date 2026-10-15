@@ -1,5 +1,6 @@
 import { getSuperadminSession } from '../auth.js';
 import { DashboardError } from './sources.js';
+import { LAB_EMPTY_CODE, LAB_EMPTY_MESSAGE } from '../labDataset.js';
 import { dashboardService } from './service.js';
 
 export function authorizeDashboard(req) {
@@ -22,7 +23,12 @@ export async function handleDashboardApi(req,res,url,{config,readJson,sendJson,s
     const actor=authorizeDashboard(req); const query=url.searchParams;
     const path=url.pathname.replace('/api/dashboard/v1','');
     if(req.method==='GET') {
-      if(path==='/projects') return sendJson(res,200,{projects:await service.projects(config)});
+      if(path==='/projects') {
+        const projects=await service.projects(config);
+        // A Lab dataset with no project in it is not seeded yet.
+        if(config?.contentSource?.labDataset===true && !projects.length) throw new DashboardError(LAB_EMPTY_MESSAGE,409,LAB_EMPTY_CODE);
+        return sendJson(res,200,{projects});
+      }
       if(path==='/overview') return sendJson(res,200,await service.overview(config,actor,{projectId:query.get('project_id'),fileId:query.get('file_id'),dateFrom:query.get('date_from'),dateTo:query.get('date_to')}));
       if(path==='/items') return sendJson(res,200,{items:service.items(config,actor,query.get('token'),query.get('metric'))});
       if(path==='/evidence') return sendJson(res,200,await service.evidence(config,actor,query.get('token'),query.get('id')));

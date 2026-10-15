@@ -10824,3 +10824,20 @@ body:has(#timeline.active) .sidebar {
   .condDateEntry { align-items: stretch; flex-direction: column; }
   .condDateEntry input, .condManualBtn, .condResolveBtn { width: 100%; }
 }
+
+/* Lab notices: production warning on the settings screens, empty Lab dataset. */
+.labProdNotice,
+.labEmptyNotice {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-inline-start-width: 4px;
+  border-radius: 10px;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+.labProdNotice { border-color: var(--warning-border, var(--amber)); background: var(--warning-bg); color: var(--warning-text); }
+.labEmptyNotice { border-color: var(--brand-300, #93c5fd); background: var(--brand-50, #eff6ff); color: var(--brand-700, #1d4ed8); font-weight: 700; }
+.labProdNotice[hidden],
+.labEmptyNotice[hidden] { display: none; }
+#chat > .labEmptyNotice { margin: 12px clamp(14px, 3vw, 32px) 0; }

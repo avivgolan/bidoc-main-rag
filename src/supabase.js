@@ -4,7 +4,8 @@ import { CACHE_TTL, cachedOperation } from "./cache.js";
 import { hydrateRetrievedSourceLinks, indexedSourceLinkReadPath, INDEXED_SOURCE_LINK_CONTRACT } from "./sourceLinks.js";
 import { bidocSessionIdOf, chatSessionProjectId, projectIdFilterParam, projectMismatchError, requestProjectId, sameProjectId } from "./projectScope.js";
 import { companyDbConnection, companyDbRequiredError, searchFunctionOutdatedError } from "./companyDb.js";
-import { assertMainAvailable } from "./requestMode.js";
+import { REQUEST_MODE_LAB, assertMainAvailable } from "./requestMode.js";
+import { isMissingRelationFailure, labDatasetEmptyError } from "./labDataset.js";
 
 // Every Company DB read/write and every Project-owned App DB row needs the
 // request Project; unscoped calls are refused rather than run across Projects.
@@ -346,23 +347,31 @@ export function sanitizeDelayClaimExportPayload(input = {}, defaults = {}) {
   };
 }
 
-// delay_claim_cases (App DB) carries project_id; a Project-scoped request
-// lists only its Project's cases and stamps new ones with it.
+// delay_claim_cases lives in MAIN, the Lab's own table, and carries project_id.
+// Only a Lab request reaches it (a Project request is refused at the route gate):
+// the Lab sees every case. A config that is not a Lab one is scoped to its Project
+// (fail closed): it lists only its Project's cases and stamps new ones with it.
+function delayClaimScope(config) {
+  return config?.requestMode === REQUEST_MODE_LAB ? null : requireRequestProject(config);
+}
+
+const delayClaimProjectFilter = (projectId) => (projectId ? `&${projectIdFilterParam(projectId)}` : "");
+
 export async function listDelayClaims({ config, limit = 50 } = {}) {
-  const projectId = requireRequestProject(config);
+  const projectId = delayClaimScope(config);
   if (!isConfigured(config)) return [];
   const max = Math.min(Math.max(Number(limit || 50), 1), 200);
-  return supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=*&${projectIdFilterParam(projectId)}&order=updated_at.desc&limit=${max}`);
+  return supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=*${delayClaimProjectFilter(projectId)}&order=updated_at.desc&limit=${max}`);
 }
 
 export async function createDelayClaim({ config, claim }) {
-  const projectId = requireRequestProject(config);
+  const projectId = delayClaimScope(config);
   if (!isConfigured(config)) throw new Error("Supabase is not configured");
   const payload = sanitizeDelayClaimCasePayload(claim);
-  if (payload.project_id && !sameProjectId(payload.project_id, projectId)) {
+  if (projectId && payload.project_id && !sameProjectId(payload.project_id, projectId)) {
     throw projectMismatchError("The delay claim names a different Project than the request");
   }
-  payload.project_id = projectId;
+  if (projectId) payload.project_id = projectId;
   const rows = await supabaseFetch(config, `/rest/v1/${DELAY_CLAIM_CASES_TABLE}`, {
     method: "POST",
     headers: { Prefer: "return=representation" },
@@ -481,17 +490,17 @@ export async function addDelayEventFinding({ config, eventId, finding }) {
 // may only touch cases of its own Project. A request without a Project is
 // refused.
 export async function delayClaimCaseInProject({ config, caseId }) {
-  const projectId = requireRequestProject(config);
+  const projectId = delayClaimScope(config);
   if (!caseId || !isConfigured(config)) return false;
   const rows = await supabaseFetch(
     config,
-    `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=id&id=eq.${encodeURIComponent(caseId)}&${projectIdFilterParam(projectId)}&limit=1`
+    `/rest/v1/${DELAY_CLAIM_CASES_TABLE}?select=id&id=eq.${encodeURIComponent(caseId)}${delayClaimProjectFilter(projectId)}&limit=1`
   );
   return Array.isArray(rows) && rows.length > 0;
 }
 
 export async function delayEventInProject({ config, eventId }) {
-  requireRequestProject(config);
+  delayClaimScope(config);
   if (!eventId || !isConfigured(config)) return false;
   const rows = await supabaseFetch(
     config,
@@ -1051,7 +1060,11 @@ async function supabaseFetch(config, path, options = {}) {
   }).finally(() => clearTimeout(id));
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error(data?.message || `Supabase request failed: ${response.status}`);
+  if (!response.ok) {
+    // The Lab dataset is MAIN's copy of a Company DB's tables: not seeded yet (ticket 06) reads as empty.
+    if (config.labDataset && isMissingRelationFailure(response.status, data)) throw labDatasetEmptyError();
+    throw new Error(data?.message || `Supabase request failed: ${response.status}`);
+  }
   return data;
 }
 

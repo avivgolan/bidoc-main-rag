@@ -554,7 +554,7 @@ export function qaExecutionConfig(baseConfig, projectId) {
   const externalTools = Object.fromEntries(Object.keys(baseConfig?.n8n?.tools || {}).map((name) => [name, ""]));
   return {
     ...baseConfig,
-    projectId: projectId || null,
+    projectId: projectId || baseConfig?.projectId || null,
     qa: {
       executionMode: "qa",
       persistChatHistory: false,
