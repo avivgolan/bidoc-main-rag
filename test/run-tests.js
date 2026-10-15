@@ -62,6 +62,7 @@ import { registerRunTraceTests } from "./run-trace.tests.js";
 import { registerRequestModeTests } from "./request-modes.tests.js";
 import { registerLabIsBackTests } from "./lab-is-back.tests.js";
 import { registerProjectChatHistoryTests } from "./project-chat-history.tests.js";
+import { registerLatestByDateTests } from "./latest-by-date.tests.js";
 import { registerKapaimSettingsRegressionTests, registerSettingsFromMetaTests } from "./settings-from-meta.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
@@ -13958,6 +13959,7 @@ registerRunTraceTests(test);
 // and temporarily set process env (restored at the end).
 registerCompanyDbIsolationTests(test);
 registerProjectChatHistoryTests(test);
+registerLatestByDateTests(test);
 registerSettingsFromMetaTests(test);
 registerRequestModeTests(test);
 registerLabIsBackTests(test);

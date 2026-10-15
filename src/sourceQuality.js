@@ -8,6 +8,7 @@ const QUALITY_BY_TOOL = {
   meeting_evidence_search: { score: 78, level: "MEDIUM_HIGH", label: "ראיות מתועדות מישיבה" },
   emails: { score: 74, level: "MEDIUM_HIGH", label: "תכתובת מייל" },
   alert: { score: 70, level: "MEDIUM", label: "התראה/תקציר מערכת" },
+  recent_items: { score: 80, level: "MEDIUM_HIGH", label: "פריטים אחרונים לפי תאריך" },
   hybrid_search: { score: 68, level: "MEDIUM", label: "אינדקס פרויקט" },
   hybrid_search_plan: { score: 64, level: "MEDIUM", label: "חיפוש אינדקס לפי תכנון מקצועי" },
   reranker: { score: 60, level: "MEDIUM", label: "דירוג רלוונטיות" },
