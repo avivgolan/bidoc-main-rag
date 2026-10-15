@@ -6295,13 +6295,13 @@ test("settings save never sends secrets or connections to the Meta row", async (
       secrets: { supabaseUrl: "https://shared.supabase.co/", supabaseServiceRoleKey: "sb_secret_shared" },
       contentSource: { supabaseUrl: "https://content.supabase.co", supabaseServiceRoleKey: "sb_secret_content" },
       n8nBaseUrl: "https://n8n.example"
-    }, { source: "settings_save", user: { id: "user-1", email: "root@example.test" } });
+    }, { source: "settings_save", user: { id: "a0000000-0000-4000-8000-000000000006", email: "root@example.test" } });
     assert.equal(request.url, "https://meta-save.supabase.co/rest/v1/rpc/save_agent_settings");
     assert.equal(request.options.headers.apikey, "sb_secret_meta");
     const body = JSON.parse(request.options.body);
     assert.equal(body.p_key, "main-agent");
     assert.equal(body.p_value.models.main, "openai/gpt-4o-mini");
-    assert.equal(body.p_changed_by, "user-1");
+    assert.equal(body.p_changed_by, "a0000000-0000-4000-8000-000000000006");
     for (const forbidden of ["secrets", "contentSource", "n8nBaseUrl"]) assert.equal(forbidden in body.p_value, false, forbidden);
     assert.ok(!request.options.body.includes("sb_secret_shared") && !request.options.body.includes("sb_secret_content"));
     assert.equal("secrets" in written, false);

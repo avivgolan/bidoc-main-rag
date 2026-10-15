@@ -29,7 +29,10 @@ src/
   server.js       — HTTP server, all API routes
   agent.js        — Main RAG pipeline
   classifier.js   — Message classifier (CHAT vs RAG)
-  config.js       — Settings cache + Supabase persistence
+  config.js       — Settings cache (read from / saved to the Meta DB) + env fallbacks
+  metaSettings.js — Meta DB read + save_agent_settings RPC
+  settingsSchema.js — schema check of a Lab settings save
+  contracts/switches.js — Contracts approval switches + bucket (settings, then env)
   heuristics.js   — Date/filter heuristics
   knowledge.js    — Knowledge base CRUD (Supabase-backed)
   memory.js       — Session memory helpers

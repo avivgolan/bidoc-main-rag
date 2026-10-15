@@ -2987,8 +2987,8 @@ async function handleApi(req, res, url) {
     const runId = body.runId || `schedule_conditions_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     createRun(runId, { projectId });
     try {
-      // This agent is SETTINGS-owned. Refresh MAIN.agent_settings on every
-      // explicit row action so a stale process can never use the env fallback.
+      // Refresh the Meta agent settings on every explicit row action so a
+      // stale process never runs on outdated settings. The OpenRouter key is env.
       if (!body.manualTriggerDate) await reloadSettingsFromDb();
       const result = await runScheduleConditionResolver({
         projectId,
@@ -4546,7 +4546,7 @@ async function runConnectionDiagnostics(cfg, { ids = [] } = {}) {
   add("subagent_schedule_conditions", "Schedule Condition Resolver", "subagents", async () => {
     const table = scheduleSettings().conditionsTable;
     await probeTable(contentCfg, table, "APP DATA");
-    if (!settingsOpenRouterApiKey()) inactive("Schedule Condition Resolver is inactive: a Settings-owned OpenRouter API Key is missing");
+    if (!settingsOpenRouterApiKey()) inactive("Schedule Condition Resolver is inactive: the OPENROUTER_API_KEY env var is missing or not an OpenRouter key");
     return { active: true, table };
   });
 

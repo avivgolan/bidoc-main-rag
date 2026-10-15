@@ -17,6 +17,7 @@ import { normalizeCompanyDbUrl } from "./companyDb.js";
 
 export const META_SETTINGS_KEY = "main-agent";
 const META_TIMEOUT_MS = 6000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 export function metaSettingsError(code, message, cause = null) {
   const error = new Error(message);
@@ -103,7 +104,7 @@ export async function saveMetaSettings({ value, user, env = process.env, fetchIm
       body: JSON.stringify({
         p_key: META_SETTINGS_KEY,
         p_value: value,
-        p_changed_by: user?.id || null,
+        p_changed_by: UUID_PATTERN.test(String(user?.id || "")) ? user.id : null,
         p_changed_by_email: user?.email || null
       })
     },
