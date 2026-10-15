@@ -19,6 +19,7 @@ import {
   loadContractsR6ActiveCatalog,
   persistContractsR6Embeddings
 } from "./r6Preparation.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_DECISION_REVIEW_MIGRATION_VERSION = "20260817121000";
 export const CONTRACTS_DECISION_REVIEW_STATUS_RPC = "bidoc_contracts_decision_review_status_r4_2b";
@@ -102,7 +103,7 @@ function mapWorkspaceError(error) {
 }
 
 export function contractsDecisionReviewApproved(env = process.env) {
-  return String(env.CONTRACTS_DECISIONS_R4_2B_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("decisionReviewR42b", env);
 }
 
 export function parseContractsDecisionProposalRequest(value) {

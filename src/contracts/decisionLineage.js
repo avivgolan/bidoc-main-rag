@@ -2,6 +2,7 @@ import { ContractsAgentError } from "./errors.js";
 import { parseContractsClauseWorkspaceId } from "./clausePersistence.js";
 import { CONTRACTS_DECISION_CATEGORIES } from "./decisionNormalization.js";
 import { workspaceRpc } from "./workspacePersistence.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_DECISION_LINEAGE_AGENT_VERSION = "contracts-decisions-lineage.r4.2c.v1";
 export const CONTRACTS_DECISION_LINEAGE_POLICY_VERSION = "contracts-decision-lineage.r4.2c.v1";
@@ -282,7 +283,7 @@ function assertProjection(value, { action = null } = {}) {
 }
 
 export function contractsDecisionLineageApproved(env = process.env) {
-  return String(env.CONTRACTS_DECISION_LINEAGE_R4_2C_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("decisionLineageR42c", env);
 }
 
 export function parseContractsDecisionSplitRequest(value, decisionId) {

@@ -59,6 +59,7 @@ import { registerInternalScopeTests } from "./internal-scope.tests.js";
 import { registerInternalScopeAccessTests } from "./internal-scope-access.tests.js";
 import { registerCompanyDbIsolationTests } from "./company-db-isolation.tests.js";
 import { registerProjectChatHistoryTests } from "./project-chat-history.tests.js";
+import { registerKapaimSettingsRegressionTests, registerSettingsFromMetaTests } from "./settings-from-meta.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
@@ -6120,7 +6121,7 @@ test("server disables direct subagent config persistence and keeps settings impo
   const serverSource = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(serverSource, /POST" && url\.pathname === "\/api\/settings\/import"[\s\S]*previewImportedSettingsFile\(body\)/);
   assert.match(serverSource, /PUT" && subagentConfigMatch[\s\S]*405[\s\S]*Save them through \/api\/settings/);
-  assert.match(serverSource, /PUT" && url\.pathname === "\/api\/settings"[\s\S]*writeLocalSettings\(body, \{ source: "settings_save" \}\)/);
+  assert.match(serverSource, /PUT" && url\.pathname === "\/api\/settings"[\s\S]*writeLocalSettings\(check\.patch, \{ source: "settings_save", user: /);
   assert.doesNotMatch(serverSource, /persistImportedSettingsFile/);
 });
 
@@ -6130,27 +6131,29 @@ test("prompt changes still persist through the main settings save route", () => 
   assert.match(appSource, /const body = readSettingsForm\(\);[\s\S]*api\("\/api\/settings", \{ method: "PUT", body \}\)/);
 });
 
-test("startup settings init does not auto-write agent settings", async () => {
+test("startup settings init reads the Meta settings row and never writes or touches MAIN", async () => {
   const savedFetch = global.fetch;
-  const savedUrl = process.env.SUPABASE_URL;
-  const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const saved = Object.fromEntries(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "META_SUPABASE_URL", "META_SUPABASE_SERVICE_ROLE_KEY"].map((key) => [key, process.env[key]]));
   const calls = [];
   process.env.SUPABASE_URL = "https://init.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "sb_secret_init";
+  process.env.META_SUPABASE_URL = "https://init-meta.supabase.co";
+  process.env.META_SUPABASE_SERVICE_ROLE_KEY = "sb_secret_meta";
   global.fetch = async (url, options = {}) => {
     calls.push({ url: String(url), method: options.method || "GET" });
-    return { ok: true, status: 200, text: async () => JSON.stringify([{ data: {} }]) };
+    return { ok: true, status: 200, text: async () => JSON.stringify([{ value: {} }]) };
   };
   try {
     await initSettings();
-    assert.ok(calls.some((call) => call.url.includes("/rest/v1/agent_settings?id=eq.default&select=data")));
-    assert.equal(calls.filter((call) => call.url.includes("/rest/v1/agent_settings") && call.method === "POST").length, 0);
+    assert.ok(calls.some((call) => call.url === "https://init-meta.supabase.co/rest/v1/agent_settings?select=value&key=eq.main-agent&limit=1"));
+    assert.equal(calls.filter((call) => call.method !== "GET").length, 0);
+    assert.equal(calls.filter((call) => call.url.startsWith("https://init.supabase.co")).length, 0, "MAIN is never read for settings");
   } finally {
     global.fetch = savedFetch;
-    if (savedUrl == null) delete process.env.SUPABASE_URL;
-    else process.env.SUPABASE_URL = savedUrl;
-    if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 
@@ -6241,27 +6244,26 @@ test("main agent requires inline source links instead of a consolidated footer",
   assert.match(mainPrompt, /use "caused by" only when the project record explicitly links/);
 });
 
-test("settings save fails without shared App Supabase persistence", async () => {
-  const savedUrl = process.env.SUPABASE_URL;
-  const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+test("settings save fails without the Meta DB connection and leaves the live settings alone", async () => {
+  const saved = Object.fromEntries(["META_SUPABASE_URL", "META_SUPABASE_SERVICE_ROLE_KEY"].map((key) => [key, process.env[key]]));
   const cache = readLocalSettings();
   const before = structuredClone(readLocalSettings());
-  delete process.env.SUPABASE_URL;
-  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  delete process.env.META_SUPABASE_URL;
+  delete process.env.META_SUPABASE_SERVICE_ROLE_KEY;
   for (const key of Object.keys(cache)) delete cache[key];
   try {
     await assert.rejects(
       writeLocalSettings({ models: { main: "openai/gpt-4o-mini" } }, { source: "settings_save" }),
-      /Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY/
+      /META_SUPABASE_URL and META_SUPABASE_SERVICE_ROLE_KEY/
     );
     assert.deepEqual(readLocalSettings(), {});
   } finally {
     for (const key of Object.keys(cache)) delete cache[key];
     Object.assign(cache, before);
-    if (savedUrl == null) delete process.env.SUPABASE_URL;
-    else process.env.SUPABASE_URL = savedUrl;
-    if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 
@@ -6276,35 +6278,40 @@ test("settings persistence rejects missing or unapproved write sources", async (
   );
 });
 
-test("settings import credentials can bootstrap a Supabase write", async () => {
-  const savedUrl = process.env.SUPABASE_URL;
-  const savedKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+test("settings save never sends secrets or connections to the Meta row", async () => {
+  const saved = Object.fromEntries(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "META_SUPABASE_URL", "META_SUPABASE_SERVICE_ROLE_KEY"].map((key) => [key, process.env[key]]));
   const savedFetch = global.fetch;
   let request;
   delete process.env.SUPABASE_URL;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  process.env.META_SUPABASE_URL = "https://meta-save.supabase.co";
+  process.env.META_SUPABASE_SERVICE_ROLE_KEY = "sb_secret_meta";
   global.fetch = async (url, options) => {
-    request = { url, options };
-    return { ok: true, status: 201, text: async () => "" };
+    request = { url: String(url), options };
+    return { ok: true, status: 200, text: async () => options.body ? JSON.stringify(JSON.parse(options.body).p_value) : "[]" };
   };
   try {
-    const saved = await writeLocalSettings({
+    const written = await writeLocalSettings({
       models: { main: "openai/gpt-4o-mini" },
-      secrets: {
-        supabaseUrl: "https://shared.supabase.co/",
-        supabaseServiceRoleKey: "sb_secret_shared"
-      }
-    }, { source: "settings_save" });
-    assert.equal(request.url, "https://shared.supabase.co/rest/v1/agent_settings");
-    assert.equal(request.options.headers.apikey, "sb_secret_shared");
-    assert.equal(JSON.parse(request.options.body).data.models.main, "openai/gpt-4o-mini");
-    assert.equal(saved.secrets.supabaseUrl, "https://shared.supabase.co/");
+      secrets: { supabaseUrl: "https://shared.supabase.co/", supabaseServiceRoleKey: "sb_secret_shared" },
+      contentSource: { supabaseUrl: "https://content.supabase.co", supabaseServiceRoleKey: "sb_secret_content" },
+      n8nBaseUrl: "https://n8n.example"
+    }, { source: "settings_save", user: { id: "a0000000-0000-4000-8000-000000000006", email: "root@example.test" } });
+    assert.equal(request.url, "https://meta-save.supabase.co/rest/v1/rpc/save_agent_settings");
+    assert.equal(request.options.headers.apikey, "sb_secret_meta");
+    const body = JSON.parse(request.options.body);
+    assert.equal(body.p_key, "main-agent");
+    assert.equal(body.p_value.models.main, "openai/gpt-4o-mini");
+    assert.equal(body.p_changed_by, "a0000000-0000-4000-8000-000000000006");
+    for (const forbidden of ["secrets", "contentSource", "n8nBaseUrl"]) assert.equal(forbidden in body.p_value, false, forbidden);
+    assert.ok(!request.options.body.includes("sb_secret_shared") && !request.options.body.includes("sb_secret_content"));
+    assert.equal("secrets" in written, false);
   } finally {
     global.fetch = savedFetch;
-    if (savedUrl == null) delete process.env.SUPABASE_URL;
-    else process.env.SUPABASE_URL = savedUrl;
-    if (savedKey == null) delete process.env.SUPABASE_SERVICE_ROLE_KEY;
-    else process.env.SUPABASE_SERVICE_ROLE_KEY = savedKey;
+    for (const [key, value] of Object.entries(saved)) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });
 
@@ -13946,6 +13953,8 @@ test("internal subagent diagnostics are read-only readiness probes", () => {
 // and temporarily set process env (restored at the end).
 registerCompanyDbIsolationTests(test);
 registerProjectChatHistoryTests(test);
+registerSettingsFromMetaTests(test);
+registerKapaimSettingsRegressionTests(test);
 
 const filterIndex = process.argv.indexOf("--filter");
 const filterPattern = filterIndex >= 0 ? process.argv[filterIndex + 1] : "";

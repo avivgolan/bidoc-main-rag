@@ -29,7 +29,10 @@ src/
   server.js       — HTTP server, all API routes
   agent.js        — Main RAG pipeline
   classifier.js   — Message classifier (CHAT vs RAG)
-  config.js       — Settings cache + Supabase persistence
+  config.js       — Settings cache (read from / saved to the Meta DB) + env fallbacks
+  metaSettings.js — Meta DB read + save_agent_settings RPC
+  settingsSchema.js — schema check of a Lab settings save
+  contracts/switches.js — Contracts approval switches + bucket (settings, then env)
   heuristics.js   — Date/filter heuristics
   knowledge.js    — Knowledge base CRUD (Supabase-backed)
   memory.js       — Session memory helpers
@@ -59,7 +62,7 @@ test/
 
 ## Environment Variables
 
-All configuration is read from environment variables. For local development, place them in `.env.local` (gitignored). For Vercel, set them in the Vercel dashboard.
+Secrets and connections are read from environment variables; everything else (prompts, models, presets, search tuning, time zone, Contracts approval switches and bucket) lives in the agent settings in the Meta DB (see "How Settings Work"), with the env var below as a fallback until it is removed. For local development, place them in `.env.local` (gitignored). For Vercel, set them in the Vercel dashboard.
 
 | Variable | Description |
 |---|---|
@@ -70,7 +73,7 @@ All configuration is read from environment variables. For local development, pla
 | `LITE_MODEL` | Default: `openai/gpt-4o-mini` |
 | `CLASSIFIER_MODEL` | Default: `openai/gpt-4o-mini` |
 | `KNOWLEDGE_PLANNER_MODEL` | Default: `openai/gpt-4o` |
-| `EMBEDDING_MODEL` | Default: `text-embedding-3-large` |
+| `EMBEDDING_MODEL` | Default: `text-embedding-3-large`. Env only and read-only: never read from or saved to the settings, so stored embeddings keep matching |
 | `RERANKER_MODEL` | Default: `openai/gpt-4o-mini` |
 | `HYBRID_RPC_NAME` | Supabase RPC function name for hybrid search |
 | `HYBRID_CANDIDATES` | Number of hybrid search candidates (default: 40) |
@@ -80,13 +83,14 @@ All configuration is read from environment variables. For local development, pla
 | `N8N_BASE_URL` | Base URL for n8n webhooks |
 | `N8N_TOOL_<NAME>_URL` | Override URL for a specific tool webhook |
 | `CONTRACTS_INGESTION_SECRET` | Dedicated secret accepted in `X-Contracts-Ingestion-Secret` when n8n calls the dry-run Contracts extraction API |
-| `META_SUPABASE_URL` / `META_SUPABASE_SERVICE_ROLE_KEY` | Optional. When both are set, every Project request's Company DB headers are cross-checked (read-only) against BiDoc's Meta DB (`projects.company_id` → `companies.supabase_url`, `company_credentials`); a mismatch is refused (403) |
+| `META_SUPABASE_URL` / `META_SUPABASE_SERVICE_ROLE_KEY` | BiDoc's Meta DB. Both set: the agent settings are read from it (and saved to it by the Lab), and every Project request's Company DB headers are cross-checked (read-only) against it (`projects.company_id` → `companies.supabase_url`, `company_credentials`); a mismatch is refused (403). Not set: built-in defaults with a logged warning |
+| `CONTRACTS_*_APPROVED` (13 switches), `CONTRACTS_STORAGE_BUCKET` | Fallback only: the settings section `contracts` wins when it names a switch (see `src/contracts/switches.js` for the list) |
 | `CONTENT_SUPABASE_URL` / `CONTENT_SUPABASE_SERVICE_ROLE_KEY` | Superadmin Contracts tooling only (server-owned KAPAIM connection). Never used for a Project request |
 | `PORT` | Server port (default: 4000) |
 
 ### Company DB rule
 
-Everything main-agent does for a Project (chat, insights, search, data query, memory, alerts, indexing, schedule, graph, timeline) reads and writes only that Project's own Company DB, named by the authenticated caller in `x-content-supabase-url` / `x-content-supabase-key` plus `x-project-id` (see `src/companyDb.js`). There is no global content DB and no App DB fallback: a Project route without them is refused (400 `company_db_required`) before any database call. The App DB holds only main-agent's own tables (settings, chat history keyed by `bidoc:<projectId>:` sessions, QA reports, delay claims with `project_id`).
+Everything main-agent does for a Project (chat, insights, search, data query, memory, alerts, indexing, schedule, graph, timeline) reads and writes only that Project's own Company DB, named by the authenticated caller in `x-content-supabase-url` / `x-content-supabase-key` plus `x-project-id` (see `src/companyDb.js`). There is no global content DB and no App DB fallback: a Project route without them is refused (400 `company_db_required`) before any database call. The App DB (MAIN) holds only main-agent's own tables (chat history keyed by `bidoc:<projectId>:` sessions, QA reports, delay claims with `project_id`). It no longer holds the settings: those are in the Meta DB, and a Project request never reads settings from MAIN (ADR 0012).
 
 > **Never commit `.env.local` or `data/settings.json`** — both are in `.gitignore`.
 
@@ -98,26 +102,18 @@ Everything main-agent does for a Project (chat, insights, search, data query, me
 
 The project uses three Supabase tables:
 
-### `agent_settings` — Application settings and agent prompts
+### `agent_settings` — agent settings (Meta DB, not MAIN)
 
-```sql
-create table if not exists agent_settings (
-  id         text primary key default 'default',
-  data       jsonb not null default '{}',
-  updated_at timestamptz not null default now()
-);
-
-insert into agent_settings (id, data)
-values ('default', '{}')
-on conflict (id) do nothing;
-```
-
-Stores a single JSON row (`id = 'default'`) containing:
-- `models` — model overrides per agent
+The settings are one row of the **Meta DB** table `agent_settings` (`key = 'main-agent'`, `value` jsonb); migration `supabase/migrations/20261016140000_agent_settings_change_log.sql` in the BiDoc repo. Only a Superadmin (or the service role) reads or writes it. The row holds:
+- `models` — model overrides per agent (never `embedding`: env only)
 - `prompts` — prompt overrides per agent
-- `retrieval` — hybrid search tuning
-- `n8nBaseUrl` + `tools` — n8n webhook URLs
-- `secrets` — API key overrides (prefer env vars for these)
+- `retrieval`, `ai`, `rag`, `graph`, `insights`, `cache`, `memory`, `knowledge`, `subagents`, `presets`, `timezone` — tuning
+- `tools` + `toolsRuntime` — n8n tool webhook URLs and runtime
+- `contracts` — `approvals` (13 booleans, see `src/contracts/switches.js`) and `storageBucket`; a switch that is absent follows its `CONTRACTS_*_APPROVED` env var
+
+It never holds `secrets`, `contentSource` or `n8nBaseUrl` (the Meta DB refuses them): the OpenRouter key and database keys are env only, the n8n base URL is `N8N_BASE_URL`. Every change is appended to `agent_settings_log` (who, when, diff); the table is append-only.
+
+MAIN's own `agent_settings` table is no longer read. It was copied once to Meta with `scripts/seed-main-agent-settings.mjs` in the BiDoc repo.
 
 ### `knowledge_documents` — Local knowledge base
 
@@ -140,16 +136,16 @@ Schema is managed separately — do not modify without understanding the hybrid 
 
 ## How Settings Work (In-Memory Cache)
 
-Settings are loaded from Supabase once at startup and cached in memory with a **30-second TTL**. This means:
+Settings are read from the Meta DB (`src/metaSettings.js`) and cached in memory for **3 minutes** (`SETTINGS_TTL_MS`):
 
-- Changes made on Vercel appear locally within 30 seconds (no restart needed).
-- Every write updates both the in-memory cache and Supabase atomically.
-- `getConfig()` is synchronous — it always reads from the in-memory cache.
+- A change saved from the Lab reaches the instance that saved it at once and every other instance within 3 minutes.
+- `getConfig()` is synchronous — it always reads from the in-memory cache, with env fallbacks for moved values.
 - On Vercel cold starts, `initSettings()` runs before the first request is handled.
+- If the Meta DB cannot be read (not configured, down, or no row yet) main-agent uses the built-in defaults plus env fallbacks and logs a warning; it never falls back to MAIN. A failed *refresh* keeps the last good settings and retries after 30 seconds.
 
 **Read flow:** `getConfig()` → `readLocalSettings()` → `_settingsCache`  
-**Write flow:** `writeLocalSettings()` → update `_settingsCache` + upsert `agent_settings` in Supabase  
-**Refresh:** `refreshSettingsIfStale()` is called on every request; re-fetches from Supabase if cache is older than 30s
+**Write flow:** Lab `PUT /api/settings` (Superadmin session only, schema-checked by `src/settingsSchema.js`) → fresh strict read → `writeLocalSettings()` → the `save_agent_settings` RPC (row + change log in one transaction) → cache updated. There is no reset-to-defaults.  
+**Refresh:** `refreshSettingsIfStale()` is called on every request.
 
 ---
 
@@ -157,10 +153,10 @@ Settings are loaded from Supabase once at startup and cached in memory with a **
 
 Default prompts are defined in `src/prompts.js` in `AGENT_DEFINITIONS`. These are the source of truth committed to git.
 
-At runtime, `getConfig()` merges defaults with any overrides from `agent_settings.data.prompts`. Overrides win.
+At runtime, `getConfig()` merges defaults with any overrides from the Meta settings row (`prompts`). Overrides win.
 
 **To change a prompt permanently (for all environments):** edit `src/prompts.js` and push.  
-**To override at runtime without a deploy:** use the Agents tab in the UI — saved to Supabase.
+**To override at runtime without a deploy:** use the Agents tab in the UI (a Superadmin Lab save) — stored in the Meta DB.
 
 ---
 

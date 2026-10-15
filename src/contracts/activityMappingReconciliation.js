@@ -17,6 +17,7 @@ import {
   submitActivityMappingAutoContinuation
 } from "./activityMappingReview.js";
 import { ContractsAgentError } from "./errors.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_ACTIVITY_MAPPING_RECONCILIATION_API_VERSION =
   "contracts-activity-mapping-reconciliation.phase3g.v1";
@@ -629,9 +630,7 @@ function buildSubmission(plan, operation, reviewedAt) {
 }
 
 export function contractsActivityMappingUploadReconciliationApproved(env = process.env) {
-  return String(env.CONTRACTS_PHASE3G_UPLOAD_RECONCILIATION_APPROVED || "")
-    .trim()
-    .toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("uploadReconciliation", env);
 }
 
 export function parseActivityMappingReconciliationRequest({ headers = {}, query = null, body = null } = {}) {

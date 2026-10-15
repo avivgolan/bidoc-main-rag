@@ -1,6 +1,7 @@
 import { createEmbedding } from "../openrouter.js";
 import { ContractsAgentError } from "./errors.js";
 import { workspaceRpc } from "./workspacePersistence.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_R6_PHASE3_CATALOG_RPC = "bidoc_contracts_r6_active_catalog_v1";
 export const CONTRACTS_R6_PHASE3_EMBEDDING_WORK_RPC = "bidoc_contracts_r6_embedding_work_v2";
@@ -47,7 +48,7 @@ function chunk(items, size) {
 }
 
 export function contractsR6Phase3Approved(env = process.env) {
-  return String(env.CONTRACTS_R6_PHASE3_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("r6Phase3", env);
 }
 
 export async function loadContractsR6ActiveCatalog({ config, fetchImpl = fetch, timeoutMs } = {}) {
