@@ -3,7 +3,7 @@
 ## Project Overview
 
 A Node.js HTTP server (no framework) that powers a construction-project AI assistant.  
-It combines hybrid vector/keyword search (Supabase), LLM inference (OpenRouter), optional n8n tool integrations, and a local knowledge base to answer questions about a project.
+It combines hybrid vector/keyword search (a Project's Company DB on Supabase), LLM inference (OpenRouter), optional n8n tool integrations, and a knowledge base of files shipped with the code to answer questions about a project. It serves two kinds of request, never mixed (see "Two request modes"): Project requests from BiDoc and the ingest engine, and Lab requests from a signed-in Superadmin.
 
 The frontend is a plain HTML/CSS/JS single-page app served from `public/`.
 
@@ -30,12 +30,15 @@ src/
   agent.js        — Main RAG pipeline
   classifier.js   — Message classifier (CHAT vs RAG)
   config.js       — Settings cache (read from / saved to the Meta DB) + env fallbacks
+  requestMode.js  — Request mode (Project or Lab), route access, per-mode config connections
+  companyDb.js    — Company DB connection of a Project request + Meta cross-check
   metaSettings.js — Meta DB read + save_agent_settings RPC
   settingsSchema.js — schema check of a Lab settings save
   contracts/switches.js — Contracts approval switches + bucket (settings, then env)
   heuristics.js   — Date/filter heuristics
-  knowledge.js    — Knowledge base CRUD (Supabase-backed)
-  memory.js       — Session memory helpers
+  knowledge.js    — Knowledge base: agent documents from files in knowledge-base/agents/ (shipped with the code), plus local uploads
+  memory.js       — Session memory helpers (Lab only: the memory tables live in MAIN)
+  chatMemory.js   — Lab chat memory (MAIN); projectChatHistory.js builds a Project's history from its Company DB
   openrouter.js   — LLM + embedding + reranker calls
   prompts.js      — Agent definitions and default prompts
   runLog.js       — SSE run-event log per request
@@ -51,8 +54,11 @@ public/
   app.js          — All frontend logic
   styles.css      — Design system + component styles
 
+knowledge-base/
+  agents/         — Knowledge agent documents (.md), committed and shipped with the code (read-only on Vercel)
+
 data/
-  knowledge-base/ — (empty, kept for local fallback structure)
+  knowledge-base/ — local uploads (gitignored, ephemeral on Vercel)
 
 test/
   run-tests.js    — Integration tests
@@ -67,8 +73,10 @@ Secrets and connections are read from environment variables; everything else (pr
 | Variable | Description |
 |---|---|
 | `OPENROUTER_API_KEY` | OpenRouter API key |
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (bypasses RLS) |
+| `SUPABASE_URL` | MAIN: main-agent's own database, the Lab's. Reachable only by a Lab request; a Project request has no MAIN connection |
+| `SUPABASE_SERVICE_ROLE_KEY` | MAIN service role key (bypasses RLS) |
+| `BIDOC_API_SECRET` / `INGEST_API_SECRET` | The machine secrets of a Project request (`x-bidoc-api-secret`): the BiDoc web app and the ingest engine |
+| `MAIN_AGENT_SESSION_SECRET` | Signs the Lab's Superadmin session cookie (falls back to `BIDOC_API_SECRET`) |
 | `MAIN_MODEL` | Default: `openai/gpt-4o` |
 | `LITE_MODEL` | Default: `openai/gpt-4o-mini` |
 | `CLASSIFIER_MODEL` | Default: `openai/gpt-4o-mini` |
@@ -88,19 +96,43 @@ Secrets and connections are read from environment variables; everything else (pr
 | `CONTENT_SUPABASE_URL` / `CONTENT_SUPABASE_SERVICE_ROLE_KEY` | Superadmin Contracts tooling only (server-owned KAPAIM connection). Never used for a Project request |
 | `PORT` | Server port (default: 4000) |
 
-### Company DB rule
+### Two request modes
 
-Everything main-agent does for a Project (chat, insights, search, data query, memory, alerts, indexing, schedule, graph, timeline) reads and writes only that Project's own Company DB, named by the authenticated caller in `x-content-supabase-url` / `x-content-supabase-key` plus `x-project-id` (see `src/companyDb.js`). There is no global content DB and no App DB fallback: a Project route without them is refused (400 `company_db_required`) before any database call. The App DB (MAIN) holds only main-agent's own tables (chat history keyed by `bidoc:<projectId>:` sessions, QA reports, delay claims with `project_id`). It no longer holds the settings: those are in the Meta DB, and a Project request never reads settings from MAIN (ADR 0012).
+Every request is exactly one mode, decided once in `handleApi` from its credentials (`src/requestMode.js`, ADR 0012). The mode decides which database connections exist in the request config, so the other mode's paths fail closed.
+
+| | Project mode | Lab mode |
+|---|---|---|
+| Who | BiDoc web app, ingest engine | A Superadmin signed in to main-agent's own screens |
+| Credentials | machine secret in `x-bidoc-api-secret` (`BIDOC_API_SECRET` / `INGEST_API_SECRET`), plus `x-project-id`, `x-content-supabase-url` and `x-content-supabase-key` | Superadmin session cookie (BiDoc login) |
+| Connections | that Project's own Company DB, plus the Meta settings read | MAIN, plus the Meta settings save route (`PUT /api/settings`) |
+| MAIN | none: `supabaseUrl` / `supabaseServiceRoleKey` are stripped from the request config and every MAIN reader or writer throws `main_unavailable_in_project_mode` | its database |
+| Company DB headers | required | refused (400 `lab_mode_has_no_company_db`) |
+
+- A request that carries the machine secret is a Project request even if it also carries a session cookie (the cookie is ignored; it never opens MAIN). A wrong secret is refused (401), never rescued by a cookie.
+- `routeAccess()` sorts every `/api` route: `project` (default: new routes need a Company DB), `lab` (MAIN: sessions, run history, QA, AI reports, delay claims, schedule assignment reviews, Contracts, dashboard), `shared` (settings, agents, knowledge files, model list, run stream: no data connection of their own) or `both` (annotate). A route of the other mode is refused (403 `route_requires_lab_mode` / `route_requires_project_mode`) before any database call. The Contracts lab keeps its own fixed connection (`contractsServerConfig`) and stays on the Lab side.
+- **Project mode** stores nothing of its own: no chat copy, no memory summary, no long-term memory item, no annotate vote, no local memory log. The conversation history is read from BiDoc's `chat_sessions` / `chat_messages` in the Company DB (`src/projectChatHistory.js`); the compact `runTrace` travels with the answer for BiDoc to save in the message metadata; `messageId` in the answer is `null`. `POST /api/messages/:id/annotate` is accepted and ignored (`{ ok: true, ignored: true }`): BiDoc keeps the vote in its own `chat_messages.annotation`.
+- Project data (chat, insights, search, data query, alerts, indexing, schedule, graph, timeline) lives only in the named Company DB. There is no global content DB and no MAIN fallback: a Project route without Company DB headers and a Project is refused (400 `company_db_required`) before any database call. Insight runs (`project_insight_runs`) are read and written by run id AND Project.
+- **Lab mode** works only on MAIN. Company DB headers on it are refused. Routes that read a Project's Company DB (chat, insights, indexing, timeline, data query) have no connection in Lab mode until the Lab gets its own seeded test dataset in MAIN.
 
 > **Never commit `.env.local` or `data/settings.json`** — both are in `.gitignore`.
 
 ---
 
-## Supabase Database
+## Databases
 
-### Rule: All persistent mutable state lives in Supabase — never on the local filesystem.
+### Rule: persistent mutable state lives in a database, never on the local filesystem (Vercel's filesystem is ephemeral).
 
-The project uses three Supabase tables:
+main-agent touches three kinds of database, and a request touches only the ones of its mode:
+
+| Database | Holds | Project request | Lab request |
+|---|---|---|---|
+| **Company DB** (one per Company, named by the request headers) | Project content: emails, files, index rows, alerts, graph, timeline, BiDoc's chat sessions and messages, insight runs | its own, read (and its insight runs and indexing writes) | never |
+| **MAIN** (`SUPABASE_URL`) | Lab data only: test chats (`chat_messages_gf`), chat memory (`chat_session_memory`, `chat_memory_items`, see `supabase/chat-agent-memory.sql`), QA suites and reports (`qa_*`), delay claims, schedule assignment reviews | never | yes |
+| **Meta DB** (`META_SUPABASE_*`) | the agent settings (`agent_settings`) and their change log | read | the narrow settings save route only |
+
+Memory locations: in Project mode there is no memory store; history comes from the Company DB chat messages and older turns are summarised on the fly for that request. In Lab mode the memory tables are in MAIN.
+
+Old Project chat copies and memory summaries that earlier versions wrote to MAIN (keyed by `bidoc:<projectId>:` sessions) are no longer written; a separate one-off cleanup removes the ones already there.
 
 ### `agent_settings` — agent settings (Meta DB, not MAIN)
 
@@ -115,22 +147,9 @@ It never holds `secrets`, `contentSource` or `n8nBaseUrl` (the Meta DB refuses t
 
 MAIN's own `agent_settings` table is no longer read. It was copied once to Meta with `scripts/seed-main-agent-settings.mjs` in the BiDoc repo.
 
-### `knowledge_documents` — Local knowledge base
+### Knowledge base is files, not a table
 
-```sql
-create table if not exists knowledge_documents (
-  filename   text primary key,
-  content    text not null default '',
-  updated_at timestamptz not null default now()
-);
-```
-
-Stores `.md` and `.txt` knowledge documents used by the Professional Knowledge Agent.
-
-### `chat_messages_gf` — Chat history (pre-existing)
-
-Stores user/AI messages per session. Used for memory and history tab.  
-Schema is managed separately — do not modify without understanding the hybrid search RPC dependencies.
+There is no `knowledge_documents` table. The Knowledge agents' documents are `.md` files under `knowledge-base/agents/` that ship with the code; uploads written from the UI go to `data/knowledge-base/` on the local filesystem (gitignored; ephemeral on Vercel, so effectively read-only there).
 
 ---
 
@@ -162,9 +181,9 @@ At runtime, `getConfig()` merges defaults with any overrides from the Meta setti
 
 ## How Knowledge Base Works
 
-Documents are stored in the `knowledge_documents` Supabase table. All CRUD operations in `src/knowledge.js` are async and use the Supabase REST API directly via `process.env.SUPABASE_URL` and `process.env.SUPABASE_SERVICE_ROLE_KEY` (never from the settings cache, to avoid circular dependency).
+Documents are files: the built-in Knowledge agent documents in `knowledge-base/agents/<agent>/` (committed, read-only) and local uploads in `data/knowledge-base/` (gitignored). `src/knowledge.js` reads them from disk; nothing is read from a database.
 
-`searchKnowledgeBase()` fetches all documents from Supabase and does local tokenized scoring — no vector embedding is used for the knowledge base.
+`searchKnowledgeBase()` loads the documents and does local tokenized scoring — no vector embedding is used for the knowledge base.
 
 ---
 
@@ -184,7 +203,7 @@ The project uses `vercel.json` to route all requests through `src/server.js` via
 - On Vercel: exports `default handler` (serverless)
 - Locally: starts `http.createServer(handler).listen(port)`
 
-**Vercel filesystem is ephemeral** — never write anything important to disk. Always use Supabase.
+**Vercel filesystem is ephemeral** — never write anything important to disk. Use the database of the request's mode (see "Databases").
 
 ---
 
@@ -245,6 +264,6 @@ No build step, no npm install needed — zero npm dependencies.
 
 - `data/settings.json` — gitignored, never commit
 - `.env.local` — gitignored, never commit
-- `data/knowledge-base/` — gitignored (content lives in Supabase)
+- `data/knowledge-base/` — gitignored (local uploads only; the built-in documents are in `knowledge-base/agents/`)
 - Migrations are **never run from code** — always manual via Supabase SQL Editor
 - All environment-specific config goes in Vercel env vars or `.env.local`

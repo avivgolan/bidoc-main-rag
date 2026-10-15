@@ -4,6 +4,7 @@ import { CACHE_TTL, cachedOperation } from "./cache.js";
 import { hydrateRetrievedSourceLinks, indexedSourceLinkReadPath, INDEXED_SOURCE_LINK_CONTRACT } from "./sourceLinks.js";
 import { bidocSessionIdOf, chatSessionProjectId, projectIdFilterParam, projectMismatchError, requestProjectId, sameProjectId } from "./projectScope.js";
 import { companyDbConnection, companyDbRequiredError, searchFunctionOutdatedError } from "./companyDb.js";
+import { assertMainAvailable } from "./requestMode.js";
 
 // Every Company DB read/write and every Project-owned App DB row needs the
 // request Project; unscoped calls are refused rather than run across Projects.
@@ -1032,7 +1033,11 @@ export async function hybridSearch({ config, query, dateFrom, dateTo, hashtags =
 
 export const vectorSearch = hybridSearch;
 
+// Every request to MAIN passes through here with the full request config, and a
+// Project-mode config has no MAIN connection: it throws instead of reading or
+// writing nothing. A Company DB connection (companyDbConnection) carries no mode.
 async function supabaseFetch(config, path, options = {}) {
+  assertMainAvailable(config);
   const { timeoutMs = 20_000, ...requestOptions } = options;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), Math.min(20_000, Math.max(100, Number(timeoutMs) || 20_000)));
@@ -1051,6 +1056,7 @@ async function supabaseFetch(config, path, options = {}) {
 }
 
 function isConfigured(config) {
+  assertMainAvailable(config);
   return Boolean(config.supabaseUrl && config.supabaseServiceRoleKey);
 }
 

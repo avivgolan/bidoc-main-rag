@@ -53,6 +53,7 @@ import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, h
 import { appendMemoryLog } from "./memoryLogger.js";
 import { requestProjectId } from "./projectScope.js";
 import { hasCompanyDbConnection } from "./companyDb.js";
+import { REQUEST_MODE_PROJECT } from "./requestMode.js";
 import { loadProjectConversation, projectAgentMemory, projectRoutingMemory, startEarlierSummary } from "./projectChatHistory.js";
 
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
@@ -60,11 +61,12 @@ export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
 export async function runChatPipeline({ message, sessionId, userId = null, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [], ephemeral = false, forceRag = false, executionMode = "production", persistChatHistory = true }) {
   const pipelineStartedAt = Date.now();
   const ephemeralRun = ephemeral || executionMode === "qa" || persistChatHistory === false;
-  // A Project request names its Company DB. Its conversation context is built
-  // from BiDoc's chat in that Company DB for this request only; main-agent's
-  // own memory store (MAIN: session summaries, long-term memory items) is
-  // neither read nor written.
-  const projectMode = hasCompanyDbConnection(config) && Boolean(requestProjectId(config));
+  // A Project request (see requestMode.js) has no MAIN connection. Its
+  // conversation context is built from BiDoc's chat in the Project's Company DB
+  // for this request only; main-agent writes no chat copy, no memory summary and
+  // no long-term memory item anywhere, and keeps no local memory log.
+  const projectMode = config?.requestMode === REQUEST_MODE_PROJECT
+    || (hasCompanyDbConnection(config) && Boolean(requestProjectId(config)));
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
   const openRouterCalls = [];
   let openRouterCallSequence = 0;
@@ -105,10 +107,16 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   if (routingMemory.errors.length) {
     emitRunEvent(runId, "memory", "Routing memory degraded; chat continues", { errors: routingMemory.errors });
   }
+  // A Project request stores no chat copy (BiDoc's Company DB holds the only
+  // record, so there is no main-agent message id either).
   const saved = ephemeralRun
     ? { id: null, status: "ephemeral" }
-    : await saveMessage({ config, userMessage: message, sanitizedMessage: sanitized, sessionId });
-  emitRunEvent(runId, "save_message", ephemeralRun ? "Internal query kept out of chat history" : "Message saved", { id: saved.id, status: saved.status, execution_mode: executionMode });
+    : projectMode
+      ? { id: null, status: "not_stored" }
+      : await saveMessage({ config, userMessage: message, sanitizedMessage: sanitized, sessionId });
+  emitRunEvent(runId, "save_message", ephemeralRun
+    ? "Internal query kept out of chat history"
+    : projectMode ? "Project chat kept only in the Company DB" : "Message saved", { id: saved.id, status: saved.status, execution_mode: executionMode });
   const trace = [];
   let classification;
 
@@ -269,7 +277,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   workflowLog.cacheMetrics = finalizeCacheMetrics(cacheContext);
 
   const runEvents = getRunEvents(runId);
-  if (!ephemeralRun) {
+  if (!ephemeralRun && !projectMode) {
     await updateMessage({
       config,
       messageId: saved.id,
@@ -299,7 +307,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     rejectedItems: memoryWrite?.rejected || 0,
     localLogWritten: false
   };
-  if (!ephemeralRun) {
+  if (!ephemeralRun && !projectMode) {
     const logStatus = await appendMemoryLog({
       runId,
       sessionId,
