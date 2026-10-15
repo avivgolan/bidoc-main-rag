@@ -53,7 +53,7 @@ import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, h
 import { appendMemoryLog } from "./memoryLogger.js";
 import { requestProjectId } from "./projectScope.js";
 import { hasCompanyDbConnection } from "./companyDb.js";
-import { REQUEST_MODE_PROJECT } from "./requestMode.js";
+import { REQUEST_MODE_LAB, REQUEST_MODE_PROJECT } from "./requestMode.js";
 import { loadProjectConversation, projectAgentMemory, projectRoutingMemory, startEarlierSummary } from "./projectChatHistory.js";
 
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
@@ -65,8 +65,10 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   // conversation context is built from BiDoc's chat in the Project's Company DB
   // for this request only; main-agent writes no chat copy, no memory summary and
   // no long-term memory item anywhere, and keeps no local memory log.
+  // A Lab request (Superadmin) reads the Lab dataset in MAIN and keeps its chat,
+  // memory and votes in MAIN: its content connection is not a Company DB.
   const projectMode = config?.requestMode === REQUEST_MODE_PROJECT
-    || (hasCompanyDbConnection(config) && Boolean(requestProjectId(config)));
+    || (config?.requestMode !== REQUEST_MODE_LAB && hasCompanyDbConnection(config) && Boolean(requestProjectId(config)));
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
   const openRouterCalls = [];
   let openRouterCallSequence = 0;

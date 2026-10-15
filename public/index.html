@@ -147,13 +147,6 @@
             <span class="tabLabel">QA</span>
           </button>
 
-          <button class="tab" data-tab="reset">
-            <span class="tabIcon">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.4"/></svg>
-            </span>
-            <span class="tabLabel">Reset</span>
-          </button>
-
           <button class="tab" data-tab="settings">
             <span class="tabIcon">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -174,8 +167,10 @@
       <!-- ======================================================
            CHAT
            ====================================================== -->
-      <section class="panel" id="dashboard"><div data-react-island="dashboard"></div></section>
+      <section class="panel" id="dashboard">
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div><div data-react-island="dashboard"></div></section>
       <section class="panel active" id="chat">
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
         <input id="sessionId" type="hidden" />
         <header class="chatHeader">
           <div class="chatTitleGroup">
@@ -260,6 +255,7 @@
            AGENTS
            ====================================================== -->
       <section class="panel" id="agents">
+        <div class="labProdNotice" role="note"><strong>שמירה כאן משנה את הייצור.</strong> ההגדרות נשמרות מיד ב-Meta ופעילות בכל הפרויקטים תוך דקות, בלי שלב טיוטה. כל שמירה נרשמת ביומן: מי, מתי ומה השתנה.</div>
         <header class="panelHeader">
           <div>
             <h2>סוכנים</h2>
@@ -273,14 +269,15 @@
            SUB-AGENTS
            ====================================================== -->
       <section class="panel" id="subagents">
+        <div class="labProdNotice" role="note"><strong>שמירה כאן משנה את הייצור.</strong> ההגדרות נשמרות מיד ב-Meta ופעילות בכל הפרויקטים תוך דקות, בלי שלב טיוטה. כל שמירה נרשמת ביומן: מי, מתי ומה השתנה.</div>
         <header class="panelHeader">
           <div>
             <h2>סוכני משנה</h2>
-            <p class="hint">הסוכנים הפנימיים של המערכת — כל סוכן מטפל בתחום ספציפי ומוזמן על-ידי ה-Main Agent. שינויים בכרטיסים נשמרים לטופס; לחץ "שמור ל-Supabase" כדי להחיל.</p>
+            <p class="hint">הסוכנים הפנימיים של המערכת — כל סוכן מטפל בתחום ספציפי ומוזמן על-ידי ה-Main Agent. שינויים בכרטיסים נשמרים לטופס; לחץ "שמור לייצור" כדי להחיל אותם בייצור.</p>
           </div>
           <div class="subagentsSaveBar">
             <span id="subagentsSaveStatus" class="hint"></span>
-            <button id="subagentsSaveAll" class="primary">שמור ל-Supabase</button>
+            <button id="subagentsSaveAll" class="primary">שמור לייצור</button>
           </div>
         </header>
         <div id="subagentsList" class="subagents-grid"></div>
@@ -290,6 +287,7 @@
            SCHEDULE INTELLIGENCE
            ====================================================== -->
       <section class="panel" id="schedule">
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
         <div data-react-island="schedule"></div>
       </section>
 
@@ -301,6 +299,7 @@
            INSIGHTS
            ====================================================== -->
       <section class="panel" id="insights">
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
         <div data-react-island="insights"></div>
         <div class="delayClaimsLegacyCompatibility" hidden>
           <button id="runProjectInsightsAnalysis" type="button"></button>
@@ -325,6 +324,7 @@
            WORKFLOW
            ====================================================== -->
       <section class="panel" id="workflow">
+        <div class="labProdNotice" role="note"><strong>שמירה כאן משנה את הייצור.</strong> ההגדרות נשמרות מיד ב-Meta ופעילות בכל הפרויקטים תוך דקות, בלי שלב טיוטה. כל שמירה נרשמת ביומן: מי, מתי ומה השתנה.</div>
         <div data-react-island="workflow"></div>
       </section>
 
@@ -335,10 +335,12 @@
         <header class="panelHeader">
           <div>
             <h2>Knowledge Base</h2>
-            <p class="hint">מסמכי TXT/Markdown מקומיים שמזינים את Professional Knowledge Agent.</p>
+            <p class="hint">מסמכי TXT/Markdown שנשלחים עם הקוד ומזינים את Professional Knowledge Agent.</p>
           </div>
           <button id="refreshKnowledge" type="button">רענן</button>
         </header>
+
+        <div class="labProdNotice" id="knowledgeReadOnlyNote" role="note" hidden>ה-Knowledge Base לקריאה בלבד בשרת: הקבצים נשלחים יחד עם הקוד (knowledge-base/agents). כדי לשנות מסמך, הוסיפו אותו לקוד ופרסמו.</div>
 
         <section class="knowledgeAgents" id="knowledgeAgents"></section>
 
@@ -386,6 +388,7 @@
            SETTINGS
            ====================================================== -->
       <section class="panel" id="settings">
+        <div class="labProdNotice" role="note"><strong>שמירה כאן משנה את הייצור.</strong> ההגדרות נשמרות מיד ב-Meta ופעילות בכל הפרויקטים תוך דקות, בלי שלב טיוטה. כל שמירה נרשמת ביומן: מי, מתי ומה השתנה.</div>
         <div data-react-island="settings"></div>
       </section>
 
@@ -393,6 +396,8 @@
            TOOLS
            ====================================================== -->
       <section class="panel" id="tools">
+        <div class="labProdNotice" role="note"><strong>שמירה כאן משנה את הייצור.</strong> ההגדרות נשמרות מיד ב-Meta ופעילות בכל הפרויקטים תוך דקות, בלי שלב טיוטה. כל שמירה נרשמת ביומן: מי, מתי ומה השתנה.</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
         <header class="panelHeader">
           <h2>בדיקת כלים</h2>
           <button id="runTool">הרץ בדיקה</button>
@@ -458,6 +463,7 @@
            TIMELINE
            ====================================================== -->
       <section class="panel" id="timeline" aria-label="ציר זמן אירועים">
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
         <header class="panelHeader">
           <div class="timelineTitleGroup">
             <h2>ציר זמן אירועים</h2>
@@ -526,6 +532,7 @@
            PROJECT GRAPH
            ====================================================== -->
       <section class="panel" id="graph">
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
         <header class="panelHeader">
           <div>
             <h2>גרף</h2>
@@ -595,6 +602,7 @@
            LINK AGENT
            ====================================================== -->
       <section class="panel" id="linkAgent">
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
         <header class="panelHeader">
           <div>
             <h2>סוכן הקשרים</h2>
@@ -665,6 +673,7 @@
            QA
            ====================================================== -->
       <section class="panel" id="qa">
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
         <header class="panelHeader">
           <div>
             <h2>QA — ניתוח שיחות</h2>
@@ -683,30 +692,12 @@
         <div class="qaList" id="qaList">טוען...</div>
       </section>
 
-      <!-- ======================================================
-           RESET
-           ====================================================== -->
-      <section class="panel" id="reset">
-        <header class="panelHeader">
-          <div>
-            <h2>Reset Server</h2>
-            <p class="hint">מפעיל מחדש את שרת האפליקציה בלבד — לא מוחק הגדרות, היסטוריה או Knowledge Base.</p>
-          </div>
-        </header>
-        <div class="resetBox">
-          <strong>Restart מקומי לשרת Node</strong>
-          <p>שימושי אחרי שינויי קוד או בזמן בדיקות. הדפדפן ימתין לחזרת השרת וירענן אוטומטית.</p>
-          <button id="restartServer" type="button" class="dangerButton">אפס והפעל מחדש</button>
-          <pre id="restartStatus" class="resetStatus">ממתין לפעולה.</pre>
-        </div>
-      </section>
-
     </main>
     <div class="toastContainer" id="toastContainer" aria-live="polite"></div>
     <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
     <script src="/react-loader.js?v=20260705-internal-agents" type="module"></script>
-    <script src="/app.js?v=20260806-subagent-diagnostics1" type="module"></script>
+    <script src="/app.js?v=20261016-lab-is-back" type="module"></script>
   </body>
 </html>

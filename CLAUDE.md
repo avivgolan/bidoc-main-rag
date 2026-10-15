@@ -31,6 +31,7 @@ src/
   classifier.js   — Message classifier (CHAT vs RAG)
   config.js       — Settings cache (read from / saved to the Meta DB) + env fallbacks
   requestMode.js  — Request mode (Project or Lab), route access, per-mode config connections
+  labDataset.js   — The Lab dataset (MAIN's copy of the Company DB tables): Lab Project id, empty-state error
   companyDb.js    — Company DB connection of a Project request + Meta cross-check
   metaSettings.js — Meta DB read + save_agent_settings RPC
   settingsSchema.js — schema check of a Lab settings save
@@ -104,15 +105,15 @@ Every request is exactly one mode, decided once in `handleApi` from its credenti
 |---|---|---|
 | Who | BiDoc web app, ingest engine | A Superadmin signed in to main-agent's own screens |
 | Credentials | machine secret in `x-bidoc-api-secret` (`BIDOC_API_SECRET` / `INGEST_API_SECRET`), plus `x-project-id`, `x-content-supabase-url` and `x-content-supabase-key` | Superadmin session cookie (BiDoc login) |
-| Connections | that Project's own Company DB, plus the Meta settings read | MAIN, plus the Meta settings save route (`PUT /api/settings`) |
+| Connections | that Project's own Company DB, plus the Meta settings read | MAIN (its own Lab tables and the Lab dataset in it), plus the Meta settings save route (`PUT /api/settings`) |
 | MAIN | none: `supabaseUrl` / `supabaseServiceRoleKey` are stripped from the request config and every MAIN reader or writer throws `main_unavailable_in_project_mode` | its database |
 | Company DB headers | required | refused (400 `lab_mode_has_no_company_db`) |
 
 - A request that carries the machine secret is a Project request even if it also carries a session cookie (the cookie is ignored; it never opens MAIN). A wrong secret is refused (401), never rescued by a cookie.
-- `routeAccess()` sorts every `/api` route: `project` (default: new routes need a Company DB), `lab` (MAIN: sessions, run history, QA, AI reports, delay claims, schedule assignment reviews, Contracts, dashboard), `shared` (settings, agents, knowledge files, model list, run stream: no data connection of their own) or `both` (annotate). A route of the other mode is refused (403 `route_requires_lab_mode` / `route_requires_project_mode`) before any database call. The Contracts lab keeps its own fixed connection (`contractsServerConfig`) and stays on the Lab side.
+- `routeAccess()` sorts every `/api` route: `project` (default: new routes need a Company DB), `lab` (MAIN: sessions, run history, QA, AI reports, delay claims, schedule assignment reviews, memory, the Lab dataset status, Contracts, dashboard), `shared` (settings, agents, knowledge files, model list, run stream: no data connection of their own) or `both` (annotate, and the screens that read a Project's content: chat, insights, timeline, graph, schedule, indexing, tools, alert and data-query agents). A route of the other mode is refused (403 `route_requires_lab_mode` / `route_requires_project_mode`) before any database call. The Contracts lab keeps its own fixed connection (`contractsServerConfig`) and stays on the Lab side.
 - **Project mode** stores nothing of its own: no chat copy, no memory summary, no long-term memory item, no annotate vote, no local memory log. The conversation history is read from BiDoc's `chat_sessions` / `chat_messages` in the Company DB (`src/projectChatHistory.js`); the compact `runTrace` travels with the answer for BiDoc to save in the message metadata; `messageId` in the answer is `null`. `POST /api/messages/:id/annotate` is accepted and ignored (`{ ok: true, ignored: true }`): BiDoc keeps the vote in its own `chat_messages.annotation`.
 - Project data (chat, insights, search, data query, alerts, indexing, schedule, graph, timeline) lives only in the named Company DB. There is no global content DB and no MAIN fallback: a Project route without Company DB headers and a Project is refused (400 `company_db_required`) before any database call. Insight runs (`project_insight_runs`) are read and written by run id AND Project.
-- **Lab mode** works only on MAIN. Company DB headers on it are refused. Routes that read a Project's Company DB (chat, insights, indexing, timeline, data query) have no connection in Lab mode until the Lab gets its own seeded test dataset in MAIN.
+- **Lab mode** works only on MAIN. Company DB headers on it are refused, and no Lab request contacts a Company DB (the Contracts lab keeps its own fixed `contractsServerConfig` connection). The screens that read a Project's content (chat, insights, dashboard, timeline, graph, schedule, indexing, QA runs, tools) read the **Lab dataset**: the Company DB template tables (same table and RPC names, from the settings' `contentSource`) in MAIN, labelled with the Lab Project id (`LAB_PROJECT_ID` in `src/labDataset.js`) unless the request names a Project. A Lab chat keeps its messages and memory in MAIN, and its votes. While those tables are missing or empty (until ticket 06 seeds them) a read answers the empty state "אין נתוני Lab — טען מערך בדיקה" (`GET /api/lab/dataset` reports it, the screens show a notice). The Lab sign-in is the BiDoc login (`POST /api/auth/login`, Superadmin profiles only, `BIDOC_META_SUPABASE_URL` / `BIDOC_META_SUPABASE_ANON_KEY`). There is no Reset menu item or route.
 
 > **Never commit `.env.local` or `data/settings.json`** — both are in `.gitignore`.
 
@@ -127,7 +128,7 @@ main-agent touches three kinds of database, and a request touches only the ones 
 | Database | Holds | Project request | Lab request |
 |---|---|---|---|
 | **Company DB** (one per Company, named by the request headers) | Project content: emails, files, index rows, alerts, graph, timeline, BiDoc's chat sessions and messages, insight runs | its own, read (and its insight runs and indexing writes) | never |
-| **MAIN** (`SUPABASE_URL`) | Lab data only: test chats (`chat_messages_gf`), chat memory (`chat_session_memory`, `chat_memory_items`, see `supabase/chat-agent-memory.sql`), QA suites and reports (`qa_*`), delay claims, schedule assignment reviews | never | yes |
+| **MAIN** (`SUPABASE_URL`) | Lab data only: test chats (`chat_messages_gf`), chat memory (`chat_session_memory`, `chat_memory_items`, see `supabase/chat-agent-memory.sql`), QA suites and reports (`qa_*`), delay claims, schedule assignment reviews, and the Lab dataset (the Company DB template tables, copied in by ticket 06) | never | yes |
 | **Meta DB** (`META_SUPABASE_*`) | the agent settings (`agent_settings`) and their change log | read | the narrow settings save route only |
 
 Memory locations: in Project mode there is no memory store; history comes from the Company DB chat messages and older turns are summarised on the fly for that request. In Lab mode the memory tables are in MAIN.
@@ -175,13 +176,13 @@ Default prompts are defined in `src/prompts.js` in `AGENT_DEFINITIONS`. These ar
 At runtime, `getConfig()` merges defaults with any overrides from the Meta settings row (`prompts`). Overrides win.
 
 **To change a prompt permanently (for all environments):** edit `src/prompts.js` and push.  
-**To override at runtime without a deploy:** use the Agents tab in the UI (a Superadmin Lab save) — stored in the Meta DB.
+**To override at runtime without a deploy:** use the Agents tab in the UI (a Superadmin Lab save) — stored in the Meta DB. A save changes production at once, with no draft step and no reset-to-defaults; every save is logged (who, when, diff), and the settings screens (סוכן ראשי, סוכני משנה, זרימת עבודה, בדיקת כלים, הגדרות) say so.
 
 ---
 
 ## How Knowledge Base Works
 
-Documents are files: the built-in Knowledge agent documents in `knowledge-base/agents/<agent>/` (committed, read-only) and local uploads in `data/knowledge-base/` (gitignored). `src/knowledge.js` reads them from disk; nothing is read from a database.
+Documents are files: the built-in Knowledge agent documents in `knowledge-base/agents/<agent>/` (committed, read-only) and local uploads in `data/knowledge-base/` (gitignored). `src/knowledge.js` reads them from disk; nothing is read from a database. On Vercel (`VERCEL` set) the Knowledge Base is read-only: upload and delete answer 405 `knowledge_read_only` and the screen says so; to change a document, commit it to `knowledge-base/agents/`.
 
 `searchKnowledgeBase()` loads the documents and does local tokenized scoring — no vector embedding is used for the knowledge base.
 

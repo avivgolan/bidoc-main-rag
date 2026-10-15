@@ -47,7 +47,22 @@ export async function listKnowledgeDocuments({ agentId } = {}) {
   return [...agentDocuments, ...uploadedDocuments].sort(compareKnowledgeDocuments);
 }
 
+// The Knowledge Base is files that ship with the code. Vercel's filesystem is
+// ephemeral, so there it is read-only: an upload would vanish on the next cold
+// start, and the Lab's documents change by committing them to knowledge-base/.
+export function knowledgeWritable(env = process.env) {
+  return !env.VERCEL;
+}
+
+export function knowledgeReadOnlyError() {
+  const error = new Error("The Knowledge Base is read-only on Vercel: its files ship with the code (knowledge-base/agents/). Commit a document to change it.");
+  error.code = "knowledge_read_only";
+  error.status = 405;
+  return error;
+}
+
 export async function saveKnowledgeDocument({ filename, content, agentId = "schedule" }) {
+  if (!knowledgeWritable()) throw knowledgeReadOnlyError();
   const id = normalizeAgentId(agentId);
   const safeName = sanitizeKnowledgeFilename(filename);
   await ensureAgentDir(id);
@@ -95,6 +110,7 @@ export async function readKnowledgeDocument(filename, { agentId, source } = {}) 
 }
 
 export async function deleteKnowledgeDocument(filename, { agentId, source } = {}) {
+  if (!knowledgeWritable()) throw knowledgeReadOnlyError();
   const resolved = resolveKnowledgeTarget(filename, agentId);
   const normalizedSource = normalizeDocumentSource(source);
   if (normalizedSource === "agent" || (!normalizedSource && isAgentDocumentFilename(resolved.agentId, resolved.filename))) {

@@ -3,12 +3,11 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
 import { contractsServerConfig, exportFullSettings, getConfig, initSettings, loadEnv, previewImportedSettingsFile, publicSettings, readLocalSettings, refreshSettingsIfStale, reloadSettingsFromDb, settingsOpenRouterApiKey, supabaseHeaders, supabaseKeyRole, TOOL_NAMES, writeLocalSettings } from "./config.js";
 import { buildAgentList } from "./prompts.js";
 import { chatCompletion, createEmbedding, extractJsonObject, listOpenRouterModels, summarizeOpenRouterUsage } from "./openrouter.js";
 import { runChatPipeline } from "./agent.js";
-import { addDelayEventChangeLog, addDelayEventEvidence, addDelayEventGap, annotateMessage, contentSupabaseConfig, createDelayClaim, createDelayEvent, createTimelineEventLink, delayClaimCaseInProject, delayEventInProject, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, getMessage, getLatestQaReport, getProjectInsightRun, graphSearch, hybridSearch, listDelayClaims, listDelayEvents, listDislikedMessages, listMessages, listProjectGraph, listProjectInsightRuns, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, parseTimelineEventsQuery, saveProjectInsightRun, saveQaReport, TimelineRequestError, updateDelayEvent, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
+import { addDelayEventChangeLog, addDelayEventEvidence, addDelayEventGap, annotateMessage, contentSupabaseConfig, contentSupabaseRequest, createDelayClaim, createDelayEvent, createTimelineEventLink, delayClaimCaseInProject, delayEventInProject, deleteTimelineEventLink, fetchAlertsTimelineEvents, fetchTimelineEventPage, fetchTimelineEvents, getMessage, getLatestQaReport, getProjectInsightRun, graphSearch, hybridSearch, listDelayClaims, listDelayEvents, listDislikedMessages, listMessages, listProjectGraph, listProjectInsightRuns, listQaMessages, listQaReports, listRunHistory, listSessions, listTimelineEventLinks, listTimelineGraphData, parseTimelineEventsQuery, saveProjectInsightRun, saveQaReport, TimelineRequestError, updateDelayEvent, updateMessage, upsertProjectGraphData, upsertTimelineGraphData } from "./supabase.js";
 import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventTitle, isTimelineApprovalEvent, isTimelineEventAfter, isTimelineQuoteEvent, mergeTimelineSuggestions, normalizeTimelineSource, timelineEventText } from "./timelineLinks.js";
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
@@ -17,7 +16,7 @@ import { authorizeContractsExtractionRequest, authorizeDataQueryRequest, isContr
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
-import { getPendingSharedScheduleAssignmentReview, listSharedScheduleAssignmentEvaluationLabels, listSharedScheduleAssignmentReviews, listSharedScheduleAssignmentShadowValidation, persistSharedScheduleAssignmentReview, resolveSharedScheduleAssignmentReviews, scheduleAssignmentNeedsSharedReview } from "./subagents/scheduleActivityAssignmentReviewQueue.js";
+import { getPendingSharedScheduleAssignmentReview, listScheduleAssignmentReviewProjectIds, listSharedScheduleAssignmentEvaluationLabels, listSharedScheduleAssignmentReviews, listSharedScheduleAssignmentShadowValidation, persistSharedScheduleAssignmentReview, resolveSharedScheduleAssignmentReviews, scheduleAssignmentNeedsSharedReview } from "./subagents/scheduleActivityAssignmentReviewQueue.js";
 import { SCHEDULE_ASSIGNMENT_LABEL_TYPES, SCHEDULE_ASSIGNMENT_NEGATIVE_LABEL_TYPES } from "./scheduleActivityAssignmentLabels.js";
 import { scheduleAssignmentConfigurationSnapshot, validateScheduleAssignmentAgentSettings } from "./scheduleActivityAssignmentEngine.js";
 import { scheduleAssignmentShadowRuntimeStatus, SCHEDULE_ASSIGNMENT_SHADOW_RETRIEVAL } from "./scheduleActivityAssignmentShadow.js";
@@ -34,16 +33,19 @@ import { consolidateGraphEntities, runGraphEnrichment } from "./subagents/graphE
 import { runEmbeddingBackfill, runIncrementalIndexing, runIndexDatesBackfill } from "./subagents/indexing.js";
 import { callInternalContentTool, CONTENT_TOOL_SPECS, isInternalContentTool } from "./subagents/contentTools.js";
 import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalRunHistory, recordRunHistory, runVisibleToRequest, subscribeRun } from "./runLog.js";
-import { bidocChatSessionPrefix, chatSessionInProject, chatSessionProjectId, requestProjectId, resolveRequestProjectId, resolveScopedProjectId, sameProjectId } from "./projectScope.js";
-import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
+import { bidocChatSessionPrefix, chatSessionInProject, chatSessionProjectId, projectIdFilterParam, requestProjectId, resolveRequestProjectId, resolveScopedProjectId, sameProjectId } from "./projectScope.js";
+import { deleteAllChatMemoryForUser, deleteChatSessionMemory, getChatMemoryStats } from "./chatMemory.js";
+import { deleteKnowledgeDocument, knowledgeReadOnlyError, knowledgeWritable, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
 import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession as readSuperadminSession } from "./auth.js";
 import { injectBuildVersion } from "./buildInfo.js";
 import { QaHarnessService } from "./qa/qaHarnessService.js";
+import { SupabaseQaRepository } from "./qa/supabaseQaRepository.js";
 import { handleQaHttpRequest } from "./qa/httpApi.js";
 import { createHttpQaContext } from "./mcp/context.js";
 import { companyDbRequiredError, hasCompanyDbConnection, isCompanyDbError, readCompanyDbHeaders, verifyCompanyDbAgainstMeta } from "./companyDb.js";
-import { CONTRACTS_LAB_DECISION, REQUEST_MODE_LAB, REQUEST_MODE_PROJECT, configForMode, decideRequestMode, hasMachineSecretHeader, isLabModeRequest, isProjectModeRequest, modeRouteRefusal, recordRequestMode, requestModeOf, routeNeedsCompanyDb } from "./requestMode.js";
+import { CONTRACTS_LAB_DECISION, REQUEST_MODE_LAB, REQUEST_MODE_PROJECT, configForMode, decideRequestMode, hasMachineSecretHeader, isLabModeRequest, isProjectModeRequest, labDatasetConfig, modeRouteRefusal, recordRequestMode, requestModeOf, routeNeedsCompanyDb } from "./requestMode.js";
+import { LAB_EMPTY_MESSAGE, isLabDatasetEmptyError } from "./labDataset.js";
 import { validateSettingsPatch } from "./settingsSchema.js";
 
 loadEnv();
@@ -53,7 +55,13 @@ const PUBLIC_DIR = path.join(__dirname, "..", "public");
 const config = () => getConfig();
 // Superadmin Contracts tooling only: its server-owned KAPAIM/MAIN connection.
 const contractsConfig = () => contractsServerConfig();
-const qaHarnessService = new QaHarnessService();
+// The QA harness is a Lab tool: suites, runs and results live in MAIN, and its
+// chat runs answer from the Lab dataset in MAIN (never a Company DB). The
+// repository's fetch is resolved per call so it follows the process' fetch.
+const qaHarnessService = new QaHarnessService({
+  repository: new SupabaseQaRepository({ fetchImpl: (...args) => globalThis.fetch(...args) }),
+  configProvider: () => labDatasetConfig(getConfig())
+});
 
 function logContractsRouteFailure(scope, error) {
   const cause = error?.cause;
@@ -118,8 +126,9 @@ function scheduleRouteProjectId(req, routeProjectId) {
  * DB and a Project it throws company_db_required (handleApi answers 400)
  * before any read.
  *
- * Lab mode: MAIN, and no Company DB. The Project id, when a Lab route takes
- * one, only labels MAIN rows.
+ * Lab mode: MAIN only, and no Company DB. A route that reads a Project's content
+ * gets the Lab dataset in MAIN as its content source (labDataset.js), labelled
+ * with the Lab Project id unless the request names a Project of its own.
  */
 function buildRequestConfig(req, body = {}) {
   const mode = requestModeOf(req);
@@ -132,7 +141,8 @@ function buildRequestConfig(req, body = {}) {
     query: requestQueryProjectId(req),
     body: body?.projectId || body?.project_id
   });
-  if (mode === REQUEST_MODE_LAB) return { ...base, projectId: pid };
+  // Lab mode: the Lab dataset in MAIN is the content source (never a Company DB).
+  if (mode === REQUEST_MODE_LAB) return labDatasetConfig(getConfig(), pid);
   const connection = readCompanyDbHeaders(req);
   const header = (name) => {
     const value = req.headers[name];
@@ -187,6 +197,21 @@ async function modeGate(req, url) {
   return null;
 }
 
+// Reads one row of the Lab dataset's index table (the Lab's copy of a Project's
+// index): without a row, or without the table, the Lab has no data yet.
+async function labDatasetStatus(cfg) {
+  const projectId = requestProjectId(cfg);
+  const { indexTable } = contentSupabaseConfig(cfg);
+  const empty = { hasData: false, projectId, indexTable, message: LAB_EMPTY_MESSAGE };
+  try {
+    const rows = await contentSupabaseRequest({ config: cfg, path: `/rest/v1/${indexTable}?select=id&${projectIdFilterParam(projectId)}&limit=1` });
+    return Array.isArray(rows) && rows.length ? { hasData: true, projectId, indexTable, message: null } : empty;
+  } catch (error) {
+    if (isLabDatasetEmptyError(error)) return empty;
+    throw error;
+  }
+}
+
 function sendCompanyDbError(res, error) {
   return sendJson(res, error.status || 400, { error: error.code || error.error, message: error.message });
 }
@@ -218,7 +243,16 @@ async function handler(req, res) {
       return;
     }
     if (isCompanyDbError(error)) {
+      // A Lab request has no Company DB: the only way it lacks a content connection is MAIN not being configured.
+      if (error.code === "company_db_required" && requestModeOf(req) === REQUEST_MODE_LAB) {
+        sendJson(res, 503, { error: "main_not_configured", message: "MAIN is not configured (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY): the Lab has no database" });
+        return;
+      }
       sendCompanyDbError(res, error);
+      return;
+    }
+    if (isLabDatasetEmptyError(error)) {
+      sendJson(res, 409, { error: LAB_EMPTY_MESSAGE, code: error.code });
       return;
     }
     sendJson(res, 500, { error: error.message });
@@ -356,7 +390,8 @@ async function handleApi(req, res, url) {
   // Dedicated read-only source boundary (Lab only). Snapshot writes target new dashboard tables only.
   if (url.pathname.startsWith("/api/dashboard/v1/")) {
     const { handleDashboardApi } = await import("./dashboard/http.js");
-    return handleDashboardApi(req, res, url, { config: modeConfig(req), readJson, sendJson });
+    // The dashboard reads the Lab dataset in MAIN (it is a Lab route, never a Company DB).
+    return handleDashboardApi(req, res, url, { config: buildRequestConfig(req), readJson, sendJson });
   }
 
   // Run event stream (SSE). Behind the auth wall above: the standalone UI's
@@ -389,7 +424,8 @@ async function handleApi(req, res, url) {
   }
 
   if (url.pathname.startsWith("/api/qa/")) {
-    // The QA harness works on MAIN: a Lab (Superadmin session) route only.
+    // The QA harness works on MAIN: a Lab (Superadmin session) route only. Routes
+    // that are not the harness's (the message-level QA screen) fall through.
     const qaResponse = await handleQaHttpRequest({
       req,
       url,
@@ -397,7 +433,7 @@ async function handleApi(req, res, url) {
       context: createHttpQaContext(req, { session: getSuperadminSession(req), projectId: null }),
       readJson
     });
-    return sendJson(res, qaResponse.status, qaResponse.body);
+    if (qaResponse.matched !== false) return sendJson(res, qaResponse.status, qaResponse.body);
   }
 
   if (req.method === "POST" && url.pathname === "/api/chat") {
@@ -407,7 +443,7 @@ async function handleApi(req, res, url) {
     let dashboardChat = null;
     try {
       const { resolveDashboardChat } = await import("./dashboard/chat.js");
-      dashboardChat = await resolveDashboardChat(req, body, { config: modeConfig(req) });
+      dashboardChat = await resolveDashboardChat(req, body, { config: isLabModeRequest(req) ? buildRequestConfig(req) : modeConfig(req) });
     } catch (error) {
       return sendJson(res, error.status || 500, { error: error.message, code: error.code });
     }
@@ -417,14 +453,17 @@ async function handleApi(req, res, url) {
     }
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const cfg = buildRequestConfig(req, body);
-    // The chat history is read from the Project's Company DB: a Project request
-    // may only use a session BiDoc tagged for its own Project (bidoc:<projectId>:...).
+    // A Project request reads its history from the Project's Company DB, so it may
+    // only use a session BiDoc tagged for its own Project (bidoc:<projectId>:...).
+    // A Lab chat keeps its own untagged sessions in MAIN.
     const chatProjectId = requestProjectId(cfg);
     let sessionId = body.sessionId || `session_${Date.now()}`;
-    if (!body.sessionId && chatProjectId) sessionId = `${bidocChatSessionPrefix(chatProjectId)}session_${Date.now()}`;
-    const sessionProjectId = chatSessionProjectId(sessionId);
-    if (sessionProjectId ? !chatSessionInProject(sessionId, chatProjectId) : Boolean(chatProjectId)) {
-      return sendJson(res, 400, { error: "project_mismatch", message: "The chat session belongs to a different Project" });
+    if (isProjectModeRequest(req)) {
+      if (!body.sessionId && chatProjectId) sessionId = `${bidocChatSessionPrefix(chatProjectId)}session_${Date.now()}`;
+      const sessionProjectId = chatSessionProjectId(sessionId);
+      if (sessionProjectId ? !chatSessionInProject(sessionId, chatProjectId) : Boolean(chatProjectId)) {
+        return sendJson(res, 400, { error: "project_mismatch", message: "The chat session belongs to a different Project" });
+      }
     }
     // Dashboard presentation instructions apply only at final synthesis.
     if (dashboardChat) cfg.dashboardAnswerInstructions = dashboardChat.synthesisInstructions;
@@ -495,6 +534,29 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // Whether the Lab dataset (MAIN's copy of a Project's content) has been seeded.
+  // The Lab screens that read a Project's content show the empty state until it has.
+  if (req.method === "GET" && url.pathname === "/api/lab/dataset") {
+    return sendJson(res, 200, await labDatasetStatus(buildRequestConfig(req)));
+  }
+
+  // Lab chat memory (MAIN): the stats and deletes of the Settings memory panel.
+  if (req.method === "GET" && url.pathname === "/api/memory/stats") {
+    const stats = await getChatMemoryStats({ config: modeConfig(req) }).catch(() => ({ memoryItems: 0, sessions: 0, lastUpdatedAt: null, degraded: true }));
+    return sendJson(res, 200, { ...stats, mode: "session_only" });
+  }
+  const memorySessionMatch = url.pathname.match(/^\/api\/memory\/session\/([^/]+)$/);
+  if (req.method === "DELETE" && memorySessionMatch) {
+    const deleted = await deleteChatSessionMemory({ config: modeConfig(req), sessionId: decodeURIComponent(memorySessionMatch[1]) });
+    return deleted ? sendJson(res, 200, { ok: true }) : sendJson(res, 404, { error: "memory_not_found" });
+  }
+  if (req.method === "DELETE" && url.pathname === "/api/memory/me") {
+    const body = await readJson(req).catch(() => ({}));
+    if (body.confirm !== "DELETE_ALL_MEMORY") return sendJson(res, 400, { error: "confirmation_required" });
+    const deleted = await deleteAllChatMemoryForUser({ config: modeConfig(req), userId: getSuperadminSession(req)?.sub || null });
+    return sendJson(res, 200, { ok: true, deleted });
+  }
+
   // MAIN chat history (the Lab's test chats): Lab routes only.
   if (req.method === "GET" && url.pathname === "/api/sessions") {
     const sessions = await listSessions({ config: modeConfig(req) }).catch(() => []);
@@ -562,7 +624,8 @@ async function handleApi(req, res, url) {
     // Content DB snapshot that may predate the last Settings save.
     await reloadSettingsFromDb();
     // Company DB probes use the request's own Company DB when it names one.
-    const diagnosticsConfig = isProjectModeRequest(req) && readCompanyDbHeaders(req) && requestScopeProjectId(req) ? buildRequestConfig(req) : modeConfig(req);
+    // A Project request with a Company DB probes it; a Lab request probes MAIN and the Lab dataset in it.
+    const diagnosticsConfig = isLabModeRequest(req) || (isProjectModeRequest(req) && readCompanyDbHeaders(req) && requestScopeProjectId(req)) ? buildRequestConfig(req) : modeConfig(req);
     const results = await runConnectionDiagnostics(diagnosticsConfig, { ids });
     return sendJson(res, 200, {
       ok: results.every((item) => item.ok),
@@ -774,10 +837,8 @@ async function handleApi(req, res, url) {
     }
   }
 
-  // Delay claims: delay_claim_cases (App DB) carries project_id. Only the
-  // request headers / ?project_id make these routes Project-scoped (the
-  // internal UI's body project_id keeps its old meaning); a scoped request
-  // sees and touches only cases of its Project.
+  // Delay claims live in MAIN (the Lab's own table): a Lab route that sees every
+  // case. The analyses read the Lab dataset in MAIN, like the rest of the Lab.
   if (req.method === "GET" && url.pathname === "/api/delay-claims") {
     const claims = await listDelayClaims({
       config: buildRequestConfig(req),
@@ -1038,12 +1099,6 @@ async function handleApi(req, res, url) {
     }
   }
 
-  if (req.method === "POST" && url.pathname === "/api/system/restart") {
-    sendJson(res, 200, { ok: true, message: "Restarting server" });
-    scheduleServerRestart();
-    return;
-  }
-
   if (req.method === "GET" && url.pathname === "/api/agents") {
     return sendJson(res, 200, { agents: buildAgentList(modeConfig(req)) });
   }
@@ -1054,10 +1109,11 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/knowledge/documents") {
     const documents = await listKnowledgeDocuments({ agentId: url.searchParams.get("agentId") || undefined });
-    return sendJson(res, 200, { documents });
+    return sendJson(res, 200, { documents, writable: knowledgeWritable() });
   }
 
   if (req.method === "POST" && url.pathname === "/api/knowledge/documents") {
+    if (!knowledgeWritable()) return sendJson(res, 405, { error: knowledgeReadOnlyError().message, code: "knowledge_read_only" });
     const body = await readJson(req);
     const document = await saveKnowledgeDocument({ filename: body.filename, content: body.content, agentId: body.agentId });
     return sendJson(res, 200, { document });
@@ -1073,6 +1129,7 @@ async function handleApi(req, res, url) {
       return sendJson(res, 200, { document });
     }
     if (req.method === "DELETE") {
+      if (!knowledgeWritable()) return sendJson(res, 405, { error: knowledgeReadOnlyError().message, code: "knowledge_read_only" });
       const deleted = await deleteKnowledgeDocument(filename, { agentId, source });
       return sendJson(res, 200, deleted);
     }
@@ -2567,6 +2624,16 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/schedule/projects") {
     try {
       const projects = await listScheduleProjects({ config: buildRequestConfig(req) });
+      if (isLabModeRequest(req)) {
+        // Reviews made before the Lab dataset existed live in MAIN under their own Project ids: list those
+        // Projects too, so past reviews stay visible (they have no schedule files in the dataset).
+        const known = new Set(projects.map((project) => String(project.projectId).toLowerCase()));
+        const reviewed = await listScheduleAssignmentReviewProjectIds({ config: modeConfig(req) }).catch(() => []);
+        for (const projectId of reviewed) {
+          if (known.has(projectId.toLowerCase())) continue;
+          projects.push({ projectId, name: projectId, files: 0, latestRelevancyDate: null, projectEndDate: null, database: "app_data", filesTable: null, tasksTable: null, reviewsOnly: true });
+        }
+      }
       return sendJson(res, 200, { ok: true, projects });
     } catch (error) {
       return sendJson(res, 500, { ok: false, error: error.message, projects: [] });
@@ -3011,7 +3078,8 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "POST" && url.pathname === "/api/subagents/data-query") {
-    const access = authorizeDataQueryRequest(req);
+    // A Project request carries the machine secret; a Lab request is the Superadmin's session.
+    const access = isLabModeRequest(req) ? { ok: true } : authorizeDataQueryRequest(req);
     if (!access.ok) return sendJson(res, access.status, { error: access.error });
     const body = await readJson(req).catch(() => ({}));
     const question = body.question || body.query || "";
@@ -4670,23 +4738,6 @@ function parseArray(value) {
   if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
   if (typeof value !== "string") return [];
   return value.split(/[,\n]+/).map((item) => item.trim()).filter(Boolean);
-}
-
-function scheduleServerRestart() {
-  if (!httpServer) return;
-  setTimeout(() => {
-    httpServer.close(() => {
-      const child = spawn(process.execPath, [process.argv[1]], {
-        cwd: process.cwd(),
-        detached: true,
-        stdio: "ignore",
-        env: process.env
-      });
-      child.unref();
-      process.exit(0);
-    });
-    setTimeout(() => process.exit(0), 1500);
-  }, 300);
 }
 
 function fallbackOpenRouterModels() {

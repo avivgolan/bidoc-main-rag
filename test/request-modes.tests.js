@@ -172,14 +172,19 @@ export function registerRequestModeTests(test) {
     });
   });
 
-  test("request modes: route access sorts every route into Project, Lab or shared (new routes default to Project)", () => {
+  test("request modes: route access sorts every route into Project, Lab, both or shared (new routes default to Project)", () => {
+    // The screens that read a Project's content are open to both modes: a Project request reads its Company DB,
+    // a Lab request the Lab dataset in MAIN (ticket 05, test/lab-is-back.tests.js).
     for (const path of ["/api/chat", "/api/timeline/events", "/api/graph", "/api/insights/analyze", "/api/subagents/data-query", "/api/subagents/alert",
-      "/api/index/run", "/api/schedule/alert-scan", "/api/graph/enrich", "/api/tools/meetings/test", "/api/some-new-route"]) {
-      assert.equal(routeAccess(path), "project", path);
-      assert.equal(routeNeedsCompanyDb(path), true, path);
+      "/api/index/run", "/api/schedule/alert-scan", "/api/graph/enrich", "/api/tools/meetings/test"]) {
+      assert.equal(routeAccess(path), "both", path);
+      assert.equal(routeNeedsCompanyDb(path), true, `${path} still names its Company DB in Project mode`);
+      assert.equal(routeNeedsCompanyDb(path, REQUEST_MODE_LAB), false, `${path} needs no Company DB in Lab mode`);
     }
+    assert.equal(routeAccess("/api/some-new-route"), "project", "a new route defaults to Project-only");
+    assert.equal(routeNeedsCompanyDb("/api/some-new-route"), true);
     for (const path of ["/api/sessions", "/api/sessions/s1/messages", "/api/run-history", "/api/qa/runs", "/api/ai-report/abc", "/api/delay-claims", "/api/delay-events/e1",
-      "/api/contracts/extract", "/api/indicator/contracts/x", "/api/dashboard/v1/overview", "/api/system/restart", "/api/settings/schedule-assignment-agent/dry-run"]) {
+      "/api/contracts/extract", "/api/indicator/contracts/x", "/api/dashboard/v1/overview", "/api/settings/schedule-assignment-agent/dry-run"]) {
       assert.equal(routeAccess(path), "lab", path);
       assert.equal(routeNeedsCompanyDb(path), false, path);
     }
@@ -190,7 +195,8 @@ export function registerRequestModeTests(test) {
     assert.equal(routeAccess("/api/messages/m1/annotate"), "both");
     assert.equal(routeNeedsCompanyDb("/api/messages/m1/annotate"), true, "a Project's annotate still names its Company DB");
     assert.equal(modeRouteRefusal(REQUEST_MODE_PROJECT, "/api/sessions").error, "route_requires_lab_mode");
-    assert.equal(modeRouteRefusal(REQUEST_MODE_LAB, "/api/chat").error, "route_requires_project_mode");
+    assert.equal(modeRouteRefusal(REQUEST_MODE_LAB, "/api/some-new-route").error, "route_requires_project_mode");
+    assert.equal(modeRouteRefusal(REQUEST_MODE_LAB, "/api/chat"), null, "the Lab chat reads the Lab dataset in MAIN");
     assert.equal(modeRouteRefusal(REQUEST_MODE_LAB, "/api/messages/m1/annotate"), null);
     assert.equal(modeRouteRefusal(REQUEST_MODE_PROJECT, "/api/messages/m1/annotate"), null);
   });
@@ -262,7 +268,7 @@ export function registerRequestModeTests(test) {
       const routes = [
         ["GET", "/api/sessions"], ["GET", "/api/sessions/s1/messages"], ["GET", "/api/run-history"], ["GET", "/api/qa/runs"], ["POST", "/api/qa/trends"],
         ["POST", "/api/ai-report/m1/run"], ["GET", "/api/ai-report/m1"], ["GET", "/api/delay-claims"], ["POST", "/api/delay-claims"],
-        ["GET", "/api/contracts/workspaces"], ["GET", "/api/dashboard/v1/projects"], ["POST", "/api/system/restart"],
+        ["GET", "/api/contracts/workspaces"], ["GET", "/api/dashboard/v1/projects"], ["GET", "/api/lab/dataset"], ["GET", "/api/memory/stats"],
         ["GET", "/api/schedule/activity-updates/assignment-agent/reviews?projectId=" + PROJECT_A]
       ];
       for (const withCookie of [false, true]) {
@@ -337,10 +343,9 @@ export function registerRequestModeTests(test) {
     });
   });
 
-  test("lab mode: Project routes (chat, insights, indexing, timeline, data query) have no Company DB to read and are refused without a call", async () => {
+  test("lab mode: a route no mode owns (a new route) has no Company DB to read and is refused without a call", async () => {
     await withServer(async ({ handler, calls }) => {
-      for (const [method, url] of [["POST", "/api/chat"], ["POST", "/api/insights/analyze"], ["GET", "/api/insights/runs"], ["POST", "/api/index/run"],
-        ["POST", "/api/schedule/alert-scan"], ["POST", "/api/subagents/data-query"], ["GET", "/api/timeline/events"], ["POST", "/api/subagents/alert"]]) {
+      for (const [method, url] of [["POST", "/api/some-new-route"], ["GET", "/api/some-new-route"], ["POST", "/api/system/restart"]]) {
         const result = await request(handler, { method, url, headers: labHeaders(), body: method === "POST" ? { message: "hi" } : null });
         assert.equal(result.status, 403, `${method} ${url}: ${JSON.stringify(result.body)}`);
         assert.equal(result.body.error, "route_requires_project_mode");

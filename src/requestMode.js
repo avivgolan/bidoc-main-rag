@@ -1,5 +1,6 @@
 import { isTrustedMachineSecret } from "./apiSecurity.js";
 import { COMPANY_DB_KEY_HEADER, COMPANY_DB_URL_HEADER } from "./companyDb.js";
+import { LAB_PROJECT_ID, labDatasetSource } from "./labDataset.js";
 
 // Every main-agent request is exactly one mode, decided once, before any route
 // runs (ADR 0012). The mode decides which database connections exist in the
@@ -12,6 +13,9 @@ import { COMPANY_DB_KEY_HEADER, COMPANY_DB_URL_HEADER } from "./companyDb.js";
 //                 no memory and no annotate vote anywhere.
 //   Lab mode      a Superadmin Lab session cookie. Connections: MAIN, plus the
 //                 Meta settings save route. Company DB headers are refused.
+//                 The screens that read a Project's content (chat, insights,
+//                 timeline, graph, schedule, dashboard, QA runs) read the Lab
+//                 dataset: the Company DB tables, copied into MAIN (labDataset.js).
 //
 // A request that carries the machine secret is a Project request even when it
 // also carries a session cookie: the cookie is ignored, so it never opens the
@@ -101,7 +105,8 @@ export function isLabModeRequest(req) {
 //   shared   any mode, no data connection of its own (settings, agents, models,
 //            knowledge files, the in-memory run stream)
 //   lab      Lab only (MAIN, or the Contracts lab's fixed connection)
-//   both     either mode; in Project mode it still names its Company DB
+//   both     either mode; in Project mode it names its Company DB, in Lab mode it
+//            reads and writes the Lab dataset in MAIN
 //   project  Project only (default)
 
 const LAB_ROUTES = [
@@ -109,9 +114,10 @@ const LAB_ROUTES = [
   /^\/api\/run-history$/,
   /^\/api\/ai-report\//,
   /^\/api\/qa\//,
+  /^\/api\/memory\//,
+  /^\/api\/lab\//,
   /^\/api\/delay-claims(?:\/|$)/,
   /^\/api\/delay-events\//,
-  /^\/api\/system\/restart$/,
   /^\/api\/contracts\//,
   /^\/api\/indicator\/contracts\//,
   /^\/api\/dashboard\/v1\//,
@@ -130,9 +136,22 @@ const SHARED_ROUTES = [
   /^\/api\/diagnostics\/connections$/
 ];
 
-// main-agent's annotate route: Lab votes land in MAIN; a Project's vote is kept
-// by BiDoc in its own Company DB, so in Project mode the route writes nothing.
-const BOTH_ROUTES = [/^\/api\/messages\/[^/]+\/annotate$/];
+// Routes both modes use. main-agent's annotate route: Lab votes land in MAIN; a
+// Project's vote is kept by BiDoc in its own Company DB, so in Project mode it
+// writes nothing. The rest read a Project's content: a Project request from its
+// Company DB, a Lab request from the Lab dataset in MAIN (never a Company DB).
+const BOTH_ROUTES = [
+  /^\/api\/messages\/[^/]+\/annotate$/,
+  /^\/api\/chat$/,
+  /^\/api\/evaluations\/run$/,
+  /^\/api\/graph(?:\/(?:consolidate|enrich))?$/,
+  /^\/api\/insights\//,
+  /^\/api\/timeline(?:\/|$)/,
+  /^\/api\/index\//,
+  /^\/api\/schedule\//,
+  /^\/api\/subagents\/(?:alert|data-query|schedule)$/,
+  /^\/api\/tools\/[^/]+\/test$/
+];
 
 export function routeAccess(pathname) {
   const path = String(pathname || "");
@@ -192,5 +211,18 @@ export function configForMode(base, mode) {
     ...base,
     requestMode: REQUEST_MODE_LAB,
     contentSource: { ...base.contentSource, supabaseUrl: "", supabaseServiceRoleKey: "" }
+  };
+}
+
+// The config of a Lab request that reads a Project's content: MAIN only, with the
+// Lab dataset (MAIN's copy of the Company DB tables) as its content source and
+// the Lab Project id unless the request names a Project of its own. Never a
+// Company DB.
+export function labDatasetConfig(base, projectId = null) {
+  const lab = configForMode(base, REQUEST_MODE_LAB);
+  return {
+    ...lab,
+    projectId: String(projectId ?? "").trim() || LAB_PROJECT_ID,
+    contentSource: labDatasetSource(lab)
   };
 }

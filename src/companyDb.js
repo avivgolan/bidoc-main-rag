@@ -85,7 +85,10 @@ export function companyDbConnection(config) {
     hybridRpcName: source.hybridRpcName || config?.retrieval?.rpcName || DEFAULT_HYBRID_RPC_NAME,
     indexTable: source.indexTable || DEFAULT_INDEX_TABLE,
     alertsTable,
-    alertsRpcName: source.alertsRpcName || `match_${alertsTable}`
+    alertsRpcName: source.alertsRpcName || `match_${alertsTable}`,
+    // A Lab request's content source is MAIN itself (the Lab dataset, see
+    // labDataset.js): a missing table there means "no Lab data yet".
+    ...(source.labDataset === true ? { labDataset: true } : {})
   };
 }
 

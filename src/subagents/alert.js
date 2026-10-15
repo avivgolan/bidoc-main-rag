@@ -3,6 +3,7 @@ import { readLocalSettings, supabaseHeaders } from "../config.js";
 import { contentSupabaseConfig, contentSupabaseRequest } from "../supabase.js";
 import { looksLikeRpcSignatureError, projectIdFilterParam, requestProjectId } from "../projectScope.js";
 import { companyDbRequiredError, searchFunctionOutdatedError } from "../companyDb.js";
+import { isMissingRelationFailure, labDatasetEmptyError } from "../labDataset.js";
 
 const SYSTEM_PROMPT = `# סוכן התראות — מצב אחזור מהיר
 
@@ -61,7 +62,10 @@ async function postAlertsRpc(contentConfig, rpcName, body) {
   });
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error(data?.message || `Supabase RPC failed: ${response.status}`);
+  if (!response.ok) {
+    if (contentConfig.labDataset && isMissingRelationFailure(response.status, data)) throw labDatasetEmptyError();
+    throw new Error(data?.message || `Supabase RPC failed: ${response.status}`);
+  }
   return data;
 }
 
