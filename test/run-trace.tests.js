@@ -273,7 +273,7 @@ export function registerRunTraceTests(test) {
     assert.match(lines[0], /REDACTED/);
   });
 
-  test("run trace: /api/chat returns the compact trace and every old field, and still writes MAIN as before", async () => {
+  test("run trace: /api/chat returns the compact trace and every old field, and writes nothing to MAIN", async () => {
     const { res, calls, logged } = await chatThroughHandler({
       message: "What happened with the retaining wall pour last week?",
       sessionId: `bidoc:${PROJECT}:trace-1`,
@@ -312,8 +312,9 @@ export function registerRunTraceTests(test) {
     assert.equal(entry.run_id, body.runId);
     assert.ok(entry.run_events.length > trace.steps.length);
     assert.ok(!line.includes(COMPANY_KEY) && !line.includes(SECRET));
-    // This ticket does not remove the MAIN write (ticket 04 does).
-    assert.ok(calls.some((call) => call.origin === APP_DB && call.method === "POST" && call.url.includes("chat_messages_gf")), "MAIN chat copy is still written");
+    // A Project request has no MAIN connection (ADR 0012): no chat copy is written there.
+    assert.ok(!calls.some((call) => call.origin === APP_DB), "MAIN is never contacted by a Project chat");
+    assert.equal(body.messageId, null, "no main-agent chat row, so no message id");
   });
 
   test("run trace: the streaming /api/chat result frame carries the same trace", async () => {
@@ -341,10 +342,9 @@ export function registerRunTraceTests(test) {
     assert.equal(typeof body.answer, "string");
     assert.equal(body.runTrace.version, RUN_TRACE_VERSION);
     assert.ok(!JSON.stringify(body.runTrace).includes(KAPAIM.key));
-    // Only Kapaim's own Company DB (and main-agent's App DB) are contacted: the trace adds no call.
+    // Only Kapaim's own Company DB is contacted (never MAIN): the trace adds no call.
     const origins = [...new Set(calls.map((call) => call.origin).filter((origin) => origin.includes("supabase.test")))];
-    for (const origin of origins) assert.ok([KAPAIM.company, APP_DB].includes(origin), `unexpected database ${origin}`);
-    assert.ok(calls.some((call) => call.origin === APP_DB && call.method === "POST" && call.url.includes("chat_messages_gf")), "MAIN chat copy is still written");
+    for (const origin of origins) assert.equal(origin, KAPAIM.company, `unexpected database ${origin}`);
   });
 
   test("run trace: an ephemeral (dashboard) run is traced too and still writes nothing to chat history", async () => {

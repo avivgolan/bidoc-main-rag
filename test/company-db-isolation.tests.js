@@ -101,13 +101,11 @@ function assertOnlyCompanyDb(calls, origin, label) {
   const origins = dbOrigins(calls);
   assert.ok(origins.length > 0, `${label}: expected at least one Company DB call`);
   for (const other of origins) {
-    assert.ok(other === origin || other === APP_DB, `${label}: contacted ${other}; only ${origin} (and main-agent's own App DB) are allowed`);
+    assert.equal(other, origin, `${label}: contacted ${other}; only ${origin} is allowed (a Project request has no MAIN connection)`);
   }
   assert.ok(!origins.includes(GLOBAL_CONTENT), `${label}: never the global content DB`);
   assert.ok(!origins.includes(COMPANY_B), `${label}: never another Company DB`);
-  for (const call of calls.filter((item) => item.origin === APP_DB)) {
-    assert.match(call.url, /\/rest\/v1\/(agent_settings|chat_messages_gf|chat_session_memory|chat_memory_items|qa_reports)/, `${label}: App DB is used only for main-agent's own tables (${call.url})`);
-  }
+  assert.ok(!origins.includes(APP_DB), `${label}: never MAIN`);
 }
 
 export function registerCompanyDbIsolationTests(test) {
@@ -169,7 +167,7 @@ export function registerCompanyDbIsolationTests(test) {
     });
   });
 
-  test("company db: chat for Project A reads only Company A (plus main-agent's own App DB tables)", async () => {
+  test("company db: chat for Project A reads only Company A and never MAIN", async () => {
     await withServer(async ({ handler, calls }) => {
       const start = calls.length;
       const chat = await request(handler, {
@@ -254,14 +252,14 @@ export function registerCompanyDbIsolationTests(test) {
     }, { route });
   });
 
-  test("company db: routes that touch Project data need a Company DB; App DB-only routes do not", async () => {
+  test("company db: routes that touch Project data need a Company DB; MAIN-only and settings routes do not", async () => {
     await withServer(async ({ server }) => {
       for (const path of ["/api/chat", "/api/timeline/events", "/api/graph", "/api/insights/analyze", "/api/subagents/data-query",
-        "/api/subagents/alert", "/api/index/run", "/api/schedule/alert-scan", "/api/delay-claims", "/api/graph/enrich",
-        "/api/settings/schedule-assignment-agent/dry-run", "/api/tools/meetings/test", "/api/some-new-route"]) {
+        "/api/subagents/alert", "/api/index/run", "/api/schedule/alert-scan", "/api/graph/enrich",
+        "/api/tools/meetings/test", "/api/messages/abc/annotate", "/api/some-new-route"]) {
         assert.equal(server.routeNeedsCompanyDb(path), true, path);
       }
-      for (const path of ["/api/auth/login", "/api/sessions", "/api/run-history", "/api/messages/abc/annotate", "/api/settings",
+      for (const path of ["/api/auth/login", "/api/sessions", "/api/run-history", "/api/delay-claims", "/api/settings/schedule-assignment-agent/dry-run", "/api/settings",
         "/api/knowledge/documents", "/api/contracts/extract", "/api/qa/runs", "/api/runs/r1/events"]) {
         assert.equal(server.routeNeedsCompanyDb(path), false, path);
       }

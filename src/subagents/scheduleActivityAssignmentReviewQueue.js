@@ -1,4 +1,5 @@
 import { supabaseHeaders } from "../config.js";
+import { assertMainAvailable } from "../requestMode.js";
 import {
   normalizeScheduleAssignmentReviewLabel,
   scheduleAssignmentReviewRowToEvaluationCase,
@@ -25,6 +26,7 @@ function safeNumber(value) {
 }
 
 function mainConnection(config = {}) {
+  assertMainAvailable(config);
   const supabaseUrl = String(config?.supabaseUrl || "").replace(/\/$/u, "");
   const supabaseServiceRoleKey = String(config?.supabaseServiceRoleKey || "");
   if (!supabaseUrl || !supabaseServiceRoleKey) {

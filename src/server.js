@@ -13,7 +13,7 @@ import { buildTimelineLinkSuggestions, buildTimelineSuggestionFromEvents, eventT
 import { buildEntityGraphRowsForEvents, buildTimelineKnowledgeGraph, createTimelineGraphScorer } from "./timelineGraph.js";
 import { runQaAgent, runQaTrendAnalysis } from "./qaAgent.js";
 import { callN8nTool } from "./tools.js";
-import { authorizeBidocRead, authorizeContractsExtractionRequest, authorizeDataQueryRequest, checkBidocSecretHeader, isBidocContextRequest, isContractsMachineIngestPath, resolveContractsReviewerId } from "./apiSecurity.js";
+import { authorizeContractsExtractionRequest, authorizeDataQueryRequest, isContractsMachineIngestPath, resolveContractsReviewerId } from "./apiSecurity.js";
 import { runAlertAgent } from "./subagents/alert.js";
 import { assignScheduleActivityUpdate, listScheduleActivityUpdates, listScheduleAlerts, listScheduleConditions, runScheduleAlertScan, runScheduleHealth, runScheduleIndicator, runScheduleSweep } from "./subagents/schedule.js";
 import { confirmScheduleActivityAssignment, getScheduleActivityAssignmentRun, persistScheduleActivityAssignmentWorkflow, rejectScheduleActivityAssignment, runScheduleActivityAssignmentAgent } from "./subagents/scheduleActivityAssignmentAgent.js";
@@ -37,12 +37,13 @@ import { completeRun, createRun, emitRunEvent, failRun, getRunEvents, listLocalR
 import { bidocChatSessionPrefix, chatSessionInProject, chatSessionProjectId, requestProjectId, resolveRequestProjectId, resolveScopedProjectId, sameProjectId } from "./projectScope.js";
 import { deleteKnowledgeDocument, listKnowledgeAgents, listKnowledgeDocuments, readKnowledgeDocument, saveKnowledgeDocument, searchKnowledgeBase } from "./knowledge.js";
 import { buildGraphRowsFromRecords, buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.js";
-import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession } from "./auth.js";
+import { authenticateAgainstBidoc, buildLogoutSetCookieHeader, buildSessionSetCookieHeader, getSuperadminSession as readSuperadminSession } from "./auth.js";
 import { injectBuildVersion } from "./buildInfo.js";
 import { QaHarnessService } from "./qa/qaHarnessService.js";
 import { handleQaHttpRequest } from "./qa/httpApi.js";
 import { createHttpQaContext } from "./mcp/context.js";
 import { companyDbRequiredError, hasCompanyDbConnection, isCompanyDbError, readCompanyDbHeaders, verifyCompanyDbAgainstMeta } from "./companyDb.js";
+import { CONTRACTS_LAB_DECISION, REQUEST_MODE_LAB, REQUEST_MODE_PROJECT, configForMode, decideRequestMode, hasMachineSecretHeader, isLabModeRequest, isProjectModeRequest, modeRouteRefusal, recordRequestMode, requestModeOf, routeNeedsCompanyDb } from "./requestMode.js";
 import { validateSettingsPatch } from "./settingsSchema.js";
 
 loadEnv();
@@ -77,46 +78,27 @@ async function reconcileIndicatorAfterContractMutation({ workspaceId }) {
   });
 }
 
-// ─── Multi-tenant helpers ─────────────────────────────────────────────────────
+// ─── Request mode helpers ─────────────────────────────────────────────────────
 
 /**
- * Validates the X-Bidoc-Api-Secret header against BIDOC_API_SECRET (web app)
- * or INGEST_API_SECRET (ingest engine). Fails closed: with neither secret
- * configured no cross-tenant request is accepted.
- */
-function checkBidocSecret(req) {
-  return checkBidocSecretHeader(req);
-}
-
-/**
- * Read endpoints: a cross-tenant (BiDoc-context) request needs the machine
- * secret; a same-origin request needs the standalone UI's superadmin session.
+ * Whether the request is authenticated. Authentication and the request mode are
+ * decided once in handleApi (see requestMode.js): the machine secret for a
+ * Project request, a Superadmin Lab session for a Lab request.
  */
 function checkBidocSecretForRead(req) {
-  return authorizeBidocRead(req, { hasSession: Boolean(getSuperadminSession(req)) });
+  return Boolean(requestModeOf(req));
+}
+
+// The Superadmin session of a Lab request. A Project request has no Lab
+// session, even when it also carries a session cookie. Route handlers (after the
+// mode was decided in handleApi) read the session only through this.
+function getSuperadminSession(req) {
+  return isLabModeRequest(req) ? readSuperadminSession(req) : null;
 }
 
 // The request Project from x-project-id / ?project_id (never the body).
 function requestScopeProjectId(req) {
   return resolveRequestProjectId({ header: req.headers["x-project-id"], query: requestQueryProjectId(req) });
-}
-
-// App DB chat history (chat_messages_gf, qa_reports) has no project_id: a
-// BiDoc-context caller sees only sessions BiDoc tagged bidoc:<projectId>:
-// for its request Project. Returns { bidoc: false } for the standalone UI,
-// { bidoc: true, projectId } for a BiDoc caller (projectId may be null).
-function bidocChatScope(req) {
-  if (!isBidocContextRequest(req)) return { bidoc: false, projectId: null };
-  return { bidoc: true, projectId: requestScopeProjectId(req) };
-}
-
-function chatMessageVisible(scope, message) {
-  if (!scope.bidoc) return true;
-  return chatSessionInProject(message?.session_id, scope.projectId);
-}
-
-function projectRequired(res) {
-  return sendJson(res, 400, { error: "project_required", message: "A BiDoc request must name its Project (x-project-id)" });
 }
 
 // Schedule routes name their Project in the query/body (projectId); it must
@@ -126,20 +108,23 @@ function scheduleRouteProjectId(req, routeProjectId) {
 }
 
 /**
- * The request config: the global settings plus this request's Company DB
- * connection, read ONLY from the authenticated caller's headers
- * (x-content-supabase-url / -key) and its Project (x-project-id, else
- * ?project_id, else the body). There is no fallback to a global content DB or
- * the App DB: without a Company DB and a Project it throws
- * company_db_required (handleApi answers 400) before any read.
+ * The request config: the global settings plus only the connections of the
+ * request's mode (decided once in handleApi, see requestMode.js).
+ *
+ * Project mode: this request's Company DB connection, read ONLY from the
+ * authenticated caller's headers (x-content-supabase-url / -key) and its
+ * Project (x-project-id, else ?project_id, else the body). There is no MAIN
+ * connection at all, no fallback to a global content DB, and without a Company
+ * DB and a Project it throws company_db_required (handleApi answers 400)
+ * before any read.
+ *
+ * Lab mode: MAIN, and no Company DB. The Project id, when a Lab route takes
+ * one, only labels MAIN rows.
  */
 function buildRequestConfig(req, body = {}) {
-  const base = getConfig();
-  const connection = readCompanyDbHeaders(req);
-  const header = (name) => {
-    const value = req.headers[name];
-    return String((Array.isArray(value) ? value[0] : value) ?? "").trim() || null;
-  };
+  const mode = requestModeOf(req);
+  if (!mode) throw new Error("buildRequestConfig needs a request whose mode was decided");
+  const base = configForMode(getConfig(), mode);
   // x-project-id wins; ?project_id= is the fallback for GET callers; a header
   // and query that disagree throw project_mismatch (handleApi answers 400).
   const pid = resolveRequestProjectId({
@@ -147,6 +132,12 @@ function buildRequestConfig(req, body = {}) {
     query: requestQueryProjectId(req),
     body: body?.projectId || body?.project_id
   });
+  if (mode === REQUEST_MODE_LAB) return { ...base, projectId: pid };
+  const connection = readCompanyDbHeaders(req);
+  const header = (name) => {
+    const value = req.headers[name];
+    return String((Array.isArray(value) ? value[0] : value) ?? "").trim() || null;
+  };
   if (!connection || !pid) throw companyDbRequiredError();
   return {
     ...base,
@@ -164,40 +155,26 @@ function buildRequestConfig(req, body = {}) {
   };
 }
 
-// Routes that never read or write Project data (auth, settings, knowledge,
-// model lists, App DB chat history, the in-memory run stream, QA harness) or
-// that use the superadmin Contracts server-owned connection. Every other
-// /api route needs the request's Company DB and Project; new routes default
-// to needing them.
-const COMPANY_DB_EXEMPT_ROUTES = [
-  /^\/api\/auth\//,
-  /^\/api\/runs\/[^/]+\/events$/,
-  /^\/api\/qa\//,
-  /^\/api\/sessions(?:\/[^/]+\/messages)?$/,
-  /^\/api\/run-history$/,
-  /^\/api\/messages\/[^/]+\/(?:annotate)$/,
-  /^\/api\/ai-report\//,
-  /^\/api\/settings(?:\/(?:reload|export|import|reset|defaults|restore-defaults|schedule-assignment-agent(?:\/validate)?))?$/,
-  /^\/api\/system\/restart$/,
-  /^\/api\/agents$/,
-  /^\/api\/knowledge\//,
-  /^\/api\/openrouter\/models$/,
-  /^\/api\/subagents\/[^/]+\/config$/,
-  /^\/api\/diagnostics\/connections$/,
-  /^\/api\/contracts\//,
-  /^\/api\/indicator\/contracts\//,
-  /^\/api\/dashboard\/v1\//
-];
-
-export function routeNeedsCompanyDb(pathname) {
-  return String(pathname || "").startsWith("/api/") && !COMPANY_DB_EXEMPT_ROUTES.some((pattern) => pattern.test(pathname));
+// The config of a route that needs no Company DB (settings, agents, models,
+// MAIN-only Lab routes): the global settings with the request mode's connections.
+function modeConfig(req) {
+  const mode = requestModeOf(req);
+  if (!mode) throw new Error("modeConfig needs a request whose mode was decided");
+  return configForMode(getConfig(), mode);
 }
 
-// One gate for every Project route: the request must name its Company DB and
-// Project, and (when the Meta DB cross-check is configured) that Company DB
-// must be the Project's own. Returns null to continue, or the refusal.
-async function companyDbGate(req, url) {
-  if (!routeNeedsCompanyDb(url.pathname)) return null;
+export { routeNeedsCompanyDb };
+
+// The gate for every route: a request's mode may only use the routes of its own
+// side (a Project request none of MAIN's, a Lab request none of the Company
+// DB's), and a Project route must name its Company DB and Project and, when the
+// Meta DB cross-check is configured, that Company DB must be the Project's own.
+// Returns null to continue, or the refusal ({ status, error, message }).
+async function modeGate(req, url) {
+  const mode = requestModeOf(req);
+  const refusal = modeRouteRefusal(mode, url.pathname);
+  if (refusal) return refusal;
+  if (!routeNeedsCompanyDb(url.pathname, mode)) return null;
   const connection = readCompanyDbHeaders(req);
   const projectId = resolveRequestProjectId({ header: req.headers["x-project-id"], query: url.searchParams.get("project_id") });
   if (!connection || !projectId) return companyDbRequiredError();
@@ -211,7 +188,7 @@ async function companyDbGate(req, url) {
 }
 
 function sendCompanyDbError(res, error) {
-  return sendJson(res, error.status || 400, { error: error.code, message: error.message });
+  return sendJson(res, error.status || 400, { error: error.code || error.error, message: error.message });
 }
 
 function requestQueryProjectId(req) {
@@ -283,21 +260,16 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/auth/session") {
-    const session = getSuperadminSession(req);
+    const session = readSuperadminSession(req);
     return sendJson(res, 200, { authenticated: Boolean(session), email: session?.email || null });
   }
 
-  // Dedicated read-only source boundary. Snapshot writes target new dashboard tables only.
-  if (url.pathname.startsWith("/api/dashboard/v1/")) {
-    const { handleDashboardApi } = await import("./dashboard/http.js");
-    return handleDashboardApi(req, res, url, { config: config(), readJson, sendJson });
-  }
-
   // Every route is gated here up front (rather than per-route) so routes that
-  // never had their own checkBidocSecretForRead guard (e.g. /api/messages/:id/annotate)
-  // are covered too. Cross-tenant calls (bidoc's BFF) must carry a valid shared
-  // secret — merely sending the content-supabase-url header is not enough to
-  // bypass the login wall. Same-origin calls (the standalone UI) need a session.
+  // never had their own guard (e.g. /api/messages/:id/annotate) are covered too.
+  // The request's mode is decided exactly once, here (requestMode.js): a request
+  // with the machine secret is a Project request (BiDoc, the ingest engine), a
+  // request with a Superadmin Lab session is a Lab request. Merely sending the
+  // content-supabase-url header is not enough to bypass the login wall.
   if (!url.pathname.startsWith("/api/auth/")) {
     const isContractsMachineIngestRoute = isContractsMachineIngestPath(req.method, url.pathname);
     const hasContractsIngestionSecret = Object.prototype.hasOwnProperty.call(
@@ -337,8 +309,9 @@ async function handleApi(req, res, url) {
           message: "Contracts APIs use server-owned MAIN and KAPAIM connections; client database overrides are not accepted."
         });
       }
+      recordRequestMode(req, CONTRACTS_LAB_DECISION);
     } else if (isContractsServerOwnedRoute) {
-      if (!getSuperadminSession(req)) {
+      if (!readSuperadminSession(req)) {
         return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
       }
       if (hasContractsDatabaseHeaderOverride) {
@@ -357,14 +330,33 @@ async function handleApi(req, res, url) {
           message: "Contracts APIs use server-owned MAIN and KAPAIM connections; client database overrides are not accepted."
         });
       }
-    } else {
-      const isCrossTenantApiRequest = Boolean(req.headers["x-content-supabase-url"]);
-      if (isCrossTenantApiRequest) {
-        if (!checkBidocSecret(req)) return sendJson(res, 401, { error: "Unauthorized" });
-      } else if (!getSuperadminSession(req)) {
-        return sendJson(res, 401, { error: "התחברות כסופראדמין נדרשת" });
+      // The Contracts lab keeps its own fixed connection and stays on the Lab
+      // side: a request that also carries the machine secret is a Project
+      // request, which has no business here.
+      if (hasMachineSecretHeader(req)) {
+        const refusal = modeRouteRefusal(REQUEST_MODE_PROJECT, url.pathname);
+        return sendJson(res, refusal.status, { error: refusal.error, message: refusal.message });
       }
+      recordRequestMode(req, CONTRACTS_LAB_DECISION);
+    } else {
+      const decision = decideRequestMode(req, { session: readSuperadminSession(req) });
+      if (decision.refusal) {
+        const { status, error, message } = decision.refusal;
+        return sendJson(res, status, status === 401 ? { error } : { error, message });
+      }
+      recordRequestMode(req, decision);
     }
+  }
+
+  // The mode may only use the routes of its own side (and a Project route must
+  // name its Company DB and Project).
+  const modeRefusal = await modeGate(req, url);
+  if (modeRefusal) return sendCompanyDbError(res, modeRefusal);
+
+  // Dedicated read-only source boundary (Lab only). Snapshot writes target new dashboard tables only.
+  if (url.pathname.startsWith("/api/dashboard/v1/")) {
+    const { handleDashboardApi } = await import("./dashboard/http.js");
+    return handleDashboardApi(req, res, url, { config: modeConfig(req), readJson, sendJson });
   }
 
   // Run event stream (SSE). Behind the auth wall above: the standalone UI's
@@ -373,7 +365,7 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/events")) {
     const runId = decodeURIComponent(url.pathname.split("/")[3] || "");
     // A BiDoc-context caller follows only a run started for its own Project.
-    if (!runVisibleToRequest(runId, { bidocContext: isBidocContextRequest(req), projectId: requestScopeProjectId(req) })) {
+    if (!runVisibleToRequest(runId, { bidocContext: isProjectModeRequest(req), projectId: requestScopeProjectId(req) })) {
       return sendJson(res, 404, { error: "run_not_found" });
     }
     res.writeHead(200, {
@@ -396,22 +388,13 @@ async function handleApi(req, res, url) {
     throw error;
   }
 
-  // Every Project route reads only the request's own Company DB: without a
-  // Company DB + Project (or with a Company DB that is not the Project's own,
-  // when the Meta DB cross-check is configured) it is refused here, before
-  // any database call.
-  const companyDbRefusal = await companyDbGate(req, url);
-  if (companyDbRefusal) return sendCompanyDbError(res, companyDbRefusal);
-
   if (url.pathname.startsWith("/api/qa/")) {
-    // A BiDoc-context caller must name its Project and is confined to it.
-    const qaScope = bidocChatScope(req);
-    if (qaScope.bidoc && !qaScope.projectId) return projectRequired(res);
+    // The QA harness works on MAIN: a Lab (Superadmin session) route only.
     const qaResponse = await handleQaHttpRequest({
       req,
       url,
       service: qaHarnessService,
-      context: createHttpQaContext(req, { session: getSuperadminSession(req), projectId: qaScope.projectId }),
+      context: createHttpQaContext(req, { session: getSuperadminSession(req), projectId: null }),
       readJson
     });
     return sendJson(res, qaResponse.status, qaResponse.body);
@@ -424,7 +407,7 @@ async function handleApi(req, res, url) {
     let dashboardChat = null;
     try {
       const { resolveDashboardChat } = await import("./dashboard/chat.js");
-      dashboardChat = await resolveDashboardChat(req, body, { config: config() });
+      dashboardChat = await resolveDashboardChat(req, body, { config: modeConfig(req) });
     } catch (error) {
       return sendJson(res, error.status || 500, { error: error.message, code: error.code });
     }
@@ -434,16 +417,14 @@ async function handleApi(req, res, url) {
     }
     const runId = body.runId || `run_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const cfg = buildRequestConfig(req, body);
-    // Chat memory reads the session's history: a BiDoc-context caller may only
-    // use a session BiDoc tagged for its own Project (bidoc:<projectId>:...).
+    // The chat history is read from the Project's Company DB: a Project request
+    // may only use a session BiDoc tagged for its own Project (bidoc:<projectId>:...).
     const chatProjectId = requestProjectId(cfg);
     let sessionId = body.sessionId || `session_${Date.now()}`;
-    if (isBidocContextRequest(req)) {
-      if (!body.sessionId && chatProjectId) sessionId = `${bidocChatSessionPrefix(chatProjectId)}session_${Date.now()}`;
-      const sessionProjectId = chatSessionProjectId(sessionId);
-      if (sessionProjectId ? !chatSessionInProject(sessionId, chatProjectId) : Boolean(chatProjectId)) {
-        return sendJson(res, 400, { error: "project_mismatch", message: "The chat session belongs to a different Project" });
-      }
+    if (!body.sessionId && chatProjectId) sessionId = `${bidocChatSessionPrefix(chatProjectId)}session_${Date.now()}`;
+    const sessionProjectId = chatSessionProjectId(sessionId);
+    if (sessionProjectId ? !chatSessionInProject(sessionId, chatProjectId) : Boolean(chatProjectId)) {
+      return sendJson(res, 400, { error: "project_mismatch", message: "The chat session belongs to a different Project" });
     }
     // Dashboard presentation instructions apply only at final synthesis.
     if (dashboardChat) cfg.dashboardAnswerInstructions = dashboardChat.synthesisInstructions;
@@ -514,34 +495,21 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // MAIN chat history (the Lab's test chats): Lab routes only.
   if (req.method === "GET" && url.pathname === "/api/sessions") {
-    const chatScope = bidocChatScope(req);
-    if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
-    const sessions = await listSessions({
-      config: config(),
-      sessionPrefix: chatScope.bidoc ? bidocChatSessionPrefix(chatScope.projectId) : null
-    }).catch(() => []);
+    const sessions = await listSessions({ config: modeConfig(req) }).catch(() => []);
     return sendJson(res, 200, { sessions });
   }
 
   if (req.method === "GET" && url.pathname === "/api/run-history") {
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 100);
-    // A BiDoc-context caller sees its Project's chat runs and in-memory runs
-    // only. Schedule-assignment runs live in a Company DB, which this
-    // Project-less listing cannot name, so they are not listed here.
-    const chatScope = bidocChatScope(req);
-    if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
+    // The Lab's run history: MAIN chat runs and in-memory runs. Schedule-assignment
+    // runs live in a Company DB, which a Lab request cannot reach, so they are not listed.
     const [dbRuns, scheduleAssignmentRuns] = await Promise.all([
-      listRunHistory({
-        config: config(),
-        limit,
-        sessionPrefix: chatScope.bidoc ? bidocChatSessionPrefix(chatScope.projectId) : null
-      }).catch(() => []),
+      listRunHistory({ config: modeConfig(req), limit }).catch(() => []),
       Promise.resolve([])
     ]);
-    const localRuns = chatScope.bidoc
-      ? listLocalRunHistory({ limit, projectId: chatScope.projectId })
-      : listLocalRunHistory({ limit });
+    const localRuns = listLocalRunHistory({ limit });
     const seen = new Set();
     const runs = [...localRuns, ...scheduleAssignmentRuns, ...dbRuns]
       .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
@@ -594,7 +562,7 @@ async function handleApi(req, res, url) {
     // Content DB snapshot that may predate the last Settings save.
     await reloadSettingsFromDb();
     // Company DB probes use the request's own Company DB when it names one.
-    const diagnosticsConfig = readCompanyDbHeaders(req) && requestScopeProjectId(req) ? buildRequestConfig(req) : config();
+    const diagnosticsConfig = isProjectModeRequest(req) && readCompanyDbHeaders(req) && requestScopeProjectId(req) ? buildRequestConfig(req) : modeConfig(req);
     const results = await runConnectionDiagnostics(diagnosticsConfig, { ids });
     return sendJson(res, 200, {
       ok: results.every((item) => item.ok),
@@ -997,27 +965,22 @@ async function handleApi(req, res, url) {
   const messagesMatch = url.pathname.match(/^\/api\/sessions\/([^/]+)\/messages$/);
   if (req.method === "GET" && messagesMatch) {
     const sessionId = decodeURIComponent(messagesMatch[1]);
-    const chatScope = bidocChatScope(req);
-    if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
-    if (chatScope.bidoc && !chatSessionInProject(sessionId, chatScope.projectId)) {
-      return sendJson(res, 404, { error: "session_not_found" });
-    }
-    const messages = await listMessages({ config: config(), sessionId }).catch(() => []);
+    const messages = await listMessages({ config: modeConfig(req), sessionId }).catch(() => []);
     return sendJson(res, 200, { messages });
   }
 
   if (req.method === "GET" && url.pathname === "/api/settings") {
     await reloadSettingsFromDb();
-    return sendJson(res, 200, publicSettings(config()));
+    return sendJson(res, 200, publicSettings(modeConfig(req)));
   }
 
   if (req.method === "POST" && url.pathname === "/api/settings/reload") {
     await reloadSettingsFromDb();
-    return sendJson(res, 200, { settings: publicSettings(config()) });
+    return sendJson(res, 200, { settings: publicSettings(modeConfig(req)) });
   }
 
   if (req.method === "GET" && url.pathname === "/api/settings/export") {
-    return sendJson(res, 200, exportFullSettings(config()));
+    return sendJson(res, 200, exportFullSettings(modeConfig(req)));
   }
 
   if (req.method === "POST" && url.pathname === "/api/settings/import") {
@@ -1029,7 +992,7 @@ async function handleApi(req, res, url) {
     const reviewer = getSuperadminSession(req);
     if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
     await reloadSettingsFromDb();
-    const settings = config().scheduleAssignmentAgent;
+    const settings = modeConfig(req).scheduleAssignmentAgent;
     const snapshot = scheduleAssignmentConfigurationSnapshot(settings);
     return sendJson(res, 200, {
       ok: true,
@@ -1082,7 +1045,7 @@ async function handleApi(req, res, url) {
   }
 
   if (req.method === "GET" && url.pathname === "/api/agents") {
-    return sendJson(res, 200, { agents: buildAgentList(config()) });
+    return sendJson(res, 200, { agents: buildAgentList(modeConfig(req)) });
   }
 
   if (req.method === "GET" && url.pathname === "/api/knowledge/agents") {
@@ -1128,7 +1091,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "GET" && url.pathname === "/api/openrouter/models") {
     try {
-      const models = await listOpenRouterModels({ apiKey: config().openRouterApiKey });
+      const models = await listOpenRouterModels({ apiKey: modeConfig(req).openRouterApiKey });
       return sendJson(res, 200, { models, fallback: false });
     } catch (error) {
       return sendJson(res, 200, { models: fallbackOpenRouterModels(), fallback: true, error: error.message });
@@ -1151,7 +1114,7 @@ async function handleApi(req, res, url) {
   // log (who, when, diff) in the same transaction.
   if (req.method === "PUT" && url.pathname === "/api/settings") {
     const session = getSuperadminSession(req);
-    if (isBidocContextRequest(req) || !session?.sub) {
+    if (!session?.sub) {
       return sendJson(res, 403, { error: "settings_lab_only", message: "Agent settings can be saved only from the Lab by a signed-in Superadmin" });
     }
     const body = await readJson(req);
@@ -1165,7 +1128,7 @@ async function handleApi(req, res, url) {
       // A save merges into the live row, so it needs a fresh, successful read first.
       await reloadSettingsFromDb({ strict: true });
       const saved = await writeLocalSettings(check.patch, { source: "settings_save", user: { id: session.sub, email: session.email } });
-      return sendJson(res, 200, { saved, ignored: check.ignored, settings: publicSettings(config()) });
+      return sendJson(res, 200, { saved, ignored: check.ignored, settings: publicSettings(modeConfig(req)) });
     } catch (error) {
       if (String(error?.code || "").startsWith("meta_")) {
         return sendJson(res, 502, { error: error.code, message: error.message });
@@ -2683,10 +2646,10 @@ async function handleApi(req, res, url) {
         listSharedScheduleAssignmentReviews({
           projectId,
           status: url.searchParams.get("status") || "pending",
-          config: getConfig()
+          config: modeConfig(req)
         }),
-        listSharedScheduleAssignmentEvaluationLabels({ projectId, config: getConfig() }),
-        listSharedScheduleAssignmentShadowValidation({ projectId, config: getConfig() }).catch((error) => ({
+        listSharedScheduleAssignmentEvaluationLabels({ projectId, config: modeConfig(req) }),
+        listSharedScheduleAssignmentShadowValidation({ projectId, config: modeConfig(req) }).catch((error) => ({
           ...scheduleAssignmentShadowRuntimeStatus(),
           readyForPhase7: false,
           readinessReasons: ["shadow_report_unavailable"],
@@ -2706,7 +2669,7 @@ async function handleApi(req, res, url) {
     const projectId = scheduleRouteProjectId(req, url.searchParams.get("projectId"));
     if (!projectId) return sendJson(res, 400, { error: "projectId is required" });
     try {
-      const report = await listSharedScheduleAssignmentShadowValidation({ projectId, config: getConfig() });
+      const report = await listSharedScheduleAssignmentShadowValidation({ projectId, config: modeConfig(req) });
       return sendJson(res, 200, { ok: true, projectId, runtime: scheduleAssignmentShadowRuntimeStatus(), report });
     } catch (error) {
       return sendJson(res, 500, { ok: false, error: error.message });
@@ -2737,7 +2700,7 @@ async function handleApi(req, res, url) {
           resolvedBy: reviewer.sub,
           note: "הבודק בחר פעילות מתאימה ידנית מלוח הזמנים.",
           labelType: SCHEDULE_ASSIGNMENT_LABEL_TYPES.CONFIRMED_MATCH,
-          config: getConfig()
+          config: modeConfig(req)
         }).catch((error) => { reviewQueueWarning = error.message; });
       }
       return sendJson(res, 200, { ok: true, item, ...(reviewQueueWarning ? { reviewQueueWarning } : {}) });
@@ -2805,14 +2768,14 @@ async function handleApi(req, res, url) {
             activityKey: result.assignment.activityKey,
             resolvedBy: reviewer.sub,
             note: "הסוכן שייך את ההתראה אוטומטית",
-            config: getConfig()
+            config: modeConfig(req)
           });
         } else if (scheduleAssignmentNeedsSharedReview(result)) {
           const sharedReview = await persistSharedScheduleAssignmentReview({
             result,
             projectId,
             requestedBy: reviewer.sub,
-            config: getConfig()
+            config: modeConfig(req)
           });
           result.persistedReview = sharedReview.persisted === true;
           result.reviewId = sharedReview.reviewId || null;
@@ -2870,7 +2833,7 @@ async function handleApi(req, res, url) {
         resolvedBy: reviewer.sub,
         note: "הבודק אישר את פעילות הסוכן כפעילות המתאימה.",
         labelType: SCHEDULE_ASSIGNMENT_LABEL_TYPES.CONFIRMED_MATCH,
-        config: getConfig()
+        config: modeConfig(req)
       }).catch((error) => { reviewQueueWarning = error.message; });
       return sendJson(res, 200, { ok: true, ...result, ...(reviewQueueWarning ? { reviewQueueWarning } : {}) });
     } catch (error) {
@@ -2901,7 +2864,7 @@ async function handleApi(req, res, url) {
         forbiddenActivityKeys: requestedLabelType === SCHEDULE_ASSIGNMENT_LABEL_TYPES.REJECTED_MATCH
           ? result.rejectedCandidateKeys
           : [],
-        config: getConfig()
+        config: modeConfig(req)
       }).catch((error) => { reviewQueueWarning = error.message; });
       return sendJson(res, 200, { ok: true, ...result, ...(reviewQueueWarning ? { reviewQueueWarning } : {}) });
     } catch (error) {
@@ -2924,7 +2887,7 @@ async function handleApi(req, res, url) {
       const review = await getPendingSharedScheduleAssignmentReview({
         projectId: body.projectId,
         sourceId: body.sourceId,
-        config: getConfig()
+        config: modeConfig(req)
       });
       const trustedCandidateKeys = (Array.isArray(review.candidates_snapshot) ? review.candidates_snapshot : [])
         .map((candidate) => String(candidate?.activityKey || ""))
@@ -2942,7 +2905,7 @@ async function handleApi(req, res, url) {
         note: body.reason,
         labelType: body.labelType,
         forbiddenActivityKeys: body.labelType === SCHEDULE_ASSIGNMENT_LABEL_TYPES.REJECTED_MATCH ? trustedCandidateKeys : [],
-        config: getConfig()
+        config: modeConfig(req)
       });
       return sendJson(res, 200, { ok: true, sourceId: String(body.sourceId), ...result });
     } catch (error) {
@@ -3147,16 +3110,13 @@ async function handleApi(req, res, url) {
     const messageId = decodeURIComponent(url.pathname.split("/")[3]);
     const body = await readJson(req);
     const annotation = body.annotation === "V" || body.annotation === "X" ? body.annotation : null;
-    // A BiDoc-context caller must name its Project (x-project-id) and
-    // annotates only messages of that Project's tagged sessions.
-    const chatScope = bidocChatScope(req);
-    if (chatScope.bidoc && !chatScope.projectId) return projectRequired(res);
-    if (chatScope.bidoc) {
-      const message = await getMessage({ config: config(), messageId }).catch(() => null);
-      if (!chatMessageVisible(chatScope, message)) return sendJson(res, 404, { ok: false, error: "message_not_found" });
-    }
+    // A Project request writes nothing to MAIN: BiDoc keeps the vote on its own
+    // Company DB chat message (chat_messages.annotation) and still calls this
+    // route for messages that carry an old agent_message_id, so it is accepted
+    // and ignored, with the same answer BiDoc always got.
+    if (isProjectModeRequest(req)) return sendJson(res, 200, { ok: true, ignored: true });
     try {
-      await annotateMessage({ config: config(), messageId, annotation });
+      await annotateMessage({ config: modeConfig(req), messageId, annotation });
       return sendJson(res, 200, { ok: true });
     } catch (error) {
       return sendJson(res, 500, { ok: false, error: error.message });
@@ -3494,7 +3454,7 @@ async function handleApi(req, res, url) {
 
 
   if (req.method === "GET" && url.pathname === "/api/qa/dislikes") {
-    const messages = await listDislikedMessages({ config: config() }).catch(() => []);
+    const messages = await listDislikedMessages({ config: modeConfig(req) }).catch(() => []);
     return sendJson(res, 200, { messages });
   }
 
@@ -3502,11 +3462,11 @@ async function handleApi(req, res, url) {
     const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 30), 1), 50);
     const [messages, reports] = await Promise.all([
       listQaMessages({
-        config: config(),
+        config: modeConfig(req),
         limit,
         dislikedOnly: url.searchParams.get("filter") === "disliked"
       }),
-      listQaReports({ config: config(), limit: 200 })
+      listQaReports({ config: modeConfig(req), limit: 200 })
     ]);
     const latestReportByMessage = new Map();
     for (const report of reports || []) {
@@ -3526,39 +3486,36 @@ async function handleApi(req, res, url) {
   const qaRunMatch = url.pathname.match(/^\/api\/qa\/([^/]+)\/run$/);
   if (req.method === "POST" && qaRunMatch) {
     const messageId = decodeURIComponent(qaRunMatch[1]);
-    const row = await getMessage({ config: config(), messageId }).catch(() => null);
+    const row = await getMessage({ config: modeConfig(req), messageId }).catch(() => null);
     if (!row) return sendJson(res, 404, { error: "Message not found" });
     if (!row.workflow_log) return sendJson(res, 422, { error: "חסר workflow_log — הרץ את ה-migration בסופאבייס ושלח הודעה חדשה עם דיסלייק" });
     const qaBody = await readJson(req).catch(() => ({}));
     try {
       const report = await runQaAgent({
-        config: config(),
+        config: modeConfig(req),
         userMessage: row.user_message,
         aiResponse: row.ai_response,
         workflowLog: row.workflow_log,
         userFeedback: qaBody.userFeedback || null
       });
-      await saveQaReport({ config: config(), messageId, status: "done", report });
+      await saveQaReport({ config: modeConfig(req), messageId, status: "done", report });
       return sendJson(res, 200, { ok: true, report });
     } catch (err) {
-      await saveQaReport({ config: config(), messageId, status: "error", error: err.message });
+      await saveQaReport({ config: modeConfig(req), messageId, status: "error", error: err.message });
       return sendJson(res, 500, { ok: false, error: err.message });
     }
   }
 
-  // AI reports read App DB chat messages and qa_reports (keyed by message):
-  // a BiDoc-context caller reaches only its Project's tagged sessions.
-  const aiReportScope = bidocChatScope(req);
+  // AI reports read MAIN chat messages and qa_reports (keyed by message): Lab routes only.
   const aiReportRunMatch = url.pathname.match(/^\/api\/ai-report\/([^/]+)\/run$/);
   if (req.method === "POST" && aiReportRunMatch) {
     const messageId = decodeURIComponent(aiReportRunMatch[1]);
-    if (aiReportScope.bidoc && !aiReportScope.projectId) return projectRequired(res);
     const body = await readJson(req).catch(() => ({}));
-    const row = await getMessage({ config: config(), messageId });
-    if (!row || !chatMessageVisible(aiReportScope, row)) return sendJson(res, 404, { error: "Run was not found in history" });
+    const row = await getMessage({ config: modeConfig(req), messageId });
+    if (!row) return sendJson(res, 404, { error: "Run was not found in history" });
     try {
       const report = await runQaAgent({
-        config: config(),
+        config: modeConfig(req),
         userMessage: row.user_message,
         aiResponse: row.ai_response,
         workflowLog: row.workflow_log,
@@ -3569,9 +3526,9 @@ async function handleApi(req, res, url) {
         generated_at: new Date().toISOString(),
         report
       };
-      await saveQaReport({ config: config(), messageId, status: "done", report: reportEnvelope });
+      await saveQaReport({ config: modeConfig(req), messageId, status: "done", report: reportEnvelope });
       await updateMessage({
-        config: config(),
+        config: modeConfig(req),
         messageId,
         aiResponse: row.ai_response,
         status: row.status || "done",
@@ -3580,7 +3537,7 @@ async function handleApi(req, res, url) {
       });
       return sendJson(res, 200, { ok: true, report: reportEnvelope });
     } catch (err) {
-      await saveQaReport({ config: config(), messageId, status: "error", error: err.message });
+      await saveQaReport({ config: modeConfig(req), messageId, status: "error", error: err.message });
       return sendJson(res, 500, { ok: false, error: err.message });
     }
   }
@@ -3588,11 +3545,9 @@ async function handleApi(req, res, url) {
   const aiReportMatch = url.pathname.match(/^\/api\/ai-report\/([^/]+)$/);
   if (req.method === "GET" && aiReportMatch) {
     const messageId = decodeURIComponent(aiReportMatch[1]);
-    if (aiReportScope.bidoc && !aiReportScope.projectId) return projectRequired(res);
-    const row = await getMessage({ config: config(), messageId }).catch(() => null);
-    if (aiReportScope.bidoc && !chatMessageVisible(aiReportScope, row)) return sendJson(res, 404, { error: "No AI report found" });
+    const row = await getMessage({ config: modeConfig(req), messageId }).catch(() => null);
     if (row?.workflow_log?.ai_report) return sendJson(res, 200, { report: row.workflow_log.ai_report });
-    const saved = await getLatestQaReport({ config: config(), messageId }).catch(() => null);
+    const saved = await getLatestQaReport({ config: modeConfig(req), messageId }).catch(() => null);
     if (saved?.report?.kind === "ai_report") return sendJson(res, 200, { report: saved.report });
     return sendJson(res, 404, { error: "No AI report found" });
   }
@@ -3600,16 +3555,16 @@ async function handleApi(req, res, url) {
   const qaReportMatch = url.pathname.match(/^\/api\/qa\/([^/]+)\/report$/);
   if (req.method === "GET" && qaReportMatch) {
     const messageId = decodeURIComponent(qaReportMatch[1]);
-    const report = await getLatestQaReport({ config: config(), messageId }).catch(() => null);
+    const report = await getLatestQaReport({ config: modeConfig(req), messageId }).catch(() => null);
     if (!report) return sendJson(res, 404, { error: "No report found" });
     return sendJson(res, 200, { report });
   }
 
   if (req.method === "POST" && url.pathname === "/api/qa/trends") {
-    const reports = await listQaReports({ config: config() }).catch(() => []);
+    const reports = await listQaReports({ config: modeConfig(req) }).catch(() => []);
     if (!reports.length) return sendJson(res, 422, { error: "אין דוחות QA שמורים עדיין" });
     try {
-      const trend = await runQaTrendAnalysis({ config: config(), reports });
+      const trend = await runQaTrendAnalysis({ config: modeConfig(req), reports });
       return sendJson(res, 200, { ok: true, trend });
     } catch (err) {
       return sendJson(res, 500, { ok: false, error: err.message });
@@ -3631,7 +3586,7 @@ function serveStatic(req, res, pathname) {
   const safePath = pathname === "/" ? "/index.html" : pathname;
   // Login wall: any HTML page other than the login page itself requires a
   // valid superadmin session cookie, otherwise redirect to /login.html.
-  if (safePath.endsWith(".html") && safePath !== "/login.html" && !getSuperadminSession(req)) {
+  if (safePath.endsWith(".html") && safePath !== "/login.html" && !readSuperadminSession(req)) {
     res.writeHead(302, { Location: "/login.html" });
     res.end();
     return;

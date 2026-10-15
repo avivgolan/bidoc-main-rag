@@ -90,12 +90,17 @@ export function registerInternalScopeAccessTests(test) {
     assert.equal(authorizeBidocRead({ headers: {} }, { env: {}, hasSession: false }), false);
     assert.equal(authorizeBidocRead({ headers: {} }, { env: {}, hasSession: true }), true);
 
+    // The server no longer checks the secret itself: it decides the request mode once from
+    // the credentials (requestMode.js), and a request with the machine secret is a Project
+    // request. The decision fails closed on the same check.
+    const modeSource = fs.readFileSync(new URL("../src/requestMode.js", import.meta.url), "utf8");
+    const decide = modeSource.match(/export function decideRequestMode\([\s\S]*?\n\}/)?.[0] || "";
+    assert.match(decide, /isTrustedMachineSecret\(req\.headers\[MACHINE_SECRET_HEADER\], env\)/);
+    assert.match(decide, /refusal\(401/);
     const source = serverSource();
-    const check = source.match(/function checkBidocSecret\(req\) \{[\s\S]*?\n\}/)?.[0] || "";
-    assert.doesNotMatch(check, /return true/);
-    assert.match(check, /checkBidocSecretHeader\(req\)/);
     const read = source.match(/function checkBidocSecretForRead\(req\) \{[\s\S]*?\n\}/)?.[0] || "";
-    assert.match(read, /authorizeBidocRead\(req, \{ hasSession: Boolean\(getSuperadminSession\(req\)\) \}\)/);
+    assert.match(read, /Boolean\(requestModeOf\(req\)\)/);
+    assert.doesNotMatch(read, /return true/);
   });
 
   test("internal access: chat session ids name their Project", () => {
@@ -154,7 +159,7 @@ export function registerInternalScopeAccessTests(test) {
   test("internal access: run stream, chat, data-query and App DB routes enforce the request Project", () => {
     const source = serverSource();
     const stream = routeSource(source, 'url.pathname.startsWith("/api/runs/") && url.pathname.endsWith("/events")', "res.writeHead(200");
-    assert.match(stream, /runVisibleToRequest\(runId, \{ bidocContext: isBidocContextRequest\(req\), projectId: requestScopeProjectId\(req\) \}\)/);
+    assert.match(stream, /runVisibleToRequest\(runId, \{ bidocContext: isProjectModeRequest\(req\), projectId: requestScopeProjectId\(req\) \}\)/);
     assert.match(stream, /sendJson\(res, 404/);
 
     const chat = routeSource(source, 'url.pathname === "/api/chat")', 'url.pathname === "/api/sessions")');
@@ -166,28 +171,28 @@ export function registerInternalScopeAccessTests(test) {
     assert.match(dataQuery, /resolveScopedProjectId\(/);
     assert.doesNotMatch(dataQuery, /config: config\(\)/);
 
+    // The App DB (MAIN) routes are Lab-only now: a Project request never reaches them
+    // (requestMode.js routeAccess), so they no longer scope BiDoc callers by session prefix.
     const appDb = [
       ['url.pathname === "/api/sessions")', 'url.pathname === "/api/run-history")'],
       ['url.pathname === "/api/run-history")', 'url.pathname === "/api/evaluations/run")'],
       ["const messagesMatch", 'url.pathname === "/api/settings")'],
-      ["/^\\/api\\/messages\\/[^/]+\\/annotate$/", 'url.pathname === "/api/timeline")'],
       ["const aiReportRunMatch", "const qaReportMatch"]
     ];
     for (const [start, end] of appDb) {
       const route = routeSource(source, start, end);
-      assert.match(route, /bidocChatScope\(req\)|chatMessageVisible\(/, `${start} must scope BiDoc callers to their Project`);
+      assert.doesNotMatch(route, /bidocChatScope|chatMessageVisible/, `${start} is a Lab-only MAIN route`);
+      assert.match(route, /modeConfig\(req\)/, `${start} reads MAIN through the request mode's config`);
     }
 
-    // Annotate: a BiDoc caller must name its Project (BiDoc PR #85 sends
-    // x-project-id) and may only annotate messages of that Project's sessions.
+    // Annotate: a Project request writes nothing to MAIN (BiDoc keeps the vote on its own
+    // Company DB chat message); only a Lab request annotates MAIN.
     const annotate = routeSource(source, "/^\\/api\\/messages\\/[^/]+\\/annotate$/", 'url.pathname === "/api/timeline")');
-    assert.match(annotate, /if \(chatScope\.bidoc && !chatScope\.projectId\) return projectRequired\(res\);/);
-    assert.match(annotate, /chatMessageVisible\(chatScope, message\)/);
+    assert.match(annotate, /if \(isProjectModeRequest\(req\)\) return sendJson\(res, 200, \{ ok: true, ignored: true \}\);/);
     assert.doesNotMatch(annotate, /chatSessionProjectId\(/, "no tag-only fallback without a Project");
 
     const qa = routeSource(source, 'url.pathname.startsWith("/api/qa/")', 'url.pathname === "/api/chat")');
-    assert.match(qa, /bidocChatScope\(req\)/);
-    assert.match(qa, /createHttpQaContext\(req, \{ session: getSuperadminSession\(req\), projectId:/);
+    assert.match(qa, /createHttpQaContext\(req, \{ session: getSuperadminSession\(req\), projectId: null \}\)/);
   });
 
   test("internal access: schedule routes resolve their Project against the request Project", () => {

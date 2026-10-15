@@ -59,6 +59,7 @@ import { registerInternalScopeTests } from "./internal-scope.tests.js";
 import { registerInternalScopeAccessTests } from "./internal-scope-access.tests.js";
 import { registerCompanyDbIsolationTests } from "./company-db-isolation.tests.js";
 import { registerRunTraceTests } from "./run-trace.tests.js";
+import { registerRequestModeTests } from "./request-modes.tests.js";
 import { registerProjectChatHistoryTests } from "./project-chat-history.tests.js";
 import { registerKapaimSettingsRegressionTests, registerSettingsFromMetaTests } from "./settings-from-meta.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
@@ -13957,6 +13958,7 @@ registerRunTraceTests(test);
 registerCompanyDbIsolationTests(test);
 registerProjectChatHistoryTests(test);
 registerSettingsFromMetaTests(test);
+registerRequestModeTests(test);
 registerKapaimSettingsRegressionTests(test);
 
 const filterIndex = process.argv.indexOf("--filter");
