@@ -13942,7 +13942,6 @@ test("internal subagent diagnostics are read-only readiness probes", () => {
   assert.match(serverSource, /error\?\.diagnosticStatus\s*\|\|\s*classifyDiagnosticError/);
 });
 
-// Imports the HTTP handler under a fake network and restores env after each test.
 registerRunTraceTests(test);
 
 // Registered last: these tests import the HTTP handler under a fake network

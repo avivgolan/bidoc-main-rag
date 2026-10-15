@@ -260,6 +260,19 @@ export function registerRunTraceTests(test) {
     assert.doesNotThrow(() => logFullRunTrace({ runId: "r", compact, log: () => { throw new Error("log sink down"); } }));
   });
 
+  test("run trace: the full-detail log redacts secrets, emails and phone numbers in events and OpenRouter errors", () => {
+    const lines = [];
+    const run = syntheticRun({
+      runEvents: [event(0, "chat_input", { preview: "my key is sk-or-abcdefghijklmnop mail a@b.com call 054-123-4567", nested: { list: ["Bearer abc.def.ghi"] } })],
+      openRouterCalls: [{ step: "classifier", status: "error", error: "bad key sk-or-abcdefghijklmnop" }]
+    });
+    logFullRunTrace({ runId: "r", compact: buildCompactRunTrace(run), runEvents: run.runEvents, openRouterCalls: run.openRouterCalls, log: (line) => lines.push(line) });
+    for (const forbidden of ["sk-or-abcdefghijklmnop", "a@b.com", "054-123-4567", "abc.def.ghi"]) {
+      assert.ok(!lines[0].includes(forbidden), `the log must not contain ${forbidden}`);
+    }
+    assert.match(lines[0], /REDACTED/);
+  });
+
   test("run trace: /api/chat returns the compact trace and every old field, and still writes MAIN as before", async () => {
     const { res, calls, logged } = await chatThroughHandler({
       message: "What happened with the retaining wall pour last week?",

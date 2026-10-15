@@ -69,13 +69,12 @@ function stepTimings(runEvents) {
   const events = (Array.isArray(runEvents) ? runEvents : [])
     .map((event) => ({ step: safeId(event?.step), time: Date.parse(event?.time), data: event?.data }))
     .filter((event) => event.step && Number.isFinite(event.time));
-  if (!events.length) return { origin: null, steps: [] };
+  if (!events.length) return [];
   const origin = events[0].time;
   const steps = [];
   for (const event of events) {
     const previous = steps[steps.length - 1];
     if (previous && previous.step === event.step) {
-      previous.events += 1;
       if (event.data?.status === "warning" || event.data?.error) previous.warned = true;
       continue;
     }
@@ -85,13 +84,12 @@ function stepTimings(runEvents) {
       offsetMs: event.time - origin,
       startTime: event.time,
       endTime: event.time,
-      events: 1,
       warned: Boolean(event.data?.status === "warning" || event.data?.error)
     });
   }
   const last = events[events.length - 1];
   steps[steps.length - 1].endTime = last.time;
-  return { origin, steps };
+  return steps;
 }
 
 function buildSteps({ workflowLog, runEvents }) {
@@ -105,7 +103,7 @@ function buildSteps({ workflowLog, runEvents }) {
   }
   const timings = stepTimings(runEvents);
   const merged = new Map();
-  for (const entry of timings.steps) {
+  for (const entry of timings) {
     const existing = merged.get(entry.step);
     const duration = Math.max(0, entry.endTime - entry.startTime);
     if (existing) {
@@ -194,7 +192,7 @@ const byteLength = (value) => Buffer.byteLength(JSON.stringify(value), "utf8");
 
 // Drops detail, least useful first, until the trace fits the byte cap.
 function fitToBudget(trace) {
-  const result = trace;
+  const result = trace; // shrunk in place
   const shrinkers = [
     () => { for (const call of result.model_calls) { delete call.error; delete call.http_status; } },
     () => { result.model_calls.length = Math.min(result.model_calls.length, 8); result.truncated = true; },
@@ -269,11 +267,23 @@ export function buildCompactRunTrace({
   return fitToBudget(bounded);
 }
 
+// Copy of a JSON-like value with every string passed through redactLogText
+// (API keys, tokens, JWTs, emails, phone numbers), so a secret typed into a
+// question or echoed in a provider error never reaches the logs.
+function redactDeep(value, depth = 0) {
+  if (typeof value === "string") return redactLogText(value);
+  if (depth > 8 || value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => redactDeep(item, depth + 1));
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactDeep(item, depth + 1)]));
+}
+
 /**
  * Write the full detail of one run to the logs as a single JSON line: every run
- * event and every OpenRouter call, plus the compact trace. Nothing here goes to
- * a database. Node inputs and outputs of the workflow log (which carry document
- * previews) are not logged. Never throws.
+ * event and every OpenRouter call, plus the compact trace, with secrets, emails
+ * and phone numbers redacted. Run events can still carry short previews of the
+ * question and of model output; that is the detail the logs exist for. Nothing
+ * here goes to a database. Node inputs and outputs of the workflow log (which
+ * carry document previews) are not logged. Never throws.
  */
 export function logFullRunTrace({ runId, sessionId = null, compact, runEvents = [], openRouterCalls = [], log = console.info } = {}) {
   try {
@@ -286,9 +296,9 @@ export function logFullRunTrace({ runId, sessionId = null, compact, runEvents = 
         time: event?.time,
         step: event?.step,
         message: safeText(event?.message, 300),
-        data: event?.data
+        data: redactDeep(event?.data)
       })),
-      openrouter_calls: openRouterCalls
+      openrouter_calls: redactDeep(openRouterCalls)
     };
     let line = JSON.stringify(entry);
     if (line.length > FULL_LOG_MAX_CHARS) {

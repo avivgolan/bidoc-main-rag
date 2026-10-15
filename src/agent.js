@@ -314,6 +314,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   // Trace building must never fail an answer that is already complete.
   let runTrace = null;
   try {
+    // Re-read: events were emitted after the workflow log was saved.
     const finalRunEvents = getRunEvents(runId);
     runTrace = buildCompactRunTrace({
       runId,
