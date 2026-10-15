@@ -57,6 +57,7 @@ function rowCount(data) {
   if (Array.isArray(data)) return data.length;
   if (Array.isArray(data?.data)) return data.data.length;
   if (Array.isArray(data?.matches)) return data.matches.length;
+  if (Array.isArray(data?.results)) return data.results.length;
   if (Array.isArray(data?.documents)) return data.documents.length;
   return null;
 }
@@ -188,6 +189,27 @@ function totalsFrom(usage) {
   };
 }
 
+function compactRecency(recency) {
+  const iso = (value) => (/^\d{4}-\d{2}-\d{2}$/.test(String(value ?? "")) ? String(value) : null);
+  return {
+    path: "date_ordered",
+    window: {
+      type: safeId(recency?.window?.type, 24) || "latest",
+      from: iso(recency?.window?.from),
+      to: iso(recency?.window?.to)
+    },
+    sections: (Array.isArray(recency?.sections) ? recency.sections : []).slice(0, 3).map((section) => ({
+      kind: safeId(section?.kind, 24),
+      table: safeId(section?.table, 60),
+      order_by: safeId(section?.order_by, 40),
+      scanned: finiteOrNull(section?.scanned),
+      items: finiteOrNull(section?.items),
+      newest: iso(section?.newest),
+      ranked_by_meaning: Boolean(section?.ranked_by_meaning)
+    }))
+  };
+}
+
 const byteLength = (value) => Buffer.byteLength(JSON.stringify(value), "utf8");
 
 // Drops detail, least useful first, until the trace fits the byte cap.
@@ -223,6 +245,7 @@ function fitToBudget(trace) {
  * @param {Array}  input.openRouterCalls     Every OpenRouter call of the run.
  * @param {Array}  input.trace               The run's failure/fallback entries.
  * @param {boolean} input.ephemeral          True when the run kept nothing in chat history.
+ * @param {object} [input.recency]           Summary of a date-ordered "latest / recent" read (kinds, window, order column, counts), or null.
  * @param {number} [input.finishedAt]
  */
 export function buildCompactRunTrace({
@@ -236,7 +259,8 @@ export function buildCompactRunTrace({
   runEvents = [],
   openRouterCalls = [],
   trace = [],
-  ephemeral = false
+  ephemeral = false,
+  recency = null
 }) {
   const steps = buildSteps({ workflowLog, runEvents });
   const tools = buildTools(toolCalls);
@@ -259,6 +283,8 @@ export function buildCompactRunTrace({
     model_calls: modelCalls.slice(0, RUN_TRACE_LIMITS.modelCalls),
     totals: totalsFrom(workflowLog?.openRouterUsage),
     failures: failures.slice(0, RUN_TRACE_LIMITS.failures),
+    // Only when the answer came from a date-ordered read: names, dates and counts, never row text.
+    ...(recency ? { recency: compactRecency(recency) } : {}),
     truncated: steps.length > RUN_TRACE_LIMITS.steps
       || tools.length > RUN_TRACE_LIMITS.tools
       || modelCalls.length > RUN_TRACE_LIMITS.modelCalls

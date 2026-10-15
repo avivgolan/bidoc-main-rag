@@ -52,6 +52,15 @@ import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.j
 import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, hashValue } from "./cache.js";
 import { appendMemoryLog } from "./memoryLogger.js";
 import { requestProjectId } from "./projectScope.js";
+import { detectRecencyIntent } from "./recency.js";
+import {
+  RECENT_ITEMS_TOOL_NAME,
+  buildRecentItemsAnswer,
+  hasContentConnectionFor,
+  recentItemsRouteAllowed,
+  runRecentItems,
+  summarizeRecentItems
+} from "./subagents/recentItems.js";
 import { hasCompanyDbConnection } from "./companyDb.js";
 import { REQUEST_MODE_LAB, REQUEST_MODE_PROJECT } from "./requestMode.js";
 import { loadProjectConversation, projectAgentMemory, projectRoutingMemory, startEarlierSummary } from "./projectChatHistory.js";
@@ -354,7 +363,8 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
       runEvents: finalRunEvents,
       openRouterCalls,
       trace,
-      ephemeral: ephemeralRun
+      ephemeral: ephemeralRun,
+      recency: result.recency || null
     });
     logFullRunTrace({ runId, sessionId, compact: runTrace, runEvents: finalRunEvents, openRouterCalls });
   } catch (error) {
@@ -492,6 +502,54 @@ export function shouldRunMeetingEvidenceForRequest({
   return MEETING_EVIDENCE_INTENT_RE.test(String(message || ""));
 }
 
+// The recency route (ticket 08): detects a "latest / recent" question and reads the newest items of the
+// asked kind by their own date. Returns null (the ordinary route runs) when the question is not a recency
+// question, the exact Data Query already answers it, the content connection is missing, or the read fails.
+async function tryRecentItemsRoute({ message, config, dataQueryRouting, runId, telemetryFor }) {
+  const recency = detectRecencyIntent(message, { timeZone: config?.timezone });
+  if (!recency) return null;
+  const route = {
+    kinds: recency.kinds,
+    window: recency.window ? { type: recency.window.type, from: recency.window.dateFrom, to: recency.window.dateTo } : { type: "latest" },
+    topic: Boolean(recency.topic),
+    limit: recency.limit
+  };
+  if (!recentItemsRouteAllowed(dataQueryRouting)) {
+    emitRunEvent(runId, "recent_items", "Recency question left to the exact Data Query route", { ...route, reason: dataQueryRouting?.supported === true ? "exact_data_query_supported" : "data_query_refusal" });
+    return null;
+  }
+  if (!hasContentConnectionFor(config)) {
+    emitRunEvent(runId, "recent_items", "Recency question left to the ordinary route", { ...route, reason: "no_content_connection" });
+    return null;
+  }
+  emitRunEvent(runId, "recent_items", "Recency question: reading the newest items ordered by their own date", route);
+  try {
+    const hebrew = isHebrew(message);
+    const result = await runRecentItems({ config, recency, hebrew, telemetry: telemetryFor("recent_items") });
+    if (!result.ok) {
+      emitRunEvent(runId, "recent_items", "Date-ordered read failed, using the ordinary route", { ...route, errors: result.errors });
+      return null;
+    }
+    const answer = buildRecentItemsAnswer({ result, recency, hebrew });
+    const summary = summarizeRecentItems({ result, recency });
+    const items = result.sections.flatMap((section) => section.items.map((item) => ({
+      kind: section.kind, id: item.id, date: item.date, title: item.title, detail: item.detail, url: item.url
+    })));
+    const call = {
+      toolName: RECENT_ITEMS_TOOL_NAME,
+      ok: true,
+      internal: true,
+      data: { ...summary, results: items },
+      sources: result.sections.flatMap((section) => section.items.map((item) => item.source).filter(Boolean))
+    };
+    emitRunEvent(runId, "recent_items", "Date-ordered read completed", { ...summary, errors: undefined, error_count: summary.errors.length });
+    return { recency, result, answer, summary, call };
+  } catch (error) {
+    emitRunEvent(runId, "recent_items", "Date-ordered read failed, using the ordinary route", { ...route, error: String(error?.message || error).slice(0, 160) });
+    return null;
+  }
+}
+
 async function runRagAgent({ message, sessionId, classification, memory, memorySummary, config, trace, runId, cacheContext, telemetryFor }) {
   const toolCalls = [];
   const sources = [];
@@ -507,8 +565,11 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     hasDataQueryHint: hintedTools(classification).includes("data_query"),
     settings: dataQueryRequestSettings
   }), config);
-  const pureMeetingEvidenceRoute = isPureMeetingEvidenceCapability(dataQueryRouting);
-  const structuredDataQueryRoute = shouldBypassGenericRetrieval({
+  // "Latest / recent" questions read the newest items by their own date from the Project's
+  // Company DB (ticket 08); a vector match would return the closest items, not the newest.
+  const recentItemsRoute = await tryRecentItemsRoute({ message, config, dataQueryRouting, runId, telemetryFor });
+  const pureMeetingEvidenceRoute = !recentItemsRoute && isPureMeetingEvidenceCapability(dataQueryRouting);
+  const structuredDataQueryRoute = Boolean(recentItemsRoute) || shouldBypassGenericRetrieval({
     message,
     classification,
     config,
@@ -631,9 +692,12 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
       emitRunEvent(runId, "deduplication", "Deduplication skipped because Hybrid Search failed", { error: error.message });
     }
   } else {
-    const reason = pureMeetingEvidenceRoute
-      ? "pure_meeting_evidence_route"
-      : "exact_structured_data_query_route";
+    const reason = recentItemsRoute
+      ? "date_ordered_recency_route"
+      : pureMeetingEvidenceRoute
+        ? "pure_meeting_evidence_route"
+        : "exact_structured_data_query_route";
+    const routeLabel = recentItemsRoute ? "date-ordered recent items" : pureMeetingEvidenceRoute ? "pure Meeting Evidence" : "exact Data Query";
     for (const toolName of ["hybrid_search", "graph_search", "reranker"]) {
       if (!pureMeetingEvidenceRoute) {
         toolCalls.push(annotateToolCall({
@@ -646,7 +710,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
           sources: []
         }));
       }
-      emitRunEvent(runId, toolName, `${toolName === "hybrid_search" ? "Hybrid Search" : toolName === "graph_search" ? "Project Graph Search" : "Reranker"} skipped for ${pureMeetingEvidenceRoute ? "pure Meeting Evidence" : "exact Data Query"} route`, {
+      emitRunEvent(runId, toolName, `${toolName === "hybrid_search" ? "Hybrid Search" : toolName === "graph_search" ? "Project Graph Search" : "Reranker"} skipped for ${routeLabel} route`, {
         reason,
         dataQueryDomain: dataQueryRouting.domain,
         dataQueryIntent: dataQueryRouting.intent
@@ -655,6 +719,10 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     emitRunEvent(runId, "embedding", "Embedding skipped for exact structured route", { reason });
     emitRunEvent(runId, "retrieval_filters", "Retrieval filters skipped for exact structured route", { reason });
     emitRunEvent(runId, "deduplication", "Deduplication skipped for exact structured route", { reason });
+    if (recentItemsRoute) {
+      toolCalls.push(annotateToolCall(recentItemsRoute.call));
+      sources.push(...recentItemsRoute.call.sources);
+    }
   }
 
   if (hybridResults && config.graph?.enabled !== false) {
@@ -752,7 +820,8 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     routing: dataQueryRouting
   });
   const meetingsEvidenceTool = shouldRunMeetingEvidence ? ["meeting_evidence_search"] : [];
-  const tools = buildMainProjectTools({
+  // A recency answer is read straight from the date-ordered items: no further tools.
+  const tools = recentItemsRoute ? [] : buildMainProjectTools({
     message,
     classification,
     config,
@@ -1122,7 +1191,9 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     routing: dataQueryRouting,
     toolCalls
   });
-  const deterministicAnswer = deterministicInvoiceAnswer ||
+  const deterministicRecentAnswer = recentItemsRoute ? recentItemsRoute.answer : null;
+  const deterministicAnswer = deterministicRecentAnswer ||
+    deterministicInvoiceAnswer ||
     deterministicFinancialDocumentAnswer ||
     deterministicFinancialDataQueryFailureAnswer ||
     deterministicSafetyAnswer ||
@@ -1135,6 +1206,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     deterministicMeetingFallbackEvidenceAnswer ||
     deterministicMeetingEvidenceAnswer;
   if (deterministicAnswer) {
+    const recentAnswer = Boolean(deterministicRecentAnswer);
     const invoiceAnswer = Boolean(deterministicInvoiceAnswer);
     const financialDocumentAnswer = Boolean(deterministicFinancialDocumentAnswer);
     const financialDataQueryFailureAnswer = Boolean(deterministicFinancialDataQueryFailureAnswer);
@@ -1152,7 +1224,9 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     const meetingEvidenceUnavailable = Boolean(deterministicMeetingEvidenceAnswer);
     const meetingDateDecisionAnswer = Boolean(deterministicMeetingDateDecisionAnswer);
     const meetingEvidenceFallback = Boolean(deterministicMeetingFallbackEvidenceAnswer);
-    const deterministicMainReason = invoiceAnswer
+    const deterministicMainReason = recentAnswer
+      ? "date_ordered_recent_items_answer"
+      : invoiceAnswer
       ? "exact_invoice_data_query_answer"
       : financialDocumentAnswer
         ? "exact_financial_document_data_query_answer"
@@ -1178,7 +1252,9 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
     emitRunEvent(
       runId,
       "main_agent",
-      invoiceAnswer
+      recentAnswer
+        ? "Main Agent skipped for date-ordered recent items answer"
+        : invoiceAnswer
         ? "Main Agent skipped for deterministic invoice answer"
         : financialDocumentAnswer
           ? "Main Agent skipped for deterministic financial-document answer"
@@ -1215,6 +1291,7 @@ async function runRagAgent({ message, sessionId, classification, memory, memoryS
       sourceQuality,
       conflicts,
       graphContext,
+      recency: recentItemsRoute ? recentItemsRoute.summary : null,
       mainSynthesis: {
         status: "skipped",
         reason: deterministicMainReason,
@@ -6124,6 +6201,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
   const rerankerCall = toolCalls.find((call) => call.toolName === "reranker");
   const alertCall = toolCalls.find((call) => call.toolName === "alert");
   const dataQueryCall = toolCalls.find((call) => call.toolName === "data_query");
+  const recentItemsCall = toolCalls.find((call) => call.toolName === RECENT_ITEMS_TOOL_NAME);
   const retrievalToolNames = ["hybrid_search", "hybrid_search_plan", "graph_search", "reranker"];
   const safetyPrecheckCalls = classification.urgency === "HIGH"
     ? toolCalls.filter((call) => ["safety_report", "alert"].includes(call.toolName))
@@ -6131,7 +6209,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
   const safetyReportPrecheckCalls = safetyPrecheckCalls.filter((call) => call.toolName !== "alert");
   const alertRanInSafetyPrecheck = Boolean(alertCall && safetyPrecheckCalls.includes(alertCall));
   const safetyPrecheckNames = new Set(safetyPrecheckCalls.map((call) => call.toolName));
-  const n8nCalls = toolCalls.filter((call) => !["alert", "data_query"].includes(call.toolName) && !retrievalToolNames.includes(call.toolName) && !safetyPrecheckNames.has(call.toolName));
+  const n8nCalls = toolCalls.filter((call) => !["alert", "data_query", RECENT_ITEMS_TOOL_NAME].includes(call.toolName) && !retrievalToolNames.includes(call.toolName) && !safetyPrecheckNames.has(call.toolName));
   const isChat = classification.type === "CHAT";
   const knowledgePlan = result.knowledgePlan || null;
   const mainSynthesis = result.mainSynthesis || {
@@ -6237,6 +6315,18 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
           dataQueryWorkflow.input,
           dataQueryWorkflow.output
         )
+      );
+    }
+    if (recentItemsCall) {
+      nodes.push(
+        workflowNode("recent_items", "Recent Items (date-ordered)", "database", recentItemsCall.ok ? "done" : "error", {
+          kinds: recentItemsCall.data?.kinds || [],
+          window: recentItemsCall.data?.window || null
+        }, {
+          path: recentItemsCall.data?.path || "date_ordered",
+          sections: recentItemsCall.data?.sections || [],
+          items_returned: Array.isArray(recentItemsCall.data?.results) ? recentItemsCall.data.results.length : 0
+        })
       );
     }
     if (result.investigationPlan) {
@@ -6371,6 +6461,7 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
     })
   );
 
+  const exactStepId = recentItemsCall ? "recent_items" : dataQueryCall ? "data_query" : "reranker";
   const edges = isChat
     ? [
         ["chat_input", "sanitize"],
@@ -6404,11 +6495,12 @@ function buildWorkflowLog({ message, sanitized, saved, memory, memorySummary, cl
           ? [["hybrid_search", "reranker"]]
           : [["hybrid_search", "graph_search"], ["graph_search", "reranker"]]),
         ...(dataQueryCall ? [["reranker", "data_query"]] : []),
+        ...(recentItemsCall ? [[dataQueryCall ? "data_query" : "reranker", "recent_items"]] : []),
         ...(alertCall && !alertRanInSafetyPrecheck
           ? n8nCalls.length
-            ? [[dataQueryCall ? "data_query" : "reranker", "alert_agent"], ["alert_agent", "n8n_tools"], ["n8n_tools", "source_quality"]]
-            : [[dataQueryCall ? "data_query" : "reranker", "alert_agent"], ["alert_agent", "source_quality"]]
-          : [[dataQueryCall ? "data_query" : "reranker", "n8n_tools"], ["n8n_tools", "source_quality"]]),
+            ? [[exactStepId, "alert_agent"], ["alert_agent", "n8n_tools"], ["n8n_tools", "source_quality"]]
+            : [[exactStepId, "alert_agent"], ["alert_agent", "source_quality"]]
+          : [[exactStepId, "n8n_tools"], ["n8n_tools", "source_quality"]]),
         ["source_quality", "conflict_detection"],
         ["conflict_detection", "main_agent"],
         ["main_agent", "update_message"]
