@@ -29,6 +29,7 @@ const KIND_PATTERNS = [
   ["meetings", new RegExp(`(?:ישיב(?:ה|ות)|פגיש(?:ה|ות)|פרוטוקול(?:ים)?|${START}meetings?${END}|${START}minutes${END})`, "iu")],
   ["whatsapp", new RegExp(`(?:ו+אט?סאפ|ווצאפ|וואצאפ|${START}whats\\s?app${END})`, "iu")],
   ["alerts", new RegExp(`(?:התרא(?:ה|ות)|${START}alerts?${END})`, "iu")],
+  ["commitments", new RegExp(`(?:התחייבו(?:ת|יות)|${START}commitments?${END})`, "iu")],
   ["decisions", new RegExp(`(?:החלט(?:ה|ות)|${START}decisions?${END})`, "iu")],
   ["safety", new RegExp(`(?:דו["״]?חות?\\s+ה?בטיחות|ממצאי\\s+ה?בטיחות|אירועי\\s+ה?בטיחות|${START}safety${END})`, "iu")],
   ["quality", new RegExp(`(?:(?:ממצאי\\s+)?בקרת\\s+ה?איכות|ליקויי\\s+ה?איכות|${START}quality\\s+(?:control|inspections?)${END})`, "iu")],
@@ -328,7 +329,7 @@ export function detectRecencyIntent(message, { now = new Date(), timeZone = "Asi
   if (newHe) cues.push(newHe[0]);
   // English cues; "new" counts only next to a plural kind ("new emails"), never "a new contract".
   const latestEn = [...text.matchAll(new RegExp(CUE_LATEST_EN.source, "giu"))]
-    .find((match) => match[0] !== "new" || /\bnew\s+(?:e-?mails|meetings|alerts|decisions|messages|invoices|payments|exceptions|reports)\b/.test(text));
+    .find((match) => match[0] !== "new" || /\bnew\s+(?:e-?mails|meetings|alerts|decisions|commitments|messages|invoices|payments|exceptions|reports)\b/.test(text));
   if (latestEn) cues.push(latestEn[0]);
   if (!window && !cues.length) return null;
 

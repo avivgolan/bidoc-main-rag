@@ -73,12 +73,17 @@ function companyDb({ origin, tables, missingTables = [], rpc = () => null }) {
     }
     const order = url.searchParams.get("order");
     if (order) {
-      const [column, direction] = order.split(".");
-      if (!table.columns.includes(column)) return columnError(column);
+      const keys = order.split(",").map((part) => part.split("."));
+      for (const [column] of keys) if (!table.columns.includes(column)) return columnError(column);
       rows.sort((a, b) => {
-        if (a[column] == null) return 1;
-        if (b[column] == null) return -1;
-        return (a[column] > b[column] ? 1 : -1) * (direction === "desc" ? -1 : 1);
+        for (const [column, direction] of keys) {
+          if (a[column] == null && b[column] == null) continue;
+          if (a[column] == null) return 1; // nulls last
+          if (b[column] == null) return -1;
+          if (a[column] === b[column]) continue;
+          return (a[column] > b[column] ? 1 : -1) * (direction === "desc" ? -1 : 1);
+        }
+        return 0;
       });
     }
     const limit = Number(url.searchParams.get("limit"));
@@ -108,6 +113,32 @@ function table(dateColumn, fields, options = {}) {
 
 const label = (prefix) => (id, projectId) => ({ [prefix]: projectId === PROJECT_B ? `OTHER-PROJECT ${prefix} ${id}` : `${prefix} ${id}` });
 
+// The decisions/commitments registry (project_intelligence_items): live decisions of Project A on four source
+// dates, plus rows that must never show: a withdrawn and a superseded decision (both newer), a commitment
+// (newer), a decision of Project B (newer); and one live decision with no source date (listed last).
+function registryTable({ decisions = true } = {}) {
+  const base = (id, projectId, kind, sourceDate, extra = {}) => ({
+    id: `reg-${id}`, project_id: projectId, kind, title: `${kind} ${id}`, statement: `statement ${id}`, summary: null,
+    source_date: sourceDate, due_date: null, status: "unknown", owner_text: null, decision_maker_text: null, topic: null,
+    created_at: "2026-10-01T00:00:00+00:00", withdrawn: false, superseded: false, ...extra
+  });
+  const rows = [
+    ...(decisions ? [
+      base(1, PROJECT_A, "decision", "2026-03-30"),
+      base(2, PROJECT_A, "decision", "2026-07-19", { decision_maker_text: "Dana" }),
+      base(3, PROJECT_A, "decision", "2026-05-02"),
+      base(4, PROJECT_A, "decision", "2026-06-10"),
+      base(5, PROJECT_A, "decision", "2026-09-30", { title: "WITHDRAWN decision", withdrawn: true }),
+      base(6, PROJECT_A, "decision", "2026-09-29", { title: "SUPERSEDED decision", superseded: true }),
+      base(7, PROJECT_A, "decision", null, { title: "decision without a source date", created_at: "2026-10-02T00:00:00+00:00" }),
+      base(8, PROJECT_B, "decision", "2026-09-01", { title: "OTHER-PROJECT decision" })
+    ] : []),
+    base(9, PROJECT_A, "commitment", "2026-09-15", { title: "commitment 9", statement: "send the data", owner_text: "Contractor", due_date: "2026-10-20" }),
+    base(10, PROJECT_A, "commitment", "2026-08-01", { title: "commitment 10", withdrawn: true })
+  ];
+  return { columns: Object.keys(rows[0]), rows };
+}
+
 // The 006 Company DB template: the date column names of the ticket.
 function templateTables() {
   return {
@@ -119,6 +150,7 @@ function templateTables() {
     consultants_reports: table("report_date", label("report_topic")),
     exceptions_report: table("exception_date", label("exception_subject")),
     financial_transactions: table("transaction_date", (id, projectId) => ({ topic: projectId === PROJECT_B ? "OTHER-PROJECT invoice" : `Invoice ${id}`, vendor_name: `Vendor ${id}` })),
+    project_intelligence_items: registryTable(),
     whatsapp_conversations: table("conversation_start", () => ({})),
     whatsapp_analysis: {
       columns: ["id", "project_id", "conversation_id", "summary", "item_status", "hashtags", "tasks_json"],
@@ -362,7 +394,8 @@ export function registerLatestByDateTests(test) {
     { kind: "consultants", message: "מה דוחות היועצים האחרונים?", template: { table: "consultants_reports", dateColumn: "report_date" }, legacy: { table: "consultants_reports", dateColumn: "report_date" }, titles: (id) => `report_topic ${id}` },
     { kind: "exceptions", message: "מה החריגים האחרונים?", template: { table: "exceptions_report", dateColumn: "exception_date" }, legacy: { table: "exceptions_report", dateColumn: "exception_date" }, titles: (id) => `exception_subject ${id}` },
     { kind: "financial", message: "מה החשבוניות האחרונות?", template: { table: "financial_transactions", dateColumn: "transaction_date" }, legacy: { table: "financial_transactions", dateColumn: "transaction_date" }, titles: (id) => `Invoice ${id}` },
-    { kind: "decisions", message: "מה ההחלטות האחרונות?", template: { table: "meetings", dateColumn: "meeting_date" }, legacy: { table: "meetings", dateColumn: "date" }, titles: (id) => `Meeting ${id}`, only: [1, 3], oneNewestFirst: ["2026-05-02", "2026-03-30"] },
+    { kind: "decisions", message: "מה ההחלטות האחרונות?", template: { table: "project_intelligence_items", dateColumn: "source_date" }, legacy: { table: "project_intelligence_items", dateColumn: "source_date" }, titles: () => "decision 2", firstTitle: "decision 2", oneNewestFirst: [...NEWEST_FIRST, "2026-10-02"] },
+    { kind: "commitments", message: "מה ההתחייבויות האחרונות?", template: { table: "project_intelligence_items", dateColumn: "source_date" }, legacy: { table: "project_intelligence_items", dateColumn: "source_date" }, titles: () => "commitment 9", firstTitle: "commitment 9", oneNewestFirst: ["2026-09-15"] },
     { kind: "whatsapp", message: "מה היה בוואטסאפ לאחרונה?", template: { table: "whatsapp_conversations", dateColumn: "conversation_start" }, legacy: { table: "whatsapp_conversations", dateColumn: "conversation_start" }, titles: (id) => `Chat summary ${id}` }
   ];
 
@@ -382,9 +415,8 @@ export function registerLatestByDateTests(test) {
           assert.equal(section.ingestionDate, Boolean(expected.ingestion), `${spec.kind}: ingestion-date fallback is flagged`);
           assert.deepEqual(section.items.map((item) => item.date), spec.oneNewestFirst || NEWEST_FIRST, `${spec.kind}: newest first by its own date`);
           // The newest item is not the first row by id or by insertion: it comes from the ORDER BY.
-          const newestId = (spec.only ? [3] : [2])[0];
-          assert.equal(section.items[0].title, spec.titles(spec.only ? 3 : newestId), `${spec.kind}: newest item first`);
-          assert.ok(section.items.every((item) => !String(item.title).includes("OTHER-PROJECT")), `${spec.kind}: Project B's newer row is never returned`);
+          assert.equal(section.items[0].title, spec.firstTitle || spec.titles(2), `${spec.kind}: newest item first`);
+          assert.ok(section.items.every((item) => !/OTHER-PROJECT|WITHDRAWN|SUPERSEDED/.test(String(item.title))), `${spec.kind}: Project B's, withdrawn and superseded rows are never returned`);
 
           // Every request: Project A's Company DB only, GET only, filtered by project_id, ordered by the date column.
           assert.ok(calls.length > 0);
@@ -533,6 +565,58 @@ export function registerLatestByDateTests(test) {
     });
   });
 
+  test("latest by date: decisions come from the registry (live rows only, by source date, undated last), with the owner and decision maker", async () => {
+    await withNetwork(companyDb({ origin: COMPANY_A, tables: templateTables() }), async (calls) => {
+      const intent = recencyFor("ההחלטות האחרונות");
+      const result = await runRecentItems({ config: projectConfig(), recency: intent, hebrew: true });
+      const [section] = result.sections;
+      assert.equal(section.sourceKind, "decisions");
+      assert.deepEqual(section.items.map((item) => item.title), ["decision 2", "decision 4", "decision 3", "decision 1", "decision without a source date"]);
+      const read = calls.find((call) => call.url.includes("/rest/v1/project_intelligence_items?"));
+      assert.match(read.url, /kind=eq\.decision/);
+      assert.match(read.url, /withdrawn=eq\.false/);
+      assert.match(read.url, /superseded=eq\.false/);
+      assert.match(read.url, new RegExp(`project_id=eq\\.${PROJECT_A}`));
+      assert.match(read.url, /order=source_date\.desc\.nullslast,created_at\.desc/);
+      assert.equal(calls.some((call) => call.url.includes("/rest/v1/meetings?")), false, "meetings are not read when the registry has rows");
+      const answer = buildRecentItemsAnswer({ result, recency: intent, hebrew: true });
+      assert.match(answer.split("\n")[0], /^\*\*ההחלטות האחרונות — מ־30\.03\.2026 עד 19\.07\.2026\*\*/);
+      assert.match(answer, /- \*\*19\.07\.2026\*\* · decision 2 — statement 2 — מחליט: Dana/);
+      assert.match(answer, /- \*\*02\.10\.2026\*\* _\(תאריך קליטה\)_ · decision without a source date/, "an undated row says it is dated by when it was recorded");
+    });
+  });
+
+  test("latest by date: commitments come from the registry with their owner and due date", async () => {
+    await withNetwork(companyDb({ origin: COMPANY_A, tables: templateTables() }), async () => {
+      const intent = recencyFor("what are the latest commitments?");
+      const result = await runRecentItems({ config: projectConfig(), recency: intent, hebrew: false });
+      const answer = buildRecentItemsAnswer({ result, recency: intent, hebrew: false });
+      assert.match(answer, /^\*\*Latest commitments — 15\.09\.2026\*\* \(1 item/);
+      assert.match(answer, /commitment 9 — send the data — owner: Contractor — due 20\.10\.2026/);
+      assert.equal(result.sections[0].items.length, 1, "the withdrawn commitment is not shown");
+    });
+  });
+
+  test("latest by date: decisions fall back to meetings.decisions_made only when the registry has no rows", async () => {
+    const cases = {
+      "an empty registry": { tables: { ...templateTables(), project_intelligence_items: registryTable({ decisions: false }) }, missing: [] },
+      "no registry table": { tables: templateTables(), missing: ["project_intelligence_items"] }
+    };
+    for (const [name, { tables, missing }] of Object.entries(cases)) {
+      await withNetwork(companyDb({ origin: COMPANY_A, tables, missingTables: missing }), async (calls) => {
+        const intent = recencyFor("מה ההחלטות האחרונות?");
+        const result = await runRecentItems({ config: projectConfig(), recency: intent, hebrew: true });
+        const [section] = result.sections;
+        assert.equal(section.sourceKind, "decisions_meetings", name);
+        assert.equal(section.table, "meetings", name);
+        assert.deepEqual(section.items.map((item) => item.date), ["2026-05-02", "2026-03-30"], `${name}: meetings with decisions, newest first`);
+        assert.ok(calls.some((call) => call.url.includes("/rest/v1/meetings?") && call.url.includes("decisions_made=not.is.null")));
+        assert.ok(calls.every((call) => call.method === "GET" && call.origin === COMPANY_A));
+        assert.match(buildRecentItemsAnswer({ result, recency: intent, hebrew: true }).split("\n")[0], /^\*\*ההחלטות האחרונות \(מישיבות\) — /);
+      });
+    }
+  });
+
   test("latest by date: an ingestion-time fallback is flagged in the answer", async () => {
     await withNetwork(companyDb({ origin: COMPANY_A, tables: legacyTables() }), async () => {
       const intent = recencyFor("מה דוחות הבטיחות האחרונים?");
@@ -637,6 +721,20 @@ export function registerLatestByDateTests(test) {
       assert.match(result.body.answer, /^\*\*ההתראות האחרונות — מ־30\.03\.2026 עד 19\.07\.2026\*\*/);
       assert.match(result.body.answer, /- \*\*19\.07\.2026\*\* · Alert 2 — Alert summary 2 \[למקור\]\(https:\/\/files\.test\/alert-2\)/);
       assert.equal(result.body.runTrace.recency.sections[0].table, "alerts");
+    });
+  });
+
+  test("latest by date: ההחלטות האחרונות through the handler answers from the decisions registry, GET only", async () => {
+    await withServer(companyDb({ origin: COMPANY_A, tables: templateTables(), rpc: () => jsonResponse([]) }), async ({ handler, calls }) => {
+      const result = await chat(handler, { message: "ההחלטות האחרונות" });
+      assert.equal(result.status, 200, JSON.stringify(result.body).slice(0, 300));
+      assert.match(result.body.answer, /^\*\*ההחלטות האחרונות — /);
+      assert.match(result.body.answer, /\*\*19\.07\.2026\*\* · decision 2/);
+      assert.doesNotMatch(result.body.answer, /WITHDRAWN|SUPERSEDED|OTHER-PROJECT/);
+      assert.equal(result.body.runTrace.recency.sections[0].table, "project_intelligence_items");
+      assert.equal(result.body.runTrace.recency.sections[0].order_by, "source_date");
+      const db = calls.filter((call) => call.origin.includes("supabase.test"));
+      assert.ok(db.every((call) => call.origin === COMPANY_A && call.method === "GET"));
     });
   });
 

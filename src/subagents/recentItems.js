@@ -55,7 +55,27 @@ const KINDS = {
     he: { latest: "הישיבות האחרונות", plain: "הישיבות", none: "ישיבות", date: "תאריך הישיבה" },
     en: { latest: "Latest meetings", plain: "meetings", date: "meeting date" }
   },
+  // Decisions and commitments: the Project's intelligence registry first (what production answered from);
+  // for decisions, meetings.decisions_made only when the registry has no rows.
   decisions: {
+    tool: "decisions",
+    special: "registry",
+    registryKind: "decision",
+    fallback: "decisions_meetings",
+    dateColumns: ["source_date", "created_at"],
+    he: { latest: "ההחלטות האחרונות", plain: "ההחלטות", none: "החלטות", date: "תאריך המקור" },
+    en: { latest: "Latest decisions", plain: "decisions", date: "source date" }
+  },
+  commitments: {
+    tool: "commitments",
+    special: "registry",
+    registryKind: "commitment",
+    dateColumns: ["source_date", "created_at"],
+    he: { latest: "ההתחייבויות האחרונות", plain: "ההתחייבויות", none: "התחייבויות", date: "תאריך המקור" },
+    en: { latest: "Latest commitments", plain: "commitments", date: "source date" }
+  },
+  // Fallback of decisions (never asked for by name): decisions recorded in meetings.
+  decisions_meetings: {
     tool: "meetings",
     dateColumns: ["meeting_date", "date", "created_at"],
     filters: [{ param: "decisions_made=not.is.null", column: "decisions_made", droppable: false }],
@@ -109,11 +129,14 @@ const KINDS = {
   }
 };
 
-export const RECENT_KIND_NAMES = Object.freeze(Object.keys(KINDS));
+export const RECENT_KIND_NAMES = Object.freeze(Object.keys(KINDS).filter((name) => name !== "decisions_meetings"));
+
+const REGISTRY_TABLE = "project_intelligence_items";
+const REGISTRY_SELECT = ["id", "kind", "title", "statement", "summary", "source_date", "due_date", "status", "owner_text", "decision_maker_text", "topic", "created_at"];
 
 const LABELS = {
-  he: { from: "מאת", decisions: "החלטות", risk: "רמת סיכון", status: "סטטוס", noSubject: "(ללא נושא)", noTitle: "פריט" },
-  en: { from: "from", decisions: "Decisions", risk: "risk level", status: "status", noSubject: "(no subject)", noTitle: "item" }
+  he: { owner: "אחראי", decisionMaker: "מחליט", due: "עד", from: "מאת", decisions: "החלטות", risk: "רמת סיכון", status: "סטטוס", noSubject: "(ללא נושא)", noTitle: "פריט" },
+  en: { owner: "owner", decisionMaker: "decided by", due: "due", from: "from", decisions: "Decisions", risk: "risk level", status: "status", noSubject: "(no subject)", noTitle: "item" }
 };
 
 // ── routing gate ─────────────────────────────────────────────────────────────
@@ -221,15 +244,15 @@ async function healingRead({ config, table, select, filters = [], order = null, 
   throw new Error("recent_items_read_failed_after_retries");
 }
 
-function windowFilters(dateColumn, window) {
-  const filters = [{ param: `${dateColumn}=not.is.null`, column: dateColumn, droppable: false }];
+function windowFilters(dateColumn, window, requireDate = true) {
+  const filters = requireDate ? [{ param: `${dateColumn}=not.is.null`, column: dateColumn, droppable: false }] : [];
   if (window?.dateFrom) filters.push({ param: `${dateColumn}=gte.${encodeURIComponent(window.dateFrom)}`, column: dateColumn, droppable: false });
   if (window?.dateTo) filters.push({ param: `${dateColumn}=lt.${encodeURIComponent(addDaysIso(window.dateTo, 1))}`, column: dateColumn, droppable: false });
   return filters;
 }
 
 // The newest rows of `table` (project-filtered), by the first date column the table really has.
-async function readNewest({ config, projectId, table, select, dateColumns, filters = [], window = null, limit }) {
+async function readNewest({ config, projectId, table, select, dateColumns, filters = [], window = null, limit, requireDate = true, thenOrder = null }) {
   const hint = freshHint(config, table);
   const candidates = hint?.dateColumn
     ? [hint.dateColumn, ...dateColumns.filter((column) => column !== hint.dateColumn)]
@@ -241,10 +264,10 @@ async function readNewest({ config, projectId, table, select, dateColumns, filte
         config,
         table,
         select: [...new Set([...select, dateColumn])],
-        filters: [{ param: projectIdFilterParam(projectId), column: "project_id", droppable: false }, ...filters, ...windowFilters(dateColumn, window)],
-        order: `order=${dateColumn}.desc.nullslast`,
+        filters: [{ param: projectIdFilterParam(projectId), column: "project_id", droppable: false }, ...filters, ...windowFilters(dateColumn, window, requireDate)],
+        order: `order=${dateColumn}.desc.nullslast${thenOrder ? `,${thenOrder}.desc` : ""}`,
         limit,
-        protectedColumns: [dateColumn],
+        protectedColumns: [dateColumn, ...(thenOrder ? [thenOrder] : [])],
         hint: hint?.dateColumn === dateColumn ? hint : null
       });
       schemaHints.set(hintKey(config, table), { at: Date.now(), dateColumn, dropSelect: result.dropSelect, dropFilter: result.dropFilter });
@@ -273,6 +296,14 @@ async function resolveKindSource({ config, kindName }) {
     const tables = [...new Set([saved, contentConfig.alertsTable, "alerts"].map((name) => String(name || "").trim()).filter((name) => /^[A-Za-z0-9_]+$/.test(name)))];
     return { tables, select: kind.selectColumns, dateColumns: kind.dateColumns, filters: [] };
   }
+  if (kind.special === "registry") {
+    const filters = [
+      { param: `kind=eq.${kind.registryKind}`, column: "kind", droppable: false },
+      { param: "withdrawn=eq.false", column: "withdrawn", droppable: false },
+      { param: "superseded=eq.false", column: "superseded", droppable: false }
+    ];
+    return { tables: [REGISTRY_TABLE], select: REGISTRY_SELECT, dateColumns: kind.dateColumns, filters, registry: true };
+  }
   if (kind.special === "whatsapp") {
     return { tables: ["whatsapp_conversations"], select: ["id", "conversation_start", "conversation_end"], dateColumns: kind.dateColumns, filters: [] };
   }
@@ -299,7 +330,11 @@ async function readKindRows({ config, projectId, kindName, window, limit }) {
   let lastError = null;
   for (const table of ordered) {
     try {
-      const result = await readNewest({ config, projectId, table, select: source.select, dateColumns: source.dateColumns, filters: source.filters, window, limit });
+      const result = await readNewest({
+        config, projectId, table, select: source.select, dateColumns: source.dateColumns, filters: source.filters, window, limit,
+        // The registry keeps rows with no source date, ordered last, then by creation time.
+        ...(source.registry ? { requireDate: false, thenOrder: "created_at" } : {})
+      });
       return { ...result, table };
     } catch (error) {
       if (isMissingTableError(error) || isLabDatasetEmptyError(error)) { lastError = error; continue; }
@@ -364,8 +399,18 @@ function presentRow(kindName, row, labels) {
         title: snippet(row.subject, 140) || labels.noTitle,
         detail: joinDetail([snippet(row.summary), row.decisions_made ? `${labels.decisions}: ${snippet(row.decisions_made)}` : ""])
       };
-    case "decisions":
+    case "decisions_meetings":
       return { title: snippet(row.subject, 140) || labels.noTitle, detail: snippet(row.decisions_made, 320) };
+    case "decisions":
+    case "commitments": {
+      const statement = snippet(row.statement, 320);
+      const title = snippet(row.title, 140);
+      const due = row.due_date ? `${labels.due} ${formatDisplayDate(row.due_date)}` : "";
+      return {
+        title: title || snippet(row.statement, 140) || labels.noTitle,
+        detail: joinDetail([title && statement !== title ? statement : "", row.owner_text ? `${labels.owner}: ${snippet(row.owner_text, 60)}` : "", row.decision_maker_text ? `${labels.decisionMaker}: ${snippet(row.decision_maker_text, 60)}` : "", due])
+      };
+    }
     case "whatsapp":
       return { title: snippet(row.conversation_title, 100) || snippet(row.summary, 80) || labels.noTitle, detail: snippet(row.conversation_title ? row.summary : "") };
     case "alerts":
@@ -393,10 +438,14 @@ function toItems({ kindName, rows, dateColumn, table, hebrew }) {
   const labels = hebrew ? LABELS.he : LABELS.en;
   return rows.map((row) => {
     const { title, detail } = presentRow(kindName, row, labels);
-    const source = buildContentRowSource(kind.tool, { ...row, date: toDateOnly(row[dateColumn]) }, { table });
+    // A registry row with no source date is dated by when it was recorded, and says so.
+    const ownDate = toDateOnly(row[dateColumn]);
+    const date = ownDate || (KINDS[kindName].special === "registry" ? toDateOnly(row.created_at) : null);
+    const source = buildContentRowSource(kind.tool, { ...row, date }, { table });
     return {
       id: row.id == null ? null : String(row.id),
-      date: toDateOnly(row[dateColumn]),
+      date,
+      recordedDate: !ownDate && Boolean(date),
       title,
       detail,
       url: source?.url || null,
@@ -462,12 +511,30 @@ async function runKind({ config, projectId, kindName, recency, hebrew, telemetry
   const kind = KINDS[kindName];
   const window = recency.window;
   const topic = recency.topic || "";
-  const scan = topic ? Math.min(MAX_SCAN_ROWS, Math.max(RECENT_SCAN_ROWS, recency.limit * 6)) : Math.min(MAX_SCAN_ROWS, recency.limit * (kindName === "decisions" ? 3 : 1));
-  const read = kind.special === "whatsapp"
-    ? await readWhatsappRows({ config, projectId, window, limit: scan })
-    : await readKindRows({ config, projectId, kindName, window, limit: scan });
-  let items = toItems({ kindName, rows: read.rows, dateColumn: read.dateColumn, table: read.table, hebrew });
-  if (kindName === "decisions") items = items.filter((item) => item.detail);
+  const scan = topic ? Math.min(MAX_SCAN_ROWS, Math.max(RECENT_SCAN_ROWS, recency.limit * 6)) : Math.min(MAX_SCAN_ROWS, recency.limit * (kind.fallback ? 3 : 1));
+  const readKind = (name, windowToRead, limit) => KINDS[name].special === "whatsapp"
+    ? readWhatsappRows({ config, projectId, window: windowToRead, limit })
+    : readKindRows({ config, projectId, kindName: name, window: windowToRead, limit });
+  // The kind actually read: decisions fall back to meetings.decisions_made when the registry has no rows.
+  let effectiveKind = kindName;
+  let read = null;
+  let registryError = null;
+  try {
+    read = await readKind(kindName, window, scan);
+  } catch (error) {
+    if (!kind.fallback || isCompanyDbError(error) || isLabDatasetEmptyError(error)) throw error;
+    registryError = error;
+  }
+  if (kind.fallback && (!read || !read.rows.length)) {
+    effectiveKind = kind.fallback;
+    try {
+      read = await readKind(effectiveKind, window, scan);
+    } catch (error) {
+      if (!read) throw registryError || error;
+    }
+  }
+  let items = toItems({ kindName: effectiveKind, rows: read.rows, dateColumn: read.dateColumn, table: read.table, hebrew });
+  if (effectiveKind === "decisions_meetings") items = items.filter((item) => item.detail);
   const scanned = items.length;
   let ranking = null;
   if (topic && scanned) {
@@ -480,10 +547,9 @@ async function runKind({ config, projectId, kindName, recency, hebrew, telemetry
   let newestAny = items[0]?.date || null;
   if (!scanned && window) {
     try {
-      const probe = kind.special === "whatsapp"
-        ? await readKindRows({ config, projectId, kindName: "whatsapp", window: null, limit: 1 })
-        : await readKindRows({ config, projectId, kindName, window: null, limit: 1 });
-      newestAny = toDateOnly(probe.rows[0]?.[probe.dateColumn]) || null;
+      const probe = await readKind(effectiveKind, null, 1);
+      const probeRow = probe.rows[0];
+      newestAny = toDateOnly(probeRow?.[probe.dateColumn]) || (KINDS[effectiveKind].special === "registry" ? toDateOnly(probeRow?.created_at) : null);
     } catch {
       newestAny = null;
     }
@@ -492,7 +558,9 @@ async function runKind({ config, projectId, kindName, recency, hebrew, telemetry
   }
   return {
     kind: kindName,
-    tool: kind.tool,
+    // What the rows came from (decisions: the registry, or meetings as the fallback).
+    sourceKind: effectiveKind,
+    tool: KINDS[effectiveKind].tool,
     table: read.table,
     dateColumn: read.dateColumn,
     ingestionDate: read.dateColumn === "created_at",
@@ -540,14 +608,19 @@ function itemLine(item, hebrew) {
   const date = formatDisplayDate(item.date);
   const text = item.detail ? `${item.title} — ${item.detail}` : item.title;
   const link = item.url ? ` [${hebrew ? "למקור" : "source"}](${item.url})` : "";
-  return `- **${date}** · ${text}${link}`;
+  const recorded = item.recordedDate ? (hebrew ? " _(תאריך קליטה)_" : " _(recorded)_") : "";
+  return `- **${date}**${recorded} · ${text}${link}`;
 }
 
 function sectionAnswer(section, { recency, hebrew, today }) {
-  const names = hebrew ? KINDS[section.kind].he : { ...KINDS[section.kind].en, none: KINDS[section.kind].en.plain };
+  const shown = KINDS[section.sourceKind || section.kind];
+  const names = hebrew ? shown.he : { ...shown.en, none: shown.en.plain };
   const count = section.items.length;
-  const from = formatDisplayDate(section.window?.from || section.items.at(-1)?.date);
-  const to = formatDisplayDate(section.window?.to || section.items[0]?.date);
+  // The covered span comes from the items' own dates; a recorded-date stand-in does not widen it.
+  const dated = section.items.filter((item) => !item.recordedDate);
+  const spanDates = (dated.length ? dated : section.items).map((item) => item.date).sort();
+  const from = formatDisplayDate(section.window?.from || spanDates[0]);
+  const to = formatDisplayDate(section.window?.to || spanDates.at(-1));
   const lines = [];
   const newestDays = section.newestAny ? daysBetweenIso(section.newestAny, today) : null;
   const staleNote = section.newestAny && newestDays > STALE_AFTER_DAYS
