@@ -78,6 +78,15 @@ export function chatSessionInProject(sessionId, projectId) {
   return Boolean(projectId) && sameProjectId(chatSessionProjectId(sessionId), projectId);
 }
 
+// BiDoc's own session id inside a tagged one (bidoc:<projectId>:<sessionId>),
+// which is how its chat_sessions / chat_messages rows name the conversation.
+// An untagged id is returned as is.
+export function bidocSessionIdOf(sessionId) {
+  const value = String(sessionId ?? "");
+  const match = value.match(BIDOC_SESSION_PATTERN);
+  return match ? value.slice(match[0].length) : value;
+}
+
 export function bidocChatSessionPrefix(projectId) {
   return `bidoc:${projectId}:`;
 }

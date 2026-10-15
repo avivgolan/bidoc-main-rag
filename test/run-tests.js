@@ -59,6 +59,7 @@ import { registerInternalScopeTests } from "./internal-scope.tests.js";
 import { registerInternalScopeAccessTests } from "./internal-scope-access.tests.js";
 import { registerCompanyDbIsolationTests } from "./company-db-isolation.tests.js";
 import { registerRunTraceTests } from "./run-trace.tests.js";
+import { registerProjectChatHistoryTests } from "./project-chat-history.tests.js";
 import { registerKapaimSettingsRegressionTests, registerSettingsFromMetaTests } from "./settings-from-meta.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
@@ -13954,6 +13955,7 @@ registerRunTraceTests(test);
 // Registered last: these tests import the HTTP handler under a fake network
 // and temporarily set process env (restored at the end).
 registerCompanyDbIsolationTests(test);
+registerProjectChatHistoryTests(test);
 registerSettingsFromMetaTests(test);
 registerKapaimSettingsRegressionTests(test);
 

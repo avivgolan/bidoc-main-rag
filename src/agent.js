@@ -52,12 +52,19 @@ import { buildGraphSearchPayload, summarizeGraphContext } from "./projectGraph.j
 import { CACHE_TTL, cachedOperation, createCacheContext, finalizeCacheMetrics, hashValue } from "./cache.js";
 import { appendMemoryLog } from "./memoryLogger.js";
 import { requestProjectId } from "./projectScope.js";
+import { hasCompanyDbConnection } from "./companyDb.js";
+import { loadProjectConversation, projectAgentMemory, projectRoutingMemory, startEarlierSummary } from "./projectChatHistory.js";
 
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
 
 export async function runChatPipeline({ message, sessionId, userId = null, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [], ephemeral = false, forceRag = false, executionMode = "production", persistChatHistory = true }) {
   const pipelineStartedAt = Date.now();
   const ephemeralRun = ephemeral || executionMode === "qa" || persistChatHistory === false;
+  // A Project request names its Company DB. Its conversation context is built
+  // from BiDoc's chat in that Company DB for this request only; main-agent's
+  // own memory store (MAIN: session summaries, long-term memory items) is
+  // neither read nor written.
+  const projectMode = hasCompanyDbConnection(config) && Boolean(requestProjectId(config));
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
   const openRouterCalls = [];
   let openRouterCallSequence = 0;
@@ -81,11 +88,20 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   const sanitized = sanitizeMessage(effectiveMessage);
   const memoryLoadStartedAt = Date.now();
   emitRunEvent(runId, "sanitize", "Message sanitized", { changed: sanitized !== message, length: sanitized.length });
+  const projectConversation = projectMode && !ephemeralRun
+    ? await loadProjectConversation({ config, sessionId, currentMessage: message })
+    : null;
+  // Older turns are summarised on the fly while the classifier runs.
+  const earlierSummary = projectConversation
+    ? startEarlierSummary({ config, conversation: projectConversation, telemetry: telemetryFor("memory_summary") })
+    : null;
   const routingMemory = ephemeralRun
     ? { mode: "disabled", recent: [], summary: null, sessionRow: null, memories: [], errors: [] }
-    : await loadRoutingMemory({ config, sessionId, userId, query: sanitized }).catch((error) => ({
-      mode: "session_only", recent: [], summary: null, sessionRow: null, memories: [], errors: [error.message]
-    }));
+    : projectConversation
+      ? projectRoutingMemory({ config, conversation: projectConversation })
+      : await loadRoutingMemory({ config, sessionId, userId, query: sanitized }).catch((error) => ({
+        mode: "session_only", recent: [], summary: null, sessionRow: null, memories: [], errors: [error.message]
+      }));
   if (routingMemory.errors.length) {
     emitRunEvent(runId, "memory", "Routing memory degraded; chat continues", { errors: routingMemory.errors });
   }
@@ -164,7 +180,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   });
 
   let memoryCommand = null;
-  if (!ephemeralRun) {
+  if (!ephemeralRun && !projectMode) {
     try {
       memoryCommand = await applyExplicitMemoryCommand({ config, userId, sessionId, messageId: saved.id, message: sanitized });
       if (memoryCommand) classification = { ...classification, type: "CHAT" };
@@ -177,16 +193,18 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   const agentName = classification.type === "CHAT" ? "lite" : "main";
   const memoryContext = ephemeralRun
     ? { mode: "disabled", recent: [], summary: null, sessionRow: null, memories: [], errors: [] }
-    : await loadAgentMemory({ config, sessionId, userId, query: resolvedMessage, agent: agentName }).catch((error) => ({
-      mode: userId ? "user_and_session" : "session_only",
-      recent: routingMemory.recent,
-      summary: routingMemory.summary,
-      summarySource: routingMemory.summarySource,
-      previousSessionRecalled: routingMemory.previousSessionRecalled,
-      sessionRow: routingMemory.sessionRow,
-      memories: [],
-      errors: [error.message]
-    }));
+    : projectConversation
+      ? await projectAgentMemory({ config, conversation: projectConversation, agent: agentName, earlierSummary })
+      : await loadAgentMemory({ config, sessionId, userId, query: resolvedMessage, agent: agentName }).catch((error) => ({
+        mode: userId ? "user_and_session" : "session_only",
+        recent: routingMemory.recent,
+        summary: routingMemory.summary,
+        summarySource: routingMemory.summarySource,
+        previousSessionRecalled: routingMemory.previousSessionRecalled,
+        sessionRow: routingMemory.sessionRow,
+        memories: [],
+        errors: [error.message]
+      }));
   const agentMemorySettings = config.memory?.agents?.[agentName] || {};
   const memory = memoryMessagesForAgent(memoryContext, agentMemorySettings.contextTokenBudget);
   const memorySummary = memoryContext.summary;
@@ -218,7 +236,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     source_count: Array.isArray(result.sources) ? result.sources.length : 0
   });
 
-  const memoryWrite = ephemeralRun ? null : await finalizeChatMemory({
+  const memoryWrite = ephemeralRun || projectMode ? null : await finalizeChatMemory({
     config,
     sessionId,
     userId,
@@ -232,7 +250,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
   if (memoryWrite?.errors?.length) {
     trace.push({ step: "memory_write", ok: false, fallback: true, errors: memoryWrite.errors });
     emitRunEvent(runId, "memory_write", "Memory maintenance degraded; answer preserved", { errors: memoryWrite.errors });
-  } else if (!ephemeralRun) {
+  } else if (!ephemeralRun && !projectMode) {
     emitRunEvent(runId, "memory_write", "Persistent memory updated", { learned: memoryWrite?.learned || 0, turns: memoryWrite?.turnCount || 0 });
   }
   const workflowLog = buildWorkflowLog({
@@ -271,7 +289,7 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     mode: memoryContext.mode,
     recentTurns: Math.floor(memoryContext.recent.length / 2),
     recalledItems: memoryContext.memories.length,
-    turnCount: memoryWrite?.turnCount || memoryContext.sessionRow?.turn_count || 0,
+    turnCount: memoryWrite?.turnCount || memoryContext.sessionRow?.turn_count || memoryContext.turnCount || 0,
     degraded: Boolean(memoryContext.errors.length || memoryWrite?.errors?.length),
     queryRewritten: resolvedMessage !== sanitized,
     previousSessionRecalled: Boolean(memoryContext.previousSessionRecalled || routingMemory.previousSessionRecalled),
