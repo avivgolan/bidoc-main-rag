@@ -1,3 +1,26 @@
+# main-agent — rules for agents
+
+## The Lab and live data are separate (read before any change)
+
+main-agent serves two worlds, and every change keeps them apart (ADR 0012 in the BiDoc docs; mechanics in CLAUDE.md, "Two request modes"):
+
+- **Live data** is a Project's Company DB. Only a **Project request** (from BiDoc or the ingest engine) touches it, and only that one Project's Company DB. main-agent stores nothing of its own for live requests.
+- **The Lab** is MAIN (`SUPABASE_URL`). A **Lab request** (a Superadmin signed in to main-agent's screens) works only on MAIN.
+
+When you build a new feature, try an idea, or need real Project data to test with:
+
+1. **Work in the Lab.** The feature reads and writes tables in MAIN, as a Lab route (`routeAccess()` class `lab`).
+2. **Copy, never connect.** Real data reaches the Lab only as a copy in MAIN tables:
+   - Load it with the Lab action "טען מערך בדיקה" (`src/labDatasetCopy.js`).
+   - Or extend that copy's plan (`src/labDatasetSpec.js` + the MAIN migration) so it brings the tables your feature needs.
+   - The copy is the single Lab path that reads a Company DB: GET only, narrowed to one Project, found through the Meta DB. A Lab feature reads the copy in MAIN.
+3. **New tables go in MAIN** through a migration in `supabase/migrations/` (MAIN only, idempotent, add-only), stamped with the Lab Project id (`LAB_PROJECT_ID` in `src/labDataset.js`).
+4. **Graduate by rebuilding.** A Lab feature reaches customers only when it is rebuilt into BiDoc: its tables are added to the Company DB template in the BiDoc repo, and its screens move into BiDoc. Production code keeps reading the Company DB only.
+
+**Done when:** the host-recording tests (`test/support/handler-harness.js`) prove a Lab route contacts only MAIN, and a Project route contacts only its own Company DB, never MAIN.
+
+---
+
 # Agent Knowledge: <project-name>
 
 This project uses **Project Bedrock** for persistent project memory.
