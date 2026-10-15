@@ -8,6 +8,7 @@ import { resolveMainAnswerCitations } from "./mainCitations.js";
 import { graphSearch, hybridSearch, saveMessage, updateMessage } from "./supabase.js";
 import { buildToolOrder, callN8nTool, extractLinks, buildInternalSourceUrl, isInternalProjectTool } from "./tools.js";
 import { runAlertAgent } from "./subagents/alert.js";
+import { buildCompactRunTrace, logFullRunTrace } from "./runTrace.js";
 import {
   callInternalContentTool,
   fetchEmailAttachmentByReference,
@@ -55,6 +56,7 @@ import { requestProjectId } from "./projectScope.js";
 export const KNOWLEDGE_PLANNER_RESPONSE_FORMAT = { type: "json_object" };
 
 export async function runChatPipeline({ message, sessionId, userId = null, config, runId, sourcesEnabled = true, deepResearch = false, attachments = [], ephemeral = false, forceRag = false, executionMode = "production", persistChatHistory = true }) {
+  const pipelineStartedAt = Date.now();
   const ephemeralRun = ephemeral || executionMode === "qa" || persistChatHistory === false;
   const cacheContext = createCacheContext({ config, runId, emit: emitRunEvent });
   const openRouterCalls = [];
@@ -308,6 +310,28 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     if (!logStatus.ok) console.warn("[memory_log] write failed:", logStatus.error);
   }
 
+  // The compact trace travels with the answer; the full detail goes to the logs.
+  // Trace building must never fail an answer that is already complete.
+  let runTrace = null;
+  try {
+    const finalRunEvents = getRunEvents(runId);
+    runTrace = buildCompactRunTrace({
+      runId,
+      startedAt: pipelineStartedAt,
+      classification,
+      agent: memoryCommand ? "memory_action" : agentName,
+      workflowLog,
+      toolCalls: result.toolCalls,
+      runEvents: finalRunEvents,
+      openRouterCalls,
+      trace,
+      ephemeral: ephemeralRun
+    });
+    logFullRunTrace({ runId, sessionId, compact: runTrace, runEvents: finalRunEvents, openRouterCalls });
+  } catch (error) {
+    console.warn("[run-trace] could not build the compact run trace:", error.message);
+  }
+
   const output = {
     messageId: saved.id,
     status: "complete",
@@ -331,7 +355,8 @@ export async function runChatPipeline({ message, sessionId, userId = null, confi
     conflicts: result.conflicts || [],
     openRouterUsage: workflowLog.openRouterUsage,
     trace,
-    workflowLog
+    workflowLog,
+    runTrace
   };
   if (!ephemeralRun) completeRun(runId, { messageId: saved.id, type: classification.type });
   return output;

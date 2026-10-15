@@ -58,6 +58,7 @@ import { registerInsightsProjectScopeTests } from "./insights-project-scope.test
 import { registerInternalScopeTests } from "./internal-scope.tests.js";
 import { registerInternalScopeAccessTests } from "./internal-scope-access.tests.js";
 import { registerCompanyDbIsolationTests } from "./company-db-isolation.tests.js";
+import { registerRunTraceTests } from "./run-trace.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
@@ -13940,6 +13941,9 @@ test("internal subagent diagnostics are read-only readiness probes", () => {
   assert.match(serverSource, /method:\s*"HEAD"/);
   assert.match(serverSource, /error\?\.diagnosticStatus\s*\|\|\s*classifyDiagnosticError/);
 });
+
+// Imports the HTTP handler under a fake network and restores env after each test.
+registerRunTraceTests(test);
 
 // Registered last: these tests import the HTTP handler under a fake network
 // and temporarily set process env (restored at the end).
