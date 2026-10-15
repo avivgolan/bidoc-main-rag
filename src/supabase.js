@@ -2,7 +2,7 @@ import { createEmbedding } from "./openrouter.js";
 import { supabaseHeaders } from "./config.js";
 import { CACHE_TTL, cachedOperation } from "./cache.js";
 import { hydrateRetrievedSourceLinks, indexedSourceLinkReadPath, INDEXED_SOURCE_LINK_CONTRACT } from "./sourceLinks.js";
-import { projectIdFilterParam, projectMismatchError, requestProjectId, sameProjectId } from "./projectScope.js";
+import { bidocSessionIdOf, chatSessionProjectId, projectIdFilterParam, projectMismatchError, requestProjectId, sameProjectId } from "./projectScope.js";
 import { companyDbConnection, companyDbRequiredError, searchFunctionOutdatedError } from "./companyDb.js";
 
 // Every Company DB read/write and every Project-owned App DB row needs the
@@ -728,6 +728,33 @@ export async function recentMemory({ config, sessionId, limit = 8 }) {
     if (row.ai_response) messages.push({ role: "assistant", content: row.ai_response });
     return messages;
   });
+}
+
+// The conversation of one BiDoc chat session, read from the request Project's
+// own Company DB: chat_sessions (session_id unique, project_id) names the
+// Project that owns the session, chat_messages holds its turns. BiDoc writes
+// both; main-agent only reads. A session the Project does not own yields no
+// messages (they are never read). Returns the newest `limit` rows, oldest
+// first. Only columns from the base schema are selected so a Company DB
+// without BiDoc's later chat_messages columns (Kapaim's) reads the same.
+export async function recentCompanyChatMessages({ config, sessionId, limit = 60 }) {
+  const projectId = requireRequestProject(config);
+  const taggedProjectId = chatSessionProjectId(sessionId);
+  if (taggedProjectId && !sameProjectId(taggedProjectId, projectId)) {
+    throw projectMismatchError("The chat session belongs to a different Project");
+  }
+  const bidocSessionId = bidocSessionIdOf(sessionId);
+  if (!bidocSessionId) return [];
+  const contentConfig = contentSupabaseConfig(config);
+  const session = encodeURIComponent(bidocSessionId);
+  const owned = await supabaseFetch(contentConfig,
+    `/rest/v1/chat_sessions?select=session_id&session_id=eq.${session}&${projectIdFilterParam(projectId)}&limit=1`
+  );
+  if (!owned?.length) return [];
+  const rows = await supabaseFetch(contentConfig,
+    `/rest/v1/chat_messages?select=id,role,content,created_at&session_id=eq.${session}&order=created_at.desc,id.desc&limit=${Math.max(1, Math.floor(Number(limit) || 60))}`
+  );
+  return (rows || []).reverse();
 }
 
 export async function getChatSessionMemory({ config, sessionId, userId = null }) {
