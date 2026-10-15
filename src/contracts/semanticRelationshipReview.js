@@ -6,6 +6,7 @@ import {
   CONTRACTS_RELATIONSHIPS_R4_1_VERIFIER_SCHEMA_VERSION
 } from "./semanticRelationships.js";
 import { workspaceRpc } from "./workspacePersistence.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_RELATIONSHIP_REVIEW_AGENT_VERSION = "contracts-relationships-agent.r4.2a.v1";
 export const CONTRACTS_RELATIONSHIP_REVIEW_MIGRATION_VERSION = "20260817093931";
@@ -103,7 +104,7 @@ function mapWorkspaceError(error) {
 }
 
 export function contractsRelationshipReviewApproved(env = process.env) {
-  return String(env.CONTRACTS_RELATIONSHIPS_R4_2A_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("relationshipReviewR42a", env);
 }
 
 export function parseContractsRelationshipReviewRequest(value) {

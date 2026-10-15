@@ -43,6 +43,7 @@ import { QaHarnessService } from "./qa/qaHarnessService.js";
 import { handleQaHttpRequest } from "./qa/httpApi.js";
 import { createHttpQaContext } from "./mcp/context.js";
 import { companyDbRequiredError, hasCompanyDbConnection, isCompanyDbError, readCompanyDbHeaders, verifyCompanyDbAgainstMeta } from "./companyDb.js";
+import { validateSettingsPatch } from "./settingsSchema.js";
 
 loadEnv();
 
@@ -176,7 +177,7 @@ const COMPANY_DB_EXEMPT_ROUTES = [
   /^\/api\/run-history$/,
   /^\/api\/messages\/[^/]+\/(?:annotate)$/,
   /^\/api\/ai-report\//,
-  /^\/api\/settings(?:\/(?:reload|export|import|schedule-assignment-agent(?:\/validate)?))?$/,
+  /^\/api\/settings(?:\/(?:reload|export|import|reset|defaults|restore-defaults|schedule-assignment-agent(?:\/validate)?))?$/,
   /^\/api\/system\/restart$/,
   /^\/api\/agents$/,
   /^\/api\/knowledge\//,
@@ -1138,17 +1139,39 @@ async function handleApi(req, res, url) {
     return sendJson(res, 405, { error: "Agents are read-only. Save chat models and prompts through /api/settings." });
   }
 
+  // There is no reset-to-defaults for the live agent settings (the Lab's Reset action is being
+  // removed): these paths never reach the Meta DB.
+  if (/^\/api\/settings\/(?:reset|defaults|restore-defaults)$/.test(url.pathname)) {
+    return sendJson(res, 410, { error: "settings_reset_removed", message: "Resetting the live agent settings is not available; save the values you want instead" });
+  }
+
+  // The Lab's settings save: the one write path to the live agent settings in
+  // the Meta DB. A Superadmin Lab session only (never a BiDoc machine request),
+  // schema-validated, writes only the agent settings row and appends the change
+  // log (who, when, diff) in the same transaction.
   if (req.method === "PUT" && url.pathname === "/api/settings") {
+    const session = getSuperadminSession(req);
+    if (isBidocContextRequest(req) || !session?.sub) {
+      return sendJson(res, 403, { error: "settings_lab_only", message: "Agent settings can be saved only from the Lab by a signed-in Superadmin" });
+    }
     const body = await readJson(req);
-    if (Object.prototype.hasOwnProperty.call(body || {}, "scheduleAssignmentAgent")) {
-      const reviewer = getSuperadminSession(req);
-      if (!reviewer?.sub) return sendJson(res, 403, { error: "A same-origin authenticated reviewer session is required." });
-      const validation = validateScheduleAssignmentAgentSettings(body.scheduleAssignmentAgent || {});
+    const check = validateSettingsPatch(body);
+    if (!check.ok) return sendJson(res, 400, { error: "settings_invalid", message: check.errors.join("; "), errors: check.errors });
+    if (Object.prototype.hasOwnProperty.call(check.patch, "scheduleAssignmentAgent")) {
+      const validation = validateScheduleAssignmentAgentSettings(check.patch.scheduleAssignmentAgent || {});
       if (!validation.ok) return sendJson(res, 400, { error: validation.errors.join(" "), validation });
     }
-    await reloadSettingsFromDb();
-    const saved = await writeLocalSettings(body, { source: "settings_save" });
-    return sendJson(res, 200, { saved, settings: publicSettings(config()) });
+    try {
+      // A save merges into the live row, so it needs a fresh, successful read first.
+      await reloadSettingsFromDb({ strict: true });
+      const saved = await writeLocalSettings(check.patch, { source: "settings_save", user: { id: session.sub, email: session.email } });
+      return sendJson(res, 200, { saved, ignored: check.ignored, settings: publicSettings(config()) });
+    } catch (error) {
+      if (String(error?.code || "").startsWith("meta_")) {
+        return sendJson(res, 502, { error: error.code, message: error.message });
+      }
+      throw error;
+    }
   }
 
   const toolMatch = url.pathname.match(/^\/api\/tools\/([^/]+)\/test$/);

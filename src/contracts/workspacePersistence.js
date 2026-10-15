@@ -13,6 +13,7 @@ import { CONTRACTS_COMPILER_VERSION } from "./compiler.js";
 import { ContractsAgentError } from "./errors.js";
 import { parseContractExtractionRequest } from "./request.js";
 import { assertContractExtractionSchema } from "./schema.js";
+import { CONTRACTS_STORAGE_BUCKET_PATTERN, contractsStorageBucketName, contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_WORKSPACE_VERSION = "contracts-workspace.phase3f1.v1";
 export const CONTRACTS_REVIEW_DRAFT_VERSION = "contracts-review-draft.phase3f1.v1";
@@ -219,12 +220,12 @@ function assertWorkspaceEnvelope(value, {
 }
 
 export function contractsWorkspacePersistenceApproved(env = process.env) {
-  return String(env.CONTRACTS_PHASE3F1_WORKSPACE_PERSISTENCE_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("workspacePersistence", env);
 }
 
 export function contractsWorkspaceStorageBucket(env = process.env) {
-  const bucket = String(env.CONTRACTS_STORAGE_BUCKET || "contracts-private").trim();
-  if (!/^[a-z0-9][a-z0-9._-]{0,99}$/u.test(bucket)) {
+  const bucket = contractsStorageBucketName(env);
+  if (!CONTRACTS_STORAGE_BUCKET_PATTERN.test(bucket)) {
     throw workspaceError("contracts_workspace_storage_bucket_invalid", "The configured Contracts Storage bucket name is invalid.", 503);
   }
   return bucket;

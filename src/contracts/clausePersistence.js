@@ -31,6 +31,7 @@ import {
   loadContractsR6ActiveCatalog,
   persistContractsR6Embeddings
 } from "./r6Preparation.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_CLAUSE_PERSISTENCE_VERSION = "contracts-clause-persistence.r3.2.v1";
 export const CONTRACTS_CLAUSE_PERSISTENCE_MIGRATION_VERSION = "20260815180207";
@@ -72,7 +73,7 @@ function normalizeSha256(value) {
 }
 
 export function contractsClausePersistenceApproved(env = process.env) {
-  return String(env.CONTRACTS_CLAUSE_PERSISTENCE_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("clausePersistence", env);
 }
 
 export function contractsClausePersistenceIdentity(config = {}, { useLiteModel = false } = {}) {
