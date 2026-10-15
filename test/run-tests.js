@@ -61,6 +61,7 @@ import { registerCompanyDbIsolationTests } from "./company-db-isolation.tests.js
 import { registerRunTraceTests } from "./run-trace.tests.js";
 import { registerRequestModeTests } from "./request-modes.tests.js";
 import { registerLabIsBackTests } from "./lab-is-back.tests.js";
+import { registerLabDatasetCopyTests } from "./lab-dataset-copy.tests.js";
 import { registerProjectChatHistoryTests } from "./project-chat-history.tests.js";
 import { registerKapaimSettingsRegressionTests, registerSettingsFromMetaTests } from "./settings-from-meta.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
@@ -13961,6 +13962,7 @@ registerProjectChatHistoryTests(test);
 registerSettingsFromMetaTests(test);
 registerRequestModeTests(test);
 registerLabIsBackTests(test);
+registerLabDatasetCopyTests(test);
 registerKapaimSettingsRegressionTests(test);
 
 const filterIndex = process.argv.indexOf("--filter");

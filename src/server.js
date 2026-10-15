@@ -46,6 +46,7 @@ import { createHttpQaContext } from "./mcp/context.js";
 import { companyDbRequiredError, hasCompanyDbConnection, isCompanyDbError, readCompanyDbHeaders, verifyCompanyDbAgainstMeta } from "./companyDb.js";
 import { CONTRACTS_LAB_DECISION, REQUEST_MODE_LAB, REQUEST_MODE_PROJECT, configForMode, decideRequestMode, hasMachineSecretHeader, isLabModeRequest, isProjectModeRequest, labDatasetConfig, modeRouteRefusal, recordRequestMode, requestModeOf, routeNeedsCompanyDb } from "./requestMode.js";
 import { LAB_EMPTY_MESSAGE, isLabDatasetEmptyError } from "./labDataset.js";
+import { LabDatasetError, createMainClient, latestRun, listSourceProjects, readRun, startLabCopy, stepLabCopy, summarizeRun } from "./labDatasetCopy.js";
 import { validateSettingsPatch } from "./settingsSchema.js";
 
 loadEnv();
@@ -208,6 +209,33 @@ async function labDatasetStatus(cfg) {
     return Array.isArray(rows) && rows.length ? { hasData: true, projectId, indexTable, message: null } : empty;
   } catch (error) {
     if (isLabDatasetEmptyError(error)) return empty;
+    throw error;
+  }
+}
+
+// POST /api/lab/dataset/load starts a run, POST .../runs/:id/step does the next ~40 seconds of it (the
+// screen calls it until the run is finished), GET .../runs/:id reads its progress, GET .../projects lists
+// the Projects of the Meta DB to choose from. Lab session only (the route class is `lab`).
+async function handleLabDatasetLoad(req, res, url) {
+  try {
+    const main = createMainClient(modeConfig(req));
+    if (req.method === "GET" && url.pathname === "/api/lab/dataset/projects") {
+      return sendJson(res, 200, { projects: await listSourceProjects() });
+    }
+    if (req.method === "POST" && url.pathname === "/api/lab/dataset/load") {
+      const body = await readJson(req);
+      return sendJson(res, 200, { run: await startLabCopy({ input: body, main, createdBy: getSuperadminSession(req)?.email || null }) });
+    }
+    const runMatch = url.pathname.match(/^\/api\/lab\/dataset\/runs\/([^/]+)(\/step)?$/);
+    if (runMatch && req.method === "GET" && !runMatch[2]) {
+      return sendJson(res, 200, { run: summarizeRun(await readRun(main, decodeURIComponent(runMatch[1]))) });
+    }
+    if (runMatch && req.method === "POST" && runMatch[2]) {
+      return sendJson(res, 200, { run: await stepLabCopy({ runId: decodeURIComponent(runMatch[1]), main }) });
+    }
+    return sendJson(res, 404, { error: "not_found" });
+  } catch (error) {
+    if (error instanceof LabDatasetError) return sendJson(res, error.status, { error: error.code, message: error.message });
     throw error;
   }
 }
@@ -537,7 +565,14 @@ async function handleApi(req, res, url) {
   // Whether the Lab dataset (MAIN's copy of a Project's content) has been seeded.
   // The Lab screens that read a Project's content show the empty state until it has.
   if (req.method === "GET" && url.pathname === "/api/lab/dataset") {
-    return sendJson(res, 200, await labDatasetStatus(buildRequestConfig(req)));
+    const status = await labDatasetStatus(buildRequestConfig(req));
+    const lastRun = summarizeRun(await latestRun(createMainClient(modeConfig(req))));
+    return sendJson(res, 200, { ...status, lastRun });
+  }
+  // The Lab action "load test dataset": the one Lab path that reads a Company DB (read only, through
+  // the Meta DB, into MAIN). See labDatasetCopy.js.
+  if (url.pathname.startsWith("/api/lab/dataset/")) {
+    return handleLabDatasetLoad(req, res, url);
   }
 
   // Lab chat memory (MAIN): the stats and deletes of the Settings memory panel.
