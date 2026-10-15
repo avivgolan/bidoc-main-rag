@@ -30,14 +30,21 @@ const sameText = (left, right) => String(left || "").replace(/\s+/g, " ").trim()
 // BiDoc chat_messages rows (role human|ai, oldest first) to conversation turns
 // [{ role: "user"|"assistant", content }]. BiDoc saves the question being asked
 // before it calls main-agent, so a trailing copy of the current question is not
-// history and is dropped; so are error bubbles, unknown roles and empty rows.
+// history and is dropped; so are error bubbles (with the question that failed),
+// unknown roles and empty rows.
 export function toConversationTurns(rows, { currentMessage = "" } = {}) {
-  const turns = (Array.isArray(rows) ? rows : []).flatMap((row) => {
+  const turns = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
     const role = ROLE_BY_BIDOC_ROLE[String(row?.role || "").toLowerCase()];
     const content = String(row?.content ?? "").trim();
-    if (!role || !content || (role === "assistant" && content === CHAT_AI_ERROR_TEXT)) return [];
-    return [{ role, content }];
-  });
+    if (!role || !content) continue;
+    if (role === "assistant" && content === CHAT_AI_ERROR_TEXT) {
+      // The question that failed is asked again on retry; keep neither.
+      if (turns.at(-1)?.role === "user") turns.pop();
+      continue;
+    }
+    turns.push({ role, content });
+  }
   const last = turns.at(-1);
   if (last?.role === "user" && sameText(last.content, currentMessage)) turns.pop();
   return turns;
@@ -52,6 +59,7 @@ export async function loadProjectConversation({ config, sessionId, currentMessag
     const rows = await recentCompanyChatMessages({ config, sessionId, limit: PROJECT_HISTORY_MAX_MESSAGES + 1 });
     return { turns: toConversationTurns(rows, { currentMessage }), errors: [] };
   } catch (error) {
+    console.warn(`[chat history] Company DB conversation could not be read: ${error.message}`);
     return { turns: [], errors: [error.message || "conversation history load failed"] };
   }
 }
@@ -74,7 +82,7 @@ function splitByBudget(turns, { maxMessages, tokenBudget }) {
   return { recent: turns.slice(turns.length - count), older: turns.slice(0, turns.length - count) };
 }
 
-function context({ recent, summary, errors, turns }) {
+function memoryContext({ recent, summary, errors, turns }) {
   const hasSummary = memorySummaryMessages(summary).length > 0;
   return {
     mode: "company_db",
@@ -85,6 +93,7 @@ function context({ recent, summary, errors, turns }) {
     sessionRow: null,
     memories: [],
     errors,
+    // Questions asked so far in the session, counting the one being answered.
     turnCount: turns.filter((turn) => turn.role === "user").length + 1
   };
 }
@@ -94,12 +103,12 @@ function context({ recent, summary, errors, turns }) {
 export function projectRoutingMemory({ config, conversation }) {
   const settings = config.memory;
   const { turns, errors } = conversation;
-  if (!settings?.enabled) return context({ recent: [], summary: null, errors, turns: [] });
+  if (!settings?.enabled) return memoryContext({ recent: [], summary: null, errors, turns: [] });
   const { recent, older } = splitByBudget(turns, {
     maxMessages: settings.routingRecentTurns * 2,
     tokenBudget: settings.routingTokenBudget - SUMMARY_RESERVE_TOKENS / 2
   });
-  return context({ recent, summary: older.length ? summarizeTurnsLocally(older) : null, errors, turns });
+  return memoryContext({ recent, summary: older.length ? summarizeTurnsLocally(older) : null, errors, turns });
 }
 
 function agentSplit(config, conversation, agent) {
@@ -166,10 +175,10 @@ function summaryInput(turns) {
 // budget, plus the on-the-fly summary of what did not fit.
 export async function projectAgentMemory({ config, conversation, agent, earlierSummary = null }) {
   const split = agentSplit(config, conversation, agent);
-  if (!split) return context({ recent: [], summary: null, errors: conversation.errors, turns: [] });
+  if (!split) return memoryContext({ recent: [], summary: null, errors: conversation.errors, turns: [] });
   const useSummary = config.memory.agents[agent].useSessionSummary && split.older.length > 0 && earlierSummary;
   const summary = useSummary ? (await earlierSummary).summary : null;
-  return context({
+  return memoryContext({
     recent: trimMessagesToBudget(split.recent, config.memory.agents[agent].contextTokenBudget),
     summary,
     errors: conversation.errors,

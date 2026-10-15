@@ -215,14 +215,15 @@ export function registerProjectChatHistoryTests(test) {
       { role: "ai", content: "first answer" },
       { role: "human", content: "second question" },
       { role: "ai", content: "שגיאה בקבלת תשובה מה-AI. אנא נסה שוב." },
+      { role: "human", content: "second question" },
+      { role: "ai", content: "שגיאה בקבלת תשובה מה-AI. אנא נסה שוב." },
       { role: "system", content: "ignored" },
       { role: "user", content: "   " },
       { role: "human", content: "  third question  " }
     ];
     assert.deepEqual(toConversationTurns(rows, { currentMessage: "third question" }), [
       { role: "user", content: "first question" },
-      { role: "assistant", content: "first answer" },
-      { role: "user", content: "second question" }
+      { role: "assistant", content: "first answer" }
     ]);
     // A trailing human message that is not the current question stays.
     assert.deepEqual(toConversationTurns([{ role: "human", content: "earlier" }], { currentMessage: "now" }), [{ role: "user", content: "earlier" }]);
