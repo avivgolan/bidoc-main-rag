@@ -1,5 +1,6 @@
 import { ContractsAgentError } from "./errors.js";
 import { planContractPromotions } from "./promotionPlanner.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_PHASE2_MIGRATION_VERSION = "20260810175150";
 
@@ -12,7 +13,7 @@ const APPROVED_PROMOTION_GATE = Object.freeze({
 });
 
 export function contractsPhase2ApplyApproved(env = process.env) {
-  return String(env?.CONTRACTS_PHASE2_APPLY_APPROVED || "").trim().toLowerCase() === "true";
+  return contractsSwitchEnabled("phase2Apply", env);
 }
 
 export function prepareContractReview({ body, reviewerId } = {}) {

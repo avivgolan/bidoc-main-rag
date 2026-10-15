@@ -115,7 +115,7 @@ export function scheduleResolverError(error) {
   if (/settings_openrouter_key_missing/i.test(message)) {
     return {
       code: "settings_openrouter_key_missing",
-      message: "לא נמצא מפתח OpenRouter תקין בטבלת agent_settings ב־MAIN. סוכן הלו״ז אינו משתמש במפתח מה־env."
+      message: "לא נמצא מפתח OpenRouter תקין במשתנה הסביבה OPENROUTER_API_KEY (ההגדרות ב־Meta אינן מכילות סודות)."
     };
   }
   if (/project_id_filter|function .* does not exist|schema cache/i.test(message)) {

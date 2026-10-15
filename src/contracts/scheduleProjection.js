@@ -4,6 +4,7 @@ import { loadContractsDecisionLineageReview } from "./decisionLineage.js";
 import { ContractsAgentError } from "./errors.js";
 import { workspaceRpc } from "./workspacePersistence.js";
 import { CONDITION_RESOLVER_VERSION, resolveConditionDueDate } from "../subagents/scheduleConditionResolver.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_SCHEDULE_PROJECTION_AGENT_VERSION = "contracts-schedule-projection.r5.v1";
 export const CONTRACTS_SCHEDULE_PROJECTION_POLICY_VERSION = "contracts-reviewed-schedule-shadow.r5.v1";
@@ -409,7 +410,7 @@ function metrics(items) {
 }
 
 export function contractsScheduleProjectionApproved(env = process.env) {
-  return String(env.CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("scheduleProjectionR5", env);
 }
 
 export function parseContractsScheduleProjectionWorkspaceId(value) {

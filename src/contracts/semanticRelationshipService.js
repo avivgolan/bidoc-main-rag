@@ -6,13 +6,14 @@ import {
   CONTRACTS_RELATIONSHIPS_R4_1_PROMPT_VERSION,
   runContractsSemanticRelationshipPreview
 } from "./semanticRelationships.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 function semanticServiceError(code, message, status = 400, cause = null) {
   return new ContractsAgentError(code, message, status, cause ? { cause } : {});
 }
 
 export function contractsSemanticRelationshipsApproved(env = process.env) {
-  return String(env.CONTRACTS_RELATIONSHIPS_R4_1_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("semanticRelationshipsR41", env);
 }
 
 export function parseContractsSemanticRelationshipRequest(value) {

@@ -4,6 +4,7 @@ import {
   CONTRACTS_RELATIONSHIP_POLICY_VERSION
 } from "./relationshipProposals.js";
 import { workspaceRpc } from "./workspacePersistence.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_RELATIONSHIPS_MIGRATION_VERSION = "20260815182148";
 export const CONTRACTS_RELATIONSHIPS_STATUS_RPC = "bidoc_contracts_relationships_status_r4_0";
@@ -25,7 +26,7 @@ function workspaceId(value) {
 }
 
 export function contractsRelationshipsApproved(env = process.env) {
-  return String(env.CONTRACTS_RELATIONSHIPS_R4_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("relationshipsR4", env);
 }
 
 export async function loadContractsRelationshipsStatus({

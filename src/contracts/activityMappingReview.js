@@ -9,6 +9,7 @@ import {
   normalizeActivityMappingSourceProjectId
 } from "./activityMappingService.js";
 import { ContractsAgentError } from "./errors.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_ACTIVITY_MAPPING_REVIEW_VERSION = "contracts-activity-mapping-review.phase3.v1";
 export const CONTRACTS_ACTIVITY_MAPPING_REVIEW_API_VERSION = "contracts-activity-mapping-review-api.phase3f.v1";
@@ -72,7 +73,7 @@ function unexpectedKeys(value, allowed) {
 }
 
 export function contractsActivityMappingReviewApproved(env = process.env) {
-  return String(env.CONTRACTS_PHASE3_MAPPING_REVIEW_APPROVED || "").trim().toUpperCase() === "TRUE";
+  return contractsSwitchEnabled("activityMappingReview", env);
 }
 
 export function parseActivityMappingReviewRequest({ headers = {}, query = null, body = null } = {}) {
