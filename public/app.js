@@ -386,6 +386,7 @@ async function init() {
   safeInitStep("delay claims", wireDelayClaims);
   safeInitStep("evaluation", wireEvaluation);
   safeInitStep("logout", wireLogout);
+  safeInitStep("lab dataset", wireLabDataset);
   safeInitStep("project graph", wireProjectGraph);
   safeInitStep("link agent", wireLinkAgent);
   safeInitStep("qa", wireQa);
@@ -1104,12 +1105,133 @@ async function refreshLabDatasetNotices() {
     const status = await api("/api/lab/dataset");
     const empty = status?.hasData === false;
     notices.forEach((notice) => {
-      if (empty && status.message) notice.textContent = status.message;
+      const text = notice.querySelector("[data-lab-empty-text]");
+      if (empty && status.message && text) text.textContent = status.message;
       notice.hidden = !empty;
     });
   } catch {
     // The status is advisory: a failed read leaves the notice as it was.
   }
+}
+
+// ── Lab action: load test dataset ───────────────────────────────────────────
+// Copies a slice of one Project's content into MAIN (the Lab dataset). The server does the work in steps
+// (POST .../runs/:id/step, about 40 seconds each); this loop calls it until the run is finished and shows
+// the progress it returns. The source Company DB is only read, by the server, through the Meta DB.
+const LAB_RUN_STATUS_TEXT = { running: "טוען...", done: "הטעינה הסתיימה", partial: "הטעינה הסתיימה עם שגיאות בחלק מהטבלאות", failed: "הטעינה נכשלה", superseded: "הטעינה הוחלפה בטעינה חדשה" };
+const LAB_TABLE_STATUS_TEXT = { pending: "ממתין", running: "בתהליך", done: "הושלם", skipped: "דולג", error: "שגיאה" };
+let labDatasetBusy = false;
+
+async function labDatasetRequest(path, options = {}) {
+  const response = await fetch(path, {
+    method: options.method || "GET",
+    headers: { "Content-Type": "application/json" },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data.message || data.error || `Request failed with status ${response.status}`);
+    error.code = data.error;
+    throw error;
+  }
+  return data;
+}
+
+function renderLabDatasetRun(run) {
+  const progress = $("labDatasetProgress");
+  progress.hidden = !run;
+  if (!run) return;
+  const percent = run.tablesTotal ? Math.round((run.tablesFinished / run.tablesTotal) * 100) : 0;
+  $("labDatasetBar").value = run.status === "running" ? percent : run.status === "done" || run.status === "partial" ? 100 : percent;
+  const phase = run.status === "running" ? (run.phase === "purge" ? "מנקה את הפרוסה הקודמת" : run.currentTable ? `מעתיק: ${run.currentTable.label}` : "מעתיק") : LAB_RUN_STATUS_TEXT[run.status] || run.status;
+  $("labDatasetProgressText").textContent = `${phase} · ${run.tablesFinished}/${run.tablesTotal} טבלאות · ${run.rowsCopied} שורות`;
+  const list = $("labDatasetTables");
+  list.replaceChildren(...run.tables.filter((table) => table.status !== "pending").map((table) => {
+    const item = document.createElement("li");
+    item.className = `labDatasetTable labDatasetTable-${table.status}`;
+    const count = table.total !== null && table.status === "running" ? `${table.copied}/${table.total}` : String(table.copied);
+    item.textContent = `${table.label}: ${LAB_TABLE_STATUS_TEXT[table.status] || table.status} (${count})${table.note ? ` · ${table.note}` : ""}${table.error ? ` · ${table.error}` : ""}`;
+    return item;
+  }));
+  if (run.error) showLabDatasetError(run.error);
+}
+
+function showLabDatasetError(message) {
+  const box = $("labDatasetError");
+  box.textContent = message || "";
+  box.hidden = !message;
+}
+
+function describeLabDatasetLast(lastRun) {
+  if (!lastRun) return "עדיין לא נטען מערך בדיקה.";
+  const window = lastRun.dateFrom || lastRun.dateTo ? ` · ${lastRun.dateFrom || "…"} עד ${lastRun.dateTo || "…"}` : "";
+  return `הטעינה האחרונה: ${lastRun.sourceProjectName || lastRun.sourceProjectId}${window} · ${lastRun.rowsCopied} שורות · ${LAB_RUN_STATUS_TEXT[lastRun.status] || lastRun.status}`;
+}
+
+async function openLabDatasetDialog() {
+  const dialog = $("labDatasetDialog");
+  if (!dialog) return;
+  showLabDatasetError("");
+  renderLabDatasetRun(null);
+  if (!dialog.open) dialog.showModal();
+  const select = $("labDatasetProject");
+  try {
+    const [{ projects }, status] = await Promise.all([labDatasetRequest("/api/lab/dataset/projects"), labDatasetRequest("/api/lab/dataset")]);
+    select.replaceChildren(...[{ id: "", label: "בחר פרויקט" }, ...projects.map((project) => ({ id: project.id, label: project.companyName ? `${project.name} · ${project.companyName}` : project.name }))].map((item) => {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent = item.label;
+      return option;
+    }));
+    if (status.lastRun?.sourceProjectId) select.value = status.lastRun.sourceProjectId;
+    $("labDatasetLast").textContent = describeLabDatasetLast(status.lastRun);
+    if (status.lastRun?.status === "running") renderLabDatasetRun(status.lastRun);
+  } catch (error) {
+    select.replaceChildren(new Option("לא ניתן לטעון פרויקטים", ""));
+    showLabDatasetError(error.message);
+  }
+}
+
+async function startLabDatasetLoad() {
+  if (labDatasetBusy) return;
+  const projectId = $("labDatasetProject").value;
+  if (!projectId) return showLabDatasetError("בחר פרויקט מקור");
+  const confirmed = window.confirm("הטעינה מחליפה את מערך הבדיקה הקיים ב-Lab. המקור נקרא בלבד. להמשיך?");
+  if (!confirmed) return;
+  labDatasetBusy = true;
+  $("labDatasetStart").disabled = true;
+  showLabDatasetError("");
+  try {
+    let { run } = await labDatasetRequest("/api/lab/dataset/load", {
+      method: "POST",
+      body: { projectId, dateFrom: $("labDatasetFrom").value || null, dateTo: $("labDatasetTo").value || null, rowCap: Number($("labDatasetCap").value) || undefined }
+    });
+    renderLabDatasetRun(run);
+    while (run.status === "running") {
+      ({ run } = await labDatasetRequest(`/api/lab/dataset/runs/${encodeURIComponent(run.id)}/step`, { method: "POST" }));
+      renderLabDatasetRun(run);
+    }
+    $("labDatasetLast").textContent = describeLabDatasetLast(run);
+    showToast(LAB_RUN_STATUS_TEXT[run.status] || run.status, run.status === "done" ? "success" : "error");
+    refreshLabDatasetNotices();
+    const active = document.querySelector(".tab.active")?.dataset.tab;
+    if (active) TAB_LOADERS[active]?.();
+  } catch (error) {
+    showLabDatasetError(error.message);
+  } finally {
+    labDatasetBusy = false;
+    $("labDatasetStart").disabled = false;
+  }
+}
+
+function wireLabDataset() {
+  const dialog = $("labDatasetDialog");
+  if (!dialog) return;
+  document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-lab-load]")) openLabDatasetDialog();
+  });
+  $("labDatasetStart").addEventListener("click", startLabDatasetLoad);
+  $("labDatasetClose").addEventListener("click", () => dialog.close());
 }
 
 function activateTab(tabId, pushHistory = true, options = {}) {

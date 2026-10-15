@@ -158,6 +158,7 @@
         <!-- Status -->
         <div class="sidebarFooter">
           <div class="status" id="configStatus">טוען הגדרות...</div>
+          <button id="labDatasetButton" type="button" class="sidebarLogoutButton" data-lab-load>מערך בדיקה (Lab)</button>
           <button id="logoutButton" type="button" class="sidebarLogoutButton">התנתק</button>
         </div>
 
@@ -168,9 +169,9 @@
            CHAT
            ====================================================== -->
       <section class="panel" id="dashboard">
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div><div data-react-island="dashboard"></div></section>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div><div data-react-island="dashboard"></div></section>
       <section class="panel active" id="chat">
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div>
         <input id="sessionId" type="hidden" />
         <header class="chatHeader">
           <div class="chatTitleGroup">
@@ -287,7 +288,7 @@
            SCHEDULE INTELLIGENCE
            ====================================================== -->
       <section class="panel" id="schedule">
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div>
         <div data-react-island="schedule"></div>
       </section>
 
@@ -299,7 +300,7 @@
            INSIGHTS
            ====================================================== -->
       <section class="panel" id="insights">
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div>
         <div data-react-island="insights"></div>
         <div class="delayClaimsLegacyCompatibility" hidden>
           <button id="runProjectInsightsAnalysis" type="button"></button>
@@ -397,7 +398,7 @@
            ====================================================== -->
       <section class="panel" id="tools">
         <div class="labProdNotice" role="note"><strong>שמירה כאן משנה את הייצור.</strong> ההגדרות נשמרות מיד ב-Meta ופעילות בכל הפרויקטים תוך דקות, בלי שלב טיוטה. כל שמירה נרשמת ביומן: מי, מתי ומה השתנה.</div>
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div>
         <header class="panelHeader">
           <h2>בדיקת כלים</h2>
           <button id="runTool">הרץ בדיקה</button>
@@ -463,7 +464,7 @@
            TIMELINE
            ====================================================== -->
       <section class="panel" id="timeline" aria-label="ציר זמן אירועים">
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div>
         <header class="panelHeader">
           <div class="timelineTitleGroup">
             <h2>ציר זמן אירועים</h2>
@@ -532,7 +533,7 @@
            PROJECT GRAPH
            ====================================================== -->
       <section class="panel" id="graph">
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div>
         <header class="panelHeader">
           <div>
             <h2>גרף</h2>
@@ -602,7 +603,7 @@
            LINK AGENT
            ====================================================== -->
       <section class="panel" id="linkAgent">
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div>
         <header class="panelHeader">
           <div>
             <h2>סוכן הקשרים</h2>
@@ -673,7 +674,7 @@
            QA
            ====================================================== -->
       <section class="panel" id="qa">
-        <div class="labEmptyNotice" data-lab-empty role="status" hidden>אין נתוני Lab — טען מערך בדיקה</div>
+        <div class="labEmptyNotice" data-lab-empty role="status" hidden><span data-lab-empty-text>אין נתוני Lab — טען מערך בדיקה</span><button type="button" class="labLoadButton" data-lab-load>טען מערך בדיקה</button></div>
         <header class="panelHeader">
           <div>
             <h2>QA — ניתוח שיחות</h2>
@@ -693,11 +694,38 @@
       </section>
 
     </main>
+    <dialog class="labDatasetDialog" id="labDatasetDialog" aria-labelledby="labDatasetTitle">
+      <div class="labDatasetForm">
+        <h2 id="labDatasetTitle">טען מערך בדיקה</h2>
+        <p class="hint">מעתיק פרוסה של תוכן פרויקט אחד אל ה-Lab. המקור נקרא בלבד ולא משתנה, וטעינה חוזרת מחליפה את הפרוסה הקודמת.</p>
+        <label class="labDatasetField">פרויקט מקור
+          <select id="labDatasetProject"><option value="">טוען פרויקטים...</option></select>
+        </label>
+        <div class="labDatasetRow">
+          <label class="labDatasetField">מתאריך <input type="date" id="labDatasetFrom" /></label>
+          <label class="labDatasetField">עד תאריך <input type="date" id="labDatasetTo" /></label>
+        </div>
+        <label class="labDatasetField">מקסימום שורות לכל טבלה
+          <input type="number" id="labDatasetCap" min="1" max="5000" step="1" value="300" />
+        </label>
+        <div class="hint" id="labDatasetLast"></div>
+        <div class="labDatasetProgress" id="labDatasetProgress" hidden>
+          <progress id="labDatasetBar" max="100" value="0"></progress>
+          <div id="labDatasetProgressText" role="status"></div>
+          <ul class="labDatasetTables" id="labDatasetTables"></ul>
+        </div>
+        <div class="labDatasetError" id="labDatasetError" role="alert" hidden></div>
+        <div class="labDatasetActions">
+          <button type="button" id="labDatasetStart" class="primaryButton">טען</button>
+          <button type="button" id="labDatasetClose">סגור</button>
+        </div>
+      </div>
+    </dialog>
     <div class="toastContainer" id="toastContainer" aria-live="polite"></div>
     <script src="https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://unpkg.com/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
     <script src="https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"></script>
     <script src="/react-loader.js?v=20260705-internal-agents" type="module"></script>
-    <script src="/app.js?v=20261016-lab-is-back" type="module"></script>
+    <script src="/app.js?v=20261016-lab-dataset" type="module"></script>
   </body>
 </html>

@@ -223,6 +223,18 @@ export function labDatasetConfig(base, projectId = null) {
   return {
     ...lab,
     projectId: String(projectId ?? "").trim() || LAB_PROJECT_ID,
-    contentSource: labDatasetSource(lab)
+    contentSource: labDatasetSource(lab),
+    contentTools: withoutToolTables(lab.contentTools)
+  };
+}
+
+// A content tool's saved table name (Settings, Subagents) names a table of a Company DB. In the Lab it
+// would point a tool at some other table of MAIN (the legacy *_gf ones), so a Lab request uses the
+// tools' default tables, the Lab dataset's. A draft table sent with a test call still wins.
+function withoutToolTables(contentTools) {
+  if (!contentTools?.perTool) return contentTools;
+  return {
+    ...contentTools,
+    perTool: Object.fromEntries(Object.entries(contentTools.perTool).map(([name, tool]) => [name, { ...tool, table: "" }]))
   };
 }

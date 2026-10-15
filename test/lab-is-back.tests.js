@@ -113,7 +113,7 @@ function labMessage(overrides = {}) {
 
 function datasetRows(table) {
   if (table === "projects") return [{ id: LAB_PROJECT_ID, name: "Lab", is_active: true, settings: {}, created_at: NOW }];
-  if (table === "data_index_embeddings_gf_dor_agent") {
+  if (table === "data_index") {
     return [{ id: 1, created_at: NOW, primary_date: "2026-10-01", hashtags: ["יציקה"], title: "יציקת תקרה", summary: "היציקה הושלמה", index_text: "יציקת תקרה הושלמה",
       source_table: "emails", source_id: "e1", project_id: LAB_PROJECT_ID, item_status: "open", mail_id: "m1", attachment_id: null, source_url: null, mentioned_dates: [] }];
   }

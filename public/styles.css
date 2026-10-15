@@ -10841,3 +10841,26 @@ body:has(#timeline.active) .sidebar {
 .labProdNotice[hidden],
 .labEmptyNotice[hidden] { display: none; }
 #chat > .labEmptyNotice { margin: 12px clamp(14px, 3vw, 32px) 0; }
+
+/* Lab action: load test dataset. */
+.labEmptyNotice { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.labEmptyNotice[hidden] { display: none; }
+.labLoadButton { margin-inline-start: auto; min-height: 30px; padding: 4px 12px; font-size: 0.82rem; }
+#labDatasetClose { color: var(--text-primary); background: transparent; border-color: var(--line-strong); }
+#labDatasetClose:hover:not(:disabled) { background: var(--brand-50); }
+.labDatasetDialog { position: fixed; inset: 0; margin: auto; width: min(560px, calc(100vw - 28px)); max-height: calc(100vh - 28px); overflow: auto; padding: 0; border: 1px solid var(--line-strong); border-radius: 14px; background: #fff; color: var(--text-primary); box-shadow: var(--panel-glow); }
+.labDatasetDialog::backdrop { background: rgba(15, 23, 42, 0.45); }
+.labDatasetForm { display: grid; gap: 12px; padding: 18px 20px; }
+.labDatasetForm h2 { margin: 0; font-size: 1.1rem; }
+.labDatasetField { display: grid; gap: 4px; font-size: 0.86rem; font-weight: 600; }
+.labDatasetField input, .labDatasetField select { font-weight: 400; }
+.labDatasetRow { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.labDatasetActions { display: flex; gap: 10px; justify-content: flex-start; }
+.labDatasetProgress { display: grid; gap: 6px; }
+.labDatasetProgress progress { width: 100%; }
+.labDatasetTables { margin: 0; padding: 0; list-style: none; max-height: 220px; overflow: auto; font-size: 0.8rem; line-height: 1.6; }
+.labDatasetTable-error { color: var(--danger, #b91c1c); }
+.labDatasetTable-skipped { opacity: 0.7; }
+.labDatasetError { padding: 8px 12px; border: 1px solid var(--danger, #b91c1c); border-radius: 8px; color: var(--danger, #b91c1c); font-size: 0.86rem; }
+.labDatasetError[hidden], .labDatasetProgress[hidden] { display: none; }
+@media (max-width: 520px) { .labDatasetRow { grid-template-columns: 1fr; } }
