@@ -1,5 +1,6 @@
 import { ContractsAgentError } from "./errors.js";
 import { workspaceRpc } from "./workspacePersistence.js";
+import { contractsSwitchEnabled } from "./switches.js";
 
 export const CONTRACTS_INDICATOR_HANDOFF_AGENT_VERSION = "contracts-indicator-handoff.r6.v1";
 export const CONTRACTS_INDICATOR_HANDOFF_POLICY_VERSION = "contracts-reviewed-indicator-suitability.r6.v1";
@@ -147,10 +148,7 @@ function handoffItem(decision, documentVersionId) {
 }
 
 export function contractsIndicatorHandoffApproved(env = process.env) {
-  return [
-    env.CONTRACTS_INDICATOR_HANDOFF_R5_APPROVED,
-    env.CONTRACTS_SCHEDULE_PROJECTION_R5_APPROVED
-  ].some((value) => String(value || "").trim().toUpperCase() === "TRUE");
+  return contractsSwitchEnabled("indicatorHandoffR5", env) || contractsSwitchEnabled("scheduleProjectionR5", env);
 }
 
 export function parseContractsIndicatorHandoffWorkspaceId(value) {

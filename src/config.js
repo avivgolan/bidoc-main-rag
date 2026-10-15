@@ -4,6 +4,15 @@ import { fileURLToPath } from "node:url";
 import { buildAgentList, defaultPrompts } from "./prompts.js";
 import { normalizeScheduleAssignmentAgentSettings, scheduleAssignmentConfigurationSnapshot } from "./scheduleActivityAssignmentEngine.js";
 import { normalizeContractsAgentSettings } from "./contracts/agentSettings.js";
+import {
+  CONTRACTS_SWITCH_KEYS,
+  contractsStorageBucketName,
+  contractsSwitchEnabled,
+  contractsSwitchSource,
+  normalizeContractsSettings,
+  setContractsRuntimeSettings
+} from "./contracts/switches.js";
+import { readMetaSettings, saveMetaSettings } from "./metaSettings.js";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_FILES = [".env", ".env.local"];
@@ -211,18 +220,25 @@ const BUILT_IN_SETTINGS_PRESETS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Supabase persistence for settings
-// Uses env vars directly — never reads from settings to avoid circular deps.
+// Settings: one row of the Meta DB (agent_settings, key "main-agent")
+// The row is read with the Meta service key (src/metaSettings.js) and cached
+// for a few minutes. If it cannot be read, built-in defaults (plus the env
+// fallbacks of getConfig) are used with a logged warning: main-agent never
+// falls back to its own MAIN database for settings.
 // ---------------------------------------------------------------------------
 
 let _settingsCache = {};
 let _settingsCachedAt = 0;
 let _settingsLoadedFromDb = false;
+let _settingsLoading = null;
 let _settingsDbStatus = {
   read: { ok: false, at: null, error: "not loaded yet" },
   write: { ok: false, at: null, error: "not written yet" }
 };
-const SETTINGS_TTL_MS = 30_000;
+// "A few minutes": a settings change reaches every instance within this time.
+const SETTINGS_TTL_MS = 180_000;
+// After a failed read the next attempt waits this long (not a whole TTL).
+const SETTINGS_RETRY_MS = 30_000;
 const DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS = [
   "חסם",
   "חסמים",
@@ -344,64 +360,51 @@ const DEFAULT_TIMELINE_LINK_AGENT = {
   ]
 };
 
-async function sbFetch(path, options = {}, operation = "read", connection = {}) {
-  const cachedSecrets = _settingsCache.secrets || {};
-  const preferExplicit = connection.preferExplicit === true;
-  const url = trimSlash(preferExplicit
-    ? connection.supabaseUrl || process.env.SUPABASE_URL || cachedSecrets.supabaseUrl || ""
-    : process.env.SUPABASE_URL || connection.supabaseUrl || cachedSecrets.supabaseUrl || "");
-  const key = resolveSecret(
-    preferExplicit
-      ? connection.supabaseServiceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY || cachedSecrets.supabaseServiceRoleKey || ""
-      : process.env.SUPABASE_SERVICE_ROLE_KEY || connection.supabaseServiceRoleKey || cachedSecrets.supabaseServiceRoleKey || ""
-  );
-  if (!url || !key) {
-    const message = "App Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server so settings are shared across browsers and server instances.";
-    markSettingsDbStatus(operation, false, message);
-    if (connection.required) throw new Error(message);
-    return null;
-  }
-  try {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), 10_000);
-    const response = await fetch(`${url}${path}`, {
-      ...options,
-      signal: controller.signal,
-      headers: {
-        ...supabaseHeaders(key),
-        ...(options.headers || {})
-      }
-    }).finally(() => clearTimeout(id));
-    const text = await response.text();
-    const data = text ? JSON.parse(text) : null;
-    if (!response.ok) {
-      const message = data?.message || `Supabase settings request failed: ${response.status}`;
-      markSettingsDbStatus(operation, false, message);
-      if (connection.required) throw new Error(message);
-      return null;
-    }
-    markSettingsDbStatus(operation, true, "");
-    return data;
-  } catch (error) {
-    markSettingsDbStatus(operation, false, error.message);
-    if (connection.required) throw error;
-    return null;
-  }
-}
-
-async function loadSettingsFromDb() {
-  const rows = await readSettingsSnapshot();
-  if (Array.isArray(rows)) {
-    _settingsCache = rows?.[0]?.data || {};
-    _settingsLoadedFromDb = Boolean(rows?.[0]?.data);
-  } else {
-    _settingsLoadedFromDb = false;
-  }
+function applySettings(value, { loaded }) {
+  _settingsCache = value;
+  _settingsLoadedFromDb = loaded;
   _settingsCachedAt = Date.now();
+  setContractsRuntimeSettings(value.contracts);
 }
 
-async function readSettingsSnapshot(connection = {}) {
-  return sbFetch("/rest/v1/agent_settings?id=eq.default&select=data", {}, "read", connection);
+// Reads the Meta row into the cache. A failed read never reaches MAIN:
+// - never loaded before: the cache stays empty, so getConfig() returns the
+//   built-in defaults (and env fallbacks);
+// - loaded before: the last good settings keep serving (a blip must not
+//   silently revert prompts and models), and the next try comes soon.
+// Both log a warning. `strict` rethrows instead, for a save, which must never
+// merge into a blank or stale base.
+async function readSettingsFromMeta({ strict = false } = {}) {
+  try {
+    const value = await readMetaSettings();
+    applySettings(value || {}, { loaded: Boolean(value) });
+    markSettingsDbStatus("read", true, value ? "" : "the Meta DB has no main-agent settings row yet: built-in defaults");
+    if (!value) console.warn("[config] WARNING: the Meta DB has no main-agent settings row yet; using built-in defaults and env fallbacks.");
+  } catch (error) {
+    markSettingsDbStatus("read", false, error.message);
+    console.warn(`[config] WARNING: Meta agent settings could not be read (${error.code || error.name}: ${error.message}); using ${_settingsLoadedFromDb ? "the last good settings" : "built-in defaults and env fallbacks"}. MAIN is never used for settings.`);
+    if (strict) throw error;
+    _settingsCachedAt = Date.now() - Math.max(0, SETTINGS_TTL_MS - SETTINGS_RETRY_MS);
+  }
+}
+
+async function loadSettingsFromDb({ strict = false } = {}) {
+  if (strict) return readSettingsFromMeta({ strict });
+  _settingsLoading ||= readSettingsFromMeta().finally(() => { _settingsLoading = null; });
+  return _settingsLoading;
+}
+
+// Test hook: back to "never loaded".
+export function resetSettingsForTests() {
+  _settingsCache = {};
+  _settingsCachedAt = 0;
+  _settingsLoadedFromDb = false;
+  _settingsLoading = null;
+  _settingsDbStatus = {
+    read: { ok: false, at: null, error: "not loaded yet" },
+    write: { ok: false, at: null, error: "not written yet" }
+  };
+  setContractsRuntimeSettings({});
 }
 
 // ---------------------------------------------------------------------------
@@ -451,14 +454,14 @@ export async function initSettings() {
   await migratePromptsIfNeeded().catch(() => {});
 }
 
-export async function refreshSettingsIfStale() {
-  if (Date.now() - _settingsCachedAt > SETTINGS_TTL_MS) {
+export async function refreshSettingsIfStale(now = Date.now()) {
+  if (now - _settingsCachedAt > SETTINGS_TTL_MS) {
     await loadSettingsFromDb().catch(() => {});
   }
 }
 
-export async function reloadSettingsFromDb() {
-  await loadSettingsFromDb();
+export async function reloadSettingsFromDb({ strict = false } = {}) {
+  await loadSettingsFromDb({ strict });
   return _settingsCache;
 }
 
@@ -618,7 +621,9 @@ export function getConfig(settingsOverride = null) {
       knowledgePlanner: settings.models?.knowledgePlanner || process.env.KNOWLEDGE_PLANNER_MODEL || settings.models?.main || process.env.MAIN_MODEL || "openai/gpt-4o",
       main: settings.models?.main || process.env.MAIN_MODEL || "openai/gpt-4o",
       lite: settings.models?.lite || process.env.LITE_MODEL || "openai/gpt-4o-mini",
-      embedding: settings.models?.embedding || process.env.EMBEDDING_MODEL || "openai/text-embedding-3-large",
+      // Locked: stored embeddings must keep matching, so the embedding model is env only and never
+      // read from (or written to) the settings.
+      embedding: process.env.EMBEDDING_MODEL || "openai/text-embedding-3-large",
       reranker: settings.models?.reranker || process.env.RERANKER_MODEL || "openai/gpt-4o-mini",
       qa: settings.models?.qa || process.env.QA_MODEL || settings.models?.main || process.env.MAIN_MODEL || "openai/gpt-4o"
     },
@@ -654,6 +659,7 @@ export function getConfig(settingsOverride = null) {
     timelineLinks: normalizeTimelineLinkAgentSettings(settings.timelineLinks),
     scheduleAssignmentAgent: normalizeScheduleAssignmentAgentSettings(settings.scheduleAssignmentAgent),
     contractsAgent: normalizeContractsAgentSettings(settings.contractsAgent),
+    contracts: normalizeContractsSettings(settings.contracts),
     meetingsEvidence: normalizeMeetingsEvidenceSettings(settings.subagents?.meetingsEvidence),
     dataQuery: normalizeDataQuerySettings(settings.subagents?.dataQuery),
     contentTools: normalizeContentToolsSettings(settings.subagents?.contentTools),
@@ -696,6 +702,14 @@ export function publicSettings(config = getConfig(), settingsOverride = null) {
     timelineLinks: config.timelineLinks,
     scheduleAssignmentAgent: scheduleAssignmentConfigurationSnapshot(config.scheduleAssignmentAgent),
     contractsAgent: config.contractsAgent,
+    // The Contracts approval switches and Storage bucket as they are in effect (settings first, env
+    // fallback), with where each value comes from, next to what the settings themselves hold.
+    contracts: {
+      ...config.contracts,
+      effective: contractsEffectiveSettings()
+    },
+    // Read-only: the embedding model is locked to env so stored embeddings keep matching.
+    embeddingModel: { value: config.models.embedding, readOnly: true, source: "env" },
     contentSource: {
       ...contractsSource,
       supabaseServiceRoleKey: maskSecret(contractsSource.supabaseServiceRoleKey),
@@ -1163,14 +1177,34 @@ export function readLocalSettings() {
   return _settingsCache;
 }
 
-// Some internal agents are intentionally SETTINGS-owned: their credentials
-// must come from MAIN.agent_settings and must never silently fall back to an
-// environment variable. The schedule condition resolver uses this boundary.
+// The OpenRouter key of the agents that used to be "settings-owned" (the
+// schedule condition resolver). Settings no longer hold secrets: the key is
+// OPENROUTER_API_KEY from env, so this returns it (or "" when it is not an
+// OpenRouter key).
 export function settingsOpenRouterApiKey() {
-  const value = String(_settingsCache?.secrets?.openRouterApiKey || "").trim();
-  return /^sk-/i.test(value) && !isMaskedSecret(value) ? value : "";
+  const value = resolveOpenRouterKey("", process.env.OPENROUTER_API_KEY);
+  return /^sk-/i.test(value) ? value : "";
 }
 
+// Effective Contracts switches and bucket: { approvals: { key: { value, source } }, storageBucket: { value, source } }.
+export function contractsEffectiveSettings() {
+  const approvals = Object.fromEntries(CONTRACTS_SWITCH_KEYS.map((key) => [key, { value: contractsSwitchEnabled(key), source: contractsSwitchSource(key) }]));
+  const configured = normalizeContractsSettings(_settingsCache.contracts).storageBucket;
+  return {
+    approvals,
+    storageBucket: {
+      value: contractsStorageBucketName(),
+      source: configured ? "settings" : process.env.CONTRACTS_STORAGE_BUCKET ? "env" : "default"
+    }
+  };
+}
+
+// Saves settings to the Meta DB (the one narrow, logged write path): merges the
+// patch into the current settings, keeps only what belongs in the row (never
+// secrets, the old content-source connection, the n8n base URL, the locked
+// embedding model or a Redis URL) and sends it through save_agent_settings, which
+// appends the change log entry (who, when, diff) in the same transaction.
+// `options.user` is the signed-in Superadmin ({ id, email }).
 export async function writeLocalSettings(settings, options = {}) {
   const source = String(options.source || "").trim();
   if (!source) {
@@ -1180,9 +1214,6 @@ export async function writeLocalSettings(settings, options = {}) {
     throw new Error(`Settings persistence source "${source}" is not allowed.`);
   }
   const existing = _settingsCache;
-  const incomingSecrets = settings.secrets || {};
-  const incomingContentSource = settings.contentSource || {};
-  const existingContentSource = existing.contentSource || {};
   const has = (key) => Object.prototype.hasOwnProperty.call(settings || {}, key);
   const mergeSection = (key, incoming, current = {}) => has(key) ? mergePlainObject(current, incoming) : (current || {});
   const mergedModels = mergeSection("models", settings.models || {}, existing.models || {});
@@ -1198,7 +1229,7 @@ export async function writeLocalSettings(settings, options = {}) {
   const mergedTimelineLinks = mergeSection("timelineLinks", settings.timelineLinks || {}, existing.timelineLinks || {});
   const mergedScheduleAssignmentAgent = mergeSection("scheduleAssignmentAgent", settings.scheduleAssignmentAgent || {}, existing.scheduleAssignmentAgent || {});
   const mergedContractsAgent = mergeSection("contractsAgent", settings.contractsAgent || {}, existing.contractsAgent || {});
-  const mergedContentSource = mergeSection("contentSource", incomingContentSource, existingContentSource);
+  const mergedContracts = mergeSection("contracts", settings.contracts || {}, existing.contracts || {});
   const mergedToolsRuntime = has("toolsRuntime") || has("toolRuntime")
     ? mergePlainObject(existing.toolsRuntime || existing.toolRuntime || {}, settings.toolsRuntime || settings.toolRuntime || {})
     : (existing.toolsRuntime || existing.toolRuntime || {});
@@ -1206,6 +1237,8 @@ export async function writeLocalSettings(settings, options = {}) {
   const mergedTools = has("tools")
     ? { ...(existing.tools || {}), ...(settings.tools || {}) }
     : (existing.tools || {});
+  // Locked to env: never stored.
+  const { embedding: _lockedEmbedding, ...storedModels } = mergedModels;
 
   // Only persist prompts that DIFFER from the current defaults.
   // This ensures that whenever prompts.js is updated, new defaults always take
@@ -1223,12 +1256,13 @@ export async function writeLocalSettings(settings, options = {}) {
     resolvedPrompts = existing.prompts || {}; // settings-only save — preserve existing
   }
 
+  const { redisUrl: _secretRedisUrl, ...storedCache } = normalizeCacheSettings(mergedCache, { redisUrl: "" });
   const safe = {
-    models: mergedModels,
+    models: storedModels,
     prompts: resolvedPrompts,
     [PROMPTS_MIGRATION_FLAG]: true, // mark this record as migrated
     retrieval: {
-      rpcName: mergedRetrieval.rpcName || mergedContentSource.hybridRpcName || DEFAULT_HYBRID_RPC_NAME,
+      rpcName: mergedRetrieval.rpcName || DEFAULT_HYBRID_RPC_NAME,
       candidates: clampNumber(mergedRetrieval.candidates, 1, 200, 40),
       plannerCandidates: clampNumber(mergedRetrieval.plannerCandidates, 1, 100, 20),
       alertCandidates: clampNumber(mergedRetrieval.alertCandidates, 1, 100, 20),
@@ -1242,22 +1276,8 @@ export async function writeLocalSettings(settings, options = {}) {
     rag: normalizeRagSettings(mergedRag),
     graph: normalizeGraphSettings(mergedGraph),
     insights: normalizeInsightsSettings(mergedInsights),
-    cache: normalizeCacheSettings(mergedCache, {
-      redisUrl: mergeSecret(existing.cache?.redisUrl, has("cache") ? settings.cache?.redisUrl : undefined)
-    }),
+    cache: storedCache,
     memory: normalizeMemorySettings(mergedMemory),
-    contentSource: {
-      useAppSupabase: mergedContentSource.useAppSupabase === true,
-      supabaseUrl: mergedContentSource.supabaseUrl || mergedContentSource.url || "",
-      supabaseServiceRoleKey: mergeSecret(
-        existingContentSource.supabaseServiceRoleKey || existingContentSource.serviceRoleKey,
-        has("contentSource") ? (incomingContentSource.supabaseServiceRoleKey ?? incomingContentSource.serviceRoleKey) : undefined
-      ),
-      hybridRpcName: mergedContentSource.hybridRpcName || mergedRetrieval.rpcName || DEFAULT_HYBRID_RPC_NAME,
-      indexTable: mergedContentSource.indexTable || DEFAULT_INDEX_TABLE,
-      alertsTable: mergedContentSource.alertsTable || DEFAULT_ALERTS_TABLE,
-      alertsRpcName: mergedContentSource.alertsRpcName || `match_${mergedContentSource.alertsTable || DEFAULT_ALERTS_TABLE}`
-    },
     knowledge: {
       triggerKeywords: normalizeStringList(mergedKnowledge.triggerKeywords, existing.knowledge?.triggerKeywords || DEFAULT_KNOWLEDGE_TRIGGER_KEYWORDS),
       agentLimit: clampNumber(mergedKnowledge.agentLimit, 1, 5, 2),
@@ -1267,14 +1287,7 @@ export async function writeLocalSettings(settings, options = {}) {
     timelineLinks: normalizeTimelineLinkAgentSettings(mergedTimelineLinks),
     scheduleAssignmentAgent: normalizeScheduleAssignmentAgentSettings(mergedScheduleAssignmentAgent),
     contractsAgent: normalizeContractsAgentSettings(mergedContractsAgent),
-    n8nBaseUrl: has("n8nBaseUrl") ? settings.n8nBaseUrl || "" : existing.n8nBaseUrl || "",
-    secrets: {
-      openRouterApiKey: mergeSecret(existing.secrets?.openRouterApiKey, has("secrets") ? incomingSecrets.openRouterApiKey : undefined),
-      supabaseUrl: has("secrets") && Object.prototype.hasOwnProperty.call(incomingSecrets, "supabaseUrl")
-        ? incomingSecrets.supabaseUrl || ""
-        : existing.secrets?.supabaseUrl || "",
-      supabaseServiceRoleKey: mergeSecret(existing.secrets?.supabaseServiceRoleKey, has("secrets") ? incomingSecrets.supabaseServiceRoleKey : undefined)
-    },
+    contracts: normalizeContractsSettings(mergedContracts),
     tools: Object.fromEntries(
       TOOL_NAMES.map((tool) => [tool, normalizeToolUrlValue(mergedTools[tool])])
     ),
@@ -1283,22 +1296,16 @@ export async function writeLocalSettings(settings, options = {}) {
     subagents: mergedSubagents,
     presets: has("presets") ? normalizeSettingsPresets(settings.presets || []) : normalizeSettingsPresets(existing.presets || [])
   };
-  const writeConnection = {
-    required: true,
-    preferExplicit: true,
-    ...(options.connection || {}),
-    supabaseUrl: options.connection?.supabaseUrl || safe.secrets.supabaseUrl,
-    supabaseServiceRoleKey: options.connection?.supabaseServiceRoleKey || safe.secrets.supabaseServiceRoleKey
-  };
-  await sbFetch("/rest/v1/agent_settings", {
-    method: "POST",
-    headers: { Prefer: "resolution=merge-duplicates" },
-    body: JSON.stringify({ id: "default", data: safe, updated_at: new Date().toISOString() })
-  }, "write", writeConnection);
-  _settingsCache = safe;
-  _settingsCachedAt = Date.now();
-  _settingsLoadedFromDb = true;
-  return safe;
+  let saved;
+  try {
+    saved = await saveMetaSettings({ value: safe, user: options.user });
+    markSettingsDbStatus("write", true, "");
+  } catch (error) {
+    markSettingsDbStatus("write", false, error.message);
+    throw error;
+  }
+  applySettings(saved, { loaded: true });
+  return saved;
 }
 
 function markSettingsDbStatus(operation, ok, error = "") {
