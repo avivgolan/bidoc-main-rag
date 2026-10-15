@@ -21,22 +21,44 @@ export function getMemorySummary(sessionId) {
 export function updateMemorySummary(sessionId, userMessage, assistantMessage = "", baseSummary = null) {
   if (!sessionId) return emptySummary();
   const current = baseSummary && typeof baseSummary === "object" ? normalizeMemorySummary(baseSummary) : getMemorySummary(sessionId);
+  const summary = foldTurnIntoSummary(current, userMessage, assistantMessage);
+  summaryStore.set(sessionId, summary);
+  return summary;
+}
+
+// A deterministic summary of conversation turns ([{ role, content }]) with no
+// model call and no stored state: the fallback when an on-the-fly model summary
+// is unavailable, and the cheap summary for routing.
+export function summarizeTurnsLocally(messages = []) {
+  let summary = emptySummary();
+  let pendingUser = null;
+  for (const message of messages) {
+    if (message?.role === "user") {
+      if (pendingUser !== null) summary = foldTurnIntoSummary(summary, pendingUser, "");
+      pendingUser = String(message.content || "");
+    } else if (message?.role === "assistant") {
+      summary = foldTurnIntoSummary(summary, pendingUser ?? "", String(message.content || ""));
+      pendingUser = null;
+    }
+  }
+  if (pendingUser !== null) summary = foldTurnIntoSummary(summary, pendingUser, "");
+  return summary;
+}
+
+function foldTurnIntoSummary(current, userMessage, assistantMessage = "") {
   const topics = unique([...current.active_topics, ...extractTopics(userMessage), ...extractTopics(assistantMessage)]).slice(-10);
   const dates = unique([...current.date_context, ...extractDates(userMessage), ...extractDates(assistantMessage)]).slice(-8);
   const openQuestions = unique([
     ...current.open_questions.filter((item) => !looksAnswered(item, assistantMessage)),
     ...extractQuestions(userMessage)
   ]).slice(-6);
-  const lastIntent = summarizeIntent(userMessage);
-  const summary = {
+  return {
     active_topics: topics,
     date_context: dates,
     open_questions: openQuestions,
-    last_intent: lastIntent,
+    last_intent: summarizeIntent(userMessage),
     last_updated: new Date().toISOString()
   };
-  summaryStore.set(sessionId, summary);
-  return summary;
 }
 
 export function setMemorySummary(sessionId, summary) {

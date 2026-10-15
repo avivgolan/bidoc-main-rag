@@ -58,6 +58,7 @@ import { registerInsightsProjectScopeTests } from "./insights-project-scope.test
 import { registerInternalScopeTests } from "./internal-scope.tests.js";
 import { registerInternalScopeAccessTests } from "./internal-scope-access.tests.js";
 import { registerCompanyDbIsolationTests } from "./company-db-isolation.tests.js";
+import { registerProjectChatHistoryTests } from "./project-chat-history.tests.js";
 import { buildVersionInfo, injectBuildVersion } from "../src/buildInfo.js";
 
 const tests = [];
@@ -13944,6 +13945,7 @@ test("internal subagent diagnostics are read-only readiness probes", () => {
 // Registered last: these tests import the HTTP handler under a fake network
 // and temporarily set process env (restored at the end).
 registerCompanyDbIsolationTests(test);
+registerProjectChatHistoryTests(test);
 
 const filterIndex = process.argv.indexOf("--filter");
 const filterPattern = filterIndex >= 0 ? process.argv[filterIndex + 1] : "";
