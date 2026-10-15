@@ -104,7 +104,7 @@ The project uses three Supabase tables:
 
 ### `agent_settings` — agent settings (Meta DB, not MAIN)
 
-The settings are one row of the **Meta DB** table `agent_settings` (`key = 'main-agent'`, `value` jsonb); migration `supabase/migrations/20261016130000_agent_settings_change_log.sql` in the BiDoc repo. Only a Superadmin (or the service role) reads or writes it. The row holds:
+The settings are one row of the **Meta DB** table `agent_settings` (`key = 'main-agent'`, `value` jsonb); migration `supabase/migrations/20261016140000_agent_settings_change_log.sql` in the BiDoc repo. Only a Superadmin (or the service role) reads or writes it. The row holds:
 - `models` — model overrides per agent (never `embedding`: env only)
 - `prompts` — prompt overrides per agent
 - `retrieval`, `ai`, `rag`, `graph`, `insights`, `cache`, `memory`, `knowledge`, `subagents`, `presets`, `timezone` — tuning
